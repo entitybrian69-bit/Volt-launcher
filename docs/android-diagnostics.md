@@ -7,7 +7,7 @@ On an APK containing the 0.7.6 diagnostic changes:
 1. Reproduce the problem. If Android closes the app, open Horizon again and wait
    a few seconds so its background system-exit collector can finish.
 2. Open launcher Settings > **Diagnostic report** > **Export ZIP**.
-3. The system Files app opens **Horizon Android / Reports**. Copy/share the newest
+3. The system Files app opens **Volt Launcher / Reports**. Copy/share the newest
    `horizon-diagnostics-*.zip`. Review it before attaching it to an issue.
 4. Include the exact APK version/source commit, device, renderer, resolution,
    and what you did immediately before the failure. State whether you returned
@@ -76,7 +76,7 @@ for a device-specific test. With the correct device selected:
 ```powershell
 adb -s SERIAL logcat -v threadtime > horizon-system-log.txt
 # Reproduce; stop collection with Ctrl+C.
-adb -s SERIAL shell dumpsys activity exit-info dev.horizon.android
+adb -s SERIAL shell dumpsys activity exit-info com.voltlauncher.android
 ```
 
 A full system log may include other apps' information. Review/redact it before

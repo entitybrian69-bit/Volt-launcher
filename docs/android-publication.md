@@ -1,6 +1,6 @@
 # Android release packaging
 
-Horizon Android preserves the upstream Git history, MIT copyright and license,
+Volt Launcher preserves the upstream Git history, MIT copyright and license,
 third-party notices and dependency licenses. See [upstream integration](android-upstream.json).
 The `android` branch is maintained separately from upstream deployment workflows.
 
@@ -15,7 +15,7 @@ python tools/android_build.py --abi x86 --public
 python tools/android_build.py --abi x86_64 --public
 ```
 
-Outputs are `.local/android/apk/<abi>/horizon-android-public.apk`.
+Outputs are `.local/android/apk/<abi>/volt-launcher-public.apk`.
 The build signs and audits each APK. Default development APKs are not release
 artifacts: they may contain private resource bundles and enable debugging.
 

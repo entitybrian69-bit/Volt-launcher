@@ -5,14 +5,14 @@ press Import beside the desired group. Select a file in Android's document picke
 **Open folder**, including the in-game Mod/Resource Pack/Shader Pack Folder
 buttons, browses that directory in a system file manager. If the phone shows an
 app chooser, select Files. Alternatively open the system Files app and select
-**Horizon Android** in its navigation drawer.
+**Volt Launcher** in its navigation drawer.
 
 The provider contains **Mods**, **Resource Packs**, **Shader Packs** for the
 selected launcher profile, and **Reports**. Files stay in app storage; no migration
 or second copy is needed. Android grants other apps access to documents you select.
 Account files, settings, prepared game resources and worlds are not exposed.
 Reports are read-only and can be copied or shared through Files. Screenshots
-continue to appear in **Pictures/HorizonAndroid**.
+continue to appear in **Pictures/VoltLauncher**.
 
 To download a `.hmod` from a link, paste its HTTPS URL in the Mods search field
 and press **Import .hmod** (the Search button changes when a URL is entered).

@@ -17,7 +17,7 @@ Changes after the published 0.7.2:
   compatibility checked by the game's existing loader.
 - Import `.hmod`, resource-pack ZIP and shader ZIP/`.hshader` files from Android's
   system picker. Open Folder separately browses the corresponding directory in
-  system Files through Horizon Android's DocumentsProvider.
+  system Files through Volt Launcher's DocumentsProvider.
 - Split Installed into three collapsible groups. Imported and downloaded add-on
   files can be selected or removed with confirmation.
 - Stage imports in Android's cache, validate archives on a background thread,
@@ -34,7 +34,7 @@ Changes after the published 0.7.2:
   metadata to performance reports. These diagnostics do not establish an FPS gain.
 
 - Expose Mods, Resource Packs, Shader Packs and read-only Reports in system Files.
-  Keep game files in app storage and screenshots in Pictures/HorizonAndroid.
+  Keep game files in app storage and screenshots in Pictures/VoltLauncher.
 - Restore Android keyboard input when editing signs; hide gameplay touch controls
   over the sign editor, retain the IME between lines and dismiss it on Done.
 - Use Bionic `flock` for resource-pack cache synchronization on Android instead

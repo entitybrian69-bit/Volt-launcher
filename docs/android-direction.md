@@ -1,6 +1,6 @@
 # Android architecture and compatibility
 
-Horizon Android adds native packaging, installation, touch input and Android
+Volt Launcher adds native packaging, installation, touch input and Android
 platform integration to [Horizon's Rust engine](https://github.com/ludovic111/horizon).
 World simulation, the renderer, Java protocol and shared menus remain upstream
 components. [Integration records](android-upstream.json) identify reviewed merges.

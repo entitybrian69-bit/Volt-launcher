@@ -1,6 +1,6 @@
-# Horizon on Android
+# Volt Launcher for Android
 
-Horizon Android is a native Rust/wgpu client for Minecraft Java **26.3**.
+Volt Launcher for Android is a native Rust/wgpu launcher and client for Minecraft Java **26.3**.
 It downloads the required resources on the device and supports single player
 and Java multiplayer. It does not run arbitrary Minecraft JAR versions.
 
@@ -159,7 +159,7 @@ launcher entry; TV support is experimental and analog gamepad axes are not conne
 ### Screenshots
 
 F2 keeps the original PNG in the profile and publishes a copy to
-**Pictures/HorizonAndroid** through Android MediaStore. Android 10+ needs no
+**Pictures/VoltLauncher** through Android MediaStore. Android 10+ needs no
 storage permission. Android 8.1–9 asks for storage permission when first saving;
 if access is denied, the profile copy remains available. Gallery publication runs
 outside the render thread and reports success or failure in game chat.
@@ -199,7 +199,7 @@ python tools/android_build.py --abi x86_64 --public
 Windows discovers `%LOCALAPPDATA%/Android/Sdk` and Android Studio's JDK. Otherwise
 set `ANDROID_HOME`/`JAVA_HOME` or pass `--sdk`/`--java-home`. `--gradle` selects a
 Gradle executable. Public APKs are written to
-`.local/android/apk/<abi>/horizon-android-public.apk`; signing material stays in
+`.local/android/apk/<abi>/volt-launcher-public.apk`; signing material stays in
 `.local/android/`. Keep the signing key to allow updates over an existing install.
 
 Each APK contains one `libhorizon_android.so`, using the NativeActivity winit

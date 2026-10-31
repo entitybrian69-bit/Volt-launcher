@@ -3,12 +3,12 @@
 In the launcher, open Settings, enable **Performance recording**, then press
 Play. Reproduce the slow startup, travel or other problem during normal play.
 Return to the launcher and select **Performance report → Open in Files / Reports**.
-Copy or share the `.jsonl` file from **Horizon Android → Reports** in system Files.
+Copy or share the `.jsonl` file from **Volt Launcher → Reports** in system Files.
 
 Recording is off by default. Each run is limited to 30 minutes and 8 MiB; the
 three latest internal reports are retained. Opening Reports does not create copies.
 Copies exported by the user remain in their chosen destination. Older versions'
-copies in Download/HorizonAndroid are left untouched.
+copies in Download/VoltLauncher are left untouched.
 Reports are written on a bounded background queue and flushed once per sample;
 if Android kills the process, completed samples remain available on next launch.
 No general storage permission is needed to browse the document provider.

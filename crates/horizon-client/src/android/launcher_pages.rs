@@ -254,7 +254,7 @@ impl Launcher {
             32.0,
             if w < 700.0 { 12.0 } else { 28.0 },
             LAUNCHER_TEXT,
-            &format!("Horizon Android {}", crate::backend::VERSION),
+            &format!("Volt Launcher {}", crate::backend::VERSION),
         );
         button(
             &mut ui,
@@ -1305,7 +1305,7 @@ impl Launcher {
                 self.catalog.status = if crate::platform::open_documents(&id) {
                     "Opened in Files. Return here after copying files.".into()
                 } else {
-                    "Open the system Files app and choose Horizon Android.".into()
+                    "Open the system Files app and choose Volt Launcher.".into()
                 };
             }
             Some(Action::Import(kind)) => {

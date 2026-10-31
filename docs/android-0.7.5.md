@@ -16,7 +16,7 @@ The published RC is followed by source changes for the next 0.7.5 candidate.
 
 Virtual mouse, gyroscope and crosshair gestures are in Options > Controls > Touch Controls. Display refresh rate, Performance hints (ADPF), GPU profiling and existing performance recording are in launcher Settings. Earlier system preferences are migrated from the touch file without overriding choices already saved by the client. Sensor/performance controls default to off and display frequency defaults to System default.
 
-Reports are accessible through the Android Files app under Horizon Android > Reports. Native exit history appears after the next launch. Review logs before sharing: they can include file paths, server addresses and exception text. No reports are uploaded automatically. Normal Android low-memory process termination is recorded as such; it is not automatically labeled a game crash.
+Reports are accessible through the Android Files app under Volt Launcher > Reports. Native exit history appears after the next launch. Review logs before sharing: they can include file paths, server addresses and exception text. No reports are uploaded automatically. Normal Android low-memory process termination is recorded as such; it is not automatically labeled a game crash.
 
 Device support is detected at runtime. Old Android releases retain normal startup without linking newer performance/frequency symbols at load time.
 
