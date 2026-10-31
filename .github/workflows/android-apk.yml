@@ -1,0 +1,427 @@
+name: Android APK
+
+on:
+  push:
+    branches:
+      - android
+      - 'arena/**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - android
+  workflow_dispatch:
+    inputs:
+      abis:
+        description: 'Target ABIs to build'
+        type: choice
+        options:
+          - arm64-v8a
+          - all
+          - arm64-v8a,x86_64
+          - armeabi-v7a
+          - x86_64
+          - x86
+        default: arm64-v8a
+      profile:
+        description: 'Rust compilation profile'
+        type: choice
+        options:
+          - release
+          - fast
+        default: release
+      publish_release:
+        description: 'Create or update a GitHub Release with built APKs'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  plan:
+    name: Plan build targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      profile: ${{ steps.targets.outputs.profile }}
+      publish_release: ${{ steps.targets.outputs.publish_release }}
+      multi_abi: ${{ steps.targets.outputs.multi_abi }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compute build matrix
+        id: targets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          INPUT_ABIS: ${{ inputs.abis }}
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_PUBLISH: ${{ inputs.publish_release }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          targets = {
+              "arm64-v8a": "aarch64-linux-android",
+              "armeabi-v7a": "armv7-linux-androideabi",
+              "x86_64": "x86_64-linux-android",
+              "x86": "i686-linux-android",
+          }
+
+          event = os.environ["EVENT_NAME"]
+          ref = os.environ["REF_NAME"]
+          raw_abis = os.environ.get("INPUT_ABIS", "").strip()
+          profile = os.environ.get("INPUT_PROFILE", "").strip() or "release"
+          input_publish = os.environ.get("INPUT_PUBLISH", "").strip().lower() == "true"
+
+          if ref.startswith("refs/tags/v") or raw_abis == "all":
+              selected = list(targets.keys())
+          elif event == "workflow_dispatch" and raw_abis:
+              selected = [abi.strip() for abi in raw_abis.split(",") if abi.strip()]
+          else:
+              selected = ["arm64-v8a"]
+
+          unknown = [abi for abi in selected if abi not in targets]
+          if unknown:
+              raise SystemExit(f"Unsupported ABI(s): {unknown}")
+
+          include = [{"abi": abi, "target": targets[abi]} for abi in selected]
+          publish_release = ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and input_publish)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"matrix={json.dumps({'include': include})}\n")
+              out.write(f"profile={profile}\n")
+              out.write(f"publish_release={'true' if publish_release else 'false'}\n")
+              out.write(f"multi_abi={'true' if len(include) > 1 else 'false'}\n")
+          PY
+
+  prepare:
+    name: Prepare engine tables
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Cache generated engine tables
+        id: tables-cache
+        uses: actions/cache@v4
+        with:
+          path: .local/horizon-client-tables
+          key: engine-tables-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_build.py', 'tools/android_prepare.py') }}
+
+      - name: Set up Java 25 for resource preparation
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Ensure Rust toolchain for horizon-prepare
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        run: rustup show active-toolchain
+
+      - name: Generate allowlisted Horizon engine tables
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: .local/prepare-target
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+
+          sys.path.insert(0, "tools")
+          import android_build
+          import lab
+
+          lock = json.loads(Path("research-lock.json").read_text(encoding="utf-8"))["minecraft"]
+          version = lock["version"]
+          pinned_sha1 = lock["manifest_sha1"]
+          pinned_url = f"https://piston-meta.mojang.com/v1/packages/{pinned_sha1}/{version}.json"
+          lab.download(pinned_url, Path(f".local/minecraft/{version}/manifest.json"), pinned_sha1)
+
+          cmd = [sys.executable, "tools/android_prepare.py"]
+          if os.environ.get("JAVA_HOME"):
+              cmd += ["--java-home", os.environ["JAVA_HOME"]]
+          subprocess.run(cmd, check=True)
+
+          src = Path(".local/horizon-client") / version
+          root_dst = Path(".local/horizon-client-tables")
+          dst = root_dst / version
+          if dst.exists():
+              shutil.rmtree(dst)
+          root_dst.mkdir(parents=True, exist_ok=True)
+          (root_dst / "VERSION.txt").write_text(f"{version}\n", encoding="utf-8")
+
+          copied = 0
+          for path in sorted(src.rglob("*")):
+              if not path.is_file():
+                  continue
+              rel = path.relative_to(src).as_posix()
+              if android_build.generated_engine_file(rel):
+                  target = dst / rel
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(path, target)
+                  copied += 1
+
+          if not (dst / "horizon-resources.json").is_file() or not (dst / "worldgen/blocks/structure-blocks.json").is_file():
+              raise SystemExit("Missing required generated engine tables after preparation")
+          print(f"Prepared {copied} allowlisted generated table files for Minecraft {version}", flush=True)
+          PY
+
+      - name: Upload generated engine tables for APK jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: _internal-engine-tables
+          path: .local/horizon-client-tables
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Build APK (${{ matrix.abi }})
+    needs: [plan, prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Download generated engine tables
+        uses: actions/download-artifact@v4
+        with:
+          name: _internal-engine-tables
+          path: .local/horizon-client
+
+      - name: Verify downloaded engine tables
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          version = json.loads(Path("research-lock.json").read_text(encoding="utf-8"))["minecraft"]["version"]
+          root = Path(".local/horizon-client") / version
+          assert (root / "horizon-resources.json").is_file(), f"Missing {root / 'horizon-resources.json'}"
+          assert (root / "worldgen/blocks/structure-blocks.json").is_file(), f"Missing {root / 'worldgen/blocks/structure-blocks.json'}"
+          PY
+
+      - name: Set up Java 17 for Android SDK and Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Rust toolchain and Android target
+        run: rustup target add "${{ matrix.target }}"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-apk-${{ matrix.abi }}-${{ needs.plan.outputs.profile }}
+
+      - name: Cache Gradle 8.14 distribution
+        id: gradle-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/gradle-8.14
+          key: gradle-8.14-bin-v1
+
+      - name: Install Android SDK components and Gradle 8.14
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+          (yes || true) | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
+
+          SDK_ISOLATED="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$SDK_ISOLATED/platforms" "$SDK_ISOLATED/build-tools" "$SDK_ISOLATED/ndk"
+          ln -sfn "$ANDROID_HOME/platforms/android-35" "$SDK_ISOLATED/platforms/android-35"
+          ln -sfn "$ANDROID_HOME/build-tools/35.0.0" "$SDK_ISOLATED/build-tools/35.0.0"
+          ln -sfn "$ANDROID_HOME/ndk/28.2.13676358" "$SDK_ISOLATED/ndk/28.2.13676358"
+          [ -d "$ANDROID_HOME/licenses" ] && ln -sfn "$ANDROID_HOME/licenses" "$SDK_ISOLATED/licenses"
+          [ -d "$ANDROID_HOME/platform-tools" ] && ln -sfn "$ANDROID_HOME/platform-tools" "$SDK_ISOLATED/platform-tools"
+          [ -d "$ANDROID_HOME/cmdline-tools" ] && ln -sfn "$ANDROID_HOME/cmdline-tools" "$SDK_ISOLATED/cmdline-tools"
+
+          if [ ! -x "$HOME/.cache/gradle-8.14/gradle-8.14/bin/gradle" ]; then
+            mkdir -p "$HOME/.cache/gradle-8.14"
+            curl -fsSL https://services.gradle.org/distributions/gradle-8.14-bin.zip -o "$RUNNER_TEMP/gradle-8.14-bin.zip"
+            unzip -q -o "$RUNNER_TEMP/gradle-8.14-bin.zip" -d "$HOME/.cache/gradle-8.14"
+            rm -f "$RUNNER_TEMP/gradle-8.14-bin.zip"
+          fi
+
+      - name: Restore optional signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            mkdir -p .local/android
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > .local/android/debug.keystore
+          fi
+
+      - name: Build, sign, verify and audit public APK
+        run: |
+          python3 tools/android_build.py \
+            --abi "${{ matrix.abi }}" \
+            --public \
+            --profile "${{ needs.plan.outputs.profile }}" \
+            --sdk "$RUNNER_TEMP/android-sdk" \
+            --java-home "$JAVA_HOME" \
+            --gradle "$HOME/.cache/gradle-8.14/gradle-8.14/bin/gradle"
+
+      - name: Stage APK release bundle
+        id: stage
+        env:
+          ABI: ${{ matrix.abi }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+
+          abi = os.environ["ABI"]
+          gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
+          version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
+          src_apk = Path(".local/android/apk") / abi / "horizon-android-public.apk"
+          if not src_apk.is_file():
+              raise SystemExit(f"Expected built APK at {src_apk}")
+
+          dist = Path(".local/android/dist") / abi
+          dist.mkdir(parents=True, exist_ok=True)
+          apk_name = f"Horizon-Android-{version}-{abi}.apk"
+          dst_apk = dist / apk_name
+          shutil.copy2(src_apk, dst_apk)
+          shutil.copy2("LICENSE", dist / "LICENSE.txt")
+          shutil.copy2("THIRD_PARTY_NOTICES.md", dist / "THIRD_PARTY_NOTICES.md")
+
+          sha256 = hashlib.sha256(dst_apk.read_bytes()).hexdigest()
+          size_mib = dst_apk.stat().st_size / (1024 * 1024)
+          (dist / "SHA256SUMS.txt").write_text(f"{sha256}  {apk_name}\n", encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={version}\n")
+              out.write(f"apk_name={apk_name}\n")
+              out.write(f"sha256={sha256}\n")
+              out.write(f"size_mib={size_mib:.2f}\n")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"### Built `{apk_name}`\n\n")
+              summary.write(f"- **ABI:** `{abi}`\n")
+              summary.write(f"- **Version:** `{version}`\n")
+              summary.write(f"- **Size:** `{size_mib:.2f} MiB`\n")
+              summary.write(f"- **SHA-256:** `{sha256}`\n")
+          PY
+
+      - name: Upload APK artifact (${{ matrix.abi }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: Horizon-Android-${{ steps.stage.outputs.version }}-${{ matrix.abi }}
+          path: .local/android/dist/${{ matrix.abi }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    if: needs.plan.outputs.publish_release == 'true'
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Download built APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Horizon-Android-*
+          path: .local/android/release-collect
+          merge-multiple: true
+
+      - name: Assemble release attachments and checksums
+        id: bundle
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          SHA_SHORT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+
+          collect = Path(".local/android/release-collect")
+          apks = sorted(collect.glob("Horizon-Android-*.apk"))
+          if not apks:
+              raise SystemExit("No APKs found to publish")
+
+          gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
+          version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
+          sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in apks)
+          (collect / "SHA256SUMS.txt").write_text(sums, encoding="utf-8")
+
+          is_tag = os.environ["IS_TAG"].lower() == "true"
+          tag = os.environ["REF_NAME"] if is_tag else f"v{version}-build.{os.environ['SHA_SHORT'][:7]}"
+          title = f"Horizon Android {tag}" if is_tag else f"Horizon Android {version} ({os.environ['SHA_SHORT'][:7]})"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"tag={tag}\n")
+              out.write(f"title={title}\n")
+              out.write(f"prerelease={'false' if is_tag else 'true'}\n")
+          PY
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bundle.outputs.tag }}
+          TITLE: ${{ steps.bundle.outputs.title }}
+          PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
+        run: |
+          NOTES="Automated public APK build from commit ${GITHUB_SHA}. Original Minecraft 26.3 assets download from Mojang on first launch."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              .local/android/release-collect/Horizon-Android-*.apk \
+              .local/android/release-collect/SHA256SUMS.txt \
+              .local/android/release-collect/LICENSE.txt \
+              .local/android/release-collect/THIRD_PARTY_NOTICES.md \
+              --clobber
+          else
+            EXTRA_FLAGS=()
+            if [ "$PRERELEASE" = "true" ]; then
+              EXTRA_FLAGS+=(--prerelease --target "$GITHUB_SHA")
+            fi
+            gh release create "$TAG" \
+              .local/android/release-collect/Horizon-Android-*.apk \
+              .local/android/release-collect/SHA256SUMS.txt \
+              .local/android/release-collect/LICENSE.txt \
+              .local/android/release-collect/THIRD_PARTY_NOTICES.md \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              "${EXTRA_FLAGS[@]}"
+          fi
