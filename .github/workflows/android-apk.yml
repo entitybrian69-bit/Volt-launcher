@@ -1,6 +1,9 @@
 name: Android APK
 
 on:
+  push:
+    branches:
+      - arena/58a3cdf9-volt-launcher
   workflow_dispatch:
     inputs:
       abi:
