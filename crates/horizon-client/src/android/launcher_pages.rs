@@ -1,5 +1,16 @@
 use super::*;
 use horizon_client::{osk::Output, ui_theme::color};
+
+// A launcher-only crimson palette. Keep the in-game HUD on Horizon's shared theme.
+const LAUNCHER_BG: u32 = color::hex(0x090b12, 255);
+const LAUNCHER_PANEL: u32 = color::hex(0x151821, 255);
+const LAUNCHER_RAISED: u32 = color::hex(0x20232d, 255);
+const LAUNCHER_HOVER: u32 = color::hex(0x2a2e3a, 255);
+const LAUNCHER_BORDER: u32 = color::hex(0x343846, 255);
+const LAUNCHER_TEXT: u32 = color::hex(0xf4f5fa, 255);
+const LAUNCHER_MUTED: u32 = color::hex(0xa1a7b8, 255);
+const LAUNCHER_ACCENT: u32 = color::hex(0xff315f, 255);
+const LAUNCHER_ON_ACCENT: u32 = color::hex(0xffffff, 255);
 use winit::{
     event::{KeyEvent, Touch},
     keyboard::{KeyCode, PhysicalKey},
@@ -72,8 +83,8 @@ pub(super) fn button(
         y,
         w,
         h,
-        2.0,
-        if accent { color::ACCENT } else { color::RAISED },
+        9.0,
+        if accent { LAUNCHER_ACCENT } else { LAUNCHER_RAISED },
     );
     let padding = (w * 0.12).clamp(4.0, 12.0);
     let base = if w < 80.0 { 13.0 } else { 16.0 };
@@ -90,9 +101,9 @@ pub(super) fn button(
         x + padding,
         y + 11.0,
         if accent {
-            color::ON_ACCENT
+            LAUNCHER_ON_ACCENT
         } else {
-            color::TEXT
+            LAUNCHER_TEXT
         },
         &label,
     );
@@ -111,7 +122,7 @@ fn toggle(
         14.0,
         x,
         y + 11.0,
-        color::TEXT,
+        LAUNCHER_TEXT,
         if on { "On" } else { "Off" },
     );
     ui.rounded(
@@ -120,7 +131,7 @@ fn toggle(
         48.0,
         24.0,
         12.0,
-        if on { color::TEXT } else { color::HOVER },
+        if on { LAUNCHER_TEXT } else { LAUNCHER_HOVER },
     );
     ui.rounded(
         x + w - if on { 26.0 } else { 50.0 },
@@ -128,7 +139,7 @@ fn toggle(
         20.0,
         20.0,
         10.0,
-        if on { color::BG } else { color::TEXT },
+        if on { LAUNCHER_BG } else { LAUNCHER_TEXT },
     );
     targets.push(([x, y, w, h], action));
 }
@@ -222,7 +233,7 @@ impl Launcher {
         let (w, h) = (ui.w, ui.h);
         let scale = ui.density / ui.batch.scale;
         ui.batch
-            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, color::BG);
+            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, LAUNCHER_BG);
         ui.text(
             Face::Medium,
             if w < 400.0 {
@@ -234,7 +245,7 @@ impl Launcher {
             },
             32.0,
             if w < 700.0 { 12.0 } else { 28.0 },
-            color::TEXT,
+            LAUNCHER_TEXT,
             &format!("Horizon Android {}", crate::backend::VERSION),
         );
         button(
@@ -285,7 +296,7 @@ impl Launcher {
                 32.0,
                 32.0,
                 top,
-                color::TEXT,
+                LAUNCHER_TEXT,
                 if installing {
                     "Getting your game ready"
                 } else if installed {
@@ -303,7 +314,7 @@ impl Launcher {
                 17.0,
                 32.0,
                 top + 47.0,
-                color::MUTED,
+                LAUNCHER_MUTED,
                 &format!("Minecraft 26.3  /  Profile {}", self.catalog.config.profile),
             );
             if installing {
@@ -326,9 +337,9 @@ impl Launcher {
                             32.0,
                             y,
                             if index == current {
-                                color::TEXT
+                                LAUNCHER_TEXT
                             } else {
-                                color::MUTED
+                                LAUNCHER_MUTED
                             },
                             &label,
                         );
@@ -339,7 +350,7 @@ impl Launcher {
                         18.0,
                         32.0,
                         top + 100.0,
-                        color::TEXT,
+                        LAUNCHER_TEXT,
                         progress.stage.label(),
                     );
                     ui.text(
@@ -347,7 +358,7 @@ impl Launcher {
                         15.0,
                         32.0,
                         top + 138.0,
-                        color::MUTED,
+                        LAUNCHER_MUTED,
                         &format!("Step {} of 6", current + 1),
                     );
                 }
@@ -358,9 +369,9 @@ impl Launcher {
                 };
                 let overall = (current as f32 + fraction.clamp(0.0, 1.0)) / 6.0;
                 let bar_y = h - 152.0;
-                ui.rounded(32.0, bar_y, w - 64.0, 4.0, 2.0, color::RAISED);
+                ui.rounded(32.0, bar_y, w - 64.0, 4.0, 2.0, LAUNCHER_RAISED);
                 if overall > 0.0 {
-                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, color::ACCENT);
+                    ui.rounded(32.0, bar_y, (w - 64.0) * overall, 4.0, 2.0, LAUNCHER_ACCENT);
                 }
                 let detail = match progress.stage {
                     InstallStage::Download => format!(
@@ -379,7 +390,7 @@ impl Launcher {
                     14.0,
                     32.0,
                     bar_y + 12.0,
-                    color::MUTED,
+                    LAUNCHER_MUTED,
                     &detail,
                 );
             } else {
@@ -402,7 +413,7 @@ impl Launcher {
                         17.0,
                         32.0,
                         top + 100.0 + index as f32 * 42.0,
-                        color::MUTED,
+                        LAUNCHER_MUTED,
                         line,
                     );
                 }
@@ -413,7 +424,7 @@ impl Launcher {
                     19.0,
                     32.0,
                     h - 90.0,
-                    color::TEXT,
+                    LAUNCHER_TEXT,
                     progress.stage.label(),
                 );
             } else {
@@ -438,7 +449,7 @@ impl Launcher {
                 18.0,
                 32.0,
                 142.0,
-                color::TEXT,
+                LAUNCHER_TEXT,
                 if page == Page::Mods {
                     "Horizon Mods"
                 } else if page == Page::Shaders {
@@ -498,7 +509,7 @@ impl Launcher {
                         self.catalog.config.shader_source
                     }) == origin
                     {
-                        ui.border(rect[0], rect[1], rect[2], rect[3], 1.0, color::TEXT);
+                        ui.border(rect[0], rect[1], rect[2], rect[3], 1.0, LAUNCHER_TEXT);
                     }
                 }
             }
@@ -520,7 +531,7 @@ impl Launcher {
                 _ => "Verified downloads / enable in Installed",
             };
             let hint = ui.fit_text(Face::Regular, 14.0, hint, w - 64.0);
-            ui.text(Face::Regular, 14.0, 32.0, 270.0, color::MUTED, &hint);
+            ui.text(Face::Regular, 14.0, 32.0, 270.0, LAUNCHER_MUTED, &hint);
             let kind = match page {
                 Page::Mods => horizon_client::content_files::Kind::Mods,
                 Page::Shaders => horizon_client::content_files::Kind::Shaders,
@@ -568,12 +579,13 @@ impl Launcher {
                 if y < top || y + 70.0 > bottom {
                     continue;
                 }
+                ui.rounded(24.0, y + 2.0, w - 48.0, 66.0, 10.0, LAUNCHER_PANEL);
                 let title = ui.fit_text(Face::Medium, 19.0, &p.title, w - 214.0);
                 let summary = ui.fit_text(Face::Regular, 14.0, &p.summary, w - 214.0);
-                ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
-                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, color::MUTED, &summary);
+                ui.text(Face::Medium, 19.0, 32.0, y, LAUNCHER_TEXT, &title);
+                ui.text(Face::Regular, 14.0, 32.0, y + 29.0, LAUNCHER_MUTED, &summary);
                 if let Some(state) = download {
-                    ui.text(Face::Medium, 16.0, w - 150.0, y + 12.0, color::TEXT, &state);
+                    ui.text(Face::Medium, 16.0, w - 150.0, y + 12.0, LAUNCHER_TEXT, &state);
                 } else if p.kind == crate::browser::Kind::Mod
                     && p.source == crate::browser::SourceId::Modrinth
                 {
@@ -582,7 +594,7 @@ impl Launcher {
                         14.0,
                         w - 150.0,
                         y + 12.0,
-                        color::MUTED,
+                        LAUNCHER_MUTED,
                         "Java mod",
                     );
                 } else if crate::catalog::source_only_mod(p) {
@@ -591,7 +603,7 @@ impl Launcher {
                         14.0,
                         w - 150.0,
                         y + 12.0,
-                        color::MUTED,
+                        LAUNCHER_MUTED,
                         ".hnmod: later",
                     );
                 } else if p.kind == crate::browser::Kind::Mod && !cfg!(target_pointer_width = "64")
@@ -601,7 +613,7 @@ impl Launcher {
                         14.0,
                         w - 150.0,
                         y + 12.0,
-                        color::MUTED,
+                        LAUNCHER_MUTED,
                         "64-bit required",
                     );
                 } else {
@@ -715,19 +727,20 @@ impl Launcher {
                     if y < top || y + row_height - 4.0 > bottom {
                         continue;
                     }
+                    ui.rounded(24.0, y + 2.0, w - 48.0, row_height - 6.0, 10.0, LAUNCHER_PANEL);
                     let title = ui.fit_text(
                         Face::Medium,
                         19.0,
                         &item.title,
                         if compact { w - 64.0 } else { w - 364.0 },
                     );
-                    ui.text(Face::Medium, 19.0, 32.0, y, color::TEXT, &title);
+                    ui.text(Face::Medium, 19.0, 32.0, y, LAUNCHER_TEXT, &title);
                     ui.text(
                         Face::Regular,
                         14.0,
                         32.0,
                         y + 28.0,
-                        color::MUTED,
+                        LAUNCHER_MUTED,
                         kind.label(),
                     );
                     if kind == Kind::Mods && !cfg!(target_pointer_width = "64") {
@@ -736,7 +749,7 @@ impl Launcher {
                             14.0,
                             if compact { 32.0 } else { w - 300.0 },
                             y + if compact { 62.0 } else { 12.0 },
-                            color::MUTED,
+                            LAUNCHER_MUTED,
                             "64-bit required",
                         );
                     } else {
@@ -770,7 +783,7 @@ impl Launcher {
                 24.0,
                 32.0,
                 156.0,
-                color::TEXT,
+                LAUNCHER_TEXT,
                 "Launch settings",
             );
             let row_height = if compact { 82.0 } else { 66.0 };
@@ -887,12 +900,13 @@ impl Launcher {
                 if y < 185.0 || y + if compact { 70.0 } else { 46.0 } > h - 130.0 {
                     continue;
                 }
+                ui.rounded(24.0, y + 2.0, w - 48.0, row_height - 8.0, 10.0, LAUNCHER_PANEL);
                 ui.text(
                     Face::Regular,
                     16.0,
                     32.0,
                     y + if compact { 0.0 } else { 13.0 },
-                    color::MUTED,
+                    LAUNCHER_MUTED,
                     title,
                 );
                 if matches!(
@@ -954,7 +968,7 @@ impl Launcher {
                     w - 64.0,
                     1.0,
                     0.0,
-                    color::BORDER,
+                    LAUNCHER_BORDER,
                 );
             }
             button(
@@ -987,7 +1001,7 @@ impl Launcher {
                 14.0,
                 32.0,
                 h - 47.0 + i as f32 * 18.0,
-                color::MUTED,
+                LAUNCHER_MUTED,
                 &ui.fit_text(
                     Face::Regular,
                     14.0,
@@ -1030,8 +1044,8 @@ impl Launcher {
             let height = bottom - top;
             let thumb = (height * height / (height + maximum)).max(20.0).min(height);
             let y = top + (height - thumb) * (scroll / maximum).clamp(0.0, 1.0);
-            ui.rounded(w - 12.0, top, 4.0, height, 2.0, color::BORDER);
-            ui.rounded(w - 12.0, y, 4.0, thumb, 2.0, color::MUTED);
+            ui.rounded(w - 12.0, top, 4.0, height, 2.0, LAUNCHER_BORDER);
+            ui.rounded(w - 12.0, y, 4.0, thumb, 2.0, LAUNCHER_MUTED);
         }
         let caret_visible = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1055,7 +1069,7 @@ impl Launcher {
                         1.0,
                         18.0,
                         0.0,
-                        color::TEXT,
+                        LAUNCHER_TEXT,
                     );
                 }
             }
@@ -1066,7 +1080,7 @@ impl Launcher {
         if let Some(index) = self.focus
             && let Some(([x, y, w, h], _)) = self.targets.get(index)
         {
-            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 2.0, color::TEXT);
+            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 2.0, LAUNCHER_TEXT);
             self.cursor = (
                 f64::from((x + w / 2.0) * ui.density),
                 f64::from((y + h / 2.0) * ui.density),
