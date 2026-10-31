@@ -124,7 +124,7 @@ jobs:
 
       - name: Set up Java 25 for resource preparation
         if: steps.tables-cache.outputs.cache-hit != 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -227,7 +227,7 @@ jobs:
           PY
 
       - name: Set up Java 17 for Android SDK and Gradle
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -238,9 +238,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: android-apk-${{ matrix.abi }}-${{ needs.plan.outputs.profile }}
+          cache-on-failure: true
 
       - name: Cache Gradle 8.14 distribution
-        id: gradle-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/gradle-8.14
@@ -248,6 +248,7 @@ jobs:
 
       - name: Install Android SDK components and Gradle 8.14
         run: |
+          sudo chown -R "$USER:$USER" "$ANDROID_HOME" || true
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then
             SDKMANAGER="$(command -v sdkmanager)"
@@ -255,14 +256,25 @@ jobs:
           (yes || true) | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
 
-          SDK_ISOLATED="$RUNNER_TEMP/android-sdk"
-          mkdir -p "$SDK_ISOLATED/platforms" "$SDK_ISOLATED/build-tools" "$SDK_ISOLATED/ndk"
-          ln -sfn "$ANDROID_HOME/platforms/android-35" "$SDK_ISOLATED/platforms/android-35"
-          ln -sfn "$ANDROID_HOME/build-tools/35.0.0" "$SDK_ISOLATED/build-tools/35.0.0"
-          ln -sfn "$ANDROID_HOME/ndk/28.2.13676358" "$SDK_ISOLATED/ndk/28.2.13676358"
-          [ -d "$ANDROID_HOME/licenses" ] && ln -sfn "$ANDROID_HOME/licenses" "$SDK_ISOLATED/licenses"
-          [ -d "$ANDROID_HOME/platform-tools" ] && ln -sfn "$ANDROID_HOME/platform-tools" "$SDK_ISOLATED/platform-tools"
-          [ -d "$ANDROID_HOME/cmdline-tools" ] && ln -sfn "$ANDROID_HOME/cmdline-tools" "$SDK_ISOLATED/cmdline-tools"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+
+          sdk = Path(os.environ["ANDROID_HOME"])
+          for sub in ("build-tools", "ndk"):
+              folder = sdk / sub
+              if not folder.is_dir():
+                  continue
+              for entry in list(folder.iterdir()):
+                  if not re.fullmatch(r"\d+(?:\.\d+)*", entry.name):
+                      print(f"Removing non-numeric SDK entry {entry}", flush=True)
+                      if entry.is_dir() and not entry.is_symlink():
+                          shutil.rmtree(entry, ignore_errors=True)
+                      else:
+                          entry.unlink(missing_ok=True)
+          PY
 
           if [ ! -x "$HOME/.cache/gradle-8.14/gradle-8.14/bin/gradle" ]; then
             mkdir -p "$HOME/.cache/gradle-8.14"
@@ -280,15 +292,74 @@ jobs:
             printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > .local/android/debug.keystore
           fi
 
-      - name: Build, sign, verify and audit public APK
+      - name: Compile native Rust library (${{ matrix.abi }})
+        env:
+          ABI: ${{ matrix.abi }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
         run: |
-          python3 tools/android_build.py \
-            --abi "${{ matrix.abi }}" \
-            --public \
-            --profile "${{ needs.plan.outputs.profile }}" \
-            --sdk "$RUNNER_TEMP/android-sdk" \
-            --java-home "$JAVA_HOME" \
-            --gradle "$HOME/.cache/gradle-8.14/gradle-8.14/bin/gradle"
+          python3 - <<'PY'
+          from collections import deque
+          import os
+          import subprocess
+          import sys
+
+          cmd = [
+              sys.executable, "tools/android_build.py",
+              "--abi", os.environ["ABI"],
+              "--public",
+              "--profile", os.environ["PROFILE"],
+              "--rust-only",
+              "--sdk", os.environ["ANDROID_HOME"],
+              "--java-home", os.environ["JAVA_HOME"],
+              "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
+          ]
+          tail = deque(maxlen=40)
+          proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+          for line in proc.stdout:
+              sys.stdout.write(line)
+              sys.stdout.flush()
+              tail.append(line.rstrip("\r\n"))
+          rc = proc.wait()
+          if rc != 0:
+              msg = "%0A".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              # Re-encode newlines after escaping literal %
+              escaped = "\n".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Rust compile failed (exit {rc})::{escaped}", flush=True)
+              raise SystemExit(rc)
+          PY
+
+      - name: Package, sign, verify and audit public APK (${{ matrix.abi }})
+        env:
+          ABI: ${{ matrix.abi }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
+        run: |
+          python3 - <<'PY'
+          from collections import deque
+          import os
+          import subprocess
+          import sys
+
+          cmd = [
+              sys.executable, "tools/android_build.py",
+              "--abi", os.environ["ABI"],
+              "--public",
+              "--profile", os.environ["PROFILE"],
+              "--sdk", os.environ["ANDROID_HOME"],
+              "--java-home", os.environ["JAVA_HOME"],
+              "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
+          ]
+          tail = deque(maxlen=40)
+          proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+          for line in proc.stdout:
+              sys.stdout.write(line)
+              sys.stdout.flush()
+              tail.append(line.rstrip("\r\n"))
+          rc = proc.wait()
+          if rc != 0:
+              escaped = "\n".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=APK package/audit failed (exit {rc})::{escaped}", flush=True)
+              raise SystemExit(rc)
+          PY
 
       - name: Stage APK release bundle
         id: stage
