@@ -230,10 +230,18 @@ impl Launcher {
         if let Some(bottom) = crate::native_ime::viewport_bottom() {
             ui.h = ui.h.min(bottom as f32 / ui.density);
         }
-        let (w, h) = (ui.w, ui.h);
+        let screen_w = ui.w;
+        let h = ui.h;
         let scale = ui.density / ui.batch.scale;
         ui.batch
-            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, LAUNCHER_BG);
+            .fill(&gui.atlas, 0.0, 0.0, screen_w * scale, h * scale, LAUNCHER_BG);
+        // Landscape layouts use the reference's persistent navigation rail; portrait
+        // phones keep the wider, thumb-friendly tab strip.
+        let sidebar = screen_w >= 900.0;
+        let content_shift = if sidebar { 82.0 } else { 0.0 };
+        ui.w = screen_w - content_shift;
+        let w = ui.w;
+        let content_vertex_start = ui.batch.vertices.len();
         ui.text(
             Face::Medium,
             if w < 400.0 {
@@ -264,24 +272,26 @@ impl Launcher {
         let tabs = Page::ALL.len() as f32;
         let tab_margin = if w < 700.0 { 16.0 } else { 32.0 };
         let tab_width = (w - 2.0 * tab_margin) / tabs;
-        for (i, page) in Page::ALL.iter().enumerate() {
-            let x = tab_margin + i as f32 * tab_width;
-            button(
-                &mut ui,
-                &mut self.targets,
-                [x, 88.0, tab_width - 4.0, 42.0],
-                if w < 700.0 {
-                    match page {
-                        Page::Installed => "Files",
-                        Page::Settings => "Setup",
-                        _ => page.name(),
-                    }
-                } else {
-                    page.name()
-                },
-                Action::Page(*page),
-                *page == self.catalog.page,
-            );
+        if !sidebar {
+            for (i, page) in Page::ALL.iter().enumerate() {
+                let x = tab_margin + i as f32 * tab_width;
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [x, 88.0, tab_width - 4.0, 42.0],
+                    if w < 700.0 {
+                        match page {
+                            Page::Installed => "Files",
+                            Page::Settings => "Setup",
+                            _ => page.name(),
+                        }
+                    } else {
+                        page.name()
+                    },
+                    Action::Page(*page),
+                    *page == self.catalog.page,
+                );
+            }
         }
         let compact = w < 700.0;
         let page = self.catalog.page;
@@ -427,6 +437,7 @@ impl Launcher {
                     LAUNCHER_TEXT,
                     progress.stage.label(),
                 );
+
             } else {
                 button(
                     &mut ui,
@@ -442,6 +453,27 @@ impl Launcher {
                     Action::Play,
                     true,
                 );
+                if sidebar {
+                    let x = w - 248.0;
+                    ui.rounded(x, top, 224.0, 286.0, 12.0, LAUNCHER_PANEL);
+                    ui.rounded(x + 80.0, top + 22.0, 64.0, 64.0, 32.0, LAUNCHER_ACCENT);
+                    let initial = self.catalog.config.name.chars().next().unwrap_or('P').to_string();
+                    ui.text(Face::Medium, 28.0, x + 103.0, top + 38.0, LAUNCHER_ON_ACCENT, &initial);
+                    ui.text(Face::Medium, 17.0, x + 18.0, top + 104.0, LAUNCHER_TEXT, "PLAYER PROFILE");
+                    let player = ui.fit_text(Face::Medium, 16.0, &self.catalog.config.name, 188.0);
+                    ui.text(Face::Medium, 16.0, x + 18.0, top + 136.0, LAUNCHER_TEXT, &player);
+                    let account = self.login.status(&self.catalog.config.name);
+                    ui.text(Face::Regular, 13.0, x + 18.0, top + 162.0, LAUNCHER_MUTED, &account);
+                    ui.text(Face::Regular, 13.0, x + 18.0, top + 188.0, LAUNCHER_MUTED, &format!("Profile {}", self.catalog.config.profile));
+                    button(
+                        &mut ui,
+                        &mut self.targets,
+                        [x + 14.0, top + 220.0, 196.0, 38.0],
+                        "Switch profile",
+                        Action::Profile,
+                        true,
+                    );
+                }
             }
         } else if page.is_catalog() {
             ui.text(
@@ -1074,6 +1106,15 @@ impl Launcher {
                 }
             }
         }
+        if sidebar {
+            let dx = content_shift * scale;
+            for vertex in &mut ui.batch.vertices[content_vertex_start..] {
+                vertex.pos[0] += dx;
+            }
+            for (rect, _) in self.targets.iter_mut().chain(self.list_targets.iter_mut()) {
+                rect[0] += content_shift;
+            }
+        }
         if let Some(action) = self.pending_focus.take() {
             self.focus = self.targets.iter().position(|(_, a)| *a == action);
         }
@@ -1121,6 +1162,28 @@ impl Launcher {
                 2.0,
                 horizon_client::hud::rgba(255, 255, 255, 48),
             );
+        }
+        if sidebar {
+            ui.rounded(10.0, 82.0, 62.0, (h - 94.0).max(50.0), 12.0, LAUNCHER_PANEL);
+            ui.text(Face::Medium, 21.0, 31.0, 96.0, LAUNCHER_ACCENT, "V");
+            for (index, page) in Page::ALL.iter().enumerate() {
+                let label = match page {
+                    Page::Play => "Home",
+                    Page::Mods => "Mods",
+                    Page::Packs => "Packs",
+                    Page::Shaders => "Shader",
+                    Page::Installed => "Files",
+                    Page::Settings => "Setup",
+                };
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [15.0, 126.0 + index as f32 * 59.0, 52.0, 42.0],
+                    label,
+                    Action::Page(*page),
+                    *page == self.catalog.page,
+                );
+            }
         }
         crate::documents::draw_ui(&mut ui);
         ui.finish();
