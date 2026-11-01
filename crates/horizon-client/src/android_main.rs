@@ -68,9 +68,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.7.6"
+        "0.7.9"
     } else {
-        "0.7.6-dev"
+        "0.7.9-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -236,6 +236,35 @@ fn init_logging() {
     }
 }
 
+fn apk_engine_stamp() -> Option<String> {
+    let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+    for line in maps.lines() {
+        if !line.contains("libhorizon_android") && !line.contains("/base.apk") {
+            continue;
+        }
+        let raw_path = line.split_whitespace().nth(5)?;
+        let fs_path = raw_path
+            .split_once("!/")
+            .map_or(raw_path, |(apk, _)| apk);
+        let meta = std::fs::metadata(fs_path).ok()?;
+        let mtime = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        return Some(format!(
+            "{}:{}:{}:{}:{}",
+            backend::VERSION,
+            option_env!("HORIZON_ANDROID_BUILD_COMMIT").unwrap_or("none"),
+            fs_path,
+            meta.len(),
+            mtime,
+        ));
+    }
+    None
+}
+
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     use winit::platform::android::activity::input::Axis;
@@ -287,17 +316,27 @@ fn android_main(app: AndroidApp) {
     exit_reports::install(&home);
     let _ = std::fs::remove_file(home.join("android-error.txt"));
     if let Some(mut data) = engine_data {
-        let copied = (|| -> std::io::Result<()> {
-            let mut file = std::fs::File::create(home.join("engine-data.partial"))?;
-            std::io::copy(&mut data, &mut file)?;
-            drop(file);
-            std::fs::rename(
-                home.join("engine-data.partial"),
-                home.join("engine-data.zip"),
-            )
-        })();
-        if let Err(error) = copied {
-            log::error!("Cannot unpack engine data: {error}");
+        let zip_path = home.join("engine-data.zip");
+        let stamp_path = home.join("engine-data.stamp");
+        let stamp = apk_engine_stamp();
+        let up_to_date = stamp.as_deref().is_some_and(|expected| {
+            zip_path.metadata().is_ok_and(|m| m.len() > 1024)
+                && std::fs::read_to_string(&stamp_path).ok().as_deref() == Some(expected)
+        });
+        if !up_to_date {
+            let copied = (|| -> std::io::Result<()> {
+                let mut file = std::fs::File::create(home.join("engine-data.partial"))?;
+                std::io::copy(&mut data, &mut file)?;
+                drop(file);
+                std::fs::rename(home.join("engine-data.partial"), &zip_path)?;
+                if let Some(stamp) = &stamp {
+                    let _ = std::fs::write(&stamp_path, stamp);
+                }
+                Ok(())
+            })();
+            if let Err(error) = copied {
+                log::error!("Cannot unpack engine data: {error}");
+            }
         }
     }
     let mut launcher = launcher::Launcher::new(home.clone());

@@ -249,7 +249,30 @@ fn release() {
     }
 }
 
-#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_vendor = "apple")))]
+#[cfg(target_os = "android")]
+fn release() {
+    // Android Bionic `<malloc.h>` defines M_PURGE (-101) and M_PURGE_ALL (-104)
+    // to flush Scudo/jemalloc thread caches and quarantine pages back to the OS.
+    const M_PURGE: libc::c_int = -101;
+    const M_PURGE_ALL: libc::c_int = -104;
+    type Mallopt = unsafe extern "C" fn(libc::c_int, libc::c_int) -> libc::c_int;
+    // SAFETY: looks up Bionic's process-wide `mallopt` symbol and purges unused
+    // allocator pages without moving or invalidating any live allocation.
+    unsafe {
+        let sym = libc::dlsym(libc::RTLD_DEFAULT, c"mallopt".as_ptr());
+        if !sym.is_null() {
+            let mallopt: Mallopt = std::mem::transmute(sym);
+            let _ = mallopt(M_PURGE_ALL, 0);
+            let _ = mallopt(M_PURGE, 0);
+        }
+    }
+}
+
+#[cfg(not(any(
+    all(target_os = "linux", target_env = "gnu"),
+    target_os = "android",
+    target_vendor = "apple"
+)))]
 fn release() {}
 
 /// The REPARSE_DATA_BUFFER of a mount point naming `name` (UTF-16, `\??\` prefixed). The length

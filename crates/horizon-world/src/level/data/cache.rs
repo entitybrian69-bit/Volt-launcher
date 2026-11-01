@@ -140,15 +140,7 @@ fn fingerprint(registry: &BlockRegistry, root: &Path) -> io::Result<[u8; 32]> {
     hasher.update(b"horizon resolved behaviours 2");
     // The build that resolved the tables: the version constant alone misses
     // loader changes that keep the snapshot layout.
-    let exe = std::env::current_exe()?;
-    let built = fs::metadata(&exe)?;
-    hash_str(&mut hasher, &exe.to_string_lossy());
-    hasher.update(built.len().to_le_bytes());
-    let modified = built
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| invalid(e.to_string()))?;
-    hasher.update(modified.as_nanos().to_le_bytes());
+    hash_running_build(&mut hasher)?;
     hasher.update(sources_digest(root)?);
     // The registry argument may be modified independently of facts.json.
     hasher.update((registry.len() as u64).to_le_bytes());
@@ -224,19 +216,92 @@ fn sources_digest(root: &Path) -> io::Result<[u8; 32]> {
     Ok(digest)
 }
 
+#[cfg(not(target_os = "android"))]
+fn hash_running_build(hasher: &mut Sha256) -> io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let built = fs::metadata(&exe)?;
+    hash_str(hasher, &exe.to_string_lossy());
+    hasher.update(built.len().to_le_bytes());
+    let modified = built
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| invalid(e.to_string()))?;
+    hasher.update(modified.as_nanos().to_le_bytes());
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn hash_running_build(hasher: &mut Sha256) -> io::Result<()> {
+    // On Android `current_exe()` points to Zygote (`/system/bin/app_process64`),
+    // which neither changes on APK updates nor is always stat-able under OEM
+    // SELinux policies. Fingerprint the mapped `libhorizon_android.so` / APK.
+    hash_str(hasher, env!("CARGO_PKG_VERSION"));
+    let mut stamped = false;
+    if let Ok(maps) = fs::read_to_string("/proc/self/maps") {
+        for line in maps.lines() {
+            if !line.contains("libhorizon_android") && !line.contains("/base.apk") {
+                continue;
+            }
+            if let Some(raw_path) = line.split_whitespace().nth(5) {
+                let fs_path = raw_path
+                    .split_once("!/")
+                    .map_or(raw_path, |(apk, _)| apk);
+                hash_str(hasher, raw_path);
+                if let Ok(meta) = fs::metadata(fs_path) {
+                    hasher.update(meta.len().to_le_bytes());
+                    if let Ok(modified) = meta.modified()
+                        && let Ok(dur) = modified.duration_since(UNIX_EPOCH)
+                    {
+                        hasher.update(dur.as_nanos().to_le_bytes());
+                    }
+                    stamped = true;
+                    break;
+                }
+            }
+        }
+    }
+    if !stamped
+        && let Ok(exe) = std::env::current_exe()
+        && let Ok(built) = fs::metadata(&exe)
+    {
+        hash_str(hasher, &exe.to_string_lossy());
+        hasher.update(built.len().to_le_bytes());
+        if let Ok(modified) = built.modified()
+            && let Ok(dur) = modified.duration_since(UNIX_EPOCH)
+        {
+            hasher.update(dur.as_nanos().to_le_bytes());
+        }
+    }
+    Ok(())
+}
+
 fn hash_str(hasher: &mut Sha256, text: &str) {
     hasher.update((text.len() as u64).to_le_bytes());
     hasher.update(text.as_bytes());
 }
 
 fn hash_file(hasher: &mut Sha256, root: &Path, path: &Path) -> io::Result<()> {
+    use std::io::Read;
     let relative = path
         .strip_prefix(root)
         .map_err(|e| invalid(e.to_string()))?;
     hash_str(hasher, &relative.to_string_lossy());
-    let bytes = fs::read(path)?;
-    hasher.update((bytes.len() as u64).to_le_bytes());
-    hasher.update(bytes);
+    let mut file = File::open(path)?;
+    let expected = file.metadata()?.len();
+    hasher.update(expected.to_le_bytes());
+    let mut buf = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        hasher.update(&buf[..n]);
+    }
+    if total != expected {
+        return Err(invalid("source file size changed while hashing"));
+    }
     Ok(())
 }
 

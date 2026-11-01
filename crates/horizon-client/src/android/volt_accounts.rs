@@ -144,6 +144,19 @@ pub struct VoltAccountManager {
     msa_fetched: std::collections::HashSet<String>,
 }
 
+pub enum LaunchSession {
+    Immediate(Option<PathBuf>),
+    Microsoft,
+    ElyBy {
+        account_id: String,
+        name: String,
+        uuid_hex: String,
+        access_token: String,
+        client_token: Option<String>,
+        session_path: PathBuf,
+    },
+}
+
 impl VoltAccountManager {
     pub fn load(
         data_dir: &Path,
@@ -894,31 +907,31 @@ impl VoltAccountManager {
         Some(path)
     }
 
-    /// Prepares the active account right before launching Minecraft: refreshes
-    /// Ely.by token if needed, configures `horizon_client::skins::set_offline_runtime`
-    /// with the equipped skin/cape + multiplayer server-sync command, and returns
-    /// `(player_name, session_file_for_ely_or_none, use_microsoft_store)`.
-    pub fn prepare_for_launch(&mut self) -> (String, Option<PathBuf>, bool) {
-        let Some(mut acc) = self.active().cloned() else {
+    /// Prepares the active account right before launching Minecraft without
+    /// blocking the Android UI thread on network validation/refresh calls.
+    pub fn prepare_for_launch(&mut self) -> (String, LaunchSession) {
+        let Some(acc) = self.active().cloned() else {
             horizon_client::skins::clear_offline_runtime();
-            return ("Player".into(), None, false);
+            return ("Player".into(), LaunchSession::Immediate(None));
         };
 
         if acc.provider == AccountProvider::ElyBy {
-            if let (Some(access), Some(client)) = (
-                acc.ely_access_token.as_deref(),
-                acc.ely_client_token.as_deref(),
-            ) && let Some(new_token) = refresh_ely_token(access, client)
-            {
-                acc.ely_access_token = Some(new_token.clone());
-                if let Some(stored) = self.accounts.iter_mut().find(|a| a.id == acc.id) {
-                    stored.ely_access_token = Some(new_token);
-                }
-                self.save();
-            }
-            let session_path = self.write_ely_session_file(&acc);
             self.apply_cosmetic_runtime(&acc);
-            return (acc.name, session_path, false);
+            if let Some(access_token) = acc.ely_access_token.clone() {
+                let session_path = self.ely_session_path(&acc.id);
+                return (
+                    acc.name.clone(),
+                    LaunchSession::ElyBy {
+                        account_id: acc.id,
+                        name: acc.name,
+                        uuid_hex: acc.uuid_hex,
+                        access_token,
+                        client_token: acc.ely_client_token,
+                        session_path,
+                    },
+                );
+            }
+            return (acc.name, LaunchSession::Immediate(None));
         }
 
         if acc.provider == AccountProvider::Microsoft {
@@ -931,12 +944,19 @@ impl VoltAccountManager {
             } else {
                 horizon_client::skins::clear_offline_runtime();
             }
-            return (acc.name, None, true);
+            return (acc.name, LaunchSession::Microsoft);
         }
 
         // Offline account
         self.apply_cosmetic_runtime(&acc);
-        (acc.name, None, false)
+        (acc.name, LaunchSession::Immediate(None))
+    }
+
+    pub fn update_ely_token(&mut self, account_id: &str, new_token: String) {
+        if let Some(stored) = self.accounts.iter_mut().find(|a| a.id == account_id) {
+            stored.ely_access_token = Some(new_token);
+            self.save();
+        }
     }
 
     fn apply_cosmetic_runtime(&self, acc: &VoltAccount) {
@@ -1106,9 +1126,46 @@ fn authenticate_ely_by(
     Ok((acc, skin_rgba, cape_rgba))
 }
 
-fn refresh_ely_token(access_token: &str, client_token: &str) -> Option<String> {
+pub fn prepare_ely_session_off_thread(
+    account_id: String,
+    name: String,
+    uuid_hex: String,
+    access_token: String,
+    client_token: Option<String>,
+    session_path: PathBuf,
+) -> (Option<PathBuf>, Option<(String, String)>) {
+    let refreshed = client_token
+        .as_deref()
+        .and_then(|client| refresh_ely_token_fast(&access_token, client));
+    let active_token = refreshed.as_deref().unwrap_or(access_token.as_str());
+    if let Some(parent) = session_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let body = serde_json::json!({
+        "name": name,
+        "uuid": uuid_hex,
+        "access_token": active_token,
+        "user_type": "ely",
+        "join_url": "https://authserver.ely.by/session/join",
+    });
+    let written = std::fs::write(&session_path, body.to_string())
+        .ok()
+        .map(|()| session_path);
+    (written, refreshed.map(|tok| (account_id, tok)))
+}
+
+fn fast_launch_http_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(4))
+        .timeout_read(Duration::from_secs(5))
+        .timeout_write(Duration::from_secs(5))
+        .build()
+}
+
+fn refresh_ely_token_fast(access_token: &str, client_token: &str) -> Option<String> {
+    let agent = fast_launch_http_agent();
     let validate_body = serde_json::json!({ "accessToken": access_token });
-    if http_agent()
+    if agent
         .post("https://authserver.ely.by/auth/validate")
         .set("Content-Type", "application/json")
         .send_string(&validate_body.to_string())
@@ -1120,7 +1177,7 @@ fn refresh_ely_token(access_token: &str, client_token: &str) -> Option<String> {
         "accessToken": access_token,
         "clientToken": client_token,
     });
-    let resp = http_agent()
+    let resp = agent
         .post("https://authserver.ely.by/auth/refresh")
         .set("Content-Type", "application/json")
         .send_string(&refresh_body.to_string())

@@ -293,6 +293,7 @@ pub(super) fn spawn_loader(
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
         .spawn(move || {
+            horizon_threads::behind_server();
             let mut pack_error = None;
             let root = packs::startup_root(&vanilla_root, &settings.resource_packs, &[])
                 .unwrap_or_else(|error| {

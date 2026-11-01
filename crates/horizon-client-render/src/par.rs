@@ -7,9 +7,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Threads take the next item as they finish one, so a run of slow items
 /// doesn't hold back the others.
 pub fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    let threads = std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(items.len());
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let budget = if cfg!(target_os = "android") {
+        available.saturating_sub(2).clamp(1, 4)
+    } else {
+        available
+    };
+    let threads = budget.min(items.len());
     if threads <= 1 {
         return items.iter().map(f).collect();
     }
@@ -18,6 +22,7 @@ pub fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec
         let workers: Vec<_> = (0..threads)
             .map(|_| {
                 scope.spawn(|| {
+                    horizon_threads::behind_server();
                     let mut done = Vec::new();
                     loop {
                         let i = next.fetch_add(1, Ordering::Relaxed);

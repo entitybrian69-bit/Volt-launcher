@@ -101,6 +101,8 @@ fn projection(width: u32, height: u32, yaw: f32, pitch: f32) -> Mat4 {
 }
 
 pub(super) struct Panorama {
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     group: wgpu::BindGroup,
     uniform: wgpu::Buffer,
@@ -273,11 +275,62 @@ impl Panorama {
             cache: None,
         });
         Self {
+            layout,
+            sampler,
             pipeline,
             group,
             uniform,
             vertices,
         }
+    }
+
+    pub(super) fn replace_faces(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        faces: &Faces,
+    ) {
+        let texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Title panorama cube"),
+                size: wgpu::Extent3d {
+                    width: faces.size,
+                    height: faces.size,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &faces.pixels,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..Default::default()
+        });
+        self.group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Title panorama resources"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
     }
 
     pub(super) fn prepare(

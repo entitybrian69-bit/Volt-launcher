@@ -17242,7 +17242,10 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
         f: impl FnOnce() -> T + Send + 'scope,
     ) -> Self {
         if parallel {
-            Self::Thread(scope.spawn(f))
+            Self::Thread(scope.spawn(move || {
+                horizon_threads::behind_server();
+                f()
+            }))
         } else {
             Self::Later(Box::new(f))
         }
@@ -17529,6 +17532,7 @@ fn load_resources(
     let prepared_at = Instant::now();
     let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
     let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
+    horizon_threads::release_free_memory();
     if menu {
         log::info!(
             "Horizon: handoff CPU resources prepared on worker in {} ms",
@@ -17546,11 +17550,12 @@ fn load_resources(
         let handle = std::thread::Builder::new()
             .name("world-rest-loader".into())
             .spawn(move || {
+                horizon_threads::behind_server();
                 let rest = load_world_rest(
                     &root,
                     &resources,
                     &assets,
-                    &behaviour_json,
+                    behaviour_json,
                     &gameplay_projection,
                     visibility,
                     &progress,
@@ -17561,6 +17566,7 @@ fn load_resources(
                     .rest
                     .set(rest)
                     .map_err(|_| "world resources already loaded".to_owned())?;
+                horizon_threads::release_free_memory();
                 progress.set(9);
                 horizon_client::telemetry::mark_rest_ready();
                 log::info!(
@@ -17578,7 +17584,7 @@ fn load_resources(
             &root,
             &resources,
             &assets,
-            &behaviour_json,
+            behaviour_json,
             &gameplay_projection,
             visibility,
             progress,
@@ -17606,7 +17612,7 @@ fn load_world_rest(
     root: &std::path::Path,
     resources: &Resources,
     assets: &Assets,
-    behaviour_json: &serde_json::Value,
+    behaviour_json: serde_json::Value,
     gameplay_projection: &[horizon_client::blocks::GameplayProjection],
     visibility: horizon_world::block_render::FaceVisibility,
     progress: &Progress,
@@ -17628,8 +17634,13 @@ fn load_world_rest(
         let stations = horizon_client::stations::StationData::load(root, &items, overlay);
         Ok((items, recipes, stations))
     };
-    let load_behaviours =
-        || Behaviours::load_with_gameplay(registry, root, behaviour_json, gameplay_projection);
+    let load_behaviours = move || {
+        let loaded =
+            Behaviours::load_with_gameplay(registry, root, &behaviour_json, gameplay_projection);
+        drop(behaviour_json);
+        horizon_threads::release_free_memory();
+        loaded
+    };
     let load_block_entity_render = || {
         horizon_client::block_entity_render::BlockEntityRenderer::load_with_visibility(
             root, registry, visibility,
@@ -17665,33 +17676,78 @@ fn load_world_rest(
     ) -> std::result::Result<T, String> {
         result.map_err(|e| e.to_string())
     }
-    let (items, behaviours, block_entity_render, animate, mobs, transformers) = if threads > 1 {
-        std::thread::scope(|scope| {
-            let items = scope.spawn(|| text(load_items()));
-            let behaviours = scope.spawn(|| text(load_behaviours()));
-            let block_entity_render = scope.spawn(|| text(load_block_entity_render()));
-            let animate = scope.spawn(|| text(load_animate()));
-            let mobs = scope.spawn(|| text(load_mobs()));
-            let transformers = text(load_transformers());
+    let (items, behaviours, block_entity_render, animate, mobs, transformers) =
+        if cfg!(target_os = "android") && threads > 1 {
+            // On mobile unified memory, resolve and free the ~200 MB behaviour DOM
+            // first so cold-start snapshot creation never overlaps item/recipe JSON
+            // tables and GPU sprite uploads.
+            let behaviours = text(load_behaviours());
+            std::thread::scope(|scope| {
+                let items = scope.spawn(|| {
+                    horizon_threads::behind_server();
+                    text(load_items())
+                });
+                let rest = scope.spawn(|| {
+                    horizon_threads::behind_server();
+                    (
+                        text(load_block_entity_render()),
+                        text(load_animate()),
+                        text(load_mobs()),
+                    )
+                });
+                let transformers = text(load_transformers());
+                let (block_entity_render, animate, mobs) = rest.join().unwrap();
+                (
+                    items.join().unwrap(),
+                    behaviours,
+                    block_entity_render,
+                    animate,
+                    mobs,
+                    transformers,
+                )
+            })
+        } else if threads > 1 {
+            std::thread::scope(|scope| {
+                let items = scope.spawn(|| {
+                    horizon_threads::behind_server();
+                    text(load_items())
+                });
+                let behaviours = scope.spawn(move || {
+                    horizon_threads::behind_server();
+                    text(load_behaviours())
+                });
+                let block_entity_render = scope.spawn(|| {
+                    horizon_threads::behind_server();
+                    text(load_block_entity_render())
+                });
+                let animate = scope.spawn(|| {
+                    horizon_threads::behind_server();
+                    text(load_animate())
+                });
+                let mobs = scope.spawn(|| {
+                    horizon_threads::behind_server();
+                    text(load_mobs())
+                });
+                let transformers = text(load_transformers());
+                (
+                    items.join().unwrap(),
+                    behaviours.join().unwrap(),
+                    block_entity_render.join().unwrap(),
+                    animate.join().unwrap(),
+                    mobs.join().unwrap(),
+                    transformers,
+                )
+            })
+        } else {
             (
-                items.join().unwrap(),
-                behaviours.join().unwrap(),
-                block_entity_render.join().unwrap(),
-                animate.join().unwrap(),
-                mobs.join().unwrap(),
-                transformers,
+                text(load_items()),
+                text(load_behaviours()),
+                text(load_block_entity_render()),
+                text(load_animate()),
+                text(load_mobs()),
+                text(load_transformers()),
             )
-        })
-    } else {
-        (
-            text(load_items()),
-            text(load_behaviours()),
-            text(load_block_entity_render()),
-            text(load_animate()),
-            text(load_mobs()),
-            text(load_transformers()),
-        )
-    };
+        };
     let (items, recipes, stations) = items?;
     let (animate, fog) = animate?;
     let (mob_types, mob_data) = mobs?;
@@ -17832,6 +17888,14 @@ pub(crate) fn loading_renderer(
         Some(atlas) => (atlas.glint.0.as_slice(), atlas.glint.1, atlas.glint.2),
         None => (EMPTY_GLINT.as_slice(), 1, 1),
     };
+    let (glint_armor_pixels, glint_armor_width, glint_armor_height) = match atlas {
+        Some(atlas) => (
+            atlas.glint_armor.0.as_slice(),
+            atlas.glint_armor.1,
+            atlas.glint_armor.2,
+        ),
+        None => (EMPTY_GLINT.as_slice(), 1, 1),
+    };
     // A glyph rasterized into an earlier texture is not in these pixels; the
     // new texture gets it again when the character is drawn (see
     // `build_renderer`).
@@ -17849,7 +17913,7 @@ pub(crate) fn loading_renderer(
         &[],
         (pixels, width, height),
         (glint_pixels, glint_width, glint_height),
-        (glint_pixels, glint_width, glint_height),
+        (glint_armor_pixels, glint_armor_width, glint_armor_height),
         (&FORCEFIELD[..], 1),
         panorama,
         None,
@@ -18182,6 +18246,9 @@ impl Loading {
         let Some(previous) = &self.renderer else {
             return Ok(());
         };
+        if previous.can_replace_world_textures(loaded.pack.render.texture_layers) {
+            return Ok(());
+        }
         let options = self.options.as_ref().ok_or("loading already finished")?;
         if options.offscreen || previous.info.backend != wgpu::Backend::Vulkan {
             return Ok(());
@@ -18201,6 +18268,7 @@ impl Loading {
             std::thread::Builder::new()
                 .name("Renderer preparation".into())
                 .spawn(move || {
+                    horizon_threads::behind_server();
                     let started = Instant::now();
                     let result = pollster::block_on(Renderer::new_with_context(
                         window,
@@ -18285,7 +18353,11 @@ impl Loading {
             None,
             rendering_api(&self.settings),
         ) {
-            Ok(r) => self.renderer = Some(r),
+            Ok(mut r) => {
+                r.gamma = self.settings.gamma;
+                r.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);
+                self.renderer = Some(r);
+            }
             Err(e) => {
                 self.error = Some(e);
                 crate::game::exit_app(event_loop);
@@ -18294,6 +18366,9 @@ impl Loading {
         }
         horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
         self.window = Some(window);
+        if self.gui.is_some() {
+            self.apply_menu_settings();
+        }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
@@ -18305,8 +18380,9 @@ impl Loading {
             crate::game::exit_app(event_loop);
         }
     }
-    /// The menu bundle arrived: rebuild the loading screen with the real atlas
-    /// and title panorama.
+    /// The menu bundle arrived: update the loading screen in-place with the
+    /// real atlas and title panorama without tearing down the surface or
+    /// recompiling pipelines.
     fn set_ui(&mut self, gui: UiResources, root: PathBuf) {
         log::info!(
             "Horizon: loading the title artwork after {} ms",
@@ -18315,14 +18391,39 @@ impl Loading {
         self.menu.set_root(root, &self.settings);
         self.gui = Some(gui);
         horizon_client::ui_theme::reset_atlas();
-        self.apply_menu_settings();
+        if let (Some(renderer), Some(gui)) = (&mut self.renderer, &self.gui) {
+            let atlas = &gui.atlas;
+            atlas.font.reset_cache();
+            match renderer.replace_ui_textures(
+                (&atlas.pixels, atlas.width, atlas.height),
+                (&atlas.glint.0, atlas.glint.1, atlas.glint.2),
+                (
+                    &atlas.glint_armor.0,
+                    atlas.glint_armor.1,
+                    atlas.glint_armor.2,
+                ),
+                &gui.panorama,
+            ) {
+                Ok(()) => {
+                    renderer.hud.sprite_animations = atlas
+                        .sprite_animations
+                        .iter()
+                        .map(|(rect, animation)| (*rect, animation.clone(), (usize::MAX, 0, 0)))
+                        .collect();
+                }
+                Err(e) => {
+                    self.error = Some(e);
+                    return;
+                }
+            }
+            self.apply_menu_settings();
+            return;
+        }
         let Some(window) = self.window.clone() else {
+            self.apply_menu_settings();
             return;
         };
         let offscreen = self.options.as_ref().is_some_and(|o| o.offscreen);
-        if let Some(renderer) = &mut self.renderer {
-            renderer.release_surface();
-        }
         match loading_renderer(
             window,
             offscreen,
@@ -18331,8 +18432,8 @@ impl Loading {
             rendering_api(&self.settings),
         ) {
             Ok(r) => {
-                horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
                 self.renderer = Some(r);
+                self.apply_menu_settings();
             }
             Err(e) => self.error = Some(e),
         }
@@ -18364,6 +18465,13 @@ impl Loading {
             } else {
                 w.request_redraw();
             }
+        }
+        #[cfg(target_os = "android")]
+        if self.loaded.is_none() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
         }
         event_loop.set_control_flow(ControlFlow::Poll);
     }
@@ -18434,6 +18542,7 @@ impl Loading {
         let renderer = if let Some(mut renderer) = self.prepared_renderer.take() {
             renderer
                 .activate_replacement(self.renderer.as_mut().ok_or("missing loading renderer")?)?;
+            self.renderer = None;
             // Glyphs are still being drawn into the loading atlas until this
             // handoff; invalidate only now, after the new GPU atlas is ready.
             gui.atlas.font.reset_cache();
@@ -18444,11 +18553,29 @@ impl Loading {
                 .map(|(rect, animation)| (*rect, animation.clone(), (usize::MAX, 0, 0)))
                 .collect();
             renderer
+        } else if self
+            .renderer
+            .as_ref()
+            .is_some_and(|r| r.can_replace_world_textures(loaded.pack.render.texture_layers))
+        {
+            let mut renderer = self.renderer.take().expect("checked above");
+            let assets = &loaded.pack.render;
+            renderer.replace_world_textures(
+                &assets.pixels,
+                assets.sprite_size,
+                assets.sprite_minimum_size,
+                assets.texture_layers,
+                &assets.sprite_mips,
+                &assets.animations,
+                (&loaded.pack.forcefield.2, loaded.pack.forcefield.0),
+                loaded.renderer_cpu,
+            )?;
+            renderer
         } else {
             if let Some(renderer) = &mut self.renderer {
                 renderer.release_surface();
             }
-            build_renderer(
+            let renderer = build_renderer(
                 window.clone(),
                 options.offscreen,
                 &loaded.pack,
@@ -18456,8 +18583,11 @@ impl Loading {
                 self.renderer.as_ref(),
                 loaded.renderer_cpu,
                 rendering_api(&self.settings),
-            )?
+            )?;
+            self.renderer = None;
+            renderer
         };
+        horizon_threads::release_free_memory();
         log::info!(
             "Horizon: world renderer ready after {} ms",
             self.started.elapsed().as_millis()

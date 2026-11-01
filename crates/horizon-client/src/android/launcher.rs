@@ -67,7 +67,8 @@ pub(super) struct Launcher {
     page_anim: Option<(Instant, f32)>,
     modal_was_open: bool,
     modal_anim: Option<Instant>,
-    session_worker: Option<mpsc::Receiver<std::result::Result<Option<PathBuf>, String>>>,
+    session_worker:
+        Option<mpsc::Receiver<std::result::Result<(Option<PathBuf>, Option<(String, String)>), String>>>,
     session_ready: bool,
     focus: Option<usize>,
     diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
@@ -295,31 +296,63 @@ impl Launcher {
             self.catalog.config.keypad_controls = false;
             let game_home = self.catalog.config.game_home(&self.home);
             if !self.session_ready {
-                let (active_name, ely_session, use_msa) = self.volt_accounts.prepare_for_launch();
+                let (active_name, launch_session) = self.volt_accounts.prepare_for_launch();
                 self.catalog.config.name = active_name;
                 self.catalog.config.save(&self.home)?;
-                if use_msa && crate::account::Accounts::load().selected().is_some() {
-                    let id = self.catalog.config.microsoft_client_id.clone();
-                    let (sender, receiver) = mpsc::channel();
-                    self.session_worker = Some(receiver);
-                    self.catalog.status = "Preparing Microsoft session...".into();
-                    std::thread::spawn(move || {
-                        let result = (|| {
-                            login::Login::session(&id)?
-                                .map(|(a, s)| {
-                                    crate::account::write_session_file(
-                                        &game_home.join("sessions"),
-                                        &a,
-                                        &s,
-                                    )
-                                })
-                                .transpose()
-                        })();
-                        let _ = sender.send(result);
-                    });
-                    return Ok(());
+                match launch_session {
+                    crate::volt_accounts::LaunchSession::Microsoft => {
+                        if crate::account::Accounts::load().selected().is_some() {
+                            let id = self.catalog.config.microsoft_client_id.clone();
+                            let (sender, receiver) = mpsc::channel();
+                            self.session_worker = Some(receiver);
+                            self.catalog.status = "Preparing Microsoft session...".into();
+                            std::thread::spawn(move || {
+                                let result = (|| {
+                                    login::Login::session(&id)?
+                                        .map(|(a, s)| {
+                                            crate::account::write_session_file(
+                                                &game_home.join("sessions"),
+                                                &a,
+                                                &s,
+                                            )
+                                        })
+                                        .transpose()
+                                        .map(|path| (path, None))
+                                })();
+                                let _ = sender.send(result);
+                            });
+                            return Ok(());
+                        }
+                        SESSION.with(|s| *s.borrow_mut() = None);
+                    }
+                    crate::volt_accounts::LaunchSession::ElyBy {
+                        account_id,
+                        name,
+                        uuid_hex,
+                        access_token,
+                        client_token,
+                        session_path,
+                    } => {
+                        let (sender, receiver) = mpsc::channel();
+                        self.session_worker = Some(receiver);
+                        self.catalog.status = "Preparing Ely.by session...".into();
+                        std::thread::spawn(move || {
+                            let out = crate::volt_accounts::prepare_ely_session_off_thread(
+                                account_id,
+                                name,
+                                uuid_hex,
+                                access_token,
+                                client_token,
+                                session_path,
+                            );
+                            let _ = sender.send(Ok(out));
+                        });
+                        return Ok(());
+                    }
+                    crate::volt_accounts::LaunchSession::Immediate(session_file) => {
+                        SESSION.with(|s| *s.borrow_mut() = session_file);
+                    }
                 }
-                SESSION.with(|s| *s.borrow_mut() = ely_session);
             }
             self.session_ready = false;
             std::fs::create_dir_all(&game_home)?;
@@ -649,7 +682,10 @@ impl ApplicationHandler for Launcher {
         if let Some(result) = self.session_worker.as_ref().and_then(|w| w.try_recv().ok()) {
             self.session_worker = None;
             match result {
-                Ok(file) => {
+                Ok((file, refreshed_ely)) => {
+                    if let Some((account_id, new_token)) = refreshed_ely {
+                        self.volt_accounts.update_ely_token(&account_id, new_token);
+                    }
                     SESSION.with(|s| *s.borrow_mut() = file);
                     self.session_ready = true;
                     if let Err(e) = self.action(events) {

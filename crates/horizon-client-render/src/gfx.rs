@@ -558,6 +558,7 @@ pub struct Renderer {
     panorama: panorama::Panorama,
     /// `RenderPipelines.WORLD_BORDER` and its buffers.
     border_pipeline: wgpu::RenderPipeline,
+    border_bindings: wgpu::BindGroupLayout,
     border_group: wgpu::BindGroup,
     border_uniform: wgpu::Buffer,
     border_vertices: wgpu::Buffer,
@@ -566,6 +567,7 @@ pub struct Renderer {
     screen_pipelines: [wgpu::RenderPipeline; 8],
     screen_buffer: wgpu::Buffer,
     screen_capacity: u64,
+    entity_bindings: wgpu::BindGroupLayout,
     entity_group: wgpu::BindGroup,
     /// The entity resources with the hand's projection (`hand_globals`).
     hand_group: wgpu::BindGroup,
@@ -1519,7 +1521,9 @@ impl Renderer {
                 .map(|renderer| renderer.config.present_mode)
                 .filter(|mode| caps.present_modes.contains(mode))
                 .unwrap_or_else(|| {
-                    if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+                    if !cfg!(target_os = "android")
+                        && caps.present_modes.contains(&wgpu::PresentMode::Mailbox)
+                    {
                         wgpu::PresentMode::Mailbox
                     } else {
                         wgpu::PresentMode::Fifo
@@ -1573,8 +1577,7 @@ impl Renderer {
             };
             (config, Vec::new(), None)
         };
-        let offscreen = surface
-            .is_none()
+        let offscreen = (surface.is_none() && previous.is_none())
             .then(|| Self::offscreen_target(&device, &config));
         if previous.is_none() {
             startup_step(format_args!("creating the pipelines"));
@@ -3067,12 +3070,14 @@ impl Renderer {
             entity_outline,
             panorama,
             border_pipeline,
+            border_bindings,
             border_group,
             border_uniform,
             border_vertices,
             screen_pipelines,
             screen_buffer,
             screen_capacity,
+            entity_bindings,
             entity_group,
             hand_group,
             hand_globals,
@@ -3263,6 +3268,363 @@ impl Renderer {
         }
         let size = self.window.inner_size();
         self.resize(size.width, size.height);
+        Ok(())
+    }
+    /// Swap the HUD atlas, glint and title panorama textures in-place on the
+    /// existing loading renderer without tearing down the surface or recompiling
+    /// any render/compute pipeline.
+    pub fn replace_ui_textures(
+        &mut self,
+        hud_atlas: (&[u8], u32, u32),
+        glint: (&[u8], u32, u32),
+        glint_armor: (&[u8], u32, u32),
+        panorama_faces: &panorama::Faces,
+    ) -> Result<()> {
+        let (atlas_pixels, atlas_width, atlas_height) = hud_atlas;
+        let limit = self.device.limits().max_texture_dimension_2d;
+        if atlas_width.max(atlas_height) > limit {
+            return Err(format!(
+                "the shared atlas is {atlas_width}x{atlas_height}; this GPU allows {limit}x{limit}"
+            )
+            .into());
+        }
+        // Release previous UI textures first so unified mobile memory never holds
+        // two full HUD atlases at once.
+        self.hud.atlas_texture = None;
+        self.menu_blur = None;
+        let atlas = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Shared atlas"),
+                size: wgpu::Extent3d {
+                    width: atlas_width,
+                    height: atlas_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            atlas_pixels,
+        );
+        let atlas_view = atlas.create_view(&Default::default());
+        let (glint_pixels, glint_width, glint_height) = glint;
+        let glint_texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Enchanted glint"),
+                size: wgpu::Extent3d {
+                    width: glint_width,
+                    height: glint_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            glint_pixels,
+        );
+        let glint_view = glint_texture.create_view(&Default::default());
+        let glint_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Glint"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let (glint_armor_pixels, glint_armor_width, glint_armor_height) = glint_armor;
+        let glint_armor_texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Enchanted armor glint"),
+                size: wgpu::Extent3d {
+                    width: glint_armor_width,
+                    height: glint_armor_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            glint_armor_pixels,
+        );
+        let glint_armor_view = glint_armor_texture.create_view(&Default::default());
+        self.hud.replace_textures(
+            &self.device,
+            atlas,
+            &atlas_view,
+            &glint_view,
+            &glint_sampler,
+        );
+        let atlas_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Atlas"),
+            ..Default::default()
+        });
+        self.entity_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Entity resources"),
+            layout: &self.entity_bindings,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.lightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.lightmap_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&glint_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&glint_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&glint_armor_view),
+                },
+            ],
+        });
+        self.hand_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("First-person hand resources"),
+            layout: &self.entity_bindings,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.hand_globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.lightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.lightmap_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&glint_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&glint_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&glint_armor_view),
+                },
+            ],
+        });
+        self.panorama
+            .replace_faces(&self.device, &self.queue, panorama_faces);
+        Ok(())
+    }
+    /// Whether `replace_world_textures` can upgrade this renderer in-place
+    /// without recompiling terrain pipelines (`SPRITE_ARRAYS` matches).
+    pub fn can_replace_world_textures(&self, layers: u32) -> bool {
+        let split = sprite_split().min(self.device.limits().max_texture_array_layers);
+        split > 0
+            && layers <= split.saturating_mul(SPRITE_ARRAYS)
+            && f64::from(layers.div_ceil(split).max(1)) == self.terrain_sprites[0]
+            && f64::from(split) == self.terrain_sprites[1]
+    }
+    /// Upgrade a loading renderer with the world's block sprite arrays,
+    /// animations and world-border texture in-place on the render thread,
+    /// reusing all compiled pipelines and the already-uploaded HUD/panorama.
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_world_textures(
+        &mut self,
+        sprite_pixels: &[u8],
+        sprite_size: u32,
+        sprite_minimum_size: u32,
+        layers: u32,
+        sprite_mips: &[crate::mipmap::Settings],
+        animations: &[SpriteAnimation],
+        forcefield: (&[u8], u32),
+        prepared: Option<PreparedTextures>,
+    ) -> Result<()> {
+        if !self.can_replace_world_textures(layers) {
+            return Err("renderer terrain sprite array count changed".into());
+        }
+        let split = sprite_split().min(self.device.limits().max_texture_array_layers);
+        self.sprite_textures.clear();
+        self.pack_atlas = None;
+        self.menu_blur = None;
+        let prepared = prepared
+            .unwrap_or_else(|| {
+                PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
+            })
+            .for_split(layers, split);
+        let mut mip_levels = 1;
+        let sprite_compute = animate::SpriteAnimator::compute(&self.adapter, &self.device);
+        let sprite_storage = if sprite_compute {
+            wgpu::TextureUsages::STORAGE_BINDING
+        } else {
+            wgpu::TextureUsages::empty()
+        };
+        let gl = self.info.backend == wgpu::Backend::Gl;
+        let sprite_textures: Vec<wgpu::Texture> = prepared
+            .sprites
+            .into_iter()
+            .enumerate()
+            .map(|(array, (mut mips, levels))| {
+                let first = array as u32 * split;
+                let used = layers.saturating_sub(first).clamp(1, split);
+                let count = array_layers(used, gl);
+                mips.resize(mips.len() / used as usize * count as usize, 0);
+                mip_levels = levels;
+                self.device.create_texture_with_data(
+                    &self.queue,
+                    &wgpu::TextureDescriptor {
+                        label: Some("Block sprites"),
+                        size: wgpu::Extent3d {
+                            width: sprite_size,
+                            height: sprite_size,
+                            depth_or_array_layers: count,
+                        },
+                        mip_level_count: levels,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_DST
+                            | wgpu::TextureUsages::COPY_SRC
+                            | sprite_storage,
+                        view_formats: &[],
+                    },
+                    wgpu::util::TextureDataOrder::LayerMajor,
+                    &mips,
+                )
+            })
+            .collect();
+        self.animations = animate::SpriteAnimator::new(
+            &self.device,
+            animations,
+            sprite_size,
+            sprite_mips,
+            &sprite_textures,
+            split,
+            sprite_compute,
+        );
+        self.sprite_sampler = self.device.create_sampler(&sprite_sampler_descriptor(0, 1));
+        self.texture_filtering = 0;
+        self.max_anisotropy = 1;
+        let sprite_views = sprite_views(&sprite_textures, &self.sprite_unused, None);
+        self.group = terrain_group(
+            &self.device,
+            "Horizon terrain resources",
+            &self.terrain_layout,
+            &self.globals,
+            &sprite_views,
+            &self.sprite_sampler,
+            &self.lightmap_view,
+            &self.lightmap_sampler,
+        );
+        self.crosshair_group = terrain_group(
+            &self.device,
+            "Debug crosshair resources",
+            &self.terrain_layout,
+            &self.crosshair_globals,
+            &sprite_views,
+            &self.sprite_sampler,
+            &self.lightmap_view,
+            &self.lightmap_sampler,
+        );
+        self.sprite_textures = sprite_textures;
+        self.mip_levels = mip_levels;
+        self.mipmaps = mip_levels - 1;
+        self.sprite_minimum_size = sprite_minimum_size;
+        self.lightmap_uploaded = false;
+
+        let forcefield_size = forcefield.1;
+        let (forcefield_mips, forcefield_levels) = prepared.forcefield;
+        let forcefield_texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Forcefield"),
+                size: wgpu::Extent3d {
+                    width: forcefield_size,
+                    height: forcefield_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: forcefield_levels,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &forcefield_mips,
+        );
+        let forcefield_view = forcefield_texture.create_view(&Default::default());
+        let forcefield_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Forcefield"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        self.border_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("World border resources"),
+            layout: &self.border_bindings,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&forcefield_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&forcefield_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.border_uniform.as_entire_binding(),
+                },
+            ],
+        });
         Ok(())
     }
     /// Set the live surface aside for a replacement on the same device.

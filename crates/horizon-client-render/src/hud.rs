@@ -1638,6 +1638,8 @@ pub struct HudRenderer {
     pub sprite_animations: Vec<(Rect, crate::sprites::SpriteAnimation, (usize, usize, u32))>,
     /// The shared atlas texture, for run-time glyph uploads.
     pub atlas_texture: Option<wgpu::Texture>,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     /// `RenderPipelines.CROSSHAIR`.
     invert_pipeline: wgpu::RenderPipeline,
@@ -1865,6 +1867,8 @@ impl HudRenderer {
         Ok(Self {
             atlas_texture: None,
             sprite_animations: Vec::new(),
+            layout,
+            sampler,
             pipeline,
             invert_pipeline,
             additive_pipeline,
@@ -1876,6 +1880,43 @@ impl HudRenderer {
             buffer,
             capacity,
         })
+    }
+    /// Swap the HUD atlas and glint views in-place without recompiling pipelines.
+    pub fn replace_textures(
+        &mut self,
+        device: &wgpu::Device,
+        atlas: wgpu::Texture,
+        view: &wgpu::TextureView,
+        glint_view: &wgpu::TextureView,
+        glint_sampler: &wgpu::Sampler,
+    ) {
+        self.group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("HUD resources"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(glint_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(glint_sampler),
+                },
+            ],
+        });
+        self.atlas_texture = Some(atlas);
     }
     pub fn animate_sprites(
         &mut self,

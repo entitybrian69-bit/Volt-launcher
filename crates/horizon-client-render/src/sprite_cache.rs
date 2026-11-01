@@ -110,40 +110,53 @@ impl SpriteCache {
         let temporary = self
             .path
             .with_extension(format!("{}.tmp", std::process::id()));
-        if fs::write(&temporary, serialize(self.fingerprint, &self.entries)).is_ok()
-            && fs::rename(&temporary, &self.path).is_err()
-        {
+        let written = fs::File::create(&temporary).and_then(|file| {
+            use std::io::Write;
+            let mut writer = std::io::BufWriter::with_capacity(64 * 1024, file);
+            write_to(&mut writer, self.fingerprint, &self.entries)?;
+            writer.flush()
+        });
+        if written.is_err() || fs::rename(&temporary, &self.path).is_err() {
             let _ = fs::remove_file(&temporary);
         }
     }
 }
 
+fn write_to(
+    out: &mut impl std::io::Write,
+    fingerprint: u64,
+    entries: &HashMap<String, Decoded>,
+) -> std::io::Result<()> {
+    out.write_all(MAGIC)?;
+    out.write_all(&VERSION.to_le_bytes())?;
+    out.write_all(&fingerprint.to_le_bytes())?;
+    out.write_all(&(entries.len() as u32).to_le_bytes())?;
+    for (name, d) in entries {
+        put_bytes(out, name.as_bytes())?;
+        out.write_all(&d.side.to_le_bytes())?;
+        out.write_all(&(d.frames.len() as u32).to_le_bytes())?;
+        for frame in &d.frames {
+            put_bytes(out, frame)?;
+        }
+        put_bytes(out, d.animation.as_deref().unwrap_or("").as_bytes())?;
+        out.write_all(&[u8::from(d.animation.is_some()), d.strategy as u8])?;
+        out.write_all(&d.alpha_cutoff_bias.to_bits().to_le_bytes())?;
+        out.write_all(&[
+            u8::from(d.has_transparent) | u8::from(d.opaque) << 1 | u8::from(d.translucent) << 2,
+        ])?;
+    }
+    Ok(())
+}
+fn put_bytes(out: &mut impl std::io::Write, bytes: &[u8]) -> std::io::Result<()> {
+    out.write_all(&(bytes.len() as u32).to_le_bytes())?;
+    out.write_all(bytes)
+}
+
+#[cfg(test)]
 fn serialize(fingerprint: u64, entries: &HashMap<String, Decoded>) -> Vec<u8> {
     let mut out = Vec::new();
-    out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&VERSION.to_le_bytes());
-    out.extend_from_slice(&fingerprint.to_le_bytes());
-    out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-    for (name, d) in entries {
-        put_bytes(&mut out, name.as_bytes());
-        out.extend_from_slice(&d.side.to_le_bytes());
-        out.extend_from_slice(&(d.frames.len() as u32).to_le_bytes());
-        for frame in &d.frames {
-            put_bytes(&mut out, frame);
-        }
-        put_bytes(&mut out, d.animation.as_deref().unwrap_or("").as_bytes());
-        out.push(u8::from(d.animation.is_some()));
-        out.push(d.strategy as u8);
-        out.extend_from_slice(&d.alpha_cutoff_bias.to_bits().to_le_bytes());
-        out.push(
-            u8::from(d.has_transparent) | u8::from(d.opaque) << 1 | u8::from(d.translucent) << 2,
-        );
-    }
+    write_to(&mut out, fingerprint, entries).expect("Vec::write never fails");
     out
-}
-fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    out.extend_from_slice(bytes);
 }
 
 struct Reader<'a>(&'a [u8]);
