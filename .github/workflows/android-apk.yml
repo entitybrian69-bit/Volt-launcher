@@ -240,9 +240,13 @@ jobs:
           shared-key: android-apk-${{ matrix.abi }}-${{ needs.plan.outputs.profile }}
           cache-on-failure: true
 
-      - name: Run touch control and Java launcher importer unit tests
+      - name: Run touch control and Volt settings unit tests
         run: |
+          cargo test -p horizon-client-core --lib lang
           cargo test -p horizon-client-render --lib touch
+          cargo test -p horizon-client-render --lib volt_features
+          cargo test -p horizon-client-render --lib extras
+          cargo test -p horizon-client-render --lib options_ui
 
       - name: Cache Gradle 8.14 distribution
         uses: actions/cache@v4

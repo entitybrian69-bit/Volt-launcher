@@ -17,8 +17,8 @@ pub use horizon_client_render::{
     poi_sections, post_chain, potent_sulfur, preedit, providers, screen_draw, screen_effects,
     sculk, section_mask, settings, shader_pack_list, signs, skins, sound_engine, sound_events,
     sound_preview, spans, split_layout, sprites, streaming, structure_block, tab_list, telemetry,
-    test_block, test_instance_block, testgen, title_edition, trims, ui, vault, weather, widgets,
-    world, worldborder, zip,
+    test_block, test_instance_block, testgen, title_edition, trims, ui, vault, volt_features,
+    weather, widgets, world, worldborder, zip,
 };
 pub mod attack_strength;
 pub mod attribute_updates;

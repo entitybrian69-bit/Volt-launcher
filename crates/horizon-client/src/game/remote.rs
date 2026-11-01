@@ -374,7 +374,7 @@ pub(super) struct Remote {
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     online_mode: bool,
     /// Player entities in the level: entity id to profile UUID.
-    level_players: HashMap<i32, u128>,
+    pub(super) level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
     /// player-list entry, which servers remove to hide their NPCs from the list.
     level_player_names: HashMap<i32, String>,
@@ -3492,6 +3492,9 @@ impl Game<'_> {
                 // The death screen opens (or the respawn is asked for) with the
                 // death packet when the rule hides it.
                 let shown = self.remote.as_ref().is_none_or(|r| r.show_death_screen);
+                if p.health <= 0.0 && self.screen != Screen::Dead && self.player.is_some() {
+                    self.record_death_waypoint();
+                }
                 if p.health <= 0.0 && shown && self.screen != Screen::Dead && self.player.is_some()
                 {
                     self.screen = Screen::Dead;
@@ -3513,6 +3516,7 @@ impl Game<'_> {
                 // screen, whatever health was last sent, or `respawn()` at
                 // once when it is hidden.
                 if me && self.screen != Screen::Dead && self.player.is_some() {
+                    self.record_death_waypoint();
                     if self.remote.as_ref().is_none_or(|r| r.show_death_screen) {
                         self.screen = Screen::Dead;
                         self.ui.death_time = 0;
@@ -6256,7 +6260,7 @@ impl Game<'_> {
         if self.remote.as_ref().is_some_and(|r| r.destroying.is_some()) {
             return;
         }
-        self.use_delay = 4;
+        self.use_delay = self.configured_use_delay();
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
         let entity = self.entity_targeted();
@@ -6367,7 +6371,10 @@ impl Game<'_> {
         let debug_stick = held
             .as_ref()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
-        if let Some(hit) = self.pick() {
+        if let Some(hit) = self.pick_for_placement(held_block) {
+            if held_block && !self.plane_lock_permits_and_record(&hit) {
+                return true;
+            }
             // ShelfBlock.useItemOn consumes a nonempty main-hand click client-side
             // without predicting the inventory swap or swinging.
             let shelf_reacts = hand == Hand::Main
@@ -6434,20 +6441,50 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|s| self.armor_stand_spawn(&hit, s).is_some());
             let seq = self.next_sequence();
-            let cursor = [
-                (hit.point[0] - f64::from(hit.pos[0])) as f32,
-                (hit.point[1] - f64::from(hit.pos[1])) as f32,
-                (hit.point[2] - f64::from(hit.pos[2])) as f32,
-            ];
+            let accurate = if held_block && !reacts && !spectator {
+                held.as_ref()
+                    .and_then(|s| self.resolve_local_accurate_placement(&s.item, &hit))
+            } else {
+                None
+            };
+            let send_rot = accurate.as_ref().is_some_and(|a| {
+                a.needs_rotation_packet && self.settings.extras.placement_rotation_sync
+            });
+            let move_flags = self.player.as_ref().map_or(0, |p| {
+                u8::from(p.ground.on_ground) | (u8::from(p.collision.horizontal) << 1)
+            });
+            if send_rot && let Some(acc) = &accurate {
+                self.send(S::MovePlayerRot(play::MovePlayerRot {
+                    yaw: acc.effective_yaw,
+                    pitch: acc.effective_pitch,
+                    flags: move_flags,
+                }));
+            }
+            let cursor = accurate.as_ref().map_or(
+                [
+                    (hit.point[0] - f64::from(hit.pos[0])) as f32,
+                    (hit.point[1] - f64::from(hit.pos[1])) as f32,
+                    (hit.point[2] - f64::from(hit.pos[2])) as f32,
+                ],
+                |a| a.cursor,
+            );
+            let wire_face = accurate.as_ref().map_or(hit.face, |a| a.effective_face);
             self.send(S::UseItemOn(play::UseItemOn {
                 hand: hand_id(hand),
                 pos: hit.pos,
-                face: i32::from(face_direction(hit.face)),
+                face: i32::from(face_direction(wire_face)),
                 cursor,
                 inside: hit.face == [0; 3],
                 world_border: false,
                 sequence: seq,
             }));
+            if send_rot {
+                self.send(S::MovePlayerRot(play::MovePlayerRot {
+                    yaw: self.yaw,
+                    pitch: self.pitch,
+                    flags: move_flags,
+                }));
+            }
             // MultiPlayerGameMode.performUseItemOn: a spectator's use predicts
             // nothing and ends the click (CONSUME, no swing); the server opens
             // the block's menu.
@@ -6738,13 +6775,22 @@ impl Game<'_> {
         if !self.may_build() {
             return None;
         }
+        let acc = self.resolve_local_accurate_placement(&stack.item, hit);
+        let eff_face = acc.as_ref().map_or(hit.face, |a| a.effective_face);
+        let eff_pt = acc.as_ref().map_or(hit.point, |a| {
+            [
+                f64::from(hit.pos[0]) + f64::from(a.cursor[0]).clamp(0.05, 0.95),
+                f64::from(hit.pos[1]) + f64::from(a.cursor[1]).clamp(0.05, 0.95),
+                f64::from(hit.pos[2]) + f64::from(a.cursor[2]).clamp(0.05, 0.95),
+            ]
+        });
         let ctx = horizon_world::level::PlaceContext {
             clicked_pos: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-            face: horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize],
-            hit: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+            face: horizon_core::geometry::Direction::ALL[face_direction(eff_face) as usize],
+            hit: Vec3::new(eff_pt[0], eff_pt[1], eff_pt[2]),
             inside: hit.face == [0; 3],
-            yaw: self.yaw,
-            pitch: self.pitch,
+            yaw: acc.as_ref().map_or(self.yaw, |a| a.effective_yaw),
+            pitch: acc.as_ref().map_or(self.pitch, |a| a.effective_pitch),
             sneaking: self.keys.contains(&KeyCode::ShiftLeft),
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),

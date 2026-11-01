@@ -204,6 +204,8 @@ pub struct Settings {
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
     /// `horizon.shader_pack`.
     pub shader_packs: Vec<crate::shader_pack_list::Entry>,
+    /// Saved Volt Waypoints (`volt-waypoints.json`).
+    pub volt_waypoints: crate::volt_features::WaypointStore,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -289,6 +291,7 @@ impl Default for Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            volt_waypoints: Default::default(),
         }
     }
 }
@@ -345,6 +348,10 @@ impl Settings {
             .parent()
             .map(crate::mod_list::ModList::load)
             .unwrap_or_default();
+        let volt_waypoints = path
+            .parent()
+            .map(crate::volt_features::WaypointStore::load)
+            .unwrap_or_default();
         let keypad = crate::keypad::Settings::load(&path.with_file_name("horizon-keypad.json"));
         let touch = crate::touch::Settings::load_from(&path.with_file_name("horizon-touch.json"));
         let settings = match fs::read(path) {
@@ -355,6 +362,7 @@ impl Settings {
                 keypad,
                 extras,
                 mods,
+                volt_waypoints,
                 ..Self::parse(&String::from_utf8_lossy(&bytes))
             },
             Err(_) => Self {
@@ -364,6 +372,7 @@ impl Settings {
                 keypad,
                 extras,
                 mods,
+                volt_waypoints,
                 ..Self::default()
             },
         };
@@ -479,6 +488,7 @@ impl Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            volt_waypoints: Default::default(),
             auto_jump: f.bool("autoJump"),
             language: f.string("lang"),
             force_unicode: f.bool("forceUnicodeFont"),
@@ -645,6 +655,7 @@ impl Settings {
             controller: self.controller.clone(),
             extras: self.extras.clone(),
             mods: self.mods.clone(),
+            volt_waypoints: self.volt_waypoints.clone(),
             ..Self::from_file(file)
         })
     }
@@ -663,6 +674,7 @@ impl Settings {
             let _ = self.touch.save_to(&dir.join("horizon-touch.json"));
             self.extras.save(dir);
             self.mods.save(dir);
+            self.volt_waypoints.save(dir);
         }
     }
     /// Volume of a sound source (master excluded).

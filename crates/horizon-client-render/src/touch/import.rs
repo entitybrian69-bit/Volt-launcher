@@ -238,7 +238,7 @@ fn import_native(v: &Value, title: String) -> Result<ImportedControlLayout, Stri
     let has_joystick = settings.button_visibility[Control::Move as usize] != 2;
     let meta = settings.imported_from.clone().unwrap_or(ImportedMeta {
         name: title,
-        format: "Volt / Horizon".into(),
+        format: "Volt".into(),
         buttons: settings.custom_buttons.len(),
         drawers,
         has_joystick,

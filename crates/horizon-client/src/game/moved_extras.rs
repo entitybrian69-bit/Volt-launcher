@@ -34,7 +34,10 @@ mod with_mods {
         /// the ones that were on, in the background.
         pub(in crate::game) fn start_moved_extras(&mut self) {
             let off = moved_extras::nothing_to_do(&self.settings.extras);
-            let pending = moved_extras::pending(&self.settings.extras);
+            let pending: Vec<_> = moved_extras::pending(&self.settings.extras)
+                .into_iter()
+                .filter(|m| m.id != "minimap")
+                .collect();
             if off.is_empty() && pending.is_empty() {
                 return;
             }

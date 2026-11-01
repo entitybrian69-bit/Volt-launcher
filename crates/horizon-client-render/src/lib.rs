@@ -93,6 +93,7 @@ pub mod telemetry;
 pub mod test_block;
 pub mod test_instance_block;
 pub mod testgen;
+pub mod volt_features;
 pub mod title_edition;
 pub mod touch;
 pub mod trims;

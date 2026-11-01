@@ -443,6 +443,14 @@ impl Game<'_> {
         let size = self.window.as_ref().unwrap().inner_size();
         let b = HudBatch::new([size.width, size.height]);
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
+        if !self.pad_in_menu()
+            && t.phase == TouchPhase::Started
+            && self.try_click_waypoint_hud_button((p[0], p[1]))
+        {
+            self.pad.touch.clear();
+            self.pad.touch.ignore(t.id);
+            return Ok(true);
+        }
         if let Some(action) = self
             .pad
             .touch_ui

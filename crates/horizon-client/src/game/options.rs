@@ -111,6 +111,7 @@ impl Game<'_> {
         ui.open_at(!from_title && self.title.is_none(), page);
         let root = self.options.resources.clone();
         ui.languages = lang::available(&[&root]);
+        self.sync_waypoint_ui_context();
         self.refresh_pack_lists();
     }
     /// While the resource pack screen is open, `resourcepacks/` is looked at once a second
@@ -155,6 +156,7 @@ impl Game<'_> {
     }
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
         self.watch_pack_folder();
+        self.sync_waypoint_ui_context();
         let mut ui = std::mem::take(&mut self.ui.options);
         ui.draw(&self.settings, batch, &self.gui.atlas, self.cursor);
         self.ui.options = ui;
@@ -281,6 +283,9 @@ impl Game<'_> {
                     use horizon_client::clipboard::Clipboard;
                     let text = self.agent_details();
                     self.clipboard.set(&text);
+                }
+                Event::WaypointAction(idx) => {
+                    self.execute_waypoint_action(idx);
                 }
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {

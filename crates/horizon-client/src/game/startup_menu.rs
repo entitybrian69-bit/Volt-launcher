@@ -523,7 +523,7 @@ impl Loading {
                     #[cfg(target_os = "android")]
                     self.menu.click_sound(self.settings.volumes);
                 }
-                Event::CopyAgentDetails | Event::Volume(..) => {}
+                Event::CopyAgentDetails | Event::WaypointAction(_) | Event::Volume(..) => {}
             }
         }
     }

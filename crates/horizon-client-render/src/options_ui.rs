@@ -1373,9 +1373,12 @@ pub enum Page {
     Touch,
     PadBinds,
     Extras,
+    Waypoints,
+    Minimap,
+    Placement,
     /// CreditsAndAttributionScreen.
     Credits,
-    /// Horizon Settings: every page Horizon adds, as a mod's settings
+    /// Volt Settings: every page Volt adds, as a mod's settings
     /// screen hangs off vanilla's Options.
     Horizon,
     /// AI Agent: agent control on or off, whether an agent is connected, the connection details.
@@ -1414,6 +1417,12 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    AddWaypoint,
+    ClearDeathWaypoints,
+    ToggleWaypoint(usize),
+    CycleWaypointColor(usize),
+    TeleportWaypoint(usize),
+    DeleteWaypoint(usize),
     #[cfg(target_os = "android")]
     TouchControls,
 }
@@ -1490,6 +1499,8 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// Teleport to or copy coordinates of `s.volt_waypoints.entries[i]`.
+    WaypointAction(usize),
     #[cfg(target_os = "android")]
     TouchControls,
 }
@@ -1533,6 +1544,9 @@ pub struct OptionsUi {
     language_choice: Option<String>,
     language_search: ui::EditBox,
     pub(crate) settings_search: ui::EditBox,
+    pub waypoint_name: ui::EditBox,
+    /// Active world context `(scope, dimension, [x, y, z])` for the Waypoints page.
+    pub waypoint_context: Option<(String, String, [i32; 3])>,
     /// Packs: the packs found and the selection the screen opens with.
     pub pack_infos: Vec<crate::pack_screen::PackInfo>,
     pub pack_selection: Vec<String>,
@@ -1565,6 +1579,9 @@ impl Default for OptionsUi {
         search.max_length = 32;
         let mut settings_search = ui::EditBox::new(0.0, 0.0, 200.0, 15.0);
         settings_search.focused = false;
+        let mut waypoint_name = ui::EditBox::new(0.0, 0.0, 200.0, 15.0);
+        waypoint_name.max_length = 28;
+        waypoint_name.focused = false;
         Self {
             stack: vec![Page::Main],
             scroll: 0.0,
@@ -1579,6 +1596,8 @@ impl Default for OptionsUi {
             language_choice: None,
             language_search: search,
             settings_search,
+            waypoint_name,
+            waypoint_context: None,
             pack_infos: Vec::new(),
             pack_selection: Vec::new(),
             pack_screen: None,
@@ -1649,10 +1668,13 @@ fn option_widget(s: &Settings, opt: Opt, x: f32, y: f32, w: f32) -> Widget {
         Kind::Cycle => button(x, y, w, opt.label(s), Act::Cycle(opt)),
     }
 }
-/// What a button opening one of Horizon's pages says on hover.
+/// What a button opening one of Volt's pages says on hover.
 fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
         Page::Horizon => "horizon.pages.settings.tooltip",
+        Page::Waypoints => "horizon.pages.waypoints.tooltip",
+        Page::Minimap => "horizon.pages.minimap.tooltip",
+        Page::Placement => "horizon.pages.placement.tooltip",
         Page::Graphics => "horizon.pages.graphics.tooltip",
         Page::GraphicsAdvanced => "horizon.pages.graphics_advanced.tooltip",
         Page::Controller => "horizon.pages.controller.tooltip",
@@ -1668,9 +1690,10 @@ enum Row {
     Big(Opt),
     Pair(Opt, Option<Opt>),
     Header(&'static str),
-    /// A line of grey text (a path).
+    /// A line of grey text (a path or waypoint coordinates).
     Note(String),
     Buttons(Widget, Option<Widget>),
+    Four(Widget, Widget, Widget, Widget),
 }
 fn pairs(opts: &[Opt]) -> Vec<Row> {
     opts.chunks(2)
@@ -1687,6 +1710,53 @@ impl OptionsUi {
         self.settings_search.focused
             && matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds)
     }
+    fn waypoint_name_active(&self) -> bool {
+        self.waypoint_name.focused && self.page() == Page::Waypoints
+    }
+    fn extra_section_rows(
+        &self,
+        s: &Settings,
+        defs: Vec<Result<crate::extras::Item, &'static str>>,
+    ) -> Vec<Row> {
+        let extra = |item: crate::extras::Item| {
+            let value = format!("{}: {}", item.caption(), item.value(&s.extras));
+            let label = if item.key_name().is_some() && self.selected_key == item.key_name() {
+                Text::literal(format!("> {value} <")).with_color(text::YELLOW)
+            } else {
+                Text::literal(value)
+            };
+            let widget = button(0.0, 0.0, 150.0, label, Act::Extra(item));
+            if item
+                .parent()
+                .is_some_and(|parent| parent.switch(&s.extras) == Some(false))
+            {
+                inactive(widget)
+            } else {
+                widget
+            }
+        };
+        let mut rows = Vec::new();
+        let mut section = Vec::new();
+        let flush = |rows: &mut Vec<Row>, section: &mut Vec<crate::extras::Item>| {
+            rows.extend(
+                section
+                    .chunks(2)
+                    .map(|c| Row::Buttons(extra(c[0]), c.get(1).map(|&b| extra(b)))),
+            );
+            section.clear();
+        };
+        for row in defs {
+            match row {
+                Err(header) => {
+                    flush(&mut rows, &mut section);
+                    rows.push(Row::Header(header));
+                }
+                Ok(item) => section.push(item),
+            }
+        }
+        flush(&mut rows, &mut section);
+        rows
+    }
     #[cfg(target_os = "android")]
     pub fn android_edit_value(&mut self, atlas: &HudAtlas) -> String {
         if self.page() == Page::Packs
@@ -1696,6 +1766,8 @@ impl OptionsUi {
         }
         let edit = if self.page() == Page::Language {
             &mut self.language_search
+        } else if self.page() == Page::Waypoints {
+            &mut self.waypoint_name
         } else {
             &mut self.settings_search
         };
@@ -1785,6 +1857,9 @@ impl OptionsUi {
             self.settings_search.set_value("");
             self.settings_search.focused = false;
         }
+        if page == Page::Waypoints {
+            self.waypoint_name.focused = false;
+        }
         if page == Page::Language {
             self.language_choice = None;
             self.language_search.set_value("");
@@ -1831,6 +1906,9 @@ impl OptionsUi {
             Page::Controller => "horizon.pages.controller",
             Page::PadBinds => "horizon.pages.controller_binds",
             Page::Extras => "horizon.pages.extras",
+            Page::Waypoints => "horizon.pages.waypoints",
+            Page::Minimap => "horizon.pages.minimap",
+            Page::Placement => "horizon.pages.placement",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "horizon.pages.settings",
@@ -1924,49 +2002,105 @@ impl OptionsUi {
 
     fn list_rows(&self, s: &Settings) -> Vec<Row> {
         match self.page() {
-            Page::Extras => {
-                // Each section's switches two to a row, as vanilla's
-                // OptionsList.addSmall lays out an options screen.
-                let extra = |item: crate::extras::Item| {
-                    let value = format!("{}: {}", item.caption(), item.value(&s.extras));
-                    let label = if item.key_name().is_some() && self.selected_key == item.key_name()
+            Page::Extras => self.extra_section_rows(s, crate::extras::rows()),
+            Page::Minimap => self.extra_section_rows(s, crate::extras::minimap_rows()),
+            Page::Placement => self.extra_section_rows(s, crate::extras::placement_rows()),
+            Page::Waypoints => {
+                let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
+                rows.push(Row::Header("Saved Waypoints"));
+                let add_btn = if let Some((_, _, [x, y, z])) = &self.waypoint_context {
+                    button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        Text::literal(format!("+ Add Here ({x}, {y}, {z})")),
+                        Act::AddWaypoint,
+                    )
+                } else {
+                    inactive(button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        Text::literal("+ Add Here (In World)"),
+                        Act::AddWaypoint,
+                    ))
+                };
+                let color_btn = self.extra_button(s, crate::extras::Item::WaypointNewColor);
+                rows.push(Row::Buttons(add_btn, Some(color_btn)));
+
+                if let Some((scope, _, _)) = &self.waypoint_context {
+                    let indices = s.volt_waypoints.scoped_indices(scope);
+                    if indices
+                        .iter()
+                        .any(|&i| s.volt_waypoints.entries[i].is_death)
                     {
-                        Text::literal(format!("> {value} <")).with_color(text::YELLOW)
-                    } else {
-                        Text::literal(value)
-                    };
-                    let widget = button(0.0, 0.0, 150.0, label, Act::Extra(item));
-                    // A setting of a switch that is off does nothing: inactive,
-                    // as vanilla greys out an option that can't apply.
-                    if item
-                        .parent()
-                        .is_some_and(|parent| parent.switch(&s.extras) == Some(false))
-                    {
-                        inactive(widget)
-                    } else {
-                        widget
+                        rows.push(Row::Buttons(
+                            button(
+                                0.0,
+                                0.0,
+                                310.0,
+                                Text::literal("Clear Death Waypoints"),
+                                Act::ClearDeathWaypoints,
+                            ),
+                            None,
+                        ));
                     }
-                };
-                let mut rows = Vec::new();
-                let mut section = Vec::new();
-                let flush = |rows: &mut Vec<Row>, section: &mut Vec<crate::extras::Item>| {
-                    rows.extend(
-                        section
-                            .chunks(2)
-                            .map(|c| Row::Buttons(extra(c[0]), c.get(1).map(|&b| extra(b)))),
-                    );
-                    section.clear();
-                };
-                for row in crate::extras::rows() {
-                    match row {
-                        Err(header) => {
-                            flush(&mut rows, &mut section);
-                            rows.push(Row::Header(header));
+                    if indices.is_empty() {
+                        rows.push(Row::Note(
+                            "No waypoints saved in this world yet — enter a name above and tap + Add Here."
+                                .into(),
+                        ));
+                    } else {
+                        for idx in indices {
+                            let wp = &s.volt_waypoints.entries[idx];
+                            let dim = crate::volt_features::short_dimension_label(&wp.dimension);
+                            rows.push(Row::Note(format!(
+                                "{}  [{}, {}, {} · {dim}]",
+                                wp.name, wp.x, wp.y, wp.z
+                            )));
+                            let [r, g, b] = wp.color.rgb();
+                            let state_txt = if wp.enabled { "Shown" } else { "Hidden" };
+                            let toggle = button(
+                                0.0,
+                                0.0,
+                                145.0,
+                                Text::literal(format!("{}: {state_txt}", wp.name)),
+                                Act::ToggleWaypoint(idx),
+                            );
+                            let col = button(
+                                0.0,
+                                0.0,
+                                55.0,
+                                Text::literal(wp.color.label()).with_color(
+                                    0xFF00_0000
+                                        | (u32::from(r) << 16)
+                                        | (u32::from(g) << 8)
+                                        | u32::from(b),
+                                ),
+                                Act::CycleWaypointColor(idx),
+                            );
+                            let tp = button(
+                                0.0,
+                                0.0,
+                                50.0,
+                                Text::literal("TP/Copy"),
+                                Act::TeleportWaypoint(idx),
+                            );
+                            let del = button(
+                                0.0,
+                                0.0,
+                                45.0,
+                                Text::literal("Del").with_color(rgba(248, 113, 113, 255)),
+                                Act::DeleteWaypoint(idx),
+                            );
+                            rows.push(Row::Four(toggle, col, tp, del));
                         }
-                        Ok(item) => section.push(item),
                     }
+                } else {
+                    rows.push(Row::Note(
+                        "Join a world or server to manage its waypoints.".into(),
+                    ));
                 }
-                flush(&mut rows, &mut section);
                 rows
             }
             Page::Horizon => {
@@ -1983,30 +2117,31 @@ impl OptionsUi {
                         )),
                     ),
                     Row::Buttons(
+                        open("horizon.pages.open.waypoints", Page::Waypoints),
+                        Some(open("horizon.pages.open.minimap", Page::Minimap)),
+                    ),
+                    Row::Buttons(
+                        open("horizon.pages.open.placement", Page::Placement),
+                        Some(open("horizon.pages.open.extras", Page::Extras)),
+                    ),
+                    Row::Buttons(
                         open("horizon.pages.open.shader_packs", Page::ShaderPacks),
                         Some(open("horizon.pages.open.controller", Page::Controller)),
                     ),
                     Row::Buttons(
-                        open("horizon.pages.open.extras", Page::Extras),
-                        Some(open("horizon.pages.open.mods", Page::Mods)),
-                    ),
-                    // No AI hides the AI Agent page and everything AI.
-                    Row::Buttons(
-                        self.extra_button(s, crate::extras::Item::DiscordPresence),
+                        open("horizon.pages.open.mods", Page::Mods),
                         Some(if s.extras.no_ai {
                             self.extra_button(s, crate::extras::Item::NoAi)
                         } else {
                             open("horizon.pages.open.agent", Page::Agent)
                         }),
                     ),
+                    Row::Buttons(
+                        self.extra_button(s, crate::extras::Item::DiscordPresence),
+                        (!s.extras.no_ai)
+                            .then(|| self.extra_button(s, crate::extras::Item::NoAi)),
+                    ),
                 ]
-                .into_iter()
-                .chain(
-                    (!s.extras.no_ai).then(|| {
-                        Row::Buttons(self.extra_button(s, crate::extras::Item::NoAi), None)
-                    }),
-                )
-                .collect()
             }
             Page::Agent => {
                 let mut rows = vec![Row::Buttons(
@@ -2342,6 +2477,10 @@ impl OptionsUi {
         if matches!(page, Page::Video | Page::Controls | Page::KeyBinds) {
             self.settings_search.x = cx - 100.0;
             self.settings_search.y = 17.0;
+        }
+        if page == Page::Waypoints {
+            self.waypoint_name.x = cx - 100.0;
+            self.waypoint_name.y = 17.0;
         }
         let done = |y: f32| button(cx - 100.0, y, 200.0, tr("gui.done"), Act::Done);
         // (list top, list bottom, content height)
@@ -2800,12 +2939,12 @@ impl OptionsUi {
             // Drawn by `pack_screen`.
             Page::Packs => {}
             _ => {
-                if matches!(page, Page::Video | Page::Controls) {
+                if matches!(page, Page::Video | Page::Controls | Page::Waypoints) {
                     top = 38.0;
                 }
                 out.push(Widget {
                     x: 0.0,
-                    y: if matches!(page, Page::Video | Page::Controls) {
+                    y: if matches!(page, Page::Video | Page::Controls | Page::Waypoints) {
                         4.0
                     } else {
                         12.0
@@ -2883,6 +3022,16 @@ impl OptionsUi {
                                 b.y = y + 2.0;
                                 out.push(b);
                             }
+                            y += 25.0;
+                        }
+                        Row::Four(mut a, mut b, mut c, mut d) => {
+                            let mut rx = cx - 155.0;
+                            for part in [&mut a, &mut b, &mut c, &mut d] {
+                                part.x = rx;
+                                part.y = y + 2.0;
+                                rx += part.w + 5.0;
+                            }
+                            out.extend([a, b, c, d]);
                             y += 25.0;
                         }
                     }
@@ -3194,6 +3343,23 @@ impl OptionsUi {
             }
             self.settings_search = search;
         }
+        if self.page() == Page::Waypoints {
+            let mut name_box = self.waypoint_name.clone();
+            name_box.draw(batch, atlas, None);
+            if name_box.value.is_empty() && !name_box.focused {
+                batch.text_styled(
+                    atlas,
+                    &Text::literal("Waypoint name (optional)...")
+                        .with_color(text::GRAY)
+                        .italic(),
+                    name_box.text_x(),
+                    name_box.text_y(),
+                    u32::MAX,
+                    true,
+                );
+            }
+            self.waypoint_name = name_box;
+        }
         if let Some(lines) = tooltip {
             ui::tooltip(batch, atlas, &lines, cursor);
         }
@@ -3295,6 +3461,15 @@ impl OptionsUi {
             if search.focused {
                 search.click(atlas, x, false, false);
                 self.scroll = 0.0;
+                events.push(Event::ButtonClick);
+                return events;
+            }
+        }
+        if !drag && self.page() == Page::Waypoints {
+            let nb = &mut self.waypoint_name;
+            nb.focused = ui::hovered((x, y), nb.x, nb.y, nb.width, nb.height);
+            if nb.focused {
+                nb.click(atlas, x, false, false);
                 events.push(Event::ButtonClick);
                 return events;
             }
@@ -3448,6 +3623,43 @@ impl OptionsUi {
                         Act::OpenShaderPackFolder => events.push(Event::OpenShaderPackFolder),
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::AddWaypoint => {
+                            if let Some((scope, dim, pos)) = &self.waypoint_context {
+                                let name = self.waypoint_name.value.clone();
+                                s.volt_waypoints.add(
+                                    scope,
+                                    &name,
+                                    dim,
+                                    *pos,
+                                    s.extras.waypoint_new_color,
+                                );
+                                self.waypoint_name.set_value("");
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::ClearDeathWaypoints => {
+                            if let Some((scope, _, _)) = &self.waypoint_context
+                                && s.volt_waypoints.clear_deaths(scope) > 0
+                            {
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::ToggleWaypoint(i) => {
+                            if s.volt_waypoints.toggle(i) {
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::CycleWaypointColor(i) => {
+                            if s.volt_waypoints.cycle_color(i, right) {
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::TeleportWaypoint(i) => events.push(Event::WaypointAction(i)),
+                        Act::DeleteWaypoint(i) => {
+                            if s.volt_waypoints.remove(i) {
+                                events.push(Event::Changed);
+                            }
+                        }
                         #[cfg(target_os = "android")]
                         Act::TouchControls => events.push(Event::TouchControls),
                         Act::None => {}
@@ -3706,6 +3918,8 @@ impl OptionsUi {
         } else if self.settings_search_active() {
             self.settings_search.insert_text(text);
             self.scroll = 0.0;
+        } else if self.waypoint_name_active() {
+            self.waypoint_name.insert_text(text);
         }
     }
     /// Ctrl+A/C/V/X in the language or pack search box; false when neither
@@ -3735,6 +3949,10 @@ impl OptionsUi {
             if self.settings_search.shortcut(shortcut, clipboard) {
                 self.scroll = 0.0;
             }
+            return true;
+        }
+        if self.waypoint_name_active() {
+            let _ = self.waypoint_name.shortcut(shortcut, clipboard);
             return true;
         }
         false
@@ -3845,6 +4063,15 @@ impl OptionsUi {
                 }
             }
             self.scroll = 0.0;
+        } else if self.waypoint_name_active() {
+            if !self.waypoint_name.key(key, false, false)
+                && let Some(t) = text
+            {
+                let typed: String = t.chars().filter(|c| !c.is_control()).collect();
+                if !typed.is_empty() {
+                    self.waypoint_name.insert_text(&typed);
+                }
+            }
         }
         Vec::new()
     }
@@ -5543,13 +5770,36 @@ mod tests {
             [
                 Page::Graphics,
                 Page::GraphicsAdvanced,
+                Page::Waypoints,
+                Page::Minimap,
+                Page::Placement,
+                Page::Extras,
                 Page::ShaderPacks,
                 Page::Controller,
-                Page::Extras,
                 Page::Mods,
                 Page::Agent,
             ]
         );
+        // Verify Waypoints, Minimap, and Accurate Block Placement pages all
+        // default to Off and expose their master switch + child controls cleanly.
+        for (page, master) in [
+            (Page::Waypoints, crate::extras::Item::Waypoints),
+            (Page::Minimap, crate::extras::Item::Minimap),
+            (Page::Placement, crate::extras::Item::AccuratePlacement),
+        ] {
+            assert_eq!(master.switch(&s.extras), Some(false));
+            ui.push(page);
+            let (widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+            assert!(widgets.iter().any(|w| matches!(
+                &w.kind,
+                WKind::Button {
+                    act: Act::Extra(item),
+                    active: true,
+                    ..
+                } if *item == master
+            )));
+            let _ = ui.stack.pop();
+        }
         // No AI hides the AI Agent page.
         let mut no_ai = Settings::default();
         no_ai.extras.no_ai = true;

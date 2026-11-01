@@ -5152,8 +5152,19 @@ impl Game<'_> {
             return Ok(Some(Hand::Main));
         }
         // An EntityHitResult may fall through to Item.use, never to useItemOn.
+        let holding_any_block = self
+            .held()
+            .and_then(|s| self.items().get(&s.item))
+            .is_some_and(|i| i.block.is_some())
+            || self
+                .offhand
+                .as_ref()
+                .and_then(|s| self.items().get(&s.item))
+                .is_some_and(|i| i.block.is_some());
         let block_hit = if matches!(guest, Some(GuestUse::Item(_))) || self.entity_targeted() {
             None
+        } else if guest.is_none() {
+            self.pick_for_placement(holding_any_block)
         } else {
             self.pick()
         };
@@ -5573,7 +5584,21 @@ impl Game<'_> {
             // ItemStack.useOn passes in adventure mode; useItem eats.
             return Ok(!on_block && self.start_eating(&info));
         }
-        let face = match hit.face {
+        if !self.plane_lock_permits_and_record(hit) {
+            return Ok(true);
+        }
+        let accurate = self.resolve_local_accurate_placement(&stack.item, hit);
+        let eff_face = accurate.as_ref().map_or(hit.face, |a| a.effective_face);
+        let eff_hit_pt = accurate.as_ref().map_or(hit.point, |a| {
+            [
+                f64::from(hit.pos[0]) + f64::from(a.cursor[0]).clamp(0.05, 0.95),
+                f64::from(hit.pos[1]) + f64::from(a.cursor[1]).clamp(0.05, 0.95),
+                f64::from(hit.pos[2]) + f64::from(a.cursor[2]).clamp(0.05, 0.95),
+            ]
+        });
+        let eff_yaw = accurate.as_ref().map_or(self.yaw, |a| a.effective_yaw);
+        let eff_pitch = accurate.as_ref().map_or(self.pitch, |a| a.effective_pitch);
+        let face = match eff_face {
             [0, 1, 0] => Direction::Up,
             [0, -1, 0] => Direction::Down,
             [0, 0, -1] => Direction::North,
@@ -5585,10 +5610,10 @@ impl Game<'_> {
         let ctx = PlaceContext {
             clicked_pos: BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
             face,
-            hit: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
+            hit: Vec3::new(eff_hit_pt[0], eff_hit_pt[1], eff_hit_pt[2]),
             inside: false,
-            yaw: self.yaw,
-            pitch: self.pitch,
+            yaw: eff_yaw,
+            pitch: eff_pitch,
             sneaking: self.keys.contains(&KeyCode::ShiftLeft),
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
@@ -5604,6 +5629,11 @@ impl Game<'_> {
             return Ok(true);
         };
         let target = [pos.x, pos.y, pos.z];
+        let state = if let Some(acc) = &accurate {
+            self.refine_singleplayer_placed_state(target, state, acc)
+        } else {
+            state
+        };
         let state = self.apply_item_block_state(target, state, &stack)?;
         self.mod_block_event(target, state, true);
         let name = self.res.facts().get(state).name.clone();
@@ -6604,6 +6634,7 @@ impl Game<'_> {
             // Player.die: the dimension and block of the death.
             self.level.last_death =
                 Some((self.dim.id().to_owned(), feet.map(|v| v.floor() as i32)));
+            self.record_death_waypoint();
             self.death_message();
             // The mobs bound to a guest see that guest as their player.
             let bindings = match self.lan.as_ref() {
@@ -6772,7 +6803,7 @@ impl Game<'_> {
             && self.sleeping.is_none()
         {
             self.use_with_hand()?;
-            self.use_delay = 4;
+            self.use_delay = self.configured_use_delay();
         }
         Ok(())
     }
@@ -14168,7 +14199,7 @@ impl Game<'_> {
         if self.screen == Screen::Mod && self.mod_screen_key(key) {
             return Ok(());
         }
-        if self.sort_key_press(key) || self.hdr_key_press(key) {
+        if self.sort_key_press(key) || self.hdr_key_press(key) || self.volt_key_press(key) {
             return Ok(());
         }
         if self.remote.is_some() && self.remote_key(key)? {
@@ -15600,7 +15631,11 @@ impl ApplicationHandler for Game<'_> {
                         // Neither edge of a bound button is an ordinary slot click.
                         return Ok(());
                     }
-                    if pressed && (self.sort_mouse_press(button) || self.hdr_mouse_press(button)) {
+                    if pressed
+                        && (self.sort_mouse_press(button)
+                            || self.hdr_mouse_press(button)
+                            || self.volt_mouse_press(button))
+                    {
                         return Ok(());
                     }
                     match self.screen {
