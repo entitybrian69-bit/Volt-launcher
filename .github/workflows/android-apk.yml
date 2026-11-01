@@ -95,14 +95,17 @@ jobs:
                   apk_paths[tag] = next(d.glob("*.apk"))
 
               sdkmgr = str(sdk / "cmdline-tools/latest/bin/sdkmanager")
-              avdmgr = str(sdk / "cmdline-tools/latest/bin/avdmanager")
+              if not Path(sdkmgr).is_file():
+                  import shutil as _sh
+                  sdkmgr = _sh.which("sdkmanager") or str(next(sdk.glob("cmdline-tools/*/bin/sdkmanager")))
+              avdmgr = str(Path(sdkmgr).with_name("avdmanager"))
               subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=False)
               subprocess.run(
-                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64' >/dev/null",
+                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
                   shell=True, check=True,
               )
               subprocess.run(
-                  f"echo no | '{avdmgr}' create avd -f -n testx86 -k 'system-images;android-35;google_apis;x86_64'",
+                  f"echo no | '{avdmgr}' create avd -f -n testx86 -k 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
                   shell=True, check=True,
               )
               emu_log = tmp / "emu.log"
@@ -244,19 +247,20 @@ jobs:
                   lc = subprocess.run([adb, "logcat", "-d", "-s", "PackageManager:*", "ApkSignatureVerifier:*"], capture_output=True, text=True).stdout
                   emu_out.append(f"=== {name} rc={r.returncode} ===\nOUT:{r.stdout.strip()} ERR:{r.stderr.strip()}\nLC:{lc[-600:]}")
 
-              emu.terminate()
+              emu.kill()
+              emu.wait(timeout=10)
               elog.close()
               subprocess.run([adb, "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
               msg = "\n".join(emu_out)
               for i in range(0, len(msg), 2500):
-                  print(f"::notice title=Android15 Emu {i//2500 + 1}::{esc(msg[i:i+2500])}", flush=True)
+                  print(f"\n::notice title=Android15 Emu {i//2500 + 1}::{esc(msg[i:i+2500])}\n", flush=True)
           except Exception:
               tb = traceback.format_exc()
               try:
                   subprocess.run([str(Path(os.environ["ANDROID_HOME"]) / "platform-tools/adb"), "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
               except Exception:
                   pass
-              print(f"::notice title=Android15 Emu Err::{esc(tb[:2500])}", flush=True)
+              print(f"\n::notice title=Android15 Emu Err::{esc(tb[:2500])}\n", flush=True)
 
           raise SystemExit("Diagnostic complete")
           PY
