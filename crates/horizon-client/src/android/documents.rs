@@ -1,9 +1,10 @@
 //! SAF selection, bounded background imports and explicit collision choices.
+use crate::launcher::pages::theme;
 use horizon_client::{
     Result,
     content_files::{self, Kind},
-    hud::{HudAtlas, HudBatch, rgba},
-    ui_theme::{Face, Ui, color},
+    hud::{HudAtlas, HudBatch},
+    ui_theme::{Face, Ui},
 };
 use jni::{
     JNIEnv,
@@ -422,45 +423,75 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             vec![("Cancel", Choice::Cancel)],
         )
     };
-    let w = 440.0f32.min(ui.w - 24.0);
+    let w = 460.0f32.min(ui.w - 24.0);
     let vertical = w < 320.0;
     let height = if vertical {
-        92.0 + choices.len() as f32 * 44.0
+        98.0 + choices.len() as f32 * 44.0
     } else {
-        144.0
+        152.0
     };
     let x = (ui.w - w) / 2.0;
     let y = ((ui.h - height) / 2.0).max(0.0);
-    ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, rgba(0, 0, 0, 180));
-    ui.rounded(x, y, w, height, 2.0, color::BG);
+    ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, theme::BACKDROP);
+    ui.rounded(x, y, w, height, 14.0, theme::CARD);
+    ui.border(x, y, w, height, 14.0, theme::BORDER_CRIMSON);
     ui.text(
         Face::Medium,
-        20.0,
-        x + 12.0,
-        y + 12.0,
-        color::TEXT,
+        19.0,
+        x + 18.0,
+        y + 14.0,
+        theme::TEXT,
         if s.conflict.is_some() {
             "File exists"
         } else {
             "Importing file"
         },
     );
-    let name = ui.fit_text(Face::Regular, 16.0, &name, w - 24.0);
-    ui.text(Face::Regular, 16.0, x + 12.0, y + 46.0, color::MUTED, &name);
-    let width = (w - 24.0) / choices.len() as f32;
+    let name = ui.fit_text(Face::Regular, 14.5, &name, w - 36.0);
+    ui.text(Face::Regular, 14.5, x + 18.0, y + 48.0, theme::MUTED, &name);
+    let width = (w - 36.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {
-            [x + 12.0, y + 86.0 + i as f32 * 44.0, w - 24.0, 38.0]
+            [x + 18.0, y + 88.0 + i as f32 * 44.0, w - 36.0, 38.0]
         } else {
-            [x + 12.0 + i as f32 * width, y + 92.0, width - 4.0, 38.0]
+            [x + 18.0 + i as f32 * width, y + 96.0, width - 6.0, 38.0]
         };
-        ui.rounded(rect[0], rect[1], rect[2], rect[3], 2.0, color::RAISED);
+        let is_primary = matches!(choice, Choice::Replace | Choice::KeepBoth) && i == 0;
+        ui.rounded(
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            8.0,
+            if is_primary {
+                theme::CRIMSON
+            } else {
+                theme::CARD_INNER
+            },
+        );
+        ui.border(
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            8.0,
+            if is_primary {
+                theme::CRIMSON_BRIGHT
+            } else {
+                theme::BORDER
+            },
+        );
+        let tw = ui.measure(Face::Medium, 14.5, label);
         ui.text(
             Face::Medium,
-            16.0,
-            rect[0] + 8.0,
-            rect[1] + 7.0,
-            color::TEXT,
+            14.5,
+            rect[0] + ((rect[2] - tw) * 0.5).max(8.0),
+            rect[1] + 8.5,
+            if is_primary {
+                theme::ON_CRIMSON
+            } else {
+                theme::TEXT
+            },
             label,
         );
         s.hits.push((

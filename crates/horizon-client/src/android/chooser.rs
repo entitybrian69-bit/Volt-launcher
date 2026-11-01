@@ -4,7 +4,7 @@ use super::{
     pages::{Action, button},
 };
 use crate::catalog::RendererMode;
-use horizon_client::ui_theme::{Face, Ui, color};
+use horizon_client::ui_theme::{Face, Ui};
 
 pub(super) enum Kind {
     Aspect,
@@ -236,17 +236,24 @@ impl Chooser {
             scroll: 0.0,
         }
     }
-    pub(super) fn navigation(&self, width: f32) -> Vec<([f32; 4], Action)> {
+    fn modal_box(width: f32, height: f32) -> [f32; 4] {
+        let mw = (width - 48.0).clamp(280.0, 680.0);
+        let mh = (height - 40.0).clamp(240.0, 620.0);
+        [(width - mw) * 0.5, (height - mh) * 0.5, mw, mh]
+    }
+    pub(super) fn navigation(&self, width: f32, height: f32) -> Vec<([f32; 4], Action)> {
+        let [mx, my, mw, _] = Self::modal_box(width, height);
+        let top = my + 108.0;
         self.choices
             .iter()
             .enumerate()
             .map(|(i, (_, _, action, _))| {
                 (
                     [
-                        32.0,
-                        137.0 + i as f32 * 84.0 - self.scroll,
-                        width - 64.0,
-                        76.0,
+                        mx + 20.0,
+                        top + i as f32 * 76.0 - self.scroll,
+                        mw - 40.0,
+                        68.0,
                     ],
                     *action,
                 )
@@ -254,46 +261,100 @@ impl Chooser {
             .collect()
     }
     pub(super) fn viewport(&self, height: f32) -> [f32; 3] {
+        let [_, my, _, mh] = Self::modal_box(1040.0, height);
+        let top = my + 108.0;
+        let bottom = my + mh - 68.0;
         [
-            137.0,
-            height - 100.0,
-            (self.choices.len() as f32 * 84.0 - (height - 237.0)).max(0.0),
+            top,
+            bottom,
+            (self.choices.len() as f32 * 76.0 - (bottom - top)).max(0.0),
         ]
     }
     pub fn draw(&mut self, ui: &mut Ui, targets: &mut Vec<([f32; 4], Action)>) {
+        use super::pages::theme;
         let (w, h) = (ui.w, ui.h);
         targets.clear();
-        ui.rounded(0.0, 0.0, w, h, 0.0, color::BG);
-        ui.text(Face::Medium, 28.0, 32.0, 35.0, color::TEXT, self.title);
-        ui.text(Face::Regular, 15.0, 32.0, 85.0, color::MUTED, self.help);
+        ui.rounded(0.0, 0.0, w, h, 0.0, theme::BACKDROP);
+        let [mx, my, mw, mh] = Self::modal_box(w, h);
+        ui.rounded(mx, my, mw, mh, 16.0, theme::CARD);
+        ui.border(mx, my, mw, mh, 16.0, theme::BORDER_CRIMSON);
+
+        ui.text(Face::Medium, 23.0, mx + 24.0, my + 18.0, theme::TEXT, self.title);
+        let help_fit = ui.fit_text(Face::Regular, 13.5, self.help, mw - 48.0);
+        ui.text(Face::Regular, 13.5, mx + 24.0, my + 54.0, theme::MUTED, &help_fit);
         if let Some(device) = &self.device {
-            ui.text(Face::Regular, 13.0, 32.0, 111.0, color::MUTED, device);
+            let dev_fit = ui.fit_text(Face::Regular, 12.5, device, mw - 48.0);
+            ui.text(Face::Regular, 12.5, mx + 24.0, my + 76.0, theme::CRIMSON_BRIGHT, &dev_fit);
         }
-        let top = 137.0;
-        let bottom = h - 100.0;
+        ui.rounded(mx + 20.0, my + 100.0, mw - 40.0, 1.0, 0.0, theme::BORDER);
+
+        let top = my + 108.0;
+        let bottom = my + mh - 68.0;
         self.scroll = self.scroll.clamp(
             0.0,
-            (self.choices.len() as f32 * 84.0 - (bottom - top)).max(0.0),
+            (self.choices.len() as f32 * 76.0 - (bottom - top)).max(0.0),
         );
         for (i, (label, detail, action, selected)) in self.choices.iter().enumerate() {
-            let y = top + i as f32 * 84.0 - self.scroll;
-            if y < top || y + 76.0 > bottom {
+            let y = top + i as f32 * 76.0 - self.scroll;
+            if y < top - 2.0 || y + 68.0 > bottom + 2.0 {
                 continue;
             }
-            ui.rounded(34.0, y + 10.0, 22.0, 22.0, 11.0, color::TEXT);
-            ui.rounded(36.0, y + 12.0, 18.0, 18.0, 9.0, color::BG);
+            let row_rect = [mx + 20.0, y, mw - 40.0, 68.0];
+            ui.rounded(
+                row_rect[0],
+                row_rect[1],
+                row_rect[2],
+                row_rect[3],
+                10.0,
+                if *selected {
+                    theme::HERO_BG
+                } else {
+                    theme::CARD_INNER
+                },
+            );
+            ui.border(
+                row_rect[0],
+                row_rect[1],
+                row_rect[2],
+                row_rect[3],
+                10.0,
+                if *selected {
+                    theme::CRIMSON
+                } else {
+                    theme::BORDER
+                },
+            );
+
+            let rx = row_rect[0] + 16.0;
+            let ry = y + 23.0;
+            ui.border(
+                rx,
+                ry,
+                22.0,
+                22.0,
+                11.0,
+                if *selected {
+                    theme::CRIMSON_BRIGHT
+                } else {
+                    theme::MUTED
+                },
+            );
             if *selected {
-                ui.rounded(40.0, y + 16.0, 10.0, 10.0, 5.0, color::TEXT);
+                ui.rounded(rx + 5.0, ry + 5.0, 12.0, 12.0, 6.0, theme::CRIMSON);
             }
-            ui.text(Face::Medium, 19.0, 80.0, y + 8.0, color::TEXT, label);
-            ui.text(Face::Regular, 14.0, 80.0, y + 40.0, color::MUTED, detail);
-            ui.rounded(32.0, y + 75.0, w - 64.0, 1.0, 0.0, color::BORDER);
-            targets.push(([32.0, y, w - 64.0, 76.0], *action));
+            let lbl_y = if detail.is_empty() { y + 21.0 } else { y + 10.0 };
+            let lbl_fit = ui.fit_text(Face::Medium, 16.5, label, row_rect[2] - 64.0);
+            ui.text(Face::Medium, 16.5, rx + 36.0, lbl_y, theme::TEXT, &lbl_fit);
+            if !detail.is_empty() {
+                let det_fit = ui.fit_text(Face::Regular, 13.0, detail, row_rect[2] - 64.0);
+                ui.text(Face::Regular, 13.0, rx + 36.0, y + 38.0, theme::MUTED, &det_fit);
+            }
+            targets.push((row_rect, *action));
         }
         button(
             ui,
             targets,
-            [32.0, h - 78.0, 160.0, 44.0],
+            [mx + mw - 156.0, my + mh - 52.0, 136.0, 38.0],
             "Cancel",
             Action::Dismiss,
             false,

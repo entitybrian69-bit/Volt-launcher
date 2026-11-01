@@ -12,7 +12,7 @@ mod chooser;
 #[path = "launcher_gesture.rs"]
 mod gesture;
 #[path = "launcher_pages.rs"]
-mod pages;
+pub(crate) mod pages;
 use horizon_client::{
     Result,
     gfx::Renderer,

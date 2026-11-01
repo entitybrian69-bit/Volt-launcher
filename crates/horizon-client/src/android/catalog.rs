@@ -209,7 +209,7 @@ impl Catalog {
         let config = Config::load(home);
         let mut result = Self {
             local: vec![],
-            sections: [false, false, false],
+            sections: [true, true, true],
             pending_delete: None,
             downloaded: vec![],
             downloading: None,
