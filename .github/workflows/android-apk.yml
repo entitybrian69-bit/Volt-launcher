@@ -593,151 +593,160 @@ jobs:
           import subprocess
           import sys
           import tempfile
+          import traceback
           import zipfile
 
-          abi = os.environ["ABI"]
-          run_num = int(os.environ.get("RUN_NUMBER", "1"))
-          expected_vc = 280000 + run_num
-          min_sdk = 27 if abi in ("armeabi-v7a", "x86") else 28
+          def run_checked(cmd):
+              proc = subprocess.run(cmd, capture_output=True, text=True)
+              if proc.returncode != 0:
+                  raise RuntimeError(
+                      f"Command {cmd[0]} exited {proc.returncode}:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+                  )
+              return proc.stdout
 
-          gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
-          version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
-          src_apk = Path(".local/android/apk") / abi / "horizon-android-public.apk"
-          if not src_apk.is_file():
-              raise SystemExit(f"Expected built APK at {src_apk}")
+          try:
+              abi = os.environ["ABI"]
+              run_num = int(os.environ.get("RUN_NUMBER", "1"))
+              expected_vc = 280000 + run_num
+              min_sdk = 27 if abi in ("armeabi-v7a", "x86") else 28
 
-          sdk = Path(os.environ["ANDROID_HOME"])
-          build_tools = max(
-              (sdk / "build-tools").iterdir(),
-              key=lambda p: tuple(int(v) for v in p.name.split(".")),
-          )
-          zipalign = build_tools / "zipalign"
-          aapt2 = build_tools / "aapt2"
-          apksigner_jar = build_tools / "lib/apksigner.jar"
-          java = Path(os.environ["JAVA_HOME"]) / "bin/java"
-          keystore = Path(".local/android/debug.keystore")
+              gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
+              version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
+              src_apk = Path(".local/android/apk") / abi / "horizon-android-public.apk"
+              if not src_apk.is_file():
+                  raise RuntimeError(f"Expected built APK at {src_apk}")
 
-          dist = Path(".local/android/dist") / abi
-          dist.mkdir(parents=True, exist_ok=True)
-          apk_name = f"Volt-Launcher-{version}-b{run_num}-{abi}.apk"
-          dst_apk = dist / apk_name
-
-          with tempfile.TemporaryDirectory() as tmp:
-              t = Path(tmp)
-              unsigned_apk = t / "unsigned.apk"
-              aligned_apk = t / "aligned.apk"
-              with zipfile.ZipFile(src_apk, "r") as zin, zipfile.ZipFile(unsigned_apk, "w") as zout:
-                  for info in zin.infolist():
-                      upper = info.filename.upper()
-                      if upper.startswith("META-INF/") and (
-                          upper == "META-INF/MANIFEST.MF"
-                          or upper.endswith((".SF", ".RSA", ".DSA", ".EC"))
-                      ):
-                          continue
-                      raw = zin.read(info.filename)
-                      ni = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
-                      ni.compress_type = info.compress_type
-                      ni.external_attr = info.external_attr
-                      ni.create_system = info.create_system
-                      zout.writestr(ni, raw, compress_type=info.compress_type)
-
-              subprocess.run(
-                  [str(zipalign), "-p", "-f", "4", str(unsigned_apk), str(aligned_apk)],
-                  check=True,
+              sdk = Path(os.environ["ANDROID_HOME"])
+              build_tools = max(
+                  (sdk / "build-tools").iterdir(),
+                  key=lambda p: tuple(int(v) for v in p.name.split(".")),
               )
-              subprocess.run(
-                  [
+              zipalign = build_tools / "zipalign"
+              aapt2 = build_tools / "aapt2"
+              apksigner_jar = build_tools / "lib/apksigner.jar"
+              java = Path(os.environ["JAVA_HOME"]) / "bin/java"
+              keystore = Path(".local/android/debug.keystore")
+
+              dist = Path(".local/android/dist") / abi
+              dist.mkdir(parents=True, exist_ok=True)
+              apk_name = f"Volt-Launcher-{version}-b{run_num}-{abi}.apk"
+              dst_apk = dist / apk_name
+
+              with tempfile.TemporaryDirectory() as tmp:
+                  t = Path(tmp)
+                  unsigned_apk = t / "unsigned.apk"
+                  aligned_apk = t / "aligned.apk"
+                  with zipfile.ZipFile(src_apk, "r") as zin, zipfile.ZipFile(unsigned_apk, "w") as zout:
+                      for info in zin.infolist():
+                          upper = info.filename.upper()
+                          if upper.startswith("META-INF/") and (
+                              upper == "META-INF/MANIFEST.MF"
+                              or upper.endswith((".SF", ".RSA", ".DSA", ".EC"))
+                          ):
+                              continue
+                          raw = zin.read(info.filename)
+                          ni = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
+                          ni.compress_type = info.compress_type
+                          ni.external_attr = info.external_attr
+                          ni.create_system = info.create_system
+                          zout.writestr(ni, raw, compress_type=info.compress_type)
+
+                  run_checked([str(zipalign), "-p", "-f", "4", str(unsigned_apk), str(aligned_apk)])
+                  run_checked([
                       str(java), "-jar", str(apksigner_jar), "sign",
                       "--ks", str(keystore),
                       "--ks-type", "PKCS12",
                       "--ks-pass", "pass:android",
                       "--ks-key-alias", "androiddebugkey",
                       "--key-pass", "pass:android",
-                      "--min-sdk-version", str(min_sdk),
+                      "--min-sdk-version", "21",
                       "--v1-signing-enabled", "true",
                       "--v2-signing-enabled", "true",
                       "--v3-signing-enabled", "true",
                       "--v4-signing-enabled", "false",
                       "--out", str(dst_apk),
                       str(aligned_apk),
-                  ],
-                  check=True,
-              )
+                  ])
 
-          subprocess.run([str(zipalign), "-c", "4", str(dst_apk)], check=True)
-          sig_out = subprocess.check_output(
-              [
+              run_checked([str(zipalign), "-c", "4", str(dst_apk)])
+              sig_out = run_checked([
                   str(java), "-jar", str(apksigner_jar), "verify",
-                  "--min-sdk-version", str(min_sdk),
+                  "--min-sdk-version", "21",
                   "--max-sdk-version", "35",
                   "--verbose", "--print-certs",
                   str(dst_apk),
-              ],
-              text=True,
-          )
-          print(sig_out, flush=True)
-          for scheme in (
-              "Verified using v1 scheme (JAR signing): true",
-              "Verified using v2 scheme (APK Signature Scheme v2): true",
-              "Verified using v3 scheme (APK Signature Scheme v3): true",
-          ):
-              if scheme not in sig_out:
-                  raise SystemExit(f"Missing required APK signature scheme: {scheme}")
+              ])
+              print(sig_out, flush=True)
+              for scheme in (
+                  "Verified using v1 scheme (JAR signing): true",
+                  "Verified using v2 scheme (APK Signature Scheme v2): true",
+                  "Verified using v3 scheme (APK Signature Scheme v3): true",
+              ):
+                  if scheme not in sig_out:
+                      raise RuntimeError(f"Missing required APK signature scheme: {scheme}\n{sig_out}")
 
-          badging = subprocess.check_output(
-              [str(aapt2), "dump", "badging", str(dst_apk)],
-              text=True,
-          )
-          pkg_line = badging.splitlines()[0] if badging.splitlines() else ""
-          vc_match = re.search(r"versionCode='(\d+)'", pkg_line)
-          vn_match = re.search(r"versionName='([^']+)'", pkg_line)
-          actual_vc = int(vc_match.group(1)) if vc_match else -1
-          actual_vn = vn_match.group(1) if vn_match else ""
-          if actual_vc != expected_vc:
-              raise SystemExit(f"APK versionCode mismatch: expected {expected_vc}, got {actual_vc} ({pkg_line})")
-          if actual_vn != version:
-              raise SystemExit(f"APK versionName mismatch: expected {version}, got {actual_vn} ({pkg_line})")
+              run_checked([
+                  str(java), "-jar", str(apksigner_jar), "verify",
+                  "--min-sdk-version", str(min_sdk),
+                  "--max-sdk-version", "35",
+                  "--verbose",
+                  str(dst_apk),
+              ])
 
-          subprocess.run(
-              [sys.executable, "tools/check_android_release.py", str(dst_apk), "--aapt2", str(aapt2), "--public"],
-              check=True,
-          )
-          with zipfile.ZipFile(dst_apk, "r") as zverify:
-              bad_entry = zverify.testzip()
-              if bad_entry is not None:
-                  raise SystemExit(f"Corrupted ZIP entry in staged APK: {bad_entry}")
+              badging = run_checked([str(aapt2), "dump", "badging", str(dst_apk)])
+              pkg_line = badging.splitlines()[0] if badging.splitlines() else ""
+              vc_match = re.search(r"versionCode='(\d+)'", pkg_line)
+              vn_match = re.search(r"versionName='([^']+)'", pkg_line)
+              actual_vc = int(vc_match.group(1)) if vc_match else -1
+              actual_vn = vn_match.group(1) if vn_match else ""
+              if actual_vc != expected_vc:
+                  raise RuntimeError(f"APK versionCode mismatch: expected {expected_vc}, got {actual_vc} ({pkg_line})")
+              if actual_vn != version:
+                  raise RuntimeError(f"APK versionName mismatch: expected {version}, got {actual_vn} ({pkg_line})")
 
-          shutil.copy2("LICENSE", dist / "LICENSE.txt")
-          shutil.copy2("THIRD_PARTY_NOTICES.md", dist / "THIRD_PARTY_NOTICES.md")
+              run_checked([sys.executable, "tools/check_android_release.py", str(dst_apk), "--aapt2", str(aapt2), "--public"])
+              with zipfile.ZipFile(dst_apk, "r") as zverify:
+                  bad_entry = zverify.testzip()
+                  if bad_entry is not None:
+                      raise RuntimeError(f"Corrupted ZIP entry in staged APK: {bad_entry}")
 
-          sha256 = hashlib.sha256(dst_apk.read_bytes()).hexdigest()
-          size_bytes = dst_apk.stat().st_size
-          size_mib = size_bytes / (1024 * 1024)
-          (dist / "SHA256SUMS.txt").write_text(f"{sha256}  {apk_name}\n", encoding="utf-8")
+              shutil.copy2("LICENSE", dist / "LICENSE.txt")
+              shutil.copy2("THIRD_PARTY_NOTICES.md", dist / "THIRD_PARTY_NOTICES.md")
 
-          cert_match = re.search(r"SHA-256 digest:\s*([0-9a-fA-F]+)", sig_out)
-          cert_sha = cert_match.group(1).lower() if cert_match else "unknown"
-          notice_msg = (
-              f"apk={apk_name} pkg={pkg_line} zipalign=OK v1=true v2=true v3=true "
-              f"cert_sha256={cert_sha} bytes={size_bytes} sha256={sha256}"
-          )
-          print(f"::notice title=APK Verified::{notice_msg}", flush=True)
+              sha256 = hashlib.sha256(dst_apk.read_bytes()).hexdigest()
+              size_bytes = dst_apk.stat().st_size
+              size_mib = size_bytes / (1024 * 1024)
+              (dist / "SHA256SUMS.txt").write_text(f"{sha256}  {apk_name}\n", encoding="utf-8")
 
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"version={version}\n")
-              out.write(f"apk_name={apk_name}\n")
-              out.write(f"sha256={sha256}\n")
-              out.write(f"size_mib={size_mib:.2f}\n")
+              cert_match = re.search(r"SHA-256 digest:\s*([0-9a-fA-F]+)", sig_out)
+              cert_sha = cert_match.group(1).lower() if cert_match else "unknown"
+              notice_msg = (
+                  f"apk={apk_name} pkg={pkg_line} zipalign=OK v1=true v2=true v3=true "
+                  f"cert_sha256={cert_sha} bytes={size_bytes} sha256={sha256}"
+              )
+              print(f"::notice title=APK Verified::{notice_msg}", flush=True)
 
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"### Built `{apk_name}` (`ae.net.Voltlauncher`)\n\n")
-              summary.write(f"- **Package ID:** `ae.net.Voltlauncher`\n")
-              summary.write(f"- **ABI:** `{abi}`\n")
-              summary.write(f"- **Version:** `{version}` (`versionCode={actual_vc}`)\n")
-              summary.write(f"- **Signatures:** `v1 + v2 + v3` (`zipalign -p 4` verified)\n")
-              summary.write(f"- **Cert SHA-256:** `{cert_sha}`\n")
-              summary.write(f"- **Size:** `{size_mib:.2f} MiB` (`{size_bytes}` bytes)\n")
-              summary.write(f"- **SHA-256:** `{sha256}`\n")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+                  out.write(f"version={version}\n")
+                  out.write(f"apk_name={apk_name}\n")
+                  out.write(f"sha256={sha256}\n")
+                  out.write(f"size_mib={size_mib:.2f}\n")
+
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write(f"### Built `{apk_name}` (`ae.net.Voltlauncher`)\n\n")
+                  summary.write(f"- **Package ID:** `ae.net.Voltlauncher`\n")
+                  summary.write(f"- **ABI:** `{abi}`\n")
+                  summary.write(f"- **Version:** `{version}` (`versionCode={actual_vc}`)\n")
+                  summary.write(f"- **Signatures:** `v1 + v2 + v3` (`zipalign -p 4` verified)\n")
+                  summary.write(f"- **Cert SHA-256:** `{cert_sha}`\n")
+                  summary.write(f"- **Size:** `{size_mib:.2f} MiB` (`{size_bytes}` bytes)\n")
+                  summary.write(f"- **SHA-256:** `{sha256}`\n")
+          except BaseException:
+              tb = traceback.format_exc()
+              sys.stderr.write(tb)
+              escaped = tb.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Stage APK failed::{escaped}", flush=True)
+              raise SystemExit(1)
           PY
 
       - name: Upload APK artifact (${{ matrix.abi }})
