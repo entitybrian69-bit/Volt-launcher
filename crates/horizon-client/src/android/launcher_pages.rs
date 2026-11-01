@@ -405,6 +405,21 @@ impl Launcher {
         true
     }
 
+}
+
+struct DrawCtx<'a> {
+    home: &'a PathBuf,
+    install: &'a Arc<Mutex<horizon_client::official_install::InstallProgress>>,
+    worker: &'a Option<mpsc::Receiver<std::result::Result<(), String>>>,
+    error: &'a Option<String>,
+    catalog: &'a mut Catalog,
+    targets: &'a mut Vec<([f32; 4], Action)>,
+    list_targets: &'a mut Vec<([f32; 4], Action)>,
+    list_view: &'a mut Option<[f32; 3]>,
+    login: &'a login::Login,
+}
+
+impl DrawCtx<'_> {
     fn draw_sidebar(&mut self, ui: &mut Ui, rx: f32, ry: f32, rw: f32, rh: f32) {
         ui.rounded(rx, ry, rw, rh, 14.0, theme::RAIL);
         ui.border(rx, ry, rw, rh, 14.0, theme::BORDER_CRIMSON);
@@ -498,7 +513,7 @@ impl Launcher {
         // Bottom GitHub button
         styled_button(
             ui,
-            &mut self.targets,
+            self.targets,
             [rx + 12.0, ry + rh - 46.0, rw - 24.0, 34.0],
             "GitHub",
             Action::Repository,
@@ -520,7 +535,7 @@ impl Launcher {
         );
         draw_account_chip(
             ui,
-            &mut self.targets,
+            self.targets,
             [152.0, 10.0, (w - 164.0).max(120.0), 34.0],
             account_status,
             self.login.signed_in,
@@ -628,7 +643,7 @@ impl Launcher {
         let prof_y = badge_y + if compact { 42.0 } else { 48.0 };
         styled_button(
             ui,
-            &mut self.targets,
+            self.targets,
             [hx + 26.0, prof_y, 152.0, 36.0],
             &format!("Profile {}   v", self.catalog.config.profile),
             Action::Profile,
@@ -723,7 +738,7 @@ impl Launcher {
             };
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [hx + 26.0, cta_y, hw - 52.0, cta_h],
                 cta_label,
                 Action::Play,
@@ -943,7 +958,7 @@ impl Launcher {
             let acc_w = 196.0;
             draw_account_chip(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + cw - acc_w, cy + 4.0, acc_w, 38.0],
                 account_status,
                 self.login.signed_in,
@@ -999,7 +1014,7 @@ impl Launcher {
                     let orect = [cx + cw - 172.0 + idx as f32 * 88.0, cy - 2.0, 84.0, 28.0];
                     styled_button(
                         ui,
-                        &mut self.targets,
+                        self.targets,
                         orect,
                         origin.source().label(),
                         if page == Page::Mods {
@@ -1075,7 +1090,7 @@ impl Launcher {
 
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + cw - 106.0, bar_y + 8.0, 98.0, 34.0],
                 search_btn_label,
                 Action::Search,
@@ -1085,7 +1100,7 @@ impl Launcher {
             let half = (cw - 24.0) * 0.5;
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + 8.0, bar_y + 48.0, half, 32.0],
                 "Open folder",
                 Action::OpenFolder(kind),
@@ -1094,7 +1109,7 @@ impl Launcher {
             );
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + 16.0 + half, bar_y + 48.0, half, 32.0],
                 "Import file",
                 Action::Import(kind),
@@ -1138,7 +1153,7 @@ impl Launcher {
             let mut bx = srect[0] + input_w + 8.0;
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [bx, bar_y + 7.0, btn_search_w, 38.0],
                 search_btn_label,
                 Action::Search,
@@ -1148,7 +1163,7 @@ impl Launcher {
             bx += btn_search_w + 8.0;
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [bx, bar_y + 7.0, btn_folder_w, 38.0],
                 "Open folder",
                 Action::OpenFolder(kind),
@@ -1158,7 +1173,7 @@ impl Launcher {
             bx += btn_folder_w + 8.0;
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [bx, bar_y + 7.0, btn_import_w, 38.0],
                 "Import file",
                 Action::Import(kind),
@@ -1227,7 +1242,7 @@ impl Launcher {
             if mid_y + 52.0 + 40.0 <= bottom - 6.0 {
                 styled_button(
                     ui,
-                    &mut self.targets,
+                    self.targets,
                     [mid_x - 104.0, mid_y + 52.0, 208.0, 40.0],
                     import_cta,
                     Action::Import(kind),
@@ -1257,7 +1272,7 @@ impl Launcher {
             let content_h = (total_rows as f32 * row_step - gap).max(0.0);
             let max_scroll = (content_h - view_h).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-            self.list_view = Some([top, bottom, max_scroll]);
+            *self.list_view = Some([top, bottom, max_scroll]);
 
             for (i, p) in self.catalog.results.iter().enumerate() {
                 let row = i / cols;
@@ -1358,10 +1373,7 @@ impl Launcher {
                     // Tag pills (source + loader + version)
                     if !compact {
                         let mut tx = text_x;
-                        let src_tag = match p.source {
-                            crate::browser::SourceId::Horizon => "Horizon",
-                            crate::browser::SourceId::Modrinth => "Modrinth",
-                        };
+                        let src_tag = p.source.label();
                         let sw = ui.measure(Face::Medium, 11.0, src_tag) + 14.0;
                         ui.rounded(tx, y + 38.0, sw, 20.0, 6.0, theme::CRIMSON_BADGE);
                         draw_centered_text(
@@ -1419,7 +1431,7 @@ impl Launcher {
                     {
                         styled_button(
                             ui,
-                            &mut self.targets,
+                            self.targets,
                             [x + 14.0, y + card_h - btn_h - 12.0, 102.0, btn_h],
                             "View details",
                             Action::OpenProject(i),
@@ -1490,7 +1502,7 @@ impl Launcher {
                     } else {
                         styled_button(
                             ui,
-                            &mut self.targets,
+                            self.targets,
                             btn_rect,
                             self.catalog.install_button(p),
                             Action::Install(i),
@@ -1508,7 +1520,7 @@ impl Launcher {
         ui.border(cx, fy, cw, footer_h, 11.0, theme::BORDER);
         styled_button(
             ui,
-            &mut self.targets,
+            self.targets,
             [cx + 6.0, fy + 5.0, 108.0, 34.0],
             "<- Previous",
             Action::Previous,
@@ -1517,7 +1529,7 @@ impl Launcher {
         );
         styled_button(
             ui,
-            &mut self.targets,
+            self.targets,
             [cx + cw - 114.0, fy + 5.0, 108.0, 34.0],
             "Next ->",
             Action::Next,
@@ -1566,7 +1578,7 @@ impl Launcher {
             ui.text(Face::Medium, 24.0, cx, cy, theme::TEXT, "Installed Content");
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + cw - 360.0, cy + 2.0, 148.0, 38.0],
                 &format!("Profile {}   v", self.catalog.config.profile),
                 Action::Profile,
@@ -1575,7 +1587,7 @@ impl Launcher {
             );
             draw_account_chip(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + cw - 200.0, cy + 2.0, 200.0, 38.0],
                 account_status,
                 self.login.signed_in,
@@ -1607,7 +1619,7 @@ impl Launcher {
             let item_h = 68.0;
             let max_scroll = (max_items as f32 * item_h - inner_h).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-            self.list_view = Some([inner_top, inner_bottom, max_scroll]);
+            *self.list_view = Some([inner_top, inner_bottom, max_scroll]);
 
             for (section, kind) in Kind::ALL.into_iter().enumerate() {
                 let col_x = cx + section as f32 * (col_w + gap);
@@ -1622,7 +1634,7 @@ impl Launcher {
                 let chev = if self.catalog.sections[section] { "v" } else { ">" };
                 styled_button(
                     ui,
-                    &mut self.targets,
+                    self.targets,
                     [col_x + col_w - 42.0, top + 10.0, 28.0, 28.0],
                     chev,
                     Action::ToggleSection(section),
@@ -1634,7 +1646,7 @@ impl Launcher {
                 // Import + Folder action strip
                 styled_button(
                     ui,
-                    &mut self.targets,
+                    self.targets,
                     [col_x + 14.0, top + 56.0, 96.0, 32.0],
                     "Import",
                     Action::Import(kind),
@@ -1643,7 +1655,7 @@ impl Launcher {
                 );
                 styled_button(
                     ui,
-                    &mut self.targets,
+                    self.targets,
                     [col_x + col_w - 104.0, top + 56.0, 90.0, 32.0],
                     "Folder",
                     Action::OpenFolder(kind),
@@ -1733,11 +1745,11 @@ impl Launcher {
                                 "64-bit required",
                             );
                         } else {
-                            toggle(ui, &mut self.targets, toggle_rect, item.enabled, Action::ToggleLocal(i));
+                            toggle(ui, self.targets, toggle_rect, item.enabled, Action::ToggleLocal(i));
                         }
                         styled_button(
                             ui,
-                            &mut self.targets,
+                            self.targets,
                             del_rect,
                             "Remove",
                             Action::DeleteLocal(i),
@@ -1795,7 +1807,7 @@ impl Launcher {
                 .sum::<f32>();
             let maximum = (total - (bottom - top)).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, maximum);
-            self.list_view = Some([top, bottom, maximum]);
+            *self.list_view = Some([top, bottom, maximum]);
             let mut offset = 0.0;
             for (section, kind) in Kind::ALL.into_iter().enumerate() {
                 let count = self.catalog.local.iter().filter(|e| e.kind == kind).count();
@@ -1812,7 +1824,7 @@ impl Launcher {
                 if y >= top && y + 40.0 <= bottom {
                     styled_button(
                         ui,
-                        &mut self.targets,
+                        self.targets,
                         sec_rect,
                         &label,
                         Action::ToggleSection(section),
@@ -1821,7 +1833,7 @@ impl Launcher {
                     );
                     styled_button(
                         ui,
-                        &mut self.targets,
+                        self.targets,
                         imp_rect,
                         "Import",
                         Action::Import(kind),
@@ -1863,11 +1875,11 @@ impl Launcher {
                             "64-bit required",
                         );
                     } else {
-                        toggle(ui, &mut self.targets, tog_rect, item.enabled, Action::ToggleLocal(i));
+                        toggle(ui, self.targets, tog_rect, item.enabled, Action::ToggleLocal(i));
                     }
                     styled_button(
                         ui,
-                        &mut self.targets,
+                        self.targets,
                         del_rect,
                         "Remove",
                         Action::DeleteLocal(i),
@@ -2040,7 +2052,7 @@ impl Launcher {
             let max_rows = left_items.len().max(right_items.len());
             let max_scroll = (max_rows as f32 * row_h - (list_bottom - list_top)).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-            self.list_view = Some([list_top, list_bottom, max_scroll]);
+            *self.list_view = Some([list_top, list_bottom, max_scroll]);
 
             for (slice, base_x) in [(&left_items[..], cx), (&right_items[..], rx)] {
                 for (i, (label, val, act, sw, dropdown)) in slice.iter().enumerate() {
@@ -2062,7 +2074,7 @@ impl Launcher {
                         &lbl_fit,
                     );
                     if let Some(on) = sw {
-                        toggle(ui, &mut self.targets, ctrl_rect, *on, *act);
+                        toggle(ui, self.targets, ctrl_rect, *on, *act);
                     } else {
                         let text = if *dropdown {
                             format!("{val}   v")
@@ -2071,7 +2083,7 @@ impl Launcher {
                         };
                         styled_button(
                             ui,
-                            &mut self.targets,
+                            self.targets,
                             ctrl_rect,
                             &text,
                             *act,
@@ -2097,7 +2109,7 @@ impl Launcher {
             let half_right = (col_w - 12.0) * 0.5;
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [rx, btn_y, half_right, 44.0],
                 "Startup diagnostics",
                 Action::Logs,
@@ -2106,7 +2118,7 @@ impl Launcher {
             );
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [rx + half_right + 12.0, btn_y, half_right, 44.0],
                 "Microsoft / Xbox account",
                 Action::Account,
@@ -2115,7 +2127,7 @@ impl Launcher {
             );
             draw_account_chip(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [rx + col_w - 190.0, btn_y + 52.0, 190.0, 30.0],
                 account_status,
                 self.login.signed_in,
@@ -2148,7 +2160,7 @@ impl Launcher {
             let row_h = 68.0;
             let max_scroll = (all_items.len() as f32 * row_h - (bottom - top)).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-            self.list_view = Some([top, bottom, max_scroll]);
+            *self.list_view = Some([top, bottom, max_scroll]);
 
             for (i, (label, val, act, sw, dropdown)) in all_items.iter().enumerate() {
                 let y = top + i as f32 * row_h - self.catalog.scroll;
@@ -2159,7 +2171,7 @@ impl Launcher {
                 }
                 ui.text(Face::Regular, 13.5, cx + 2.0, y, theme::MUTED, label);
                 if let Some(on) = sw {
-                    toggle(ui, &mut self.targets, ctrl_rect, *on, *act);
+                    toggle(ui, self.targets, ctrl_rect, *on, *act);
                 } else {
                     let text = if *dropdown {
                         format!("{val}   v")
@@ -2168,7 +2180,7 @@ impl Launcher {
                     };
                     styled_button(
                         ui,
-                        &mut self.targets,
+                        self.targets,
                         ctrl_rect,
                         &text,
                         *act,
@@ -2180,7 +2192,7 @@ impl Launcher {
             let half = (cw - 10.0) * 0.5;
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx, cy + ch - 44.0, half, 40.0],
                 "Diagnostics",
                 Action::Logs,
@@ -2189,7 +2201,7 @@ impl Launcher {
             );
             styled_button(
                 ui,
-                &mut self.targets,
+                self.targets,
                 [cx + half + 10.0, cy + ch - 44.0, half, 40.0],
                 "Microsoft account",
                 Action::Account,
@@ -2199,6 +2211,9 @@ impl Launcher {
         }
     }
 
+}
+
+impl Launcher {
     pub(super) fn draw_pages(&mut self) -> Result<()> {
         let (Some(r), Some(gui)) = (&mut self.renderer, &self.gui) else {
             return Ok(());
@@ -2234,31 +2249,44 @@ impl Launcher {
 
         let compact = w < 760.0;
         let account_status = self.login.status(&self.catalog.config.name);
-        let content_area = if compact {
-            self.draw_compact_header(&mut ui, w, &account_status);
-            [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
-        } else {
-            let rail_w = 176.0;
-            self.draw_sidebar(&mut ui, 12.0, 12.0, rail_w, (h - 24.0).max(260.0));
-            [
-                12.0 + rail_w + 16.0,
-                14.0,
-                (w - rail_w - 40.0).max(240.0),
-                (h - 28.0).max(200.0),
-            ]
-        };
+        {
+            let mut ctx = DrawCtx {
+                home: &self.home,
+                install: &self.install,
+                worker: &self.worker,
+                error: &self.error,
+                catalog: &mut self.catalog,
+                targets: &mut self.targets,
+                list_targets: &mut self.list_targets,
+                list_view: &mut self.list_view,
+                login: &self.login,
+            };
+            let content_area = if compact {
+                ctx.draw_compact_header(&mut ui, w, &account_status);
+                [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
+            } else {
+                let rail_w = 176.0;
+                ctx.draw_sidebar(&mut ui, 12.0, 12.0, rail_w, (h - 24.0).max(260.0));
+                [
+                    12.0 + rail_w + 16.0,
+                    14.0,
+                    (w - rail_w - 40.0).max(240.0),
+                    (h - 28.0).max(200.0),
+                ]
+            };
 
-        let page = self.catalog.page;
-        match page {
-            Page::Play => self.draw_play_page(&mut ui, content_area, compact, &account_status),
-            Page::Mods | Page::Packs | Page::Shaders => {
-                self.draw_catalog_page(&mut ui, content_area, compact, page, &account_status)
-            }
-            Page::Installed => {
-                self.draw_installed_page(&mut ui, content_area, compact, &account_status)
-            }
-            Page::Settings => {
-                self.draw_settings_page(&mut ui, content_area, compact, &account_status)
+            let page = ctx.catalog.page;
+            match page {
+                Page::Play => ctx.draw_play_page(&mut ui, content_area, compact, &account_status),
+                Page::Mods | Page::Packs | Page::Shaders => {
+                    ctx.draw_catalog_page(&mut ui, content_area, compact, page, &account_status)
+                }
+                Page::Installed => {
+                    ctx.draw_installed_page(&mut ui, content_area, compact, &account_status)
+                }
+                Page::Settings => {
+                    ctx.draw_settings_page(&mut ui, content_area, compact, &account_status)
+                }
             }
         }
 
