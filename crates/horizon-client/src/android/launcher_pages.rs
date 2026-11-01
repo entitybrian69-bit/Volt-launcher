@@ -161,17 +161,17 @@ fn styled_button(
     };
     ui.rounded(x, y, w, h, radius, bg);
     ui.border(x, y, w, h, radius, border_col);
-    let base = if h >= 52.0 {
-        18.0
+    let base = if h >= 50.0 {
+        19.5
     } else if w < 84.0 {
-        12.5
+        13.5
     } else {
-        14.5
+        15.5
     };
     let pad = (w * 0.1).clamp(8.0, 14.0);
     let font = if matches!(action, Action::Page(_)) {
         (base * ((w - 2.0 * pad) / ui.measure(Face::Medium, base, label).max(1.0)).min(1.0))
-            .max(10.0)
+            .max(11.0)
     } else {
         base
     };
@@ -215,16 +215,18 @@ fn toggle(
     action: Action,
 ) {
     let [x, y, w, h] = rect;
-    ui.text(
-        Face::Medium,
-        13.5,
-        x,
-        text_vcenter(y, h, 13.5),
-        if on { theme::TEXT } else { theme::MUTED },
-        if on { "On" } else { "Off" },
-    );
-    let sw = 46.0;
-    let sh = 24.0;
+    if w >= 72.0 {
+        ui.text(
+            Face::Medium,
+            14.5,
+            x,
+            text_vcenter(y, h, 14.5),
+            if on { theme::TEXT } else { theme::MUTED },
+            if on { "On" } else { "Off" },
+        );
+    }
+    let sw = 48.0;
+    let sh = 26.0;
     let sx = x + w - sw;
     let sy = y + (h - sh) * 0.5;
     ui.rounded(
@@ -232,7 +234,7 @@ fn toggle(
         sy,
         sw,
         sh,
-        12.0,
+        13.0,
         if on { theme::CRIMSON } else { theme::HOVER },
     );
     ui.border(
@@ -240,16 +242,16 @@ fn toggle(
         sy,
         sw,
         sh,
-        12.0,
+        13.0,
         if on {
             theme::CRIMSON_BRIGHT
         } else {
             theme::BORDER
         },
     );
-    let knob = 18.0;
+    let knob = 20.0;
     let kx = if on { sx + sw - knob - 3.0 } else { sx + 3.0 };
-    ui.rounded(kx, sy + 3.0, knob, knob, 9.0, theme::ON_CRIMSON);
+    ui.rounded(kx, sy + 3.0, knob, knob, 10.0, theme::ON_CRIMSON);
     targets.push((rect, action));
 }
 
@@ -477,27 +479,27 @@ impl DrawCtx<'_> {
 
         // Brand emblem + VOLT LAUNCHER header
         let bx = rx + 12.0;
-        let by = ry + 13.0;
-        ui.rounded(bx, by, 34.0, 34.0, 9.0, theme::BG);
-        ui.border(bx, by, 34.0, 34.0, 9.0, theme::CRIMSON);
-        ui.volt_logo(bx + 3.0, by + 3.0, 28.0, 28.0);
-        ui.text(Face::Medium, 18.0, bx + 42.0, by - 1.0, theme::TEXT, "VOLT");
+        let by = ry + 12.0;
+        ui.rounded(bx, by, 38.0, 38.0, 10.0, theme::BG);
+        ui.border(bx, by, 38.0, 38.0, 10.0, theme::CRIMSON);
+        ui.volt_logo(bx + 4.0, by + 4.0, 30.0, 30.0);
+        ui.text(Face::Medium, 19.5, bx + 46.0, by - 1.0, theme::TEXT, "VOLT");
         ui.text(
             Face::Medium,
-            10.5,
-            bx + 42.0,
-            by + 18.0,
+            11.5,
+            bx + 46.0,
+            by + 20.0,
             theme::MUTED,
             &format!("LAUNCHER {}", crate::backend::VERSION),
         );
-        ui.rounded(rx + 12.0, ry + 56.0, rw - 24.0, 1.0, 0.0, theme::BORDER);
+        ui.rounded(rx + 12.0, ry + 58.0, rw - 24.0, 1.0, 0.0, theme::BORDER);
 
         // Full-height vertical navigation items filling the entire sidebar!
-        let nav_top = ry + 64.0;
-        let nav_bottom = ry + rh - 96.0;
-        let avail = (nav_bottom - nav_top).max(252.0);
+        let nav_top = ry + 66.0;
+        let nav_bottom = ry + rh - 100.0;
+        let avail = (nav_bottom - nav_top).max(168.0);
         let step = avail / Page::ALL.len() as f32;
-        let item_h = (step - 6.0).max(34.0);
+        let item_h = (step - 5.0).max(24.0);
 
         for (i, &page) in Page::ALL.iter().enumerate() {
             let iy = nav_top + i as f32 * step;
@@ -530,9 +532,9 @@ impl DrawCtx<'_> {
                 );
                 ui.rounded(
                     rx + 2.5,
-                    iy + (item_h * 0.18).clamp(6.0, 12.0),
+                    iy + (item_h * 0.18).clamp(5.0, 12.0),
                     4.0,
-                    (item_h * 0.64).max(16.0),
+                    (item_h * 0.64).max(14.0),
                     2.0,
                     theme::CRIMSON_BRIGHT,
                 );
@@ -545,12 +547,12 @@ impl DrawCtx<'_> {
             } else {
                 theme::TEXT
             };
-            draw_page_icon(ui, page, rect[0] + 20.0, iy + item_h * 0.5, fg);
+            draw_page_icon(ui, page, rect[0] + 22.0, iy + item_h * 0.5, fg);
             ui.text(
                 Face::Medium,
-                15.5,
-                rect[0] + 40.0,
-                text_vcenter(iy, item_h, 15.5),
+                16.5,
+                rect[0] + 44.0,
+                text_vcenter(iy, item_h, 16.5),
                 fg,
                 page.name(),
             );
@@ -558,9 +560,9 @@ impl DrawCtx<'_> {
         }
 
         // Discord button directly above GitHub button
-        let disc_rect = [rx + 12.0, ry + rh - 86.0, rw - 24.0, 36.0];
-        ui.rounded(disc_rect[0], disc_rect[1], disc_rect[2], disc_rect[3], 9.0, theme::CRIMSON_BADGE);
-        ui.border(disc_rect[0], disc_rect[1], disc_rect[2], disc_rect[3], 9.0, theme::BORDER_CRIMSON);
+        let disc_rect = [rx + 10.0, ry + rh - 90.0, rw - 20.0, 38.0];
+        ui.rounded(disc_rect[0], disc_rect[1], disc_rect[2], disc_rect[3], 10.0, theme::CRIMSON_BADGE);
+        ui.border(disc_rect[0], disc_rect[1], disc_rect[2], disc_rect[3], 10.0, theme::BORDER_CRIMSON);
         draw_discord_icon(
             ui,
             disc_rect[0] + 26.0,
@@ -570,18 +572,18 @@ impl DrawCtx<'_> {
         );
         ui.text(
             Face::Medium,
-            13.5,
-            disc_rect[0] + 44.0,
-            text_vcenter(disc_rect[1], disc_rect[3], 13.5),
+            14.5,
+            disc_rect[0] + 46.0,
+            text_vcenter(disc_rect[1], disc_rect[3], 14.5),
             theme::TEXT,
             "Discord",
         );
         self.targets.push((disc_rect, Action::Discord));
 
         // GitHub button at bottom
-        let gh_rect = [rx + 12.0, ry + rh - 44.0, rw - 24.0, 34.0];
-        ui.rounded(gh_rect[0], gh_rect[1], gh_rect[2], gh_rect[3], 9.0, theme::CARD_INNER);
-        ui.border(gh_rect[0], gh_rect[1], gh_rect[2], gh_rect[3], 9.0, theme::BORDER);
+        let gh_rect = [rx + 10.0, ry + rh - 46.0, rw - 20.0, 36.0];
+        ui.rounded(gh_rect[0], gh_rect[1], gh_rect[2], gh_rect[3], 10.0, theme::CARD_INNER);
+        ui.border(gh_rect[0], gh_rect[1], gh_rect[2], gh_rect[3], 10.0, theme::BORDER);
         draw_github_icon(
             ui,
             gh_rect[0] + 26.0,
@@ -590,9 +592,9 @@ impl DrawCtx<'_> {
         );
         ui.text(
             Face::Medium,
-            13.5,
-            gh_rect[0] + 44.0,
-            text_vcenter(gh_rect[1], gh_rect[3], 13.5),
+            14.5,
+            gh_rect[0] + 46.0,
+            text_vcenter(gh_rect[1], gh_rect[3], 14.5),
             theme::TEXT,
             "GitHub",
         );
@@ -660,6 +662,21 @@ impl DrawCtx<'_> {
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
 
+        let play_status = self.error.as_deref().or_else(|| {
+            let s = self.catalog.status.as_str();
+            let is_catalog_noise = s.is_empty()
+                || s.contains("Horizon shader")
+                || s.contains("Java mods - browsing")
+                || s.starts_with("Searching ")
+                || s.ends_with(" found");
+            (!is_catalog_noise).then_some(s)
+        });
+        let bottom_pad = if !compact && play_status.is_some() {
+            28.0
+        } else {
+            2.0
+        };
+
         let (hero_rect, right_rect) = if compact {
             let hero_h = (ch * 0.42).clamp(176.0, 240.0);
             (
@@ -667,11 +684,11 @@ impl DrawCtx<'_> {
                 [cx, cy + hero_h + 12.0, cw, (ch - hero_h - 12.0).max(200.0)],
             )
         } else {
-            let hero_w = (cw * 0.56).round();
+            let hero_w = (cw * 0.55).round();
             let right_w = cw - hero_w - 16.0;
             (
-                [cx, cy, hero_w, ch - 30.0],
-                [cx + hero_w + 16.0, cy, right_w, ch - 30.0],
+                [cx, cy, hero_w, ch - bottom_pad],
+                [cx + hero_w + 16.0, cy, right_w, ch - bottom_pad],
             )
         };
 
@@ -683,11 +700,11 @@ impl DrawCtx<'_> {
         ui.border(hx, hy, hw, hh, 16.0, theme::BORDER_CRIMSON);
 
         if !compact {
-            let lx = hx + hw - 86.0;
+            let lx = hx + hw - 88.0;
             let ly = hy + 24.0;
-            ui.rounded(lx, ly, 60.0, 60.0, 14.0, theme::BG);
-            ui.border(lx, ly, 60.0, 60.0, 14.0, theme::BORDER_CRIMSON);
-            ui.volt_logo(lx + 6.0, ly + 6.0, 48.0, 48.0);
+            ui.rounded(lx, ly, 64.0, 64.0, 15.0, theme::BG);
+            ui.border(lx, ly, 64.0, 64.0, 15.0, theme::BORDER_CRIMSON);
+            ui.volt_logo(lx + 6.0, ly + 6.0, 52.0, 52.0);
         }
 
         let heading = if installing {
@@ -699,39 +716,39 @@ impl DrawCtx<'_> {
         } else {
             "Java Worlds on Android"
         };
-        let heading_sz = if compact { 24.0 } else { 36.0 };
-        let heading_max = if compact { hw - 52.0 } else { hw - 124.0 };
+        let heading_sz = if compact { 25.0 } else { 38.0 };
+        let heading_max = if compact { hw - 52.0 } else { hw - 126.0 };
         let fitted_heading = ui.fit_text(Face::Medium, heading_sz, heading, heading_max);
         ui.text(
             Face::Medium,
             heading_sz,
             hx + 26.0,
-            hy + if compact { 16.0 } else { 30.0 },
+            hy + if compact { 16.0 } else { 28.0 },
             theme::TEXT,
             &fitted_heading,
         );
 
         // Version badge pill
         let badge_y = hy + if compact { 56.0 } else { 88.0 };
-        let ver_w = 196.0f32.min(hw - 52.0);
-        ui.rounded(hx + 26.0, badge_y, ver_w, 34.0, 9.0, theme::CRIMSON_BADGE);
-        ui.border(hx + 26.0, badge_y, ver_w, 34.0, 9.0, theme::BORDER_CRIMSON);
-        ui.rounded(hx + 38.0, badge_y + 11.0, 12.0, 12.0, 3.0, theme::CRIMSON_BRIGHT);
+        let ver_w = 216.0f32.min(hw - 52.0);
+        ui.rounded(hx + 26.0, badge_y, ver_w, 38.0, 10.0, theme::CRIMSON_BADGE);
+        ui.border(hx + 26.0, badge_y, ver_w, 38.0, 10.0, theme::BORDER_CRIMSON);
+        ui.rounded(hx + 38.0, badge_y + 12.5, 13.0, 13.0, 3.5, theme::CRIMSON_BRIGHT);
         ui.text(
             Face::Medium,
-            13.5,
+            15.0,
             hx + 58.0,
-            text_vcenter(badge_y, 34.0, 13.5),
+            text_vcenter(badge_y, 38.0, 15.0),
             theme::CRIMSON_BRIGHT,
             "Minecraft Java 26.3",
         );
 
         // Profile selector pill
-        let prof_y = badge_y + if compact { 40.0 } else { 46.0 };
+        let prof_y = badge_y + if compact { 44.0 } else { 48.0 };
         styled_button(
             ui,
             self.targets,
-            [hx + 26.0, prof_y, 152.0, 36.0],
+            [hx + 26.0, prof_y, 172.0, 40.0],
             &format!("Profile {}   v", self.catalog.config.profile),
             Action::Profile,
             BtnStyle::CrimsonOutline,
@@ -807,8 +824,8 @@ impl DrawCtx<'_> {
             ui.text(Face::Regular, 12.5, hx + 26.0, bar_y + 14.0, theme::MUTED, &fitted);
         } else if !compact {
             // Active loadout summary card anchored cleanly at the bottom of the left hero card
-            let info_h = 84.0f32.min((hy + hh - (prof_y + 52.0) - 22.0).max(0.0));
-            if info_h >= 64.0 {
+            let info_h = 92.0f32.min((hy + hh - (prof_y + 52.0) - 22.0).max(0.0));
+            if info_h >= 68.0 {
                 let iy = hy + hh - info_h - 22.0;
                 ui.rounded(hx + 26.0, iy, hw - 52.0, info_h, 12.0, theme::CARD);
                 ui.border(hx + 26.0, iy, hw - 52.0, info_h, 12.0, theme::BORDER_CRIMSON);
@@ -824,18 +841,18 @@ impl DrawCtx<'_> {
                 };
                 let title = ui.fit_text(
                     Face::Medium,
-                    15.5,
+                    17.0,
                     &format!("{acc_name}  •  {badge_txt}"),
                     hw - 84.0,
                 );
-                ui.text(Face::Medium, 15.5, hx + 42.0, iy + 14.0, theme::TEXT, &title);
+                ui.text(Face::Medium, 17.0, hx + 42.0, iy + 15.0, theme::TEXT, &title);
                 let sub = ui.fit_text(
                     Face::Regular,
-                    12.5,
+                    13.5,
                     &format!("Skin: {skin_txt}   |   Cape: {cape_txt}   |   Renderer: {}", self.catalog.config.renderer.label()),
                     hw - 84.0,
                 );
-                ui.text(Face::Regular, 12.5, hx + 42.0, iy + 42.0, theme::MUTED, &sub);
+                ui.text(Face::Regular, 13.5, hx + 42.0, iy + 46.0, theme::MUTED, &sub);
                 self.targets
                     .push(([hx + 26.0, iy, hw - 52.0, info_h], Action::Page(Page::Account)));
             }
@@ -843,7 +860,7 @@ impl DrawCtx<'_> {
 
         // Right Column: Interactive Rotatable 3D Minecraft Character + Bottom-Right PLAY Button!
         let [rx, ry, rw, rh] = right_rect;
-        let cta_h = if compact { 50.0 } else { 60.0 };
+        let cta_h = if compact { 52.0 } else { 62.0 };
         let char_h = (rh - cta_h - 14.0).max(140.0);
         let char_card = [rx, ry, rw, char_h];
 
@@ -872,29 +889,29 @@ impl DrawCtx<'_> {
         };
 
         // Header badge inside 3D character showcase card
-        let pill_w = (ui.measure(Face::Medium, 11.5, provider_badge) + 20.0).min(110.0);
-        ui.rounded(rx + 16.0, ry + 14.0, pill_w, 24.0, 7.0, theme::CRIMSON_BADGE);
-        ui.border(rx + 16.0, ry + 14.0, pill_w, 24.0, 7.0, theme::BORDER_CRIMSON);
+        let pill_w = (ui.measure(Face::Medium, 12.5, provider_badge) + 22.0).min(118.0);
+        ui.rounded(rx + 16.0, ry + 14.0, pill_w, 28.0, 8.0, theme::CRIMSON_BADGE);
+        ui.border(rx + 16.0, ry + 14.0, pill_w, 28.0, 8.0, theme::BORDER_CRIMSON);
         draw_centered_text(
             ui,
             Face::Medium,
-            11.5,
-            [rx + 16.0, ry + 14.0, pill_w, 24.0],
+            12.5,
+            [rx + 16.0, ry + 14.0, pill_w, 28.0],
             theme::CRIMSON_BRIGHT,
             provider_badge,
         );
 
         let name_fit = ui.fit_text(
             Face::Medium,
-            15.5,
+            17.0,
             acc_name,
-            (rw - pill_w - 114.0).max(48.0),
+            (rw - pill_w - 122.0).max(48.0),
         );
         ui.text(
             Face::Medium,
-            15.5,
-            rx + 24.0 + pill_w,
-            text_vcenter(ry + 14.0, 24.0, 15.5),
+            17.0,
+            rx + 26.0 + pill_w,
+            text_vcenter(ry + 14.0, 28.0, 17.0),
             theme::TEXT,
             &name_fit,
         );
@@ -903,7 +920,7 @@ impl DrawCtx<'_> {
         styled_button(
             ui,
             self.targets,
-            [rx + rw - 78.0, ry + 12.0, 62.0, 28.0],
+            [rx + rw - 86.0, ry + 12.0, 70.0, 32.0],
             "Flip",
             Action::ResetPreviewAngle,
             BtnStyle::Secondary,
@@ -911,8 +928,8 @@ impl DrawCtx<'_> {
         );
 
         // Subtle crimson pedestal glow under feet
-        let ped_w = (rw * 0.42).clamp(76.0, 150.0);
-        let ped_y = ry + char_h - 36.0;
+        let ped_w = (rw * 0.44).clamp(80.0, 160.0);
+        let ped_y = ry + char_h - 38.0;
         ui.rounded(
             rx + (rw - ped_w) * 0.5,
             ped_y,
@@ -924,10 +941,10 @@ impl DrawCtx<'_> {
 
         // Draw rotatable GPU 3D Minecraft character + 3D cape!
         let model_bounds = [
-            rx + 12.0,
-            ry + 42.0,
-            (rw - 24.0).max(40.0),
-            (char_h - 72.0).max(60.0),
+            rx + 10.0,
+            ry + 44.0,
+            (rw - 20.0).max(40.0),
+            (char_h - 76.0).max(60.0),
         ];
         crate::skin_preview::draw_player_3d(
             ui,
@@ -944,15 +961,15 @@ impl DrawCtx<'_> {
 
         let hint = ui.fit_text(
             Face::Regular,
-            12.0,
+            13.0,
             "Drag to rotate  •  Tap character for Account & Skins",
             rw - 28.0,
         );
         draw_centered_text(
             ui,
             Face::Regular,
-            12.0,
-            [rx + 14.0, ry + char_h - 26.0, rw - 28.0, 20.0],
+            13.0,
+            [rx + 14.0, ry + char_h - 28.0, rw - 28.0, 22.0],
             theme::MUTED,
             &hint,
         );
@@ -981,23 +998,22 @@ impl DrawCtx<'_> {
             true,
         );
 
-        if !compact {
-            let status = self.error.as_deref().unwrap_or(&self.catalog.status);
-            if !status.is_empty() {
-                let fitted = ui.fit_text(Face::Regular, 13.0, status, cw);
-                ui.text(
-                    Face::Regular,
-                    13.0,
-                    cx + 4.0,
-                    cy + ch - 22.0,
-                    if self.error.is_some() {
-                        theme::CRIMSON_BRIGHT
-                    } else {
-                        theme::MUTED
-                    },
-                    &fitted,
-                );
-            }
+        if !compact
+            && let Some(status) = play_status
+        {
+            let fitted = ui.fit_text(Face::Regular, 13.5, status, cw);
+            ui.text(
+                Face::Regular,
+                13.5,
+                cx + 4.0,
+                cy + ch - 22.0,
+                if self.error.is_some() {
+                    theme::CRIMSON_BRIGHT
+                } else {
+                    theme::MUTED
+                },
+                &fitted,
+            );
         }
     }
 
@@ -2534,12 +2550,12 @@ impl DrawCtx<'_> {
         } else {
             theme::TEXT
         };
-        let fitted = ui.fit_text(Face::Medium, 13.5, &display, (w - 24.0).max(16.0));
+        let fitted = ui.fit_text(Face::Medium, 14.5, &display, (w - 24.0).max(16.0));
         ui.text(
             Face::Medium,
-            13.5,
+            14.5,
             x + 12.0,
-            text_vcenter(y, h, 13.5),
+            text_vcenter(y, h, 14.5),
             col,
             &fitted,
         );
@@ -2557,21 +2573,21 @@ impl DrawCtx<'_> {
         let [cx, cy, cw, ch] = area;
 
         // Top Page Title + Status Bar
-        let header_h = if compact { 32.0 } else { 36.0 };
+        let header_h = if compact { 34.0 } else { 38.0 };
         ui.text(
             Face::Medium,
-            if compact { 18.0 } else { 22.0 },
+            if compact { 19.5 } else { 24.0 },
             cx + 4.0,
             cy + 2.0,
             theme::TEXT,
             "Account & Custom Skin Wardrobe",
         );
         if !compact {
-            let chip_w = (cw * 0.34).clamp(180.0, 290.0);
+            let chip_w = (cw * 0.34).clamp(190.0, 300.0);
             draw_account_chip(
                 ui,
                 self.targets,
-                [cx + cw - chip_w, cy, chip_w, 34.0],
+                [cx + cw - chip_w, cy, chip_w, 36.0],
                 account_status,
                 self.volt_accounts
                     .active()
@@ -3279,7 +3295,7 @@ impl Launcher {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
                 [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
-                let rail_w = 188.0;
+                let rail_w = 208.0;
                 ctx.draw_sidebar(&mut ui, 12.0, 12.0, rail_w, (h - 24.0).max(260.0));
                 [
                     12.0 + rail_w + 16.0,
@@ -3367,19 +3383,19 @@ impl Launcher {
             .is_ok_and(|t| t.as_millis() % 1000 < 500);
         if caret_visible && let Some(name) = self.catalog.editing {
             let (value, font_sz, pad_x) = match name {
-                "name" => (self.catalog.config.name.clone(), 14.5, 14.0),
-                "server" => (self.catalog.config.server.clone(), 14.5, 12.0),
-                "render_scale" => (self.catalog.render_scale_text.clone(), 14.5, 12.0),
-                "offline_name" => (self.catalog.offline_name_input.clone(), 13.5, 12.0),
-                "ely_user" => (self.catalog.ely_user_input.clone(), 13.5, 12.0),
+                "name" => (self.catalog.config.name.clone(), 15.5, 14.0),
+                "server" => (self.catalog.config.server.clone(), 15.5, 12.0),
+                "render_scale" => (self.catalog.render_scale_text.clone(), 15.5, 12.0),
+                "offline_name" => (self.catalog.offline_name_input.clone(), 14.5, 12.0),
+                "ely_user" => (self.catalog.ely_user_input.clone(), 14.5, 12.0),
                 "ely_pass" => (
                     "*".repeat(self.catalog.ely_pass_input.chars().count()),
-                    13.5,
+                    14.5,
                     12.0,
                 ),
-                "ely_totp" => (self.catalog.ely_totp_input.clone(), 13.5, 12.0),
-                "skin_query" => (self.catalog.skin_query_input.clone(), 13.5, 12.0),
-                _ => (self.catalog.query.clone(), 14.0, 14.0),
+                "ely_totp" => (self.catalog.ely_totp_input.clone(), 14.5, 12.0),
+                "skin_query" => (self.catalog.skin_query_input.clone(), 14.5, 12.0),
+                _ => (self.catalog.query.clone(), 14.5, 14.0),
             };
             let face = if name == "search" {
                 Face::Regular

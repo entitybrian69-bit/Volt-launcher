@@ -262,6 +262,7 @@ impl Login {
             Some(SignInState::Starting) => "Requesting a sign-in code...",
             _ => &self.message,
         };
+        let max_rows = ((h - 412.0) / 20.0).floor().clamp(1.0, 5.0) as usize;
         let limit = ((w - 48.0) / 7.5).max(20.0) as usize;
         let mut line = String::new();
         let mut row = 0;
@@ -277,7 +278,7 @@ impl Login {
                 );
                 row += 1;
                 line.clear();
-                if row >= 5 {
+                if row >= max_rows {
                     break;
                 }
             }
@@ -286,7 +287,7 @@ impl Login {
             }
             line.push_str(word);
         }
-        if row < 5 {
+        if row < max_rows {
             ui.text(
                 Face::Regular,
                 13.5,

@@ -71,7 +71,7 @@ pub fn draw_player_3d(
     });
 
     // Character stands 32 model units tall (y = 0 at feet, y = 32 at top of head; center y = 16).
-    let unit = (bh / 36.0).min(bw / 20.5);
+    let unit = (bh / 33.5).min(bw / 18.5);
     let cx = ui.to_batch(bx + bw * 0.5);
     let cy = ui.to_batch(by + bh * 0.52);
     let scale = ui.to_batch(unit);
@@ -268,9 +268,10 @@ pub fn draw_player_3d(
     );
 
     // 3D Cape hinged at shoulders on the back (-Z), rotated 180 deg around Y so
-    // the cape's front UV (1..11, 1..17) faces outward (-Z) behind the player.
+    // the cape's front UV (1..11, 1..17) faces outward (-Z) behind the player,
+    // then tilted by positive X rotation so y < 0 swings backward (-Z) away from the body.
     if let Some(c_uv) = cape_uv {
-        let cape_tilt = -(11.5 + breathe * 1.8).to_radians();
+        let cape_tilt = (10.5 + breathe * 1.8).to_radians();
         let cape_rot =
             Mat3::from_rotation_x(cape_tilt) * Mat3::from_rotation_y(std::f32::consts::PI);
         emit_part(
@@ -279,7 +280,7 @@ pub fn draw_player_3d(
             c_uv,
             Vec3::new(0.0, 24.0, -2.35),
             cape_rot,
-            Vec3::new(0.0, -8.0, -0.5),
+            Vec3::new(0.0, -8.0, 0.5),
             [10.0, 16.0, 1.0],
             0.0,
             [0, 0],

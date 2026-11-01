@@ -396,28 +396,22 @@ impl<'a> Ui<'a> {
             batch,
         }
     }
-    /// Native launcher density on tall phone screens; game HUD scale is untouched.
+    /// Native launcher density on phone & tablet screens; game HUD scale is untouched.
     pub fn mobile(atlas: &'a HudAtlas, batch: &'a mut HudBatch, cursor: (f32, f32)) -> Self {
         let mut ui = Self::new(atlas, batch, cursor);
         let pw = ui.batch.width * ui.scale;
         let ph = ui.batch.height * ui.scale;
-        if ph > pw {
-            ui.density = (pw / 480.0).clamp(1.0, 4.0);
-            ui.w = pw / ui.density;
-            ui.h = ph / ui.density;
-            ui.cursor = (
-                cursor.0 * ui.scale / ui.density,
-                cursor.1 * ui.scale / ui.density,
-            );
-        } else if ph < 700.0 {
-            ui.density = (pw / 1040.0).min(ph / 700.0).clamp(0.5, 4.0);
-            ui.w = pw / ui.density;
-            ui.h = ph / ui.density;
-            ui.cursor = (
-                cursor.0 * ui.scale / ui.density,
-                cursor.1 * ui.scale / ui.density,
-            );
-        }
+        ui.density = if ph > pw {
+            (pw / 420.0).clamp(1.0, 4.5)
+        } else {
+            (pw / 860.0).min(ph / 560.0).clamp(0.65, 4.5)
+        };
+        ui.w = pw / ui.density;
+        ui.h = ph / ui.density;
+        ui.cursor = (
+            cursor.0 * ui.scale / ui.density,
+            cursor.1 * ui.scale / ui.density,
+        );
         ui
     }
 
