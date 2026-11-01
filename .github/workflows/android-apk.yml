@@ -162,8 +162,14 @@ jobs:
                   subprocess.run([adb, "shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", f"file:///sdcard/Download/{fn}"], check=False, capture_output=True)
 
               import xml.etree.ElementTree as ET
-              for pkg in ("com.google.android.documentsui", "com.android.documentsui", "com.android.providers.media", "com.google.android.providers.media.module"):
+              for pkg in (
+                  "com.google.android.documentsui", "com.android.documentsui",
+                  "com.android.providers.media", "com.google.android.providers.media.module",
+                  "com.android.mtp", "com.android.externalstorage",
+                  "com.android.providers.downloads", "com.android.providers.downloads.ui",
+              ):
                   subprocess.run([adb, "shell", "appops", "set", pkg, "REQUEST_INSTALL_PACKAGES", "allow"], check=False, capture_output=True)
+                  subprocess.run([adb, "shell", "appops", "set", "--uid", pkg, "REQUEST_INSTALL_PACKAGES", "allow"], check=False, capture_output=True)
 
               def tap_text(xml_str: str, target: str) -> bool:
                   try:
