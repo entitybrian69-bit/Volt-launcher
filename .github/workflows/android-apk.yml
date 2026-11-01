@@ -247,8 +247,14 @@ jobs:
       - name: Cache Gradle 8.14 distribution
         uses: actions/cache@v4
         with:
-          path: ~/.cache/gradle-8.14
-          key: gradle-8.14-bin-v1
+          path: |
+            ~/.cache/gradle-8.14
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-8.14-caches-v1-${{ runner.os }}-${{ hashFiles('packaging/android/settings.gradle') }}
+          restore-keys: |
+            gradle-8.14-caches-v1-${{ runner.os }}-
+            gradle-8.14-bin-v1
 
       - name: Install Android SDK components and Gradle 8.14
         run: |
@@ -505,15 +511,40 @@ jobs:
           from pathlib import Path
           import subprocess
           import sys
+          import time
 
           env = dict(os.environ)
           version_code = 280000 + int(os.environ.get("RUN_NUMBER", "1"))
           env["VOLT_VERSION_CODE"] = str(version_code)
           env["ORG_GRADLE_PROJECT_versionCode"] = str(version_code)
           gradle_user_dir = Path.home() / ".gradle"
-          gradle_user_dir.mkdir(parents=True, exist_ok=True)
+          init_d = gradle_user_dir / "init.d"
+          init_d.mkdir(parents=True, exist_ok=True)
           (gradle_user_dir / "gradle.properties").write_text(
-              f"versionCode={version_code}\n",
+              "\n".join([
+                  f"versionCode={version_code}",
+                  "org.gradle.internal.http.connectionTimeout=120000",
+                  "org.gradle.internal.http.socketTimeout=120000",
+                  "org.gradle.internal.repository.max.tentatives=6",
+                  "org.gradle.internal.repository.initial.backoff=2000",
+                  "",
+              ]),
+              encoding="utf-8",
+          )
+          (init_d / "maven-mirror.gradle").write_text(
+              "\n".join([
+                  "beforeSettings { settings ->",
+                  "    settings.pluginManagement.repositories {",
+                  "        google()",
+                  "        maven { url = uri('https://maven-central.storage-download.googleapis.com/maven2/') }",
+                  "    }",
+                  "    settings.dependencyResolutionManagement.repositories {",
+                  "        google()",
+                  "        maven { url = uri('https://maven-central.storage-download.googleapis.com/maven2/') }",
+                  "    }",
+                  "}",
+                  "",
+              ]),
               encoding="utf-8",
           )
           print(f"Building Volt Launcher with monotonic versionCode={version_code}", flush=True)
@@ -527,13 +558,20 @@ jobs:
               "--java-home", os.environ["JAVA_HOME"],
               "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
           ]
+          rc = 1
           tail = deque(maxlen=40)
-          proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
-          for line in proc.stdout:
-              sys.stdout.write(line)
-              sys.stdout.flush()
-              tail.append(line.rstrip("\r\n"))
-          rc = proc.wait()
+          for attempt in range(1, 4):
+              tail.clear()
+              proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
+              for line in proc.stdout:
+                  sys.stdout.write(line)
+                  sys.stdout.flush()
+                  tail.append(line.rstrip("\r\n"))
+              rc = proc.wait()
+              if rc == 0:
+                  break
+              print(f"Attempt {attempt}/3 exited with {rc}; retrying after backoff...", flush=True)
+              time.sleep(attempt * 10)
           if rc != 0:
               escaped = "\n".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
               print(f"::error title=APK package/audit failed (exit {rc})::{escaped}", flush=True)
