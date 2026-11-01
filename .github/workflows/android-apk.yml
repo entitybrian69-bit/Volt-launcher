@@ -94,7 +94,7 @@ jobs:
               raise SystemExit(f"Unsupported ABI(s): {unknown}")
 
           include = [{"abi": abi, "target": targets[abi]} for abi in selected]
-          publish_release = ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and input_publish)
+          publish_release = (event == "push") or ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and input_publish)
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"matrix={json.dumps({'include': include})}\n")
@@ -382,7 +382,7 @@ jobs:
 
           dist = Path(".local/android/dist") / abi
           dist.mkdir(parents=True, exist_ok=True)
-          apk_name = f"Horizon-Android-{version}-{abi}.apk"
+          apk_name = f"Volt-Launcher-{version}-{abi}.apk"
           dst_apk = dist / apk_name
           shutil.copy2(src_apk, dst_apk)
           shutil.copy2("LICENSE", dist / "LICENSE.txt")
@@ -399,7 +399,8 @@ jobs:
               out.write(f"size_mib={size_mib:.2f}\n")
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"### Built `{apk_name}`\n\n")
+              summary.write(f"### Built `{apk_name}` (`ae.net.Voltlauncher`)\n\n")
+              summary.write(f"- **Package ID:** `ae.net.Voltlauncher`\n")
               summary.write(f"- **ABI:** `{abi}`\n")
               summary.write(f"- **Version:** `{version}`\n")
               summary.write(f"- **Size:** `{size_mib:.2f} MiB`\n")
@@ -409,7 +410,7 @@ jobs:
       - name: Upload APK artifact (${{ matrix.abi }})
         uses: actions/upload-artifact@v4
         with:
-          name: Horizon-Android-${{ steps.stage.outputs.version }}-${{ matrix.abi }}
+          name: Volt-Launcher-${{ steps.stage.outputs.version }}-${{ matrix.abi }}
           path: .local/android/dist/${{ matrix.abi }}/*
           if-no-files-found: error
           retention-days: 30
@@ -430,7 +431,7 @@ jobs:
       - name: Download built APK artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: Horizon-Android-*
+          pattern: Volt-Launcher-*
           path: .local/android/release-collect
           merge-multiple: true
 
@@ -448,7 +449,7 @@ jobs:
           import re
 
           collect = Path(".local/android/release-collect")
-          apks = sorted(collect.glob("Horizon-Android-*.apk"))
+          apks = sorted(collect.glob("Volt-Launcher-*.apk"))
           if not apks:
               raise SystemExit("No APKs found to publish")
 
@@ -459,7 +460,7 @@ jobs:
 
           is_tag = os.environ["IS_TAG"].lower() == "true"
           tag = os.environ["REF_NAME"] if is_tag else f"v{version}-build.{os.environ['SHA_SHORT'][:7]}"
-          title = f"Horizon Android {tag}" if is_tag else f"Horizon Android {version} ({os.environ['SHA_SHORT'][:7]})"
+          title = f"Volt Launcher {tag}" if is_tag else f"Volt Launcher {version} ({os.environ['SHA_SHORT'][:7]})"
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"tag={tag}\n")
@@ -474,10 +475,10 @@ jobs:
           TITLE: ${{ steps.bundle.outputs.title }}
           PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
         run: |
-          NOTES="Automated public APK build from commit ${GITHUB_SHA}. Original Minecraft 26.3 assets download from Mojang on first launch."
+          NOTES="Automated public APK build (ae.net.Voltlauncher) from commit ${GITHUB_SHA}. Original Minecraft 26.3 assets download from Mojang on first launch."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              .local/android/release-collect/Horizon-Android-*.apk \
+              .local/android/release-collect/Volt-Launcher-*.apk \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
@@ -488,7 +489,7 @@ jobs:
               EXTRA_FLAGS+=(--prerelease --target "$GITHUB_SHA")
             fi
             gh release create "$TAG" \
-              .local/android/release-collect/Horizon-Android-*.apk \
+              .local/android/release-collect/Volt-Launcher-*.apk \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \

@@ -86,7 +86,7 @@ def inspect_payload(path, public=False):
 def audit(path, aapt2, public=False):
     report = inspect_payload(path, public)
     badging = subprocess.check_output([str(aapt2), 'dump', 'badging', str(path)], text=True)
-    if "package: name='dev.horizon.android'" not in badging:
+    if "package: name='ae.net.Voltlauncher'" not in badging:
         raise ValueError('Unexpected Android package identity')
     report['debuggable'] = 'application-debuggable' in badging
     if report['debuggable']:

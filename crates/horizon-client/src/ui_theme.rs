@@ -108,6 +108,7 @@ enum Key {
     Glyph(Face, u16, u16),
     /// A quarter disc (`false`) or a 1px quarter ring of this radius in pixels.
     Corner(u16, bool),
+    VoltLogo,
 }
 #[derive(Clone, Copy)]
 struct Cached {
@@ -173,16 +174,12 @@ impl Cache {
         self.shelf = (x + w + 1, y, row.max(h));
         Some((x, y, region))
     }
-    fn upload(&mut self, atlas: &HudAtlas, w: u32, h: u32, alpha: &[f32]) -> Option<Rect> {
+    fn upload_rgba(&mut self, atlas: &HudAtlas, w: u32, h: u32, rgba: Vec<u8>) -> Option<Rect> {
         let (x, y, region) = self.place(atlas, w, h)?;
         let (ax, ay) = (
             (region.u0 * atlas.width as f32).round() as u32 + x,
             (region.v0 * atlas.height as f32).round() as u32 + y,
         );
-        let rgba = alpha
-            .iter()
-            .flat_map(|a| [255, 255, 255, (a.clamp(0.0, 1.0) * 255.0).round() as u8])
-            .collect();
         self.pending.push(crate::font::Patch {
             x: ax,
             y: ay,
@@ -199,6 +196,39 @@ impl Cache {
             w,
             h,
         })
+    }
+    fn upload(&mut self, atlas: &HudAtlas, w: u32, h: u32, alpha: &[f32]) -> Option<Rect> {
+        let rgba = alpha
+            .iter()
+            .flat_map(|a| [255, 255, 255, (a.clamp(0.0, 1.0) * 255.0).round() as u8])
+            .collect();
+        self.upload_rgba(atlas, w, h, rgba)
+    }
+    fn volt_logo(&mut self, atlas: &HudAtlas) -> Option<Rect> {
+        if let Some(c) = self.entries.get(&Key::VoltLogo) {
+            return c.rect;
+        }
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(include_bytes!("volt_logo.png")));
+        decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+        let mut reader = decoder.read_info().ok()?;
+        let mut bytes = vec![0; reader.output_buffer_size()?];
+        let info = reader.next_frame(&mut bytes).ok()?;
+        if info.color_type != png::ColorType::Rgba {
+            return None;
+        }
+        bytes.truncate(info.buffer_size());
+        let rect = self.upload_rgba(atlas, info.width, info.height, bytes);
+        if rect.is_some() {
+            self.entries.insert(
+                Key::VoltLogo,
+                Cached {
+                    rect,
+                    left: 0.0,
+                    top: 0.0,
+                },
+            );
+        }
+        rect
     }
     fn glyph(&mut self, atlas: &HudAtlas, face: Face, id: ab_glyph::GlyphId, px: f32) -> Cached {
         let size = (px * 4.0).round() as u16;
@@ -452,6 +482,29 @@ impl<'a> Ui<'a> {
         self.raw_fill(x0, y0 + r, x0 + 1.0, y1 - r, color);
         self.raw_fill(x1 - 1.0, y0 + r, x1, y1 - r, color);
         self.corners(x0, y0, x1, y1, r, true, color);
+    }
+
+    pub fn volt_logo(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let Some(rect) = with_cache(self.atlas, |c| c.volt_logo(self.atlas)) else {
+            return;
+        };
+        let (x0, y0, x1, y1) = (
+            self.px_x(x),
+            self.px_y(y),
+            self.px_x(x + w),
+            self.px_y(y + h),
+        );
+        if x1 > x0 && y1 > y0 {
+            let s = self.scale;
+            self.batch.rect_uv(
+                x0 / s,
+                y0 / s,
+                (x1 - x0) / s,
+                (y1 - y0) / s,
+                rect,
+                color::hex(0xFFFFFF, 255),
+            );
+        }
     }
 
     // ---- text ----

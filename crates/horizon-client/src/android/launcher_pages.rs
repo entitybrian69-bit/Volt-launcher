@@ -424,27 +424,20 @@ impl DrawCtx<'_> {
         ui.rounded(rx, ry, rw, rh, 14.0, theme::RAIL);
         ui.border(rx, ry, rw, rh, 14.0, theme::BORDER_CRIMSON);
 
-        // Brand emblem + VOLT / HORIZON version header
-        let bx = rx + 14.0;
-        let by = ry + 14.0;
-        ui.rounded(bx, by, 32.0, 32.0, 8.0, theme::CRIMSON_BADGE);
-        ui.border(bx, by, 32.0, 32.0, 8.0, theme::CRIMSON);
-        draw_centered_text(
-            ui,
-            Face::Medium,
-            17.0,
-            [bx, by, 32.0, 32.0],
-            theme::CRIMSON_BRIGHT,
-            "V",
-        );
-        ui.text(Face::Medium, 18.0, bx + 40.0, by - 2.0, theme::TEXT, "VOLT");
+        // Brand emblem + VOLT LAUNCHER header
+        let bx = rx + 12.0;
+        let by = ry + 13.0;
+        ui.rounded(bx, by, 34.0, 34.0, 9.0, theme::BG);
+        ui.border(bx, by, 34.0, 34.0, 9.0, theme::CRIMSON);
+        ui.volt_logo(bx + 3.0, by + 3.0, 28.0, 28.0);
+        ui.text(Face::Medium, 17.5, bx + 42.0, by - 1.0, theme::TEXT, "VOLT");
         ui.text(
-            Face::Regular,
+            Face::Medium,
             10.5,
-            bx + 40.0,
+            bx + 42.0,
             by + 18.0,
             theme::MUTED,
-            &format!("HORIZON {}", crate::backend::VERSION),
+            &format!("LAUNCHER {}", crate::backend::VERSION),
         );
         ui.rounded(rx + 12.0, ry + 58.0, rw - 24.0, 1.0, 0.0, theme::BORDER);
 
@@ -523,20 +516,21 @@ impl DrawCtx<'_> {
     }
 
     fn draw_compact_header(&mut self, ui: &mut Ui, w: f32, account_status: &str) {
-        ui.rounded(12.0, 10.0, 132.0, 34.0, 9.0, theme::CARD);
-        ui.border(12.0, 10.0, 132.0, 34.0, 9.0, theme::BORDER_CRIMSON);
-        draw_centered_text(
-            ui,
+        ui.rounded(12.0, 10.0, 168.0, 34.0, 9.0, theme::CARD);
+        ui.border(12.0, 10.0, 168.0, 34.0, 9.0, theme::BORDER_CRIMSON);
+        ui.volt_logo(18.0, 14.0, 26.0, 26.0);
+        ui.text(
             Face::Medium,
-            13.5,
-            [12.0, 10.0, 132.0, 34.0],
+            12.5,
+            50.0,
+            text_vcenter(10.0, 34.0, 12.5),
             theme::TEXT,
-            &format!("VOLT {}", crate::backend::VERSION),
+            "VOLT LAUNCHER",
         );
         draw_account_chip(
             ui,
             self.targets,
-            [152.0, 10.0, (w - 164.0).max(120.0), 34.0],
+            [188.0, 10.0, (w - 200.0).max(110.0), 34.0],
             account_status,
             self.login.signed_in,
         );
@@ -604,6 +598,14 @@ impl DrawCtx<'_> {
         ui.rounded(hx + 16.0, hy + 14.0, hw * 0.42, hh * 0.28, 12.0, theme::HERO_GLOW);
         ui.border(hx, hy, hw, hh, 16.0, theme::BORDER_CRIMSON);
 
+        if !compact {
+            let lx = hx + hw - 86.0;
+            let ly = hy + 24.0;
+            ui.rounded(lx, ly, 60.0, 60.0, 14.0, theme::BG);
+            ui.border(lx, ly, 60.0, 60.0, 14.0, theme::BORDER_CRIMSON);
+            ui.volt_logo(lx + 6.0, ly + 6.0, 48.0, 48.0);
+        }
+
         let heading = if installing {
             "Getting Game Ready"
         } else if installed {
@@ -614,7 +616,8 @@ impl DrawCtx<'_> {
             "Java Worlds on Android"
         };
         let heading_sz = if compact { 26.0 } else { 36.0 };
-        let fitted_heading = ui.fit_text(Face::Medium, heading_sz, heading, hw - 52.0);
+        let heading_max = if compact { hw - 52.0 } else { hw - 124.0 };
+        let fitted_heading = ui.fit_text(Face::Medium, heading_sz, heading, heading_max);
         ui.text(
             Face::Medium,
             heading_sz,
@@ -2552,7 +2555,7 @@ impl Launcher {
                 self.catalog.status = if crate::platform::open_documents(&id) {
                     "Opened in Files. Return here after copying files.".into()
                 } else {
-                    "Open the system Files app and choose Horizon Android.".into()
+                    "Open the system Files app and choose Volt Launcher.".into()
                 };
             }
             Some(Action::Import(kind)) => {
