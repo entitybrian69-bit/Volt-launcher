@@ -11,15 +11,15 @@ pub(super) fn reveal(scroll: f32, row: [f32; 4], view: [f32; 3]) -> f32 {
     };
     (scroll + adjustment).clamp(0.0, maximum.max(0.0))
 }
-pub(super) struct Drag {
+pub(crate) struct Drag {
     origin: [f64; 2],
     previous_x: f64,
     previous_y: f64,
-    pub(super) moved: bool,
+    pub(crate) moved: bool,
 }
 
 impl Drag {
-    pub(super) fn new(x: f64, y: f64) -> Self {
+    pub(crate) fn new(x: f64, y: f64) -> Self {
         Self {
             origin: [x, y],
             previous_x: x,
@@ -28,20 +28,20 @@ impl Drag {
         }
     }
 
-    pub(super) fn origin_y(&self) -> f64 {
+    pub(crate) fn origin_y(&self) -> f64 {
         self.origin[1]
     }
 
-    pub(super) fn origin_xy(&self) -> [f64; 2] {
+    pub(crate) fn origin_xy(&self) -> [f64; 2] {
         self.origin
     }
 
-    pub(super) fn update(&mut self, x: f64, y: f64, density: f64) -> f32 {
+    pub(crate) fn update(&mut self, x: f64, y: f64, density: f64) -> f32 {
         let (_, dy) = self.update_xy(x, y, density);
         dy
     }
 
-    pub(super) fn update_xy(&mut self, x: f64, y: f64, density: f64) -> (f32, f32) {
+    pub(crate) fn update_xy(&mut self, x: f64, y: f64, density: f64) -> (f32, f32) {
         let density = density.max(0.01);
         self.moved |= (x - self.origin[0]).hypot(y - self.origin[1]) > 12.0 * density;
         let delta = if self.moved {

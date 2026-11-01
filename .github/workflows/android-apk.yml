@@ -471,17 +471,24 @@ jobs:
               "--java-home", os.environ["JAVA_HOME"],
               "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
           ]
-          tail = deque(maxlen=40)
+          tail = deque(maxlen=80)
+          err_lines = []
+          in_err = 0
           proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
           for line in proc.stdout:
               sys.stdout.write(line)
               sys.stdout.flush()
-              tail.append(line.rstrip("\r\n"))
+              stripped = line.rstrip("\r\n")
+              tail.append(stripped)
+              if stripped.startswith("error"):
+                  in_err = 12
+              if in_err > 0 and len(err_lines) < 220:
+                  err_lines.append(stripped)
+                  in_err -= 1
           rc = proc.wait()
           if rc != 0:
-              msg = "%0A".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              # Re-encode newlines after escaping literal %
-              escaped = "\n".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              combined = err_lines + ["--- tail ---"] + list(tail) if err_lines else list(tail)
+              escaped = "\n".join(combined).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
               print(f"::error title=Rust compile failed (exit {rc})::{escaped}", flush=True)
               raise SystemExit(rc)
           PY

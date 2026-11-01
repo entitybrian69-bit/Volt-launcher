@@ -444,10 +444,10 @@ pub(super) struct Remote {
     /// `ClientPacketListener.getDebugQueryHandler`: the F3+I query waiting
     /// for the server's data.
     pub(super) debug_query: super::debug_keys::DebugQuery,
-    offline_skin_gen: u64,
-    offline_cape_gen: u64,
-    skin_synced: bool,
-    volt_peer_skins: HashMap<u128, (Option<bool>, bool)>,
+    pub(super) offline_skin_gen: u64,
+    pub(super) offline_cape_gen: u64,
+    pub(super) skin_synced: bool,
+    pub(super) volt_peer_skins: HashMap<u128, (Option<bool>, bool)>,
 }
 
 /// The time a frame spends on chunk packets before it leaves the rest of
@@ -2494,7 +2494,7 @@ impl Game<'_> {
                         is_slim
                     });
                     let has_cape = if let Some(rgba) = cape {
-                        self.store_skin(format!("volt/cape/{uuid:032x}"), rgba);
+                        self.store_skin(format!("capes/volt_{uuid:032x}"), rgba);
                         true
                     } else {
                         false
@@ -4389,7 +4389,7 @@ impl Game<'_> {
                 }
             }
             if peer_cape {
-                let slot = format!("volt/cape/{uuid:032x}");
+                let slot = format!("capes/volt_{uuid:032x}");
                 if self.skin_slots.contains(&slot) {
                     capes.insert(uuid, slot);
                 }
@@ -4588,7 +4588,7 @@ impl Game<'_> {
     /// Whether a downloaded skin or cape is in the atlas to draw, marking it
     /// drawn; if not (new, or its slot taken), its image is queued for upload
     /// again and it is drawn from the next frame.
-    fn again_skin(&mut self, location: &str) -> bool {
+    pub(super) fn again_skin(&mut self, location: &str) -> bool {
         let mut downloads = self.skin_downloads.borrow_mut();
         // A slot without its sprite (the atlas was rebuilt, or the upload
         // never happened) counts as missing, so the skin is stored again.

@@ -1682,7 +1682,7 @@ impl Game<'_> {
                         is_slim
                     });
                     let has_cape = if let Some(rgba) = cape {
-                        self.store_skin(format!("volt/cape/{guest_uuid:032x}"), rgba);
+                        self.store_skin(format!("capes/volt_{guest_uuid:032x}"), rgba);
                         true
                     } else {
                         false
@@ -1696,7 +1696,7 @@ impl Game<'_> {
                             m.slim = is_slim;
                         }
                         if has_cape {
-                            m.cape = Some(format!("volt/cape/{guest_uuid:032x}"));
+                            m.cape = Some(format!("capes/volt_{guest_uuid:032x}"));
                         }
                     }
                     host.hub.broadcast(&C::CustomPayload(

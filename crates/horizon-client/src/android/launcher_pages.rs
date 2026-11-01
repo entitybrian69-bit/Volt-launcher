@@ -3722,6 +3722,7 @@ impl Launcher {
                 {
                     if self.volt_accounts.remove_account(&id).is_some() {
                         self.login.sign_out();
+                        self.login.visible = false;
                     }
                     if let Some(active) = self.volt_accounts.active() {
                         self.catalog.config.name = active.name.clone();
@@ -3854,6 +3855,9 @@ impl Launcher {
             Some(Action::SignIn) => self.login.start(&self.catalog.config.microsoft_client_id),
             Some(Action::SignOut) => {
                 self.login.sign_out();
+                if self.catalog.page == Page::Account {
+                    self.login.visible = false;
+                }
                 self.volt_accounts
                     .sync_msa_accounts(&crate::account::Accounts::load(), false);
             }
