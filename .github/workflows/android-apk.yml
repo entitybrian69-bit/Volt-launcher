@@ -148,66 +148,67 @@ jobs:
               abilist = subprocess.run([adb, "shell", "getprop", "ro.product.cpu.abilist"], capture_output=True, text=True).stdout.strip()
               emu_out.append(f"abilist={abilist}")
 
-              # 1) Test adb install + upgrade on Android 14 (API 34) first!
-              for tag in tags:
-                  subprocess.run([adb, "logcat", "-c"], check=False)
-                  r = subprocess.run([adb, "install", str(apk_paths[tag])], capture_output=True, text=True)
-                  lc = subprocess.run([adb, "logcat", "-d", "*:W"], capture_output=True, text=True).stdout
-                  pm_lines = [ln for ln in lc.splitlines() if any(k in ln for k in ("Package", "Install", "Volt", "horizon", "Sign", "Cert", "Downgrade", "dex", "Native"))]
-                  emu_out.append(f"API34 ADB {tag} rc={r.returncode} out={r.stdout.strip()} err={r.stderr.strip()}\n" + "\n".join(pm_lines[-15:]))
-
-              # Uninstall and test real Google PackageInstaller GUI (INSTALL_FROM_ADB == 0)
-              subprocess.run([adb, "uninstall", "ae.net.Voltlauncher"], check=False, capture_output=True)
+              # 1) Test real Google Files -> Google PackageInstaller GUI (INSTALL_FROM_ADB == 0)!
               for _ in range(20):
                   mk = subprocess.run([adb, "shell", "mkdir", "-p", "/sdcard/Download"], capture_output=True, text=True)
                   if mk.returncode == 0:
                       break
                   time.sleep(1)
 
-              for tag in tags:
-                  subprocess.run([adb, "push", str(apk_paths[tag]), f"/sdcard/Download/{tag}.apk"], check=True, capture_output=True)
+              subprocess.run([adb, "push", str(apk_paths["v0.7.6-build.939d02a"]), "/sdcard/Download/a_old.apk"], check=True, capture_output=True)
+              subprocess.run([adb, "push", str(apk_paths["v0.7.7-build.b06d040"]), "/sdcard/Download/b_new.apk"], check=True, capture_output=True)
+              # Trigger MediaScanner so Files app sees a_old.apk and b_new.apk immediately
+              for fn in ("a_old.apk", "b_new.apk"):
+                  subprocess.run([adb, "shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", f"file:///sdcard/Download/{fn}"], check=False, capture_output=True)
 
-              def ui_install(apk_remote: str, label: str):
+              def tap_text(xml: str, target: str) -> bool:
+                  m = re.search(rf'text="[^"]*{re.escape(target)}[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml, re.I)
+                  if not m:
+                      m = re.search(rf'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="[^"]*{re.escape(target)}[^"]*"', xml, re.I)
+                  if m:
+                      cx = (int(m.group(1)) + int(m.group(3))) // 2
+                      cy = (int(m.group(2)) + int(m.group(4))) // 2
+                      subprocess.run([adb, "shell", "input", "tap", str(cx), str(cy)], check=False)
+                      return True
+                  return False
+
+              def gui_flow(apk_name: str, label: str):
                   subprocess.run([adb, "logcat", "-c"], check=False)
-                  subprocess.run([
-                      adb, "shell", "appops", "set", "com.android.externalstorage", "REQUEST_INSTALL_PACKAGES", "allow"
-                  ], check=False, capture_output=True)
-                  subprocess.run([
-                      adb, "shell", "appops", "set", "com.google.android.documentsui", "REQUEST_INSTALL_PACKAGES", "allow"
-                  ], check=False, capture_output=True)
-                  uri = f"content://com.android.externalstorage.documents/document/primary%3ADownload%2F{apk_remote}"
-                  subprocess.run([
-                      adb, "shell", "am", "start",
-                      "-a", "android.intent.action.VIEW",
-                      "-d", uri,
-                      "-t", "application/vnd.android.package-archive",
-                      "--grant-read-uri-permission",
-                  ], check=False, capture_output=True)
+                  subprocess.run([adb, "shell", "am", "start", "-a", "android.intent.action.VIEW_DOWNLOADS"], check=False, capture_output=True)
                   screens = []
-                  for step in range(8):
+                  tapped_file = False
+                  for step in range(14):
                       time.sleep(2)
                       subprocess.run([adb, "shell", "uiautomator", "dump", "/sdcard/ui.xml"], check=False, capture_output=True)
                       xml = subprocess.run([adb, "shell", "cat", "/sdcard/ui.xml"], capture_output=True, text=True).stdout
                       texts = re.findall(r'text="([^"]+)"', xml)
-                      if texts:
-                          screens.append(f"t{step}:{texts}")
-                      for btn in ("Install", "Update", "INSTALL", "UPDATE", "Settings"):
-                          m = re.search(rf'text="{btn}"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml)
-                          if m and btn != "Settings":
-                              cx = (int(m.group(1)) + int(m.group(3))) // 2
-                              cy = (int(m.group(2)) + int(m.group(4))) // 2
-                              subprocess.run([adb, "shell", "input", "tap", str(cx), str(cy)], check=False)
-                              break
-                      if any("App installed" in t or "not installed" in t.lower() or "invalid" in t.lower() for t in texts):
+                      screens.append(f"s{step}:{texts[:8]}")
+                      if any("App installed" in t or "not installed" in t.lower() or "invalid" in t.lower() or "conflicts" in t.lower() for t in texts):
                           break
-                  lc = subprocess.run([adb, "logcat", "-d", "*:W"], capture_output=True, text=True).stdout
-                  pm_lines = [ln for ln in lc.splitlines() if any(k in ln for k in ("Package", "Install", "Volt", "horizon", "Sign", "Cert", "Downgrade", "dex", "Native"))]
+                      if not tapped_file and tap_text(xml, apk_name):
+                          tapped_file = True
+                          continue
+                      if any("Settings" == t for t in texts) and any("unknown" in t.lower() or "security" in t.lower() for t in texts):
+                          tap_text(xml, "Settings")
+                          continue
+                      if any("Allow from this source" in t for t in texts):
+                          tap_text(xml, "Allow from this source")
+                          time.sleep(1)
+                          subprocess.run([adb, "shell", "input", "keyevent", "KEYCODE_BACK"], check=False)
+                          continue
+                      if any(t.lower() in ("install", "update") for t in texts):
+                          if not tap_text(xml, "Update"):
+                              tap_text(xml, "Install")
+                          continue
+                      if any("Continue" == t for t in texts):
+                          tap_text(xml, "Continue")
+                          continue
+                  lc = subprocess.run([adb, "logcat", "-d", "-s", "PackageManager:*", "PackageInstaller:*", "InstallStaging:*", "InstallInstalling:*", "InstallFailed:*", "ApkSignatureVerifier:*", "OplusPackageManager:*"], capture_output=True, text=True).stdout
                   subprocess.run([adb, "shell", "input", "keyevent", "KEYCODE_HOME"], check=False)
-                  emu_out.append(f"UI {label}: {' -> '.join(screens)}\nWARN/ERR:\n" + "\n".join(pm_lines[-25:]))
+                  emu_out.append(f"GUI {label}:\n" + "\n".join(screens) + f"\nLOG:\n{lc[-1200:]}")
 
-              ui_install("v0.7.6-build.939d02a.apk", "fresh_939d02a")
-              ui_install("v0.7.6-build.7dcadc5.apk", "update_7dcadc5")
-              ui_install("v0.7.7-build.b06d040.apk", "update_b06d040")
+              gui_flow("a_old.apk", "fresh_939d02a")
+              gui_flow("b_new.apk", "update_b06d040")
 
               emu.kill()
               emu.wait(timeout=10)
