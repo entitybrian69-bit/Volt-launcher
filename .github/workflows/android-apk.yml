@@ -258,7 +258,11 @@ jobs:
               sys.stdout.write(proc.stdout)
               sys.stdout.flush()
               if proc.returncode != 0:
-                  tail = proc.stdout[-6000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  relevant = "\n".join(
+                      l for l in proc.stdout.splitlines()
+                      if not l.lstrip().startswith(("Compiling ", "Downloading ", "Downloaded "))
+                  )
+                  tail = relevant[-3500:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
                   print(f"\n::error title=Unit test failed ({' '.join(cmd)})::{tail}")
                   sys.exit(proc.returncode)
           PY

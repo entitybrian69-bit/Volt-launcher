@@ -774,7 +774,9 @@ impl Opt {
             Opt::GraphicsBackend => match s.horizon.api {
                 crate::graphics::GraphicsApi::OpenGl => tr("options.graphicsApi.opengl"),
                 crate::graphics::GraphicsApi::Vulkan => tr("options.graphicsApi.vulkan"),
-                crate::graphics::GraphicsApi::VulkanSupporter => "Vulkan (Supporter)".to_owned(),
+                crate::graphics::GraphicsApi::VulkanSupporter => {
+                    Text::literal("Vulkan (Supporter)")
+                }
                 _ => tr("options.graphicsApi.default"),
             },
             Opt::SmoothLighting => on_off(s.smooth_lighting),
