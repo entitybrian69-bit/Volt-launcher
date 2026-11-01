@@ -100,17 +100,20 @@ jobs:
                   sdkmgr = _sh.which("sdkmanager") or str(next(sdk.glob("cmdline-tools/*/bin/sdkmanager")))
               avdmgr = str(Path(sdkmgr).with_name("avdmanager"))
               subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=False)
-              subprocess.run(
-                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
-                  shell=True, check=True,
-              )
-              subprocess.run(
-                  f"echo no | '{avdmgr}' create avd -f -n testx86 -k 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
-                  shell=True, check=True,
-              )
-              emu_log = tmp / "emu.log"
+              avd_home = tmp / "avd"
+              avd_home.mkdir()
               env = dict(os.environ)
               env["ANDROID_SDK_ROOT"] = str(sdk)
+              env["ANDROID_AVD_HOME"] = str(avd_home)
+              subprocess.run(
+                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
+                  shell=True, check=True, env=env,
+              )
+              subprocess.run(
+                  f"echo no | '{avdmgr}' create avd -f -n testx86 -p '{avd_home / 'testx86.avd'}' -k 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
+                  shell=True, check=True, env=env,
+              )
+              emu_log = tmp / "emu.log"
               elog = open(emu_log, "w")
               emu = subprocess.Popen(
                   [
