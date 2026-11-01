@@ -149,14 +149,14 @@ jobs:
               emu_out.append(f"abilist={abilist}")
 
               # 1) Test real Google Files -> Google PackageInstaller GUI (INSTALL_FROM_ADB == 0)!
-              for _ in range(20):
-                  mk = subprocess.run([adb, "shell", "mkdir", "-p", "/sdcard/Download"], capture_output=True, text=True)
-                  if mk.returncode == 0:
+              subprocess.run([adb, "push", str(apk_paths["v0.7.6-build.939d02a"]), "/data/local/tmp/a_old.apk"], check=True, capture_output=True)
+              subprocess.run([adb, "push", str(apk_paths["v0.7.7-build.b06d040"]), "/data/local/tmp/b_new.apk"], check=True, capture_output=True)
+              subprocess.run([adb, "shell", "wm", "dismiss-keyguard"], check=False, capture_output=True)
+              for _ in range(30):
+                  cp1 = subprocess.run([adb, "shell", "cp /data/local/tmp/a_old.apk /sdcard/Download/a_old.apk && cp /data/local/tmp/b_new.apk /sdcard/Download/b_new.apk"], capture_output=True, text=True)
+                  if cp1.returncode == 0:
                       break
-                  time.sleep(1)
-
-              subprocess.run([adb, "push", str(apk_paths["v0.7.6-build.939d02a"]), "/sdcard/Download/a_old.apk"], check=True, capture_output=True)
-              subprocess.run([adb, "push", str(apk_paths["v0.7.7-build.b06d040"]), "/sdcard/Download/b_new.apk"], check=True, capture_output=True)
+                  time.sleep(2)
               # Trigger MediaScanner so Files app sees a_old.apk and b_new.apk immediately
               for fn in ("a_old.apk", "b_new.apk"):
                   subprocess.run([adb, "shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", f"file:///sdcard/Download/{fn}"], check=False, capture_output=True)
