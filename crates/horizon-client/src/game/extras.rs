@@ -393,7 +393,7 @@ impl Game<'_> {
     // Volt Accurate Block Placement
     // ========================================================================
 
-    pub(super) fn configured_use_delay(&self) -> u8 {
+    pub(super) fn configured_use_delay(&self) -> u32 {
         if !self.settings.extras.accurate_placement {
             return 4;
         }
@@ -407,7 +407,7 @@ impl Game<'_> {
                 .and_then(|h| self.items().get(&h.item))
                 .is_some_and(|i| i.block.is_some());
         if holding_block {
-            self.settings.extras.placement_fast_delay.min(4)
+            u32::from(self.settings.extras.placement_fast_delay.min(4))
         } else {
             4
         }
