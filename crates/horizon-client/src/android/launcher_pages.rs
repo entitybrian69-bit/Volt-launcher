@@ -38,6 +38,7 @@ pub(super) enum Action {
     Search,
     ShaderSource(crate::shader_catalog::Origin),
     ModSource(crate::shader_catalog::Origin),
+    PackSource(crate::shader_catalog::Origin),
     Field(&'static str),
     FinishNameEdit,
     Install(usize),
@@ -142,6 +143,41 @@ fn draw_centered_text(
     );
 }
 
+thread_local! {
+    static ACTIVE_FEEDBACK: std::cell::RefCell<Option<(Action, std::time::Instant)>> =
+        const { std::cell::RefCell::new(None) };
+    static TOGGLE_ANIMS: std::cell::RefCell<std::collections::HashMap<u32, (f32, std::time::Instant)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    let u = 1.0 - t.clamp(0.0, 1.0);
+    1.0 - u * u * u
+}
+
+fn toggle_key(action: Action) -> u32 {
+    match action {
+        Action::Immersive => 1,
+        Action::Cutout => 2,
+        Action::PerformanceHints => 3,
+        Action::GpuProfile => 4,
+        Action::RecordPerformance => 5,
+        Action::ToggleServerSkinSync => 6,
+        Action::ToggleSlimModel => 7,
+        Action::ToggleLocal(i) => 1000 + i as u32,
+        Action::ToggleSection(i) => 2000 + i as u32,
+        _ => 9999,
+    }
+}
+
+fn has_active_toggle_anims() -> bool {
+    TOGGLE_ANIMS.with(|map| {
+        map.borrow()
+            .values()
+            .any(|&(pos, ts)| (pos > 0.005 && pos < 0.995) && ts.elapsed().as_secs_f32() < 0.4)
+    })
+}
+
 fn styled_button(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -152,13 +188,26 @@ fn styled_button(
     centered: bool,
 ) {
     let [x, y, w, h] = rect;
+    let press_t = ACTIVE_FEEDBACK.with(|fb| {
+        fb.borrow().and_then(|(act, ts)| {
+            let el = ts.elapsed().as_secs_f32();
+            (act == action && el < 0.22).then_some(el / 0.22)
+        })
+    });
+    let v_start = ui.batch_mut().vertices.len();
     let radius = (h * 0.24).clamp(6.0, 11.0);
-    let (bg, border_col, fg) = match style {
+    let (mut bg, mut border_col, fg) = match style {
         BtnStyle::Primary => (theme::CRIMSON, theme::CRIMSON_BRIGHT, theme::ON_CRIMSON),
         BtnStyle::CrimsonOutline => (theme::CARD_INNER, theme::BORDER_CRIMSON, theme::TEXT),
         BtnStyle::Secondary => (theme::CARD_INNER, theme::BORDER, theme::TEXT),
         BtnStyle::Subtle => (theme::CARD, theme::BORDER, theme::MUTED),
     };
+    if let Some(t) = press_t {
+        let flash = (1.0 - t).powi(2);
+        bg = horizon_client::ui_theme::color::lerp(bg, theme::CRIMSON_BRIGHT, flash * 0.30);
+        border_col =
+            horizon_client::ui_theme::color::lerp(border_col, theme::CRIMSON_BRIGHT, flash * 0.85);
+    }
     ui.rounded(x, y, w, h, radius, bg);
     ui.border(x, y, w, h, radius, border_col);
     let base = if h >= 50.0 {
@@ -180,6 +229,11 @@ fn styled_button(
     } else {
         let fitted = ui.fit_text(Face::Medium, font, label, (w - 2.0 * pad).max(8.0));
         ui.text(Face::Medium, font, x + pad, text_vcenter(y, h, font), fg, &fitted);
+    }
+    if let Some(t) = press_t {
+        let dip = (t * std::f32::consts::PI).sin() * (1.0 - t * 0.45);
+        let scale = 1.0 - 0.042 * dip;
+        ui.animate_vertices(v_start, 0.0, 0.0, scale, [x + w * 0.5, y + h * 0.5], 1.0);
     }
     targets.push((rect, action));
 }
@@ -215,13 +269,28 @@ fn toggle(
     action: Action,
 ) {
     let [x, y, w, h] = rect;
+    let target_pos = if on { 1.0f32 } else { 0.0f32 };
+    let anim_pos = TOGGLE_ANIMS.with(|map| {
+        let mut map = map.borrow_mut();
+        let now = std::time::Instant::now();
+        let key = toggle_key(action);
+        let entry = map.entry(key).or_insert((target_pos, now));
+        let dt = now.duration_since(entry.1).as_secs_f32().clamp(0.0, 0.1);
+        let alpha = 1.0 - (-dt * 18.0).exp();
+        entry.0 += (target_pos - entry.0) * alpha;
+        if (target_pos - entry.0).abs() < 0.004 {
+            entry.0 = target_pos;
+        }
+        entry.1 = now;
+        entry.0
+    });
     if w >= 72.0 {
         ui.text(
             Face::Medium,
             14.5,
             x,
             text_vcenter(y, h, 14.5),
-            if on { theme::TEXT } else { theme::MUTED },
+            horizon_client::ui_theme::color::lerp(theme::MUTED, theme::TEXT, anim_pos),
             if on { "On" } else { "Off" },
         );
     }
@@ -229,28 +298,13 @@ fn toggle(
     let sh = 26.0;
     let sx = x + w - sw;
     let sy = y + (h - sh) * 0.5;
-    ui.rounded(
-        sx,
-        sy,
-        sw,
-        sh,
-        13.0,
-        if on { theme::CRIMSON } else { theme::HOVER },
-    );
-    ui.border(
-        sx,
-        sy,
-        sw,
-        sh,
-        13.0,
-        if on {
-            theme::CRIMSON_BRIGHT
-        } else {
-            theme::BORDER
-        },
-    );
+    let track_col = horizon_client::ui_theme::color::lerp(theme::HOVER, theme::CRIMSON, anim_pos);
+    let border_col =
+        horizon_client::ui_theme::color::lerp(theme::BORDER, theme::CRIMSON_BRIGHT, anim_pos);
+    ui.rounded(sx, sy, sw, sh, 13.0, track_col);
+    ui.border(sx, sy, sw, sh, 13.0, border_col);
     let knob = 20.0;
-    let kx = if on { sx + sw - knob - 3.0 } else { sx + 3.0 };
+    let kx = sx + 3.0 + (sw - knob - 6.0) * anim_pos;
     ui.rounded(kx, sy + 3.0, knob, knob, 10.0, theme::ON_CRIMSON);
     targets.push((rect, action));
 }
@@ -468,6 +522,8 @@ struct DrawCtx<'a> {
     volt_accounts: &'a crate::volt_accounts::VoltAccountManager,
     preview_yaw: f32,
     preview_pitch: f32,
+    preview_vel_yaw: f32,
+    sidebar_anim: f32,
     idle_phase: f32,
     preview_rect: &'a mut Option<[f32; 4]>,
 }
@@ -504,59 +560,48 @@ impl DrawCtx<'_> {
         for (i, &page) in Page::ALL.iter().enumerate() {
             let iy = nav_top + i as f32 * step;
             let rect = [rx + 10.0, iy, rw - 20.0, item_h];
-            let active = page == self.catalog.page;
-            if active {
-                ui.rounded(
-                    rect[0],
-                    rect[1],
-                    rect[2],
-                    rect[3],
-                    10.0,
-                    if page == Page::Play {
-                        theme::CRIMSON
-                    } else {
-                        theme::CRIMSON_SOFT
-                    },
-                );
-                ui.border(
-                    rect[0],
-                    rect[1],
-                    rect[2],
-                    rect[3],
-                    10.0,
-                    if page == Page::Play {
-                        theme::CRIMSON_BRIGHT
-                    } else {
-                        theme::CRIMSON
-                    },
-                );
-                ui.rounded(
-                    rx + 2.5,
-                    iy + (item_h * 0.18).clamp(5.0, 12.0),
-                    4.0,
-                    (item_h * 0.64).max(14.0),
-                    2.0,
-                    theme::CRIMSON_BRIGHT,
-                );
-            } else {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CARD);
-                ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::BORDER);
-            }
-            let fg = if active {
-                theme::ON_CRIMSON
-            } else {
-                theme::TEXT
-            };
-            draw_page_icon(ui, page, rect[0] + 22.0, iy + item_h * 0.5, fg);
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CARD);
+            ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::BORDER);
+            self.targets.push((rect, Action::Page(page)));
+        }
+
+        // Smoothly gliding active crimson selection pill + glowing left bar!
+        let anim_y = nav_top + self.sidebar_anim * step;
+        let play_blend = (1.0 - self.sidebar_anim).clamp(0.0, 1.0);
+        let pill_fill = horizon_client::ui_theme::color::lerp(
+            theme::CRIMSON_BADGE,
+            theme::CRIMSON,
+            play_blend,
+        );
+        let pill_border = horizon_client::ui_theme::color::lerp(
+            theme::CRIMSON,
+            theme::CRIMSON_BRIGHT,
+            play_blend,
+        );
+        ui.rounded(rx + 10.0, anim_y, rw - 20.0, item_h, 10.0, pill_fill);
+        ui.border(rx + 10.0, anim_y, rw - 20.0, item_h, 10.0, pill_border);
+        ui.rounded(
+            rx + 2.5,
+            anim_y + (item_h * 0.18).clamp(5.0, 12.0),
+            4.0,
+            (item_h * 0.64).max(14.0),
+            2.0,
+            theme::CRIMSON_BRIGHT,
+        );
+
+        for (i, &page) in Page::ALL.iter().enumerate() {
+            let iy = nav_top + i as f32 * step;
+            let prox = (1.0 - (self.sidebar_anim - i as f32).abs()).clamp(0.0, 1.0);
+            let fg = horizon_client::ui_theme::color::lerp(theme::TEXT, theme::ON_CRIMSON, prox);
+            draw_page_icon(ui, page, rx + 32.0, iy + item_h * 0.5, fg);
             ui.text(
                 Face::Medium,
                 16.5,
-                rect[0] + 44.0,
+                rx + 54.0 + prox * 2.0,
                 text_vcenter(iy, item_h, 16.5),
                 fg,
                 page.name(),
             );
-            self.targets.push((rect, Action::Page(page)));
         }
 
         // Discord button directly above GitHub button
@@ -621,28 +666,33 @@ impl DrawCtx<'_> {
             self.login.signed_in,
         );
 
-        // Segmented pill dock
+        // Segmented pill dock with smoothly gliding crimson pill!
         ui.rounded(12.0, 52.0, w - 24.0, 40.0, 10.0, theme::RAIL);
         ui.border(12.0, 52.0, w - 24.0, 40.0, 10.0, theme::BORDER);
         let tab_w = (w - 32.0) / Page::ALL.len() as f32;
+        ui.rounded(
+            16.0 + self.sidebar_anim * tab_w + 1.0,
+            56.0,
+            tab_w - 2.0,
+            32.0,
+            7.0,
+            theme::CRIMSON,
+        );
         for (i, &page) in Page::ALL.iter().enumerate() {
             let tx = 16.0 + i as f32 * tab_w;
-            let active = page == self.catalog.page;
+            let prox = (1.0 - (self.sidebar_anim - i as f32).abs()).clamp(0.0, 1.0);
             let label = match page {
                 Page::Installed => "Files",
                 Page::Settings => "Setup",
                 _ => page.name(),
             };
             let rect = [tx + 1.0, 56.0, tab_w - 2.0, 32.0];
-            if active {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 7.0, theme::CRIMSON);
-            }
             draw_centered_text(
                 ui,
                 Face::Medium,
                 12.5,
                 rect,
-                if active { theme::ON_CRIMSON } else { theme::MUTED },
+                horizon_client::ui_theme::color::lerp(theme::MUTED, theme::ON_CRIMSON, prox),
                 label,
             );
             self.targets.push((rect, Action::Page(page)));
@@ -930,6 +980,15 @@ impl DrawCtx<'_> {
         // Subtle crimson pedestal glow under feet
         let ped_w = (rw * 0.44).clamp(80.0, 160.0);
         let ped_y = ry + char_h - 38.0;
+        let pulse = (self.idle_phase * 2.1).sin() * 0.5 + 0.5;
+        ui.rounded(
+            rx + (rw - (ped_w + 18.0)) * 0.5,
+            ped_y - 3.0,
+            ped_w + 18.0,
+            14.0,
+            7.0,
+            horizon_client::ui_theme::color::with_alpha(theme::CRIMSON, 0.14 + 0.16 * pulse),
+        );
         ui.rounded(
             rx + (rw - ped_w) * 0.5,
             ped_y,
@@ -952,6 +1011,7 @@ impl DrawCtx<'_> {
             self.preview_yaw,
             self.preview_pitch,
             self.idle_phase,
+            self.preview_vel_yaw,
             0,
             1,
             self.volt_accounts.active_skin_preview(),
@@ -1036,30 +1096,49 @@ impl DrawCtx<'_> {
             Page::Shaders => "Shader Packs",
             _ => "Resource Packs",
         };
+        use crate::shader_catalog::Origin;
         let hint = match page {
-            Page::Mods
-                if self.catalog.config.mod_source == crate::shader_catalog::Origin::Modrinth =>
-            {
-                "Modrinth Java mods are browse-only; Fabric/Forge/NeoForge cannot run here"
+            Page::Mods if self.catalog.config.mod_source != Origin::Horizon => {
+                "Java mods (Modrinth / CurseForge) are browse-only; native .hmod mods run on Android"
             }
             Page::Mods => "Search Horizon mods or paste an HTTPS .hmod link",
-            Page::Shaders
-                if self.catalog.config.shader_source == crate::shader_catalog::Origin::Modrinth =>
-            {
-                "Modrinth shader ZIPs / experimental compatibility; some packs may not work"
+            Page::Shaders if self.catalog.config.shader_source != Origin::Horizon => {
+                "Modrinth & CurseForge shader ZIPs / experimental compatibility"
             }
             Page::Shaders => "Horizon catalog / native .hshader & experimental ZIP support",
-            _ => "Verified downloads / enable in Installed",
+            _ => "Modrinth & CurseForge verified resource packs / enable in Installed",
+        };
+        let origins: &[Origin] = if page == Page::Packs {
+            &[Origin::Modrinth, Origin::CurseForge, Origin::Both]
+        } else {
+            &[
+                Origin::Horizon,
+                Origin::Modrinth,
+                Origin::CurseForge,
+                Origin::Both,
+            ]
+        };
+        let active_origin = match page {
+            Page::Mods => self.catalog.config.mod_source,
+            Page::Shaders => self.catalog.config.shader_source,
+            _ => self.catalog.config.pack_source,
+        };
+        let origin_action = |o: Origin| match page {
+            Page::Mods => Action::ModSource(o),
+            Page::Shaders => Action::ShaderSource(o),
+            _ => Action::PackSource(o),
         };
 
-        // Top header row (matching 02-mods.png / 03-packs.png / 04-shaders.png)
+        // Top header row with Modrinth | CurseForge | Both platform selector!
         if !compact {
             ui.text(Face::Medium, 24.0, cx, cy, theme::TEXT, title);
-            let hint_max = (cw - 450.0).max(140.0);
+            let acc_w = 186.0;
+            let tab_item_w = if origins.len() == 4 { 84.0 } else { 88.0 };
+            let seg_w = 8.0 + origins.len() as f32 * tab_item_w;
+            let hint_max = (cw - acc_w - seg_w - 32.0).max(120.0);
             let fitted_hint = ui.fit_text(Face::Regular, 13.0, hint, hint_max);
             ui.text(Face::Regular, 13.0, cx, cy + 30.0, theme::MUTED, &fitted_hint);
 
-            let acc_w = 196.0;
             draw_account_chip(
                 ui,
                 self.targets,
@@ -1068,77 +1147,58 @@ impl DrawCtx<'_> {
                 self.login.signed_in,
             );
 
-            if matches!(page, Page::Mods | Page::Shaders) {
-                use crate::shader_catalog::Origin;
-                let seg_w = 204.0;
-                let seg_x = cx + cw - acc_w - seg_w - 12.0;
-                ui.rounded(seg_x, cy + 4.0, seg_w, 38.0, 10.0, theme::CARD);
-                ui.border(seg_x, cy + 4.0, seg_w, 38.0, 10.0, theme::BORDER);
-                let active_origin = if page == Page::Mods {
-                    self.catalog.config.mod_source
-                } else {
-                    self.catalog.config.shader_source
-                };
-                for (idx, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let ox = seg_x + 4.0 + idx as f32 * 98.0;
-                    let orect = [ox, cy + 8.0, 94.0, 30.0];
-                    let is_on = active_origin == origin;
-                    if is_on {
-                        ui.rounded(orect[0], orect[1], orect[2], orect[3], 7.0, theme::CRIMSON_BADGE);
-                        ui.border(orect[0], orect[1], orect[2], orect[3], 7.0, theme::CRIMSON);
-                    }
-                    draw_centered_text(
-                        ui,
-                        Face::Medium,
-                        13.0,
-                        orect,
-                        if is_on { theme::ON_CRIMSON } else { theme::MUTED },
-                        origin.source().label(),
-                    );
-                    self.targets.push((
-                        orect,
-                        if page == Page::Mods {
-                            Action::ModSource(origin)
-                        } else {
-                            Action::ShaderSource(origin)
-                        },
-                    ));
+            let seg_x = cx + cw - acc_w - seg_w - 10.0;
+            ui.rounded(seg_x, cy + 4.0, seg_w, 38.0, 10.0, theme::CARD);
+            ui.border(seg_x, cy + 4.0, seg_w, 38.0, 10.0, theme::BORDER);
+            for (idx, &origin) in origins.iter().enumerate() {
+                let ox = seg_x + 4.0 + idx as f32 * tab_item_w;
+                let orect = [ox + 1.0, cy + 8.0, tab_item_w - 2.0, 30.0];
+                let is_on = active_origin == origin;
+                if is_on {
+                    ui.rounded(orect[0], orect[1], orect[2], orect[3], 7.0, theme::CRIMSON_BADGE);
+                    ui.border(orect[0], orect[1], orect[2], orect[3], 7.0, theme::CRIMSON);
                 }
+                draw_centered_text(
+                    ui,
+                    Face::Medium,
+                    12.5,
+                    orect,
+                    if is_on { theme::ON_CRIMSON } else { theme::MUTED },
+                    origin.label(),
+                );
+                self.targets.push((orect, origin_action(origin)));
             }
         } else {
             ui.text(Face::Medium, 18.0, cx, cy, theme::TEXT, title);
-            if matches!(page, Page::Mods | Page::Shaders) {
-                use crate::shader_catalog::Origin;
-                let active_origin = if page == Page::Mods {
-                    self.catalog.config.mod_source
-                } else {
-                    self.catalog.config.shader_source
-                };
-                for (idx, origin) in [Origin::Horizon, Origin::Modrinth].into_iter().enumerate() {
-                    let orect = [cx + cw - 172.0 + idx as f32 * 88.0, cy - 2.0, 84.0, 28.0];
-                    styled_button(
-                        ui,
-                        self.targets,
-                        orect,
-                        origin.source().label(),
-                        if page == Page::Mods {
-                            Action::ModSource(origin)
-                        } else {
-                            Action::ShaderSource(origin)
-                        },
-                        if active_origin == origin {
-                            BtnStyle::Primary
-                        } else {
-                            BtnStyle::Secondary
-                        },
-                        true,
-                    );
+            let seg_y = cy + 26.0;
+            ui.rounded(cx, seg_y, cw, 34.0, 9.0, theme::CARD);
+            ui.border(cx, seg_y, cw, 34.0, 9.0, theme::BORDER);
+            let tab_item_w = (cw - 8.0) / origins.len() as f32;
+            for (idx, &origin) in origins.iter().enumerate() {
+                let orect = [
+                    cx + 4.0 + idx as f32 * tab_item_w + 1.0,
+                    seg_y + 3.0,
+                    tab_item_w - 2.0,
+                    28.0,
+                ];
+                let is_on = active_origin == origin;
+                if is_on {
+                    ui.rounded(orect[0], orect[1], orect[2], orect[3], 6.5, theme::CRIMSON);
                 }
+                draw_centered_text(
+                    ui,
+                    Face::Medium,
+                    12.0,
+                    orect,
+                    if is_on { theme::ON_CRIMSON } else { theme::MUTED },
+                    origin.label(),
+                );
+                self.targets.push((orect, origin_action(origin)));
             }
         }
 
         // Unified Command Toolbar Card (Search + Search CTA + Open folder + Import file)
-        let bar_y = cy + if compact { 32.0 } else { 54.0 };
+        let bar_y = cy + if compact { 66.0 } else { 54.0 };
         let bar_h = if compact { 88.0 } else { 52.0 };
         ui.rounded(cx, bar_y, cw, bar_h, 12.0, theme::CARD);
         ui.border(cx, bar_y, cw, bar_h, 12.0, theme::BORDER);
@@ -1378,6 +1438,7 @@ impl DrawCtx<'_> {
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
             *self.list_view = Some([top, bottom, max_scroll]);
 
+            let results_age = self.catalog.results_born.elapsed().as_secs_f32();
             for (i, p) in self.catalog.results.iter().enumerate() {
                 let row = i / cols;
                 let col_idx = i % cols;
@@ -1385,10 +1446,14 @@ impl DrawCtx<'_> {
                 let y = top + row as f32 * row_step - self.catalog.scroll;
 
                 let download = self.catalog.download_label(p);
+                let is_java_mod = p.kind == crate::browser::Kind::Mod
+                    && matches!(
+                        p.source,
+                        crate::browser::SourceId::Modrinth | crate::browser::SourceId::CurseForge
+                    );
                 let can_install = download.is_none()
                     && !crate::catalog::source_only_mod(p)
-                    && !(p.kind == crate::browser::Kind::Mod
-                        && p.source == crate::browser::SourceId::Modrinth)
+                    && !is_java_mod
                     && !(p.kind == crate::browser::Kind::Mod && !cfg!(target_pointer_width = "64"));
 
                 let btn_w = if cols == 3 { 98.0 } else { 116.0 };
@@ -1406,14 +1471,79 @@ impl DrawCtx<'_> {
                     continue;
                 }
 
+                let card_v_start = ui.batch_mut().vertices.len();
+                let icon_slot = 4 + (i % 24);
+                let project_icon = self.catalog.project_icon(p);
+
                 ui.rounded(x, y, card_w, card_h, 12.0, theme::CARD);
                 ui.border(x, y, card_w, card_h, 12.0, theme::BORDER_CRIMSON);
 
                 if cols == 3 {
-                    // 3-Column Resource Pack Card layout (matching 03-packs.png)
-                    ui.rounded(x + 14.0, y + 14.0, 44.0, 44.0, 10.0, theme::CRIMSON_BADGE);
-                    ui.border(x + 14.0, y + 14.0, 44.0, 44.0, 10.0, theme::BORDER_CRIMSON);
-                    draw_page_icon(ui, page, x + 36.0, y + 36.0, theme::CRIMSON_BRIGHT);
+                    // 3-Column Resource Pack Card layout with real project logo + source pill!
+                    let icon_sz = 46.0;
+                    ui.rounded(x + 14.0, y + 13.0, icon_sz, icon_sz, 10.0, theme::HERO_BG);
+                    let mut drew_logo = false;
+                    if let Some(ic) = project_icon {
+                        let fade = (ic.loaded_at.elapsed().as_secs_f32() / 0.22).clamp(0.0, 1.0);
+                        let alpha = (ease_out_cubic(fade) * 255.0).round() as u8;
+                        drew_logo = ui.draw_dynamic_rgba(
+                            icon_slot,
+                            ic.hash,
+                            64,
+                            64,
+                            &ic.rgba,
+                            x + 15.0,
+                            y + 14.0,
+                            icon_sz - 2.0,
+                            icon_sz - 2.0,
+                            alpha,
+                        );
+                    }
+                    if !drew_logo {
+                        let pulse = (self.idle_phase * 4.2 + i as f32 * 0.7).sin() * 0.5 + 0.5;
+                        ui.rounded(
+                            x + 14.0,
+                            y + 13.0,
+                            icon_sz,
+                            icon_sz,
+                            10.0,
+                            horizon_client::ui_theme::color::lerp(
+                                theme::CRIMSON_BADGE,
+                                theme::HERO_BG,
+                                pulse,
+                            ),
+                        );
+                        draw_page_icon(
+                            ui,
+                            page,
+                            x + 14.0 + icon_sz * 0.5,
+                            y + 13.0 + icon_sz * 0.5,
+                            theme::CRIMSON_BRIGHT,
+                        );
+                    }
+                    ui.border(
+                        x + 14.0,
+                        y + 13.0,
+                        icon_sz,
+                        icon_sz,
+                        10.0,
+                        theme::BORDER_CRIMSON,
+                    );
+
+                    // Platform badge next to icon so Both mode clearly distinguishes Modrinth vs CurseForge
+                    let src_tag = p.source.label();
+                    let sw = ui.measure(Face::Medium, 10.5, src_tag) + 12.0;
+                    if x + 66.0 + sw < btn_rect[0] - 6.0 {
+                        ui.rounded(x + 66.0, y + 25.0, sw, 20.0, 6.0, theme::CRIMSON_BADGE);
+                        draw_centered_text(
+                            ui,
+                            Face::Medium,
+                            10.5,
+                            [x + 66.0, y + 25.0, sw, 20.0],
+                            theme::CRIMSON_BRIGHT,
+                            src_tag,
+                        );
+                    }
 
                     let title_fit = ui.fit_text(Face::Medium, 16.0, &p.title, card_w - 28.0);
                     ui.text(
@@ -1437,16 +1567,55 @@ impl DrawCtx<'_> {
                         );
                     }
                 } else {
-                    // 2-Column Rich Mod / Shader Card layout (matching 02-mods.png)
-                    let icon_sz = if compact { 42.0 } else { 56.0 };
+                    // 2-Column Rich Mod / Shader / Pack Card layout with real project logo!
+                    let icon_sz = if compact { 44.0 } else { 56.0 };
                     ui.rounded(x + 14.0, y + 14.0, icon_sz, icon_sz, 11.0, theme::HERO_BG);
-                    ui.border(x + 14.0, y + 14.0, icon_sz, icon_sz, 11.0, theme::BORDER_CRIMSON);
-                    draw_page_icon(
-                        ui,
-                        page,
-                        x + 14.0 + icon_sz * 0.5,
-                        y + 14.0 + icon_sz * 0.5,
-                        theme::CRIMSON_BRIGHT,
+                    let mut drew_logo = false;
+                    if let Some(ic) = project_icon {
+                        let fade = (ic.loaded_at.elapsed().as_secs_f32() / 0.22).clamp(0.0, 1.0);
+                        let alpha = (ease_out_cubic(fade) * 255.0).round() as u8;
+                        drew_logo = ui.draw_dynamic_rgba(
+                            icon_slot,
+                            ic.hash,
+                            64,
+                            64,
+                            &ic.rgba,
+                            x + 15.0,
+                            y + 15.0,
+                            icon_sz - 2.0,
+                            icon_sz - 2.0,
+                            alpha,
+                        );
+                    }
+                    if !drew_logo {
+                        let pulse = (self.idle_phase * 4.2 + i as f32 * 0.7).sin() * 0.5 + 0.5;
+                        ui.rounded(
+                            x + 14.0,
+                            y + 14.0,
+                            icon_sz,
+                            icon_sz,
+                            11.0,
+                            horizon_client::ui_theme::color::lerp(
+                                theme::CRIMSON_BADGE,
+                                theme::HERO_BG,
+                                pulse,
+                            ),
+                        );
+                        draw_page_icon(
+                            ui,
+                            page,
+                            x + 14.0 + icon_sz * 0.5,
+                            y + 14.0 + icon_sz * 0.5,
+                            theme::CRIMSON_BRIGHT,
+                        );
+                    }
+                    ui.border(
+                        x + 14.0,
+                        y + 14.0,
+                        icon_sz,
+                        icon_sz,
+                        11.0,
+                        theme::BORDER_CRIMSON,
                     );
 
                     let text_x = x + 26.0 + icon_sz;
@@ -1527,7 +1696,7 @@ impl DrawCtx<'_> {
                         );
                     }
 
-                    // Optional "View details" button (matching 02-mods.png)
+                    // Widened "View details" button so the full label never truncates!
                     if !compact
                         && (p.page.starts_with("https://") || p.page.starts_with("http://"))
                         && y + card_h - btn_h - 12.0 >= top
@@ -1536,7 +1705,7 @@ impl DrawCtx<'_> {
                         styled_button(
                             ui,
                             self.targets,
-                            [x + 14.0, y + card_h - btn_h - 12.0, 102.0, btn_h],
+                            [x + 14.0, y + card_h - btn_h - 12.0, 128.0, btn_h],
                             "View details",
                             Action::OpenProject(i),
                             BtnStyle::Secondary,
@@ -1572,9 +1741,7 @@ impl DrawCtx<'_> {
                             theme::TEXT,
                             &state,
                         );
-                    } else if p.kind == crate::browser::Kind::Mod
-                        && p.source == crate::browser::SourceId::Modrinth
-                    {
+                    } else if is_java_mod {
                         draw_centered_text(
                             ui,
                             Face::Regular,
@@ -1614,6 +1781,21 @@ impl DrawCtx<'_> {
                             true,
                         );
                     }
+                }
+
+                // Staggered card entrance slide + micro-scale + fade!
+                let delay = (i.min(8) as f32) * 0.028;
+                if results_age < delay + 0.25 {
+                    let raw_t = ((results_age - delay) / 0.25).clamp(0.0, 1.0);
+                    let ease = ease_out_cubic(raw_t);
+                    ui.animate_vertices(
+                        card_v_start,
+                        0.0,
+                        (1.0 - ease) * 14.0,
+                        0.97 + 0.03 * ease,
+                        [x + card_w * 0.5, y + card_h * 0.5],
+                        ease,
+                    );
                 }
             }
         }
@@ -2774,6 +2956,7 @@ impl DrawCtx<'_> {
             self.preview_yaw,
             self.preview_pitch,
             self.idle_phase,
+            self.preview_vel_yaw,
             2,
             3,
             self.volt_accounts.active_skin_preview(),
@@ -3233,7 +3416,113 @@ impl DrawCtx<'_> {
 }
 
 impl Launcher {
+    pub(super) fn is_animating(&self) -> bool {
+        let page_idx = Page::ALL
+            .iter()
+            .position(|&p| p == self.catalog.page)
+            .unwrap_or(0) as f32;
+        if (self.sidebar_anim - page_idx).abs() > 0.005 {
+            return true;
+        }
+        if self
+            .page_anim
+            .is_some_and(|(ts, _)| ts.elapsed().as_secs_f32() < 0.28)
+        {
+            return true;
+        }
+        if self
+            .modal_anim
+            .is_some_and(|ts| ts.elapsed().as_secs_f32() < 0.24)
+        {
+            return true;
+        }
+        if self
+            .feedback
+            .is_some_and(|(_, ts)| ts.elapsed().as_secs_f32() < 0.24)
+        {
+            return true;
+        }
+        if self.preview_target_yaw.is_some() || self.preview_vel_yaw.abs() > 0.4 {
+            return true;
+        }
+        if self.worker.is_some() || self.catalog.animating_icons_or_cards() {
+            return true;
+        }
+        has_active_toggle_anims()
+    }
+
+    fn tick_animations(&mut self) {
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(self.last_frame).as_secs_f32().clamp(0.0, 0.08);
+        self.last_frame = now;
+
+        // Detect page changes from any trigger (sidebar tap, character tap, controller, install completion)
+        if self.catalog.page != self.prev_rendered_page {
+            let old_idx = Page::ALL
+                .iter()
+                .position(|&p| p == self.prev_rendered_page)
+                .unwrap_or(0) as f32;
+            let new_idx = Page::ALL
+                .iter()
+                .position(|&p| p == self.catalog.page)
+                .unwrap_or(0) as f32;
+            let dir = if new_idx >= old_idx { 1.0 } else { -1.0 };
+            self.page_anim = Some((now, dir));
+            self.prev_rendered_page = self.catalog.page;
+        }
+
+        // Smoothly glide sidebar / dock active selection pill
+        let target_idx = Page::ALL
+            .iter()
+            .position(|&p| p == self.catalog.page)
+            .unwrap_or(0) as f32;
+        let alpha = 1.0 - (-dt * 18.0).exp();
+        self.sidebar_anim += (target_idx - self.sidebar_anim) * alpha;
+        if (target_idx - self.sidebar_anim).abs() < 0.003 {
+            self.sidebar_anim = target_idx;
+        }
+
+        // Detect modal pop-in transitions (Chooser / Microsoft Login)
+        let modal_open = self.chooser.is_some() || self.login.visible;
+        if modal_open && !self.modal_was_open {
+            self.modal_anim = Some(now);
+        }
+        self.modal_was_open = modal_open;
+
+        // Smooth 3D character Flip target + rotational inertia
+        let dragging_preview = (self.mouse_down || self.drag.is_some())
+            && self.drag.as_ref().is_some_and(|d| d.moved);
+        if let Some(target_yaw) = self.preview_target_yaw {
+            let mut diff = (target_yaw - self.preview_yaw + 180.0).rem_euclid(360.0) - 180.0;
+            if diff.abs() < 0.4 {
+                self.preview_yaw = target_yaw.rem_euclid(360.0);
+                self.preview_vel_yaw = 0.0;
+                self.preview_target_yaw = None;
+            } else {
+                let step_alpha = 1.0 - (-dt * 11.5).exp();
+                let delta = diff * step_alpha;
+                self.preview_yaw = (self.preview_yaw + delta).rem_euclid(360.0);
+                self.preview_vel_yaw = (delta / dt.max(0.004)).clamp(-320.0, 320.0);
+                diff -= delta;
+                if diff.abs() < 0.4 {
+                    self.preview_yaw = target_yaw.rem_euclid(360.0);
+                    self.preview_target_yaw = None;
+                }
+            }
+        } else if !dragging_preview {
+            if self.preview_vel_yaw.abs() > 0.3 {
+                self.preview_yaw =
+                    (self.preview_yaw + self.preview_vel_yaw * dt).rem_euclid(360.0);
+                self.preview_vel_yaw *= (-dt * 6.0).exp();
+            } else {
+                self.preview_vel_yaw = 0.0;
+            }
+        }
+    }
+
     pub(super) fn draw_pages(&mut self) -> Result<()> {
+        self.tick_animations();
+        ACTIVE_FEEDBACK.with(|fb| *fb.borrow_mut() = self.feedback);
         let (Some(r), Some(gui)) = (&mut self.renderer, &self.gui) else {
             return Ok(());
         };
@@ -3274,6 +3563,8 @@ impl Launcher {
             .map(|a| format!("{} • {}", a.name, a.provider.badge()))
             .unwrap_or_else(|| self.login.status(&self.catalog.config.name));
         let idle_phase = self.launch_start.elapsed().as_secs_f32();
+        let content_area;
+        let page_v_start;
         {
             let mut ctx = DrawCtx {
                 home: &self.home,
@@ -3288,10 +3579,12 @@ impl Launcher {
                 volt_accounts: &self.volt_accounts,
                 preview_yaw: self.preview_yaw,
                 preview_pitch: self.preview_pitch,
+                preview_vel_yaw: self.preview_vel_yaw,
+                sidebar_anim: self.sidebar_anim,
                 idle_phase,
                 preview_rect: &mut self.preview_rect,
             };
-            let content_area = if compact {
+            content_area = if compact {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
                 [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
@@ -3305,6 +3598,7 @@ impl Launcher {
                 ]
             };
 
+            page_v_start = ui.batch_mut().vertices.len();
             let page = ctx.catalog.page;
             match page {
                 Page::Play => ctx.draw_play_page(&mut ui, content_area, compact, &account_status),
@@ -3320,6 +3614,25 @@ impl Launcher {
                 Page::Settings => {
                     ctx.draw_settings_page(&mut ui, content_area, compact, &account_status)
                 }
+            }
+        }
+        if let Some((anim_start, dir)) = self.page_anim {
+            let el = anim_start.elapsed().as_secs_f32();
+            if el < 0.25 {
+                let ease = ease_out_cubic(el / 0.25);
+                ui.animate_vertices(
+                    page_v_start,
+                    0.0,
+                    dir * (1.0 - ease) * 18.0,
+                    0.985 + 0.015 * ease,
+                    [
+                        content_area[0] + content_area[2] * 0.5,
+                        content_area[1] + content_area[3] * 0.5,
+                    ],
+                    ease,
+                );
+            } else {
+                self.page_anim = None;
             }
         }
 
@@ -3349,6 +3662,7 @@ impl Launcher {
             );
         }
 
+        let modal_v_start = ui.batch_mut().vertices.len();
         if self.login.visible {
             self.list_targets.clear();
             self.list_view = None;
@@ -3363,6 +3677,31 @@ impl Launcher {
             chooser.draw(&mut ui, &mut self.targets);
             self.list_targets = chooser.navigation(ui.w, ui.h);
             self.list_view = Some(chooser.viewport(ui.h));
+        }
+        if (self.login.visible || self.chooser.is_some())
+            && let Some(anim_start) = self.modal_anim
+        {
+            let el = anim_start.elapsed().as_secs_f32();
+            if el < 0.20 {
+                let ease = ease_out_cubic(el / 0.20);
+                // Fade backdrop smoothly while keeping full-bleed bounds; pop-scale modal card!
+                let backdrop_end = (modal_v_start + 6).min(ui.batch_mut().vertices.len());
+                for v in &mut ui.batch_mut().vertices[modal_v_start..backdrop_end] {
+                    let base_a = (v.color >> 24) as f32;
+                    let new_a = (base_a * ease).round().clamp(0.0, 255.0) as u32;
+                    v.color = (v.color & 0x00ff_ffff) | (new_a << 24);
+                }
+                ui.animate_vertices(
+                    backdrop_end,
+                    0.0,
+                    (1.0 - ease) * 14.0,
+                    0.92 + 0.08 * ease,
+                    [w * 0.5, h * 0.5],
+                    ease,
+                );
+            } else {
+                self.modal_anim = None;
+            }
         }
         if let Some([top, bottom, maximum]) = self.list_view
             && maximum > 0.0
@@ -3575,12 +3914,21 @@ impl Launcher {
                 self.catalog.config.mod_source = origin;
                 self.catalog.config.save(&self.home)?;
                 self.catalog.offset = 0;
+                self.page_anim = Some((std::time::Instant::now(), 0.45));
                 self.catalog.browse(&self.home);
             }
             Some(Action::ShaderSource(origin)) => {
                 self.catalog.config.shader_source = origin;
                 self.catalog.config.save(&self.home)?;
                 self.catalog.offset = 0;
+                self.page_anim = Some((std::time::Instant::now(), 0.45));
+                self.catalog.browse(&self.home);
+            }
+            Some(Action::PackSource(origin)) => {
+                self.catalog.config.pack_source = origin;
+                self.catalog.config.save(&self.home)?;
+                self.catalog.offset = 0;
+                self.page_anim = Some((std::time::Instant::now(), 0.45));
                 self.catalog.browse(&self.home);
             }
             Some(Action::OpenProject(i)) => {
@@ -3719,6 +4067,7 @@ impl Launcher {
                 crate::platform::hide();
                 self.catalog.editing = None;
                 self.catalog.account_tab = prov;
+                self.page_anim = Some((std::time::Instant::now(), 0.40));
             }
             Some(Action::SelectVoltAccount(idx)) => {
                 if let Some(acc) = self.volt_accounts.accounts.get(idx).cloned() {
@@ -3835,8 +4184,8 @@ impl Launcher {
                 if let Err(e) = self.volt_accounts.apply_preset_cape(preset) {
                     self.catalog.status = e;
                 } else {
-                    // Rotate character toward back so user immediately sees their newly equipped 3D cape!
-                    self.preview_yaw = 162.0;
+                    // Smoothly spin character toward back so user watches their 3D cape billow into view!
+                    self.preview_target_yaw = Some(162.0);
                     self.catalog.status = format!("Equipped {}!", preset.label());
                 }
             }
@@ -3848,7 +4197,8 @@ impl Launcher {
             }
             Some(Action::ResetPreviewAngle) => {
                 let normalized = (self.preview_yaw + 180.0).rem_euclid(360.0) - 180.0;
-                self.preview_yaw = if normalized.abs() < 90.0 { 162.0 } else { -18.0 };
+                let target = if normalized.abs() < 90.0 { 162.0 } else { 342.0 };
+                self.preview_target_yaw = Some(target);
                 self.preview_pitch = 6.0;
             }
             Some(Action::Account) => {
@@ -4056,8 +4406,10 @@ impl Launcher {
                                 ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
                             });
                         if in_preview {
+                            self.preview_target_yaw = None;
                             self.preview_yaw =
                                 (self.preview_yaw + dx * 0.9).rem_euclid(360.0);
+                            self.preview_vel_yaw = (dx * 42.0).clamp(-360.0, 360.0);
                             self.preview_pitch =
                                 (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
                         } else if let Some(chooser) = &mut self.chooser {

@@ -3,18 +3,22 @@ use crate::browser::{self, Kind, Project, Source, SourceId, Version, installed};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Origin {
     #[default]
     Horizon,
     Modrinth,
+    CurseForge,
+    Both,
 }
 impl Origin {
-    pub fn source(self) -> SourceId {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::Horizon => SourceId::Horizon,
-            Self::Modrinth => SourceId::Modrinth,
+            Self::Horizon => "Horizon",
+            Self::Modrinth => "Modrinth",
+            Self::CurseForge => "CurseForge",
+            Self::Both => "Both",
         }
     }
 }
@@ -39,10 +43,10 @@ pub fn install(
     progress: &dyn Fn(&str, f32),
 ) -> Result<usize, String> {
     if project.kind != Kind::Shader
-        || project.source != SourceId::Modrinth
+        || !matches!(project.source, SourceId::Modrinth | SourceId::CurseForge)
         || source.id() != project.source
     {
-        return Err("Expected a Modrinth shader pack".into());
+        return Err("Expected a Modrinth or CurseForge shader pack".into());
     }
     let versions = source.versions(project)?;
     let v = version(&versions).ok_or("No downloadable shader ZIP is available")?;

@@ -468,7 +468,7 @@ impl VoltAccountManager {
         };
         let rgba = generate_preset_cape_rgba(preset);
         let path = self.cape_png_path(&id);
-        write_rgba_png(&path, 64, 64, &rgba)?;
+        write_rgba_png(&path, 64, 32, &rgba[..64 * 32 * 4])?;
         self.cape_cache.insert(
             id,
             CapePreviewTexture {
@@ -684,7 +684,9 @@ impl VoltAccountManager {
                         );
                     }
                     if let Some(rgba) = cape_rgba {
-                        if write_rgba_png(&self.cape_png_path(&id), 64, 64, &rgba).is_ok() {
+                        if write_rgba_png(&self.cape_png_path(&id), 64, 32, &rgba[..64 * 32 * 4])
+                            .is_ok()
+                        {
                             account.has_custom_cape = true;
                             account.cape_label = "Ely.by Cape".into();
                         }
@@ -729,7 +731,13 @@ impl VoltAccountManager {
                     );
                     let mut equipped_cape = false;
                     if let Some(c_rgba) = cape_rgba
-                        && write_rgba_png(&self.cape_png_path(&account_id), 64, 64, &c_rgba).is_ok()
+                        && write_rgba_png(
+                            &self.cape_png_path(&account_id),
+                            64,
+                            32,
+                            &c_rgba[..64 * 32 * 4],
+                        )
+                        .is_ok()
                     {
                         self.cape_cache.insert(
                             account_id.clone(),
@@ -769,7 +777,12 @@ impl VoltAccountManager {
                     self.busy = None;
                     let mut trigger_sign = None;
                     if is_cape {
-                        let _ = write_rgba_png(&self.cape_png_path(&account_id), 64, 64, &rgba);
+                        let _ = write_rgba_png(
+                            &self.cape_png_path(&account_id),
+                            64,
+                            32,
+                            &rgba[..64 * 32 * 4],
+                        );
                         self.cape_cache.insert(
                             account_id.clone(),
                             CapePreviewTexture {
@@ -1255,13 +1268,22 @@ fn fetch_cosmetic_url_blocking(url: &str, is_cape: bool) -> Result<Vec<u8>, Stri
         .call()
         .map_err(|e| format!("Download failed: {e}"))?;
     let bytes = read_bounded(resp, 4 * 1024 * 1024).ok_or("Image too large or unreadable")?;
-    let (w, h, rgba) =
-        horizon_client::hud::decode_bytes(&bytes).map_err(|_| "URL did not return a PNG image")?;
+    let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes)
+        .or_else(|_| {
+            image::load_from_memory(&bytes)
+                .map(|img| {
+                    let rgba8 = img.to_rgba8();
+                    let (iw, ih) = rgba8.dimensions();
+                    (iw, ih, rgba8.into_raw())
+                })
+                .map_err(|_| ())
+        })
+        .map_err(|_| "URL did not return a valid image")?;
     if is_cape {
         horizon_client::skins::process_cape(w, h, &rgba).ok_or("Invalid cape dimensions".into())
     } else {
         horizon_client::skins::process_legacy_skin(w, h, &rgba)
-            .ok_or("Skin PNG must be 64x64 or 64x32".into())
+            .ok_or("Skin image must be 64x64 or 64x32".into())
     }
 }
 

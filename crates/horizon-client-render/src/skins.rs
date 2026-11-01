@@ -540,21 +540,117 @@ pub fn cape(textures: &Textures) -> Option<String> {
         .map(|hash| cape_location(&hash))
 }
 
-/// A cape in a 64x64 skin slot: the 64x32 picture (or the older 22x17,
-/// which has the same layout) in its top half. Vanilla draws a cape of any
-/// size; a larger one is scaled down to 64x32 here.
+/// A cape in a 64x64 skin slot: the 64x32 picture (or the older 22x17 /
+/// OptiFine 46x22*2^k / front-only 10x16*k crop) in its top half. Also
+/// accepts an already-normalized 64x64 slot (transparent rows 32..64)
+/// idempotently so re-decoding a saved cape never squashes it vertically.
 pub fn process_cape(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     let (w, h) = (width as usize, height as usize);
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
         return None;
     }
     let mut img = vec![0u8; 64 * 64 * 4];
-    let (fit_w, fit_h) = if w <= 64 && h <= 32 { (w, h) } else { (64, 32) };
-    for y in 0..fit_h {
-        for x in 0..fit_w {
-            let (sx, sy) = (x * w / fit_w, y * h / fit_h);
-            let (s, d) = ((sy * w + sx) * 4, (y * 64 + x) * 4);
-            img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+
+    // 1. Square 1:1 canvas (e.g. 64x64 or 128x128 slot buffer) whose bottom half is transparent:
+    // treat the top w x (h/2) half as the actual 2:1 cape sheet so re-decoding is idempotent.
+    let eff_h = if w == h && h >= 64 && h.is_multiple_of(2) {
+        let half = h / 2;
+        let bottom_blank = rgba[half * w * 4..h * w * 4]
+            .chunks_exact(4)
+            .all(|px| px[3] == 0);
+        if bottom_blank { half } else { h }
+    } else {
+        h
+    };
+
+    // 2. Front-only cape crop (10x16, 20x32, 40x64, ... exact 5:8 aspect ratio).
+    if w * 16 == eff_h * 10 {
+        for fy in 0..16usize {
+            for fx in 0..10usize {
+                let (sx, sy) = (fx * w / 10, fy * eff_h / 16);
+                let s = (sy * w + sx) * 4;
+                let px = [rgba[s], rgba[s + 1], rgba[s + 2], rgba[s + 3]];
+                let d = ((1 + fy) * 64 + (1 + fx)) * 4;
+                img[d..d + 4].copy_from_slice(&px);
+                // Darkened inner back face (12..22, 1..17)
+                let bd = ((1 + fy) * 64 + (12 + (9 - fx))) * 4;
+                img[bd..bd + 4].copy_from_slice(&[
+                    (px[0] as u16 * 58 / 100) as u8,
+                    (px[1] as u16 * 58 / 100) as u8,
+                    (px[2] as u16 * 58 / 100) as u8,
+                    px[3],
+                ]);
+            }
+            // 1px left & right thickness edges
+            let left_s = ((1 + fy) * 64 + 1) * 4;
+            let right_s = ((1 + fy) * 64 + 10) * 4;
+            let left_px = [img[left_s], img[left_s + 1], img[left_s + 2], img[left_s + 3]];
+            let right_px = [
+                img[right_s],
+                img[right_s + 1],
+                img[right_s + 2],
+                img[right_s + 3],
+            ];
+            let ld = ((1 + fy) * 64) * 4;
+            let rd = ((1 + fy) * 64 + 11) * 4;
+            img[ld..ld + 4].copy_from_slice(&left_px);
+            img[rd..rd + 4].copy_from_slice(&right_px);
+        }
+        for fx in 0..10usize {
+            let top_s = (64 + (1 + fx)) * 4;
+            let bot_s = (16 * 64 + (1 + fx)) * 4;
+            let top_px = [img[top_s], img[top_s + 1], img[top_s + 2], img[top_s + 3]];
+            let bot_px = [img[bot_s], img[bot_s + 1], img[bot_s + 2], img[bot_s + 3]];
+            let td = (1 + fx) * 4;
+            let btd = (11 + fx) * 4;
+            img[td..td + 4].copy_from_slice(&top_px);
+            img[btd..btd + 4].copy_from_slice(&bot_px);
+        }
+        return Some(img);
+    }
+
+    // 3. Direct 1:1 copy for <= 64x32 sheets (22x17 legacy, 46x22 OptiFine, 64x32 Mojang).
+    if w <= 64 && eff_h <= 32 {
+        for y in 0..eff_h {
+            for x in 0..w {
+                let (s, d) = ((y * w + x) * 4, (y * 64 + x) * 4);
+                img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
+        }
+        return Some(img);
+    }
+
+    // 4. Scaled tight 22x17 cuboid net (44x34, 88x68, ...).
+    if w * 17 == eff_h * 22 {
+        for y in 0..17usize {
+            for x in 0..22usize {
+                let (sx, sy) = (x * w / 22, y * eff_h / 17);
+                let (s, d) = ((sy * w + sx) * 4, (y * 64 + x) * 4);
+                img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
+        }
+        return Some(img);
+    }
+
+    // 5. Standard 2:1 HD sheet (128x64, 256x128, 512x256, 1024x512) or OptiFine 64x32*2^k sheet (92x44, 184x88, ...).
+    let (sheet_w, sheet_h) = if w == eff_h * 2 {
+        (w, eff_h)
+    } else {
+        let mut sw = 64usize;
+        let mut sh = 32usize;
+        while sw < w || sh < eff_h {
+            sw *= 2;
+            sh *= 2;
+        }
+        (sw, sh)
+    };
+    for y in 0..32usize {
+        for x in 0..64usize {
+            let (sx, sy) = (x * sheet_w / 64, y * sheet_h / 32);
+            if sx < w && sy < eff_h {
+                let (s, d) = ((sy * w + sx) * 4, (y * 64 + x) * 4);
+                img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
         }
     }
     Some(img)

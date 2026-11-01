@@ -33,6 +33,10 @@ impl RendererMode {
     }
 }
 
+fn default_pack_source() -> crate::shader_catalog::Origin {
+    crate::shader_catalog::Origin::Modrinth
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -54,6 +58,8 @@ pub struct Config {
     pub device: crate::device_preferences::Settings,
     pub shader_source: crate::shader_catalog::Origin,
     pub mod_source: crate::shader_catalog::Origin,
+    #[serde(default = "default_pack_source")]
+    pub pack_source: crate::shader_catalog::Origin,
 }
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
@@ -111,6 +117,9 @@ impl Config {
             crate::account::client_id().unwrap_or_else(|| MICROSOFT_CLIENT_ID.into());
         if value.get("renderer").is_none() && value["gpu_batching"].as_bool() == Some(true) {
             config.renderer = RendererMode::Vulkan;
+        }
+        if config.pack_source == crate::shader_catalog::Origin::Horizon {
+            config.pack_source = crate::shader_catalog::Origin::Modrinth;
         }
         let legacy = std::fs::read(config.game_home(home).join("horizon-touch.json"))
             .ok()
@@ -176,6 +185,13 @@ impl Page {
         matches!(self, Self::Packs | Self::Mods | Self::Shaders)
     }
 }
+#[derive(Clone)]
+pub struct ProjectIcon {
+    pub hash: u64,
+    pub rgba: Vec<u8>,
+    pub loaded_at: std::time::Instant,
+}
+
 enum Reply {
     Done(String, horizon_client::content_files::Kind),
 }
@@ -190,6 +206,7 @@ pub struct Catalog {
     pub page: Page,
     pub query: String,
     pub results: Vec<Project>,
+    pub results_born: std::time::Instant,
     pub status: String,
     pub offset: usize,
     pub scroll: f32,
@@ -204,9 +221,16 @@ pub struct Catalog {
     pub ely_pass_input: String,
     pub ely_totp_input: String,
     pub skin_query_input: String,
+    icon_cache: std::collections::HashMap<String, Option<ProjectIcon>>,
+    icon_pending: std::collections::HashSet<String>,
+    icon_tx: mpsc::Sender<(String, Option<(u64, Vec<u8>)>)>,
+    icon_rx: mpsc::Receiver<(String, Option<(u64, Vec<u8>)>)>,
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
     search_worker: Option<mpsc::Receiver<Result<Vec<Project>, String>>>,
-    searches: crate::search_queue::Queue<(Page, browser::SourceId, String, usize), Vec<Project>>,
+    searches: crate::search_queue::Queue<
+        (Page, crate::shader_catalog::Origin, String, usize),
+        Vec<Project>,
+    >,
 }
 #[derive(Clone)]
 pub struct LocalItem {
@@ -218,6 +242,7 @@ pub struct LocalItem {
 impl Catalog {
     pub fn new(home: &Path) -> Self {
         let config = Config::load(home);
+        let (icon_tx, icon_rx) = mpsc::channel();
         let mut result = Self {
             local: vec![],
             sections: [true, true, true],
@@ -229,6 +254,7 @@ impl Catalog {
             page: Page::Play,
             query: String::new(),
             results: vec![],
+            results_born: std::time::Instant::now(),
             status: String::new(),
             offset: 0,
             scroll: 0.0,
@@ -243,6 +269,10 @@ impl Catalog {
             ely_pass_input: String::new(),
             ely_totp_input: String::new(),
             skin_query_input: String::new(),
+            icon_cache: std::collections::HashMap::new(),
+            icon_pending: std::collections::HashSet::new(),
+            icon_tx,
+            icon_rx,
             worker: None,
             search_worker: None,
             searches: crate::search_queue::Queue::new(),
@@ -386,6 +416,15 @@ impl Catalog {
             }
             self.refresh(home);
         }
+        while let Ok((url, decoded)) = self.icon_rx.try_recv() {
+            self.icon_pending.remove(&url);
+            let entry = decoded.map(|(hash, rgba)| ProjectIcon {
+                hash,
+                rgba,
+                loaded_at: std::time::Instant::now(),
+            });
+            self.icon_cache.insert(url, entry);
+        }
         let result = self
             .search_worker
             .as_ref()
@@ -399,10 +438,13 @@ impl Catalog {
             let visible = self.searches.finish(result.as_ref().ok().cloned());
             if visible && self.page.is_catalog() && !self.busy() {
                 match result {
-                    Ok(items) => self.show_results(items),
+                    Ok(items) => self.show_results(items, home),
                     Err(error) => self.status = error,
                 }
             }
+        }
+        if self.page.is_catalog() && !self.results.is_empty() {
+            self.queue_result_icons(home);
         }
         self.start_search();
     }
@@ -430,34 +472,34 @@ impl Catalog {
             return;
         }
         self.scroll = 0.0;
-        let source = match self.page {
-            Page::Packs => browser::SourceId::Modrinth,
-            Page::Shaders => self.config.shader_source.source(),
-            Page::Mods => self.config.mod_source.source(),
-            _ => browser::SourceId::Horizon,
+        let origin = match self.page {
+            Page::Packs => self.config.pack_source,
+            Page::Shaders => self.config.shader_source,
+            Page::Mods => self.config.mod_source,
+            _ => crate::shader_catalog::Origin::Horizon,
         };
-        let key = (self.page, source, self.query.trim().to_owned(), self.offset);
+        let key = (self.page, origin, self.query.trim().to_owned(), self.offset);
         if let Some(items) = self.searches.request(key, refresh) {
-            self.show_results(items);
+            self.show_results(items, home);
         } else {
             self.results.clear();
             self.status = "Searching... You can switch tabs while results load.".into();
         }
         self.start_search();
     }
-    fn show_results(&mut self, items: Vec<Project>) {
+    fn show_results(&mut self, items: Vec<Project>, home: &Path) {
+        use crate::shader_catalog::Origin;
         self.status = if self.page == Page::Shaders
             && items.is_empty()
-            && self.config.shader_source == crate::shader_catalog::Origin::Horizon
+            && self.config.shader_source == Origin::Horizon
         {
             "No Horizon shader packs match this search. Try another query or import a .hshader."
                 .into()
-        } else if self.page == Page::Mods
-            && self.config.mod_source == crate::shader_catalog::Origin::Modrinth
-        {
+        } else if self.page == Page::Mods && self.config.mod_source != Origin::Horizon {
             format!(
-                "{} Java mods - browsing only; this Rust client cannot run Java loaders",
-                items.len()
+                "{} Java mods ({}) - browsing; this Rust client runs native .hmod mods",
+                items.len(),
+                self.config.mod_source.label()
             )
         } else if self.page == Page::Mods {
             let native = items.iter().filter(|p| source_only_mod(p)).count();
@@ -467,42 +509,81 @@ impl Catalog {
                 native
             )
         } else {
+            let active_origin = match self.page {
+                Page::Packs => self.config.pack_source,
+                Page::Shaders => self.config.shader_source,
+                _ => Origin::Modrinth,
+            };
             format!(
-                "{} results - select Install to check compatibility",
-                items.len()
+                "{} {} results - select Install to download",
+                items.len(),
+                active_origin.label()
             )
         };
         self.results = items;
+        self.results_born = std::time::Instant::now();
+        self.queue_result_icons(home);
+    }
+    pub fn project_icon(&self, project: &Project) -> Option<&ProjectIcon> {
+        let url = project.icon.as_deref().filter(|u| !u.is_empty())?;
+        self.icon_cache.get(url).and_then(|entry| entry.as_ref())
+    }
+    pub fn animating_icons_or_cards(&self) -> bool {
+        if !self.icon_pending.is_empty() || self.search_worker.is_some() || self.worker.is_some() {
+            return true;
+        }
+        if self.page.is_catalog() && !self.results.is_empty() {
+            if self.results_born.elapsed().as_secs_f32() < 0.65 {
+                return true;
+            }
+            for p in &self.results {
+                if let Some(icon) = self.project_icon(p)
+                    && icon.loaded_at.elapsed().as_secs_f32() < 0.30
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    fn queue_result_icons(&mut self, home: &Path) {
+        if self.icon_cache.len() > 256 {
+            self.icon_cache.clear();
+        }
+        let urls: Vec<String> = self
+            .results
+            .iter()
+            .filter_map(|p| p.icon.as_deref())
+            .filter(|u| !u.is_empty())
+            .map(str::to_owned)
+            .collect();
+        for url in urls {
+            if self.icon_pending.len() >= 6 {
+                break;
+            }
+            if self.icon_cache.contains_key(&url) || self.icon_pending.contains(&url) {
+                continue;
+            }
+            self.icon_pending.insert(url.clone());
+            let tx = self.icon_tx.clone();
+            let home_buf = home.to_path_buf();
+            std::thread::spawn(move || {
+                let decoded = fetch_and_round_icon(&home_buf, &url);
+                let _ = tx.send((url, decoded));
+            });
+        }
     }
     fn start_search(&mut self) {
         if self.busy() || self.search_worker.is_some() {
             return;
         }
-        let Some((page, source, text, offset)) = self.searches.take_next() else {
+        let Some((page, origin, text, offset)) = self.searches.take_next() else {
             return;
         };
         let (tx, rx) = mpsc::channel();
         self.search_worker = Some(rx);
         std::thread::spawn(move || {
-            let kind = match page {
-                Page::Mods => Kind::Mod,
-                Page::Shaders => Kind::Shader,
-                _ => Kind::ResourcePack,
-            };
-            let mut query = Query::new(&text, kind);
-            query.offset = offset;
-            query.limit = 12;
-            let result = if page == Page::Shaders && source == browser::SourceId::Modrinth {
-                query.everything = true;
-                browser::modrinth::search_shader_packs(&query)
-            } else if page == Page::Packs
-                || (page == Page::Mods && source == browser::SourceId::Modrinth)
-            {
-                query.everything = true;
-                browser::modrinth::Modrinth.search(&query)
-            } else {
-                browser::horizon::Registry.search(&query)
-            };
+            let result = run_catalog_query(page, origin, &text, offset);
             let _ = tx.send(result);
         });
     }
@@ -542,7 +623,9 @@ impl Catalog {
             && !(project.kind == Kind::Shader
                 && matches!(
                     project.source,
-                    browser::SourceId::Horizon | browser::SourceId::Modrinth
+                    browser::SourceId::Horizon
+                        | browser::SourceId::Modrinth
+                        | browser::SourceId::CurseForge
                 ))
             && !(cfg!(target_pointer_width = "64")
                 && project.kind == Kind::Mod
@@ -554,17 +637,27 @@ impl Catalog {
         self.failed = None;
         *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = 0.0;
         let progress = self.progress.clone();
-        let status =
-            if project.kind == Kind::Shader && project.source == browser::SourceId::Modrinth {
-                "Downloading experimental shader ZIP..."
-            } else {
-                "Checking compatibility and downloading..."
-            };
+        let status = if project.kind == Kind::Shader
+            && matches!(
+                project.source,
+                browser::SourceId::Modrinth | browser::SourceId::CurseForge
+            ) {
+            "Downloading shader pack ZIP..."
+        } else {
+            "Checking compatibility and downloading..."
+        };
         self.job(status, move || {
             std::fs::create_dir_all(&game).map_err(|e| e.to_string())?;
-            let source = browser::source(project.source).ok_or("Unsupported download source")?;
+            let source: Box<dyn Source> = if project.source == browser::SourceId::CurseForge {
+                Box::new(browser::curseforge::CurseForge::volt())
+            } else {
+                browser::source(project.source).ok_or("Unsupported download source")?
+            };
             let count = if project.kind == Kind::Shader
-                && project.source == browser::SourceId::Modrinth
+                && matches!(
+                    project.source,
+                    browser::SourceId::Modrinth | browser::SourceId::CurseForge
+                )
             {
                 crate::shader_catalog::install(source.as_ref(), &project, &game, &|_name, p| {
                     if p.is_finite() {
@@ -731,4 +824,182 @@ impl Catalog {
             }
         }
     }
+}
+
+fn run_single_source_query(
+    page: Page,
+    origin: crate::shader_catalog::Origin,
+    text: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<Project>, String> {
+    use crate::shader_catalog::Origin;
+    let kind = match page {
+        Page::Mods => Kind::Mod,
+        Page::Shaders => Kind::Shader,
+        _ => Kind::ResourcePack,
+    };
+    let mut query = Query::new(text, kind);
+    query.offset = offset;
+    query.limit = limit;
+    match origin {
+        Origin::Horizon => browser::horizon::Registry.search(&query),
+        Origin::Modrinth => {
+            query.everything = true;
+            if page == Page::Shaders {
+                browser::modrinth::search_shader_packs(&query)
+            } else {
+                browser::modrinth::Modrinth.search(&query)
+            }
+        }
+        Origin::CurseForge => {
+            query.everything = true;
+            let cf = browser::curseforge::CurseForge::volt();
+            if page == Page::Shaders {
+                cf.search_shader_packs(&query)
+            } else {
+                cf.search(&query)
+            }
+        }
+        Origin::Both => Ok(Vec::new()),
+    }
+}
+
+fn run_catalog_query(
+    page: Page,
+    origin: crate::shader_catalog::Origin,
+    text: &str,
+    offset: usize,
+) -> Result<Vec<Project>, String> {
+    use crate::shader_catalog::Origin;
+    if origin != Origin::Both {
+        return run_single_source_query(page, origin, text, offset, 12);
+    }
+    let half_offset = offset / 2;
+    let (mr_res, cf_res) = std::thread::scope(|s| {
+        let mr = s.spawn(|| run_single_source_query(page, Origin::Modrinth, text, half_offset, 8));
+        let cf =
+            s.spawn(|| run_single_source_query(page, Origin::CurseForge, text, half_offset, 8));
+        (
+            mr.join()
+                .unwrap_or_else(|_| Err("Modrinth worker panicked".into())),
+            cf.join()
+                .unwrap_or_else(|_| Err("CurseForge worker panicked".into())),
+        )
+    });
+    match (mr_res, cf_res) {
+        (Ok(mr), Ok(cf)) => {
+            let mut merged = Vec::with_capacity(12);
+            let max_len = mr.len().max(cf.len());
+            for idx in 0..max_len {
+                if let Some(item) = mr.get(idx)
+                    && merged.len() < 12
+                {
+                    merged.push(item.clone());
+                }
+                if let Some(item) = cf.get(idx)
+                    && merged.len() < 12
+                {
+                    merged.push(item.clone());
+                }
+                if merged.len() >= 12 {
+                    break;
+                }
+            }
+            Ok(merged)
+        }
+        (Ok(mut mr), Err(_)) => {
+            mr.truncate(12);
+            Ok(mr)
+        }
+        (Err(_), Ok(mut cf)) => {
+            cf.truncate(12);
+            Ok(cf)
+        }
+        (Err(e1), Err(e2)) => Err(format!("Modrinth: {e1} | CurseForge: {e2}")),
+    }
+}
+
+fn fetch_and_round_icon(home: &Path, url: &str) -> Option<(u64, Vec<u8>)> {
+    let decoded = if let Some(cached_path) = browser::images::cached(home, url, 80)
+        .or_else(|| browser::images::fetch(home, url, 80).ok())
+    {
+        image::open(cached_path).ok()?
+    } else if url.starts_with("https://") {
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        ureq::AgentBuilder::new()
+            .https_only(true)
+            .user_agent(&format!(
+                "VoltLauncher/{} (github.com/entitybrian69-bit/Volt-launcher)",
+                crate::backend::VERSION
+            ))
+            .timeout_connect(std::time::Duration::from_secs(12))
+            .timeout_read(std::time::Duration::from_secs(20))
+            .build()
+            .get(url)
+            .call()
+            .ok()?
+            .into_reader()
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        if bytes.is_empty() || bytes.len() > 4 * 1024 * 1024 {
+            return None;
+        }
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .ok()?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(2048);
+        limits.max_image_height = Some(2048);
+        limits.max_alloc = Some(32 << 20);
+        reader.limits(limits);
+        reader.decode().ok()?
+    } else {
+        return None;
+    };
+
+    let resized = decoded
+        .resize_exact(64, 64, image::imageops::FilterType::Triangle)
+        .to_rgba8();
+    let mut rgba = resized.into_raw();
+
+    // 4x4 supersampled rounded-corner mask (radius = 10.5 out of 64.0) for crisp anti-aliased edges.
+    let radius = 10.5f32;
+    let r2 = radius * radius;
+    for y in 0..64usize {
+        for x in 0..64usize {
+            let mut inside = 0u32;
+            for sy in 0..4usize {
+                for sx in 0..4usize {
+                    let px = x as f32 + (sx as f32 + 0.5) * 0.25;
+                    let py = y as f32 + (sy as f32 + 0.5) * 0.25;
+                    let cx = if px < radius {
+                        radius - px
+                    } else if px > 64.0 - radius {
+                        px - (64.0 - radius)
+                    } else {
+                        0.0
+                    };
+                    let cy = if py < radius {
+                        radius - py
+                    } else if py > 64.0 - radius {
+                        py - (64.0 - radius)
+                    } else {
+                        0.0
+                    };
+                    if cx * cx + cy * cy <= r2 {
+                        inside += 1;
+                    }
+                }
+            }
+            if inside < 16 {
+                let idx = (y * 64 + x) * 4 + 3;
+                rgba[idx] = ((u32::from(rgba[idx]) * inside + 8) / 16) as u8;
+            }
+        }
+    }
+    let hash = crate::skin_preview::fnv1a(&rgba);
+    Some((hash, rgba))
 }

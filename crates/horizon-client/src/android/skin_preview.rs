@@ -26,12 +26,14 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
 /// Renders an interactive, depth-tested 3D Minecraft player model (with Classic 4px
 /// or Slim 3px arms, outer 2nd skin layer, directional lighting, and 3D cape)
 /// inside `bounds`.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_player_3d(
     ui: &mut Ui<'_>,
     bounds: [f32; 4],
     yaw_deg: f32,
     pitch_deg: f32,
     idle_phase: f32,
+    spin_vel: f32,
     skin_slot: usize,
     cape_slot: usize,
     skin: Option<&SkinPreviewTexture>,
@@ -269,16 +271,19 @@ pub fn draw_player_3d(
 
     // 3D Cape hinged at shoulders on the back (-Z), rotated 180 deg around Y so
     // the cape's front UV (1..11, 1..17) faces outward (-Z) behind the player,
-    // then tilted by positive X rotation so y < 0 swings backward (-Z) away from the body.
+    // resting naturally at ~6.5 deg with dynamic billow & sway when spinning.
     if let Some(c_uv) = cape_uv {
-        let cape_tilt = (10.5 + breathe * 1.8).to_radians();
-        let cape_rot =
-            Mat3::from_rotation_x(cape_tilt) * Mat3::from_rotation_y(std::f32::consts::PI);
+        let billow = (spin_vel.abs() * 0.085).clamp(0.0, 20.0);
+        let sway_z = (spin_vel * 0.032).clamp(-10.0, 10.0).to_radians();
+        let cape_tilt = (6.5 + breathe * 1.4 + billow).to_radians();
+        let cape_rot = Mat3::from_rotation_z(sway_z)
+            * Mat3::from_rotation_x(cape_tilt)
+            * Mat3::from_rotation_y(std::f32::consts::PI);
         emit_part(
             batch,
             &ctx,
             c_uv,
-            Vec3::new(0.0, 24.0, -2.35),
+            Vec3::new(0.0, 24.0, -2.25),
             cape_rot,
             Vec3::new(0.0, -8.0, 0.5),
             [10.0, 16.0, 1.0],

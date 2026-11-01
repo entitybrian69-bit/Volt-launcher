@@ -62,9 +62,18 @@ pub mod color {
     pub const MUTED: u32 = hex(P.ink_soft, 255);
     pub const ACCENT: u32 = hex(P.accent, 255);
     pub const ON_ACCENT: u32 = hex(P.on_accent, 255);
-    pub(crate) fn with_alpha(c: u32, a: f32) -> u32 {
+    pub fn with_alpha(c: u32, a: f32) -> u32 {
         let base = (c >> 24) as f32;
         (c & 0x00ff_ffff) | ((base * a.clamp(0.0, 1.0)).round() as u32) << 24
+    }
+    pub fn lerp(a: u32, b: u32, t: f32) -> u32 {
+        let t = t.clamp(0.0, 1.0);
+        let ch = |shift: u32| -> u32 {
+            let ca = ((a >> shift) & 0xff) as f32;
+            let cb = ((b >> shift) & 0xff) as f32;
+            (ca + (cb - ca) * t).round().clamp(0.0, 255.0) as u32
+        };
+        ch(0) | (ch(8) << 8) | (ch(16) << 16) | (ch(24) << 24)
     }
 }
 
@@ -117,11 +126,13 @@ struct Cached {
     left: f32,
     top: f32,
 }
+const DYNAMIC_SLOTS: usize = 32;
+
 /// Glyphs and corner masks rasterized into the atlas region `horizon/ui-text`.
 struct Cache {
     fonts: Fonts,
     entries: HashMap<Key, Cached>,
-    dynamic_slots: [Option<(u64, u32, u32, Rect)>; 4],
+    dynamic_slots: [Option<(u64, u32, u32, Rect)>; DYNAMIC_SLOTS],
     shelf: (u32, u32, u32),
     pending: Vec<crate::font::Patch>,
     /// The atlas the entries were uploaded to (a new atlas starts over).
@@ -141,7 +152,7 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
         let cache = c.get_or_insert_with(|| Cache {
             fonts: Fonts::load(),
             entries: HashMap::new(),
-            dynamic_slots: [None; 4],
+            dynamic_slots: [None; DYNAMIC_SLOTS],
             shelf: (0, 0, 0),
             pending: Vec::new(),
             atlas: id,
@@ -149,7 +160,7 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
         if cache.atlas != id {
             cache.atlas = id;
             cache.entries.clear();
-            cache.dynamic_slots = [None; 4];
+            cache.dynamic_slots = [None; DYNAMIC_SLOTS];
             cache.shelf = (0, 0, 0);
             cache.pending.clear();
         }
@@ -171,7 +182,7 @@ impl Cache {
         }
         if y + h > region.h || w > region.w {
             self.entries.clear();
-            self.dynamic_slots = [None; 4];
+            self.dynamic_slots = [None; DYNAMIC_SLOTS];
             self.shelf = (0, 0, 0);
             return None;
         }
@@ -567,6 +578,77 @@ impl<'a> Ui<'a> {
     ) -> Option<Rect> {
         let atlas = self.atlas;
         with_cache(atlas, |c| c.dynamic_rgba(atlas, slot, hash, w, h, rgba))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_dynamic_rgba(
+        &mut self,
+        slot: usize,
+        hash: u64,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+        x: f32,
+        y: f32,
+        draw_w: f32,
+        draw_h: f32,
+        alpha: u8,
+    ) -> bool {
+        if self.dry {
+            return false;
+        }
+        let Some(rect) = self.dynamic_rgba(slot, hash, w, h, rgba) else {
+            return false;
+        };
+        let (x0, y0, x1, y1) = (
+            self.px_x(x),
+            self.px_y(y),
+            self.px_x(x + draw_w),
+            self.px_y(y + draw_h),
+        );
+        if x1 > x0 && y1 > y0 {
+            let s = self.scale;
+            self.batch.rect_uv(
+                x0 / s,
+                y0 / s,
+                (x1 - x0) / s,
+                (y1 - y0) / s,
+                rect,
+                color::hex(0xFFFFFF, alpha),
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Post-transforms 2D/3D vertices emitted since `start` for smooth slide, scale, and fade transitions.
+    pub fn animate_vertices(
+        &mut self,
+        start: usize,
+        dx_dp: f32,
+        dy_dp: f32,
+        scale: f32,
+        pivot_dp: [f32; 2],
+        alpha_mul: f32,
+    ) {
+        if self.dry || start >= self.batch.vertices.len() {
+            return;
+        }
+        let dx = self.to_batch(dx_dp);
+        let dy = self.to_batch(dy_dp);
+        let px = self.to_batch(pivot_dp[0]);
+        let py = self.to_batch(pivot_dp[1]);
+        let a = alpha_mul.clamp(0.0, 1.0);
+        for v in &mut self.batch.vertices[start..] {
+            v.pos[0] = (v.pos[0] - px) * scale + px + dx;
+            v.pos[1] = (v.pos[1] - py) * scale + py + dy;
+            if v.depth == 0.0 && a < 0.999 {
+                let base_a = (v.color >> 24) as f32;
+                let new_a = (base_a * a).round().clamp(0.0, 255.0) as u32;
+                v.color = (v.color & 0x00ff_ffff) | (new_a << 24);
+            }
+        }
     }
 
     pub fn gui_scale(&self) -> f32 {

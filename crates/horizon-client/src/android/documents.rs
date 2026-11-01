@@ -738,27 +738,41 @@ fn stage_cosmetic(
         return Err("Image file is too large (max 4 MB)".into());
     }
     let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes)
-        .map_err(|_| "Selected file is not a valid PNG image")?;
+        .or_else(|_| {
+            image::load_from_memory(&bytes)
+                .map(|img| {
+                    let rgba8 = img.to_rgba8();
+                    let (iw, ih) = rgba8.dimensions();
+                    (iw, ih, rgba8.into_raw())
+                })
+                .map_err(|_| ())
+        })
+        .map_err(|_| "Selected file is not a valid image")?;
     let normalized_rgba = if is_cape {
         horizon_client::skins::process_cape(w, h, &rgba)
             .ok_or("Selected image could not be processed as a cape")?
     } else {
         horizon_client::skins::process_legacy_skin(w, h, &rgba)
-            .ok_or("Skin PNG must be 64x64 or 64x32")?
+            .ok_or("Skin image must be 64x64 or 64x32")?
     };
     if let Some(parent) = dest_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let (out_w, out_h, out_slice) = if is_cape {
+        (64u32, 32u32, &normalized_rgba[..64 * 32 * 4])
+    } else {
+        (64u32, 64u32, normalized_rgba.as_slice())
+    };
     let mut png_bytes = Vec::new();
     {
-        let mut encoder = png::Encoder::new(&mut png_bytes, 64, 64);
+        let mut encoder = png::Encoder::new(&mut png_bytes, out_w, out_h);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder
             .write_header()
             .map_err(|e| format!("PNG encode failed: {e}"))?;
         writer
-            .write_image_data(&normalized_rgba)
+            .write_image_data(out_slice)
             .map_err(|e| format!("PNG write failed: {e}"))?;
     }
     let tmp = dest_path.with_extension("png.tmp");

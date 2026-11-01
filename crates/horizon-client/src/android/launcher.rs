@@ -57,8 +57,16 @@ pub(super) struct Launcher {
     volt_accounts: crate::volt_accounts::VoltAccountManager,
     preview_yaw: f32,
     preview_pitch: f32,
+    preview_vel_yaw: f32,
+    preview_target_yaw: Option<f32>,
     preview_rect: Option<[f32; 4]>,
     launch_start: Instant,
+    last_frame: Instant,
+    prev_rendered_page: Page,
+    sidebar_anim: f32,
+    page_anim: Option<(Instant, f32)>,
+    modal_was_open: bool,
+    modal_anim: Option<Instant>,
     session_worker: Option<mpsc::Receiver<std::result::Result<Option<PathBuf>, String>>>,
     session_ready: bool,
     focus: Option<usize>,
@@ -126,8 +134,16 @@ impl Launcher {
             volt_accounts,
             preview_yaw: -18.0,
             preview_pitch: 6.0,
+            preview_vel_yaw: 0.0,
+            preview_target_yaw: None,
             preview_rect: None,
             launch_start: Instant::now(),
+            last_frame: Instant::now(),
+            prev_rendered_page: Page::Play,
+            sidebar_anim: 0.0,
+            page_anim: Some((Instant::now(), 1.0)),
+            modal_was_open: false,
+            modal_anim: None,
             session_worker: None,
             session_ready: false,
             focus: None,
@@ -441,7 +457,9 @@ impl ApplicationHandler for Launcher {
                                 ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
                             })
                         {
+                            self.preview_target_yaw = None;
                             self.preview_yaw = (self.preview_yaw + dx * 0.9).rem_euclid(360.0);
+                            self.preview_vel_yaw = (dx * 42.0).clamp(-360.0, 360.0);
                             self.preview_pitch =
                                 (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
                         }
@@ -587,6 +605,9 @@ impl ApplicationHandler for Launcher {
             self.catalog.status = notice.text;
             if let Some((is_cape, path)) = notice.cosmetic_imported {
                 self.volt_accounts.on_saf_cosmetic_imported(is_cape, &path);
+                if is_cape {
+                    self.preview_target_yaw = Some(162.0);
+                }
             } else if notice.controls_changed {
                 if matches!(
                     self.catalog.config.input_host,
@@ -642,10 +663,12 @@ impl ApplicationHandler for Launcher {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-        let frame_wait = if matches!(self.catalog.page, Page::Play | Page::Account) {
-            Duration::from_millis(33)
+        let frame_wait = if matches!(self.catalog.page, Page::Play | Page::Account)
+            || self.is_animating()
+        {
+            Duration::from_millis(16)
         } else {
-            Duration::from_millis(100)
+            Duration::from_millis(40)
         };
         events.set_control_flow(ControlFlow::WaitUntil(Instant::now() + frame_wait));
     }
