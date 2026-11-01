@@ -54,6 +54,11 @@ pub(super) struct Launcher {
     drag: Option<gesture::Drag>,
     chooser: Option<chooser::Chooser>,
     login: login::Login,
+    volt_accounts: crate::volt_accounts::VoltAccountManager,
+    preview_yaw: f32,
+    preview_pitch: f32,
+    preview_rect: Option<[f32; 4]>,
+    launch_start: Instant,
     session_worker: Option<mpsc::Receiver<std::result::Result<Option<PathBuf>, String>>>,
     session_ready: bool,
     focus: Option<usize>,
@@ -85,6 +90,16 @@ impl Launcher {
         }
         crate::configure_input_mode(catalog.config.input_host);
         crate::device_runtime::configure(catalog.config.device);
+        let msa_store = crate::account::Accounts::load();
+        let volt_accounts =
+            crate::volt_accounts::VoltAccountManager::load(&home, &catalog.config.name, &msa_store);
+        if let Some(acc) = volt_accounts.active() {
+            catalog.offline_name_input = acc.name.clone();
+            catalog.account_tab = acc.provider;
+            if catalog.config.name.trim().is_empty() {
+                catalog.config.name = acc.name.clone();
+            }
+        }
         Self {
             home,
             controller_edges: Default::default(),
@@ -108,6 +123,11 @@ impl Launcher {
             drag: None,
             chooser: None,
             login: login::Login::new(),
+            volt_accounts,
+            preview_yaw: -18.0,
+            preview_pitch: 6.0,
+            preview_rect: None,
+            launch_start: Instant::now(),
             session_worker: None,
             session_ready: false,
             focus: None,
@@ -258,26 +278,32 @@ impl Launcher {
             }
             self.catalog.config.keypad_controls = false;
             let game_home = self.catalog.config.game_home(&self.home);
-            if !self.session_ready && crate::account::Accounts::load().selected().is_some() {
-                let id = self.catalog.config.microsoft_client_id.clone();
-                let (sender, receiver) = mpsc::channel();
-                self.session_worker = Some(receiver);
-                self.catalog.status = "Preparing Microsoft session...".into();
-                std::thread::spawn(move || {
-                    let result = (|| {
-                        login::Login::session(&id)?
-                            .map(|(a, s)| {
-                                crate::account::write_session_file(
-                                    &game_home.join("sessions"),
-                                    &a,
-                                    &s,
-                                )
-                            })
-                            .transpose()
-                    })();
-                    let _ = sender.send(result);
-                });
-                return Ok(());
+            if !self.session_ready {
+                let (active_name, ely_session, use_msa) = self.volt_accounts.prepare_for_launch();
+                self.catalog.config.name = active_name;
+                self.catalog.config.save(&self.home)?;
+                if use_msa && crate::account::Accounts::load().selected().is_some() {
+                    let id = self.catalog.config.microsoft_client_id.clone();
+                    let (sender, receiver) = mpsc::channel();
+                    self.session_worker = Some(receiver);
+                    self.catalog.status = "Preparing Microsoft session...".into();
+                    std::thread::spawn(move || {
+                        let result = (|| {
+                            login::Login::session(&id)?
+                                .map(|(a, s)| {
+                                    crate::account::write_session_file(
+                                        &game_home.join("sessions"),
+                                        &a,
+                                        &s,
+                                    )
+                                })
+                                .transpose()
+                        })();
+                        let _ = sender.send(result);
+                    });
+                    return Ok(());
+                }
+                SESSION.with(|s| *s.borrow_mut() = ely_session);
             }
             self.session_ready = false;
             std::fs::create_dir_all(&game_home)?;
@@ -401,6 +427,26 @@ impl ApplicationHandler for Launcher {
             WindowEvent::CursorMoved { position, .. } => {
                 self.focus = None;
                 self.pending_focus = None;
+                if self.mouse_down {
+                    let density = self.ui_density() as f64;
+                    if let Some(drag) = &mut self.drag {
+                        let (dx, dy) = drag.update_xy(position.x, position.y, density);
+                        if drag.moved
+                            && !self.login.visible
+                            && self.chooser.is_none()
+                            && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
+                                let [ox, oy] = drag.origin_xy();
+                                let ux = (ox / density) as f32;
+                                let uy = (oy / density) as f32;
+                                ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
+                            })
+                        {
+                            self.preview_yaw = (self.preview_yaw + dx * 0.9).rem_euclid(360.0);
+                            self.preview_pitch =
+                                (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
+                        }
+                    }
+                }
                 self.cursor = (position.x, position.y);
                 Ok(())
             }
@@ -420,9 +466,15 @@ impl ApplicationHandler for Launcher {
             } => {
                 if state == ElementState::Pressed {
                     self.mouse_down = true;
+                    self.drag = Some(gesture::Drag::new(self.cursor.0, self.cursor.1));
                     Ok(())
                 } else if std::mem::take(&mut self.mouse_down) {
-                    self.activate(events)
+                    let dragged = self.drag.take().is_some_and(|d| d.moved);
+                    if dragged {
+                        Ok(())
+                    } else {
+                        self.activate(events)
+                    }
                 } else {
                     Ok(())
                 }
@@ -533,7 +585,9 @@ impl ApplicationHandler for Launcher {
         self.catalog.poll(&self.home);
         if let Some(notice) = crate::documents::poll() {
             self.catalog.status = notice.text;
-            if notice.controls_changed {
+            if let Some((is_cape, path)) = notice.cosmetic_imported {
+                self.volt_accounts.on_saf_cosmetic_imported(is_cape, &path);
+            } else if notice.controls_changed {
                 if matches!(
                     self.catalog.config.input_host,
                     crate::catalog::InputHost::KeyboardMouse | crate::catalog::InputHost::Controller
@@ -551,7 +605,26 @@ impl ApplicationHandler for Launcher {
         for result in crate::gallery::poll() {
             self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
         }
+        let prev_msa = self.login.signed_in;
         self.login.poll();
+        if self.login.signed_in != prev_msa {
+            let msa_store = crate::account::Accounts::load();
+            self.volt_accounts.sync_msa_accounts(&msa_store, self.login.signed_in);
+            if self.login.signed_in {
+                self.login.visible = false;
+                if let Some(acc) = self.volt_accounts.active() {
+                    self.catalog.config.name = acc.name.clone();
+                    let _ = self.catalog.config.save(&self.home);
+                }
+            }
+        }
+        if let Some(msg) = self.volt_accounts.poll() {
+            self.catalog.status = msg;
+            if let Some(acc) = self.volt_accounts.active() {
+                self.catalog.config.name = acc.name.clone();
+                let _ = self.catalog.config.save(&self.home);
+            }
+        }
         if let Some(result) = self.session_worker.as_ref().and_then(|w| w.try_recv().ok()) {
             self.session_worker = None;
             match result {
@@ -569,9 +642,12 @@ impl ApplicationHandler for Launcher {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-        events.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(100),
-        ));
+        let frame_wait = if matches!(self.catalog.page, Page::Play | Page::Account) {
+            Duration::from_millis(33)
+        } else {
+            Duration::from_millis(100)
+        };
+        events.set_control_flow(ControlFlow::WaitUntil(Instant::now() + frame_wait));
     }
     fn exiting(&mut self, events: &ActiveEventLoop) {
         if let Some(game) = &mut self.game {

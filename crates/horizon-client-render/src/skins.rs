@@ -24,11 +24,25 @@ pub struct Textures {
     pub signed: bool,
 }
 
-/// The `getTexture` endpoint's valid URIs from Minecraft services discovery.
-pub const TEXTURE_URIS: [&str; 2] = [
+/// The `getTexture` endpoint's valid URIs from Minecraft services discovery
+/// plus Ely.by skin/cape CDNs for Ely.by & CustomSkinLoader support.
+pub const TEXTURE_URIS: [&str; 12] = [
     "https://textures.minecraft.net/texture/{textureId}",
     "http://textures.minecraft.net/texture/{textureId}",
+    "https://textures.ely.by/skins/{textureId}",
+    "http://textures.ely.by/skins/{textureId}",
+    "https://ely.by/storage/skins/{textureId}",
+    "http://ely.by/storage/skins/{textureId}",
+    "https://ely.by/storage/capes/{textureId}",
+    "http://ely.by/storage/capes/{textureId}",
+    "https://skinsystem.ely.by/skins/{textureId}",
+    "http://skinsystem.ely.by/skins/{textureId}",
+    "https://skinsystem.ely.by/capes/{textureId}",
+    "http://skinsystem.ely.by/capes/{textureId}",
 ];
+
+/// Custom payload channel for peer-to-peer custom skin & cape sync between Volt clients/LAN.
+pub const VOLT_SKIN_CHANNEL: &str = "volt:skin";
 
 /// `java.util.Base64.getDecoder().decode`.
 pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
@@ -308,13 +322,50 @@ impl Resolver {
         }
         let (key, send) = (key.clone(), self.send.clone());
         std::thread::spawn(move || {
-            let resolved = crate::auth::discovery()
+            let mut resolved = crate::auth::discovery()
                 .ok()
                 .and_then(|doc| resolve_profile(&key, &doc));
+            if resolved.is_none()
+                && let NameOrId::Name(name) = &key
+            {
+                resolved = resolve_ely_profile_by_name(name);
+            }
             let _ = send.send((key, resolved));
         });
         Resolve::Pending
     }
+}
+
+/// Resolve a player's skin & cape from Ely.by's public skin system (`skinsystem.ely.by`).
+pub fn resolve_ely_profile_by_name(name: &str) -> Option<ResolvedProfile> {
+    if !valid_player_name(name) {
+        return None;
+    }
+    let encoded_name: String = name
+        .bytes()
+        .filter(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        .map(char::from)
+        .collect();
+    if encoded_name.is_empty() {
+        return None;
+    }
+    let body = http_get(&format!("https://skinsystem.ely.by/textures/{encoded_name}"))
+        .or_else(|| http_get(&format!("http://skinsystem.ely.by/textures/{encoded_name}")))?;
+    let tex_obj: serde_json::Value = serde_json::from_slice(&body).ok()?;
+    if !tex_obj.is_object() || tex_obj.as_object().is_none_or(|o| o.is_empty()) {
+        return None;
+    }
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let payload = serde_json::json!({
+        "profileName": encoded_name,
+        "textures": tex_obj,
+    });
+    let b64 = STANDARD.encode(payload.to_string().as_bytes());
+    Some(ResolvedProfile {
+        id: horizon_protocol::crypto::offline_uuid(&encoded_name),
+        name: encoded_name,
+        properties: vec![("textures".into(), b64, None)],
+    })
 }
 
 /// `ResolvableProfile` (an item's `minecraft:profile` component, a skull's
@@ -546,6 +597,140 @@ fn read_offline_skin(path: &std::path::Path, model: &str) -> Result<(Vec<u8>, bo
     let (w, h, rgba) = crate::hud::decode_bytes(&bytes).map_err(|e| e.to_string())?;
     let skin = process_legacy_skin(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
     Ok((skin, model == "slim"))
+}
+
+/// Reloadable runtime override for Android / in-process launches so changing
+/// offline skins, capes, or server-sync settings in Volt Launcher takes effect
+/// on every launch without restarting the process.
+pub struct OfflineRuntime {
+    pub generation: u64,
+    pub skin: Option<(Vec<u8>, bool)>,
+    pub cape: Option<Vec<u8>>,
+    pub raw_skin_png: Option<Vec<u8>>,
+    pub raw_cape_png: Option<Vec<u8>>,
+    pub server_sync_cmd: Option<String>,
+}
+
+static OFFLINE_RT: std::sync::RwLock<Option<OfflineRuntime>> = std::sync::RwLock::new(None);
+static OFFLINE_GEN_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(2);
+
+pub fn clear_offline_runtime() {
+    if let Ok(mut guard) = OFFLINE_RT.write() {
+        *guard = None;
+    }
+}
+
+pub fn set_offline_runtime(
+    skin_png_path: Option<&std::path::Path>,
+    slim: bool,
+    cape_png_path: Option<&std::path::Path>,
+    server_sync_cmd: Option<String>,
+) {
+    let raw_skin_png = skin_png_path.and_then(|p| std::fs::read(p).ok());
+    let skin = raw_skin_png.as_ref().and_then(|bytes| {
+        let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
+        Some((process_legacy_skin(w, h, &rgba)?, slim))
+    });
+    let raw_cape_png = cape_png_path.and_then(|p| std::fs::read(p).ok());
+    let cape = raw_cape_png.as_ref().and_then(|bytes| {
+        let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
+        process_cape(w, h, &rgba)
+    });
+    let generation = OFFLINE_GEN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut guard) = OFFLINE_RT.write() {
+        *guard = Some(OfflineRuntime {
+            generation,
+            skin,
+            cape,
+            raw_skin_png: raw_skin_png.filter(|b| b.len() <= 20 * 1024),
+            raw_cape_png: raw_cape_png.filter(|b| b.len() <= 12 * 1024),
+            server_sync_cmd,
+        });
+    }
+}
+
+pub fn current_offline_skin() -> Option<(Vec<u8>, bool, u64)> {
+    if let Ok(guard) = OFFLINE_RT.read()
+        && let Some(rt) = guard.as_ref()
+    {
+        return rt
+            .skin
+            .as_ref()
+            .map(|(rgba, slim)| (rgba.clone(), *slim, rt.generation));
+    }
+    offline_skin().map(|(rgba, slim)| (rgba.clone(), *slim, 1))
+}
+
+pub fn current_offline_cape() -> Option<(Vec<u8>, u64)> {
+    if let Ok(guard) = OFFLINE_RT.read()
+        && let Some(rt) = guard.as_ref()
+    {
+        return rt.cape.as_ref().map(|rgba| (rgba.clone(), rt.generation));
+    }
+    offline_cape().map(|rgba| (rgba.to_vec(), 1))
+}
+
+pub fn current_server_sync_cmd() -> Option<String> {
+    OFFLINE_RT
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|rt| rt.server_sync_cmd.clone()))
+}
+
+pub fn build_volt_skin_packet(uuid: u128) -> Option<Vec<u8>> {
+    let guard = OFFLINE_RT.read().ok()?;
+    let rt = guard.as_ref()?;
+    if rt.raw_skin_png.is_none() && rt.raw_cape_png.is_none() {
+        return None;
+    }
+    let slim = rt.skin.as_ref().is_some_and(|(_, s)| *s);
+    let skin_bytes = rt.raw_skin_png.as_deref().unwrap_or(&[]);
+    let cape_bytes = rt.raw_cape_png.as_deref().unwrap_or(&[]);
+    let total = 4 + 16 + 1 + 4 + skin_bytes.len() + 4 + cape_bytes.len();
+    if total > 28_672 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"VSK\x01");
+    out.extend_from_slice(&uuid.to_be_bytes());
+    out.push(u8::from(slim));
+    out.extend_from_slice(&(skin_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(skin_bytes);
+    out.extend_from_slice(&(cape_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(cape_bytes);
+    Some(out)
+}
+
+pub fn parse_volt_skin_packet(
+    data: &[u8],
+) -> Option<(u128, Option<(Vec<u8>, bool)>, Option<Vec<u8>>)> {
+    if data.len() < 29 || data.len() > 28_672 || &data[..4] != b"VSK\x01" {
+        return None;
+    }
+    let uuid = u128::from_be_bytes(data[4..20].try_into().ok()?);
+    let slim = data[20] & 1 != 0;
+    let skin_len = u32::from_be_bytes(data[21..25].try_into().ok()?) as usize;
+    let cape_pos = 25usize.checked_add(skin_len)?;
+    if cape_pos + 4 > data.len() {
+        return None;
+    }
+    let cape_len = u32::from_be_bytes(data[cape_pos..cape_pos + 4].try_into().ok()?) as usize;
+    if cape_pos.checked_add(4)?.checked_add(cape_len)? != data.len() {
+        return None;
+    }
+    let skin = if skin_len > 0 {
+        let (w, h, rgba) = crate::hud::decode_bytes(&data[25..cape_pos]).ok()?;
+        Some((process_legacy_skin(w, h, &rgba)?, slim))
+    } else {
+        None
+    };
+    let cape = if cape_len > 0 {
+        let (w, h, rgba) = crate::hud::decode_bytes(&data[cape_pos + 4..]).ok()?;
+        process_cape(w, h, &rgba)
+    } else {
+        None
+    };
+    Some((uuid, skin, cape))
 }
 
 /// The signed-in account's own profile properties (`Minecraft.profileFuture`:

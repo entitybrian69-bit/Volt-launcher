@@ -523,6 +523,37 @@ impl Game<'_> {
         m.extra.swing_right_arm = swing_right_arm;
         m.extra.swing_stab = self.swing.current.is_some_and(|c| c.animation.kind == 2);
         m.hurt_time = hurt;
+        if self.remote.is_none() {
+            let custom_skin = horizon_client::skins::current_offline_skin();
+            let custom_cape = horizon_client::skins::current_offline_cape();
+            if let Some((rgba, _, _)) = &custom_skin
+                && !self.skin_slots.contains("horizon/offline_skin")
+            {
+                self.store_skin("horizon/offline_skin".into(), rgba.clone());
+            }
+            if let Some((rgba, _)) = &custom_cape
+                && !self.skin_slots.contains("capes/offline")
+            {
+                self.store_skin("capes/offline".into(), rgba.clone());
+            }
+            let skin_ready = custom_skin
+                .as_ref()
+                .filter(|_| self.again_skin("horizon/offline_skin"))
+                .map(|(_, is_slim, _)| *is_slim);
+            let cape_ready = custom_cape
+                .is_some()
+                .then_some("capes/offline")
+                .filter(|c| self.again_skin(c));
+            if let Some(mob) = self.player_model.as_mut() {
+                if let Some(is_slim) = skin_ready {
+                    mob.skin = Some("horizon/offline_skin".into());
+                    mob.slim = is_slim;
+                }
+                if let Some(cape) = cape_ready {
+                    mob.cape = Some(cape.into());
+                }
+            }
+        }
     }
     /// `Entity.turn` for the player, by the mouse, a pad, the arrow keys or an
     /// agent's `turn`.

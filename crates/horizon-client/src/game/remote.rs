@@ -444,6 +444,10 @@ pub(super) struct Remote {
     /// `ClientPacketListener.getDebugQueryHandler`: the F3+I query waiting
     /// for the server's data.
     pub(super) debug_query: super::debug_keys::DebugQuery,
+    offline_skin_gen: u64,
+    offline_cape_gen: u64,
+    skin_synced: bool,
+    volt_peer_skins: HashMap<u128, (Option<bool>, bool)>,
 }
 
 /// The time a frame spends on chunk packets before it leaves the rest of
@@ -783,6 +787,10 @@ impl Game<'_> {
             backlog_since: None,
             server_links: Vec::new(),
             debug_query: Default::default(),
+            offline_skin_gen: 0,
+            offline_cape_gen: 0,
+            skin_synced: false,
+            volt_peer_skins: HashMap::new(),
             transfer: None,
         });
         // The level's TickRateManager follows the server's ticking packets.
@@ -2477,6 +2485,25 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
             }
+            C::CustomPayload(p) if p.channel == horizon_client::skins::VOLT_SKIN_CHANNEL => {
+                if let Some((uuid, skin, cape)) =
+                    horizon_client::skins::parse_volt_skin_packet(&p.data)
+                {
+                    let slim_opt = skin.map(|(rgba, is_slim)| {
+                        self.store_skin(format!("volt/skin/{uuid:032x}"), rgba);
+                        is_slim
+                    });
+                    let has_cape = if let Some(rgba) = cape {
+                        self.store_skin(format!("volt/cape/{uuid:032x}"), rgba);
+                        true
+                    } else {
+                        false
+                    };
+                    if let Some(r) = self.remote.as_mut() {
+                        r.volt_peer_skins.insert(uuid, (slim_opt, has_cape));
+                    }
+                }
+            }
             // PingDebugMonitor.onPongReceived.
             C::PongResponse(p) => {
                 let delay = self.debug_millis() - p.time;
@@ -2520,8 +2547,19 @@ impl Game<'_> {
                     .client_information(client_view_distance(self.settings.render_distance));
                 if let Some(r) = self.remote.as_mut() {
                     r.sent_info = info.clone();
+                    r.skin_synced = false;
                 }
                 self.send(S::ClientInformation(info));
+                if let Some(local_uuid) = self.remote.as_ref().map(|r| r.profile)
+                    && let Some(data) = horizon_client::skins::build_volt_skin_packet(local_uuid)
+                {
+                    self.send(S::CustomPayload(
+                        horizon_protocol::packets::configuration::CustomPayload {
+                            channel: horizon_client::skins::VOLT_SKIN_CHANNEL.into(),
+                            data,
+                        },
+                    ));
+                }
             }
             C::Respawn(p) => {
                 // A new player, without effects (the server sends them
@@ -3741,6 +3779,33 @@ impl Game<'_> {
                     r.chat_tree = chat_tree;
                 }
                 self.merge_remote_tree();
+                if self.integrated.is_none()
+                    && self.lan.is_none()
+                    && self
+                        .remote
+                        .as_ref()
+                        .is_some_and(|r| !r.online_mode && !r.skin_synced)
+                {
+                    let has_skin_cmd = usize::try_from(p.root)
+                        .ok()
+                        .and_then(|root| p.nodes.get(root))
+                        .is_some_and(|root| {
+                            root.children.iter().any(|&c| {
+                                usize::try_from(c)
+                                    .ok()
+                                    .and_then(|i| p.nodes.get(i))
+                                    .is_some_and(|n| n.kind == 1 && n.name == "skin")
+                            })
+                        });
+                    if has_skin_cmd
+                        && let Some(cmd) = horizon_client::skins::current_server_sync_cmd()
+                    {
+                        if let Some(r) = self.remote.as_mut() {
+                            r.skin_synced = true;
+                        }
+                        self.send(S::ChatCommand(play::ChatCommand { command: cmd }));
+                    }
+                }
             }
             C::Cooldown(p) => {
                 // ClientPacketListener.handleItemCooldown: the server starts
@@ -4236,6 +4301,36 @@ impl Game<'_> {
         );
         let r = &*r;
         let local = r.profile;
+        let online_mode = r.online_mode;
+        // Built-in CustomSkinLoader fallback for players without server-supplied textures on offline servers.
+        if !online_mode {
+            for (entity_id, &uuid) in &r.level_players {
+                if uuid == local || entries.iter().any(|(u, t)| *u == uuid && t.skin.is_some()) {
+                    continue;
+                }
+                let name = r
+                    .players
+                    .get(&uuid)
+                    .or_else(|| r.level_player_names.get(entity_id));
+                if let Some(name) = name
+                    && let horizon_client::skins::Resolve::Done(Some(profile)) = self
+                        .skin_profiles
+                        .borrow_mut()
+                        .state(&horizon_client::skins::NameOrId::Name(name.clone()))
+                    && let Some((value, signature)) = profile.textures()
+                {
+                    let tex = horizon_client::skins::unpack(
+                        &value,
+                        signature,
+                        &horizon_client::skins::TEXTURE_URIS,
+                    );
+                    if tex.skin.is_some() {
+                        entries.retain(|(u, _)| *u != uuid);
+                        entries.push((uuid, tex));
+                    }
+                }
+            }
+        }
         // Minecraft.profileFuture: the signed-in account's own profile, fetched from the
         // services, gives the local player its skin where the server sends none (single
         // player's offline-mode server).
@@ -4251,11 +4346,11 @@ impl Game<'_> {
         // PlayerSkin.cape of each resolved skin.
         let mut capes: HashMap<u128, String> = HashMap::new();
         for (uuid, textures) in entries {
-            // PlayerInfo.createSkinLookup: only the local player's own skin
-            // may be unsigned.
+            // PlayerInfo.createSkinLookup: on online-mode servers other players' skins must be signed;
+            // on offline-mode servers CustomSkinLoader / Ely.by unsigned lookups are also permitted.
             let skin = {
                 let mut downloads = self.skin_downloads.borrow_mut();
-                horizon_client::skins::lookup(&textures, uuid != local, |kind, url| {
+                horizon_client::skins::lookup(&textures, online_mode && uuid != local, |kind, url| {
                     downloads.state(kind, url)
                 })
             };
@@ -4269,27 +4364,68 @@ impl Game<'_> {
                 resolved.push((uuid, skin));
             }
         }
-        // An offline name's skin from the launcher, where neither the server
-        // nor an account gives the local player one.
-        if !resolved.iter().any(|(u, _)| *u == local)
-            && let Some((rgba, is_slim)) = horizon_client::skins::offline_skin()
+        // Peer-to-peer Volt skin/cape packets from LAN / multiplayer peers.
+        let peer_skins: Vec<(u128, Option<bool>, bool)> = self
+            .remote
+            .as_ref()
+            .map(|r| {
+                r.volt_peer_skins
+                    .iter()
+                    .map(|(&u, &(s, c))| (u, s, c))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (uuid, peer_slim, peer_cape) in peer_skins {
+            if let Some(is_slim) = peer_slim {
+                let slot = format!("volt/skin/{uuid:032x}");
+                if self.skin_slots.contains(&slot) {
+                    resolved.retain(|(u, _)| *u != uuid);
+                    if is_slim {
+                        slim.insert(uuid);
+                    } else {
+                        slim.remove(&uuid);
+                    }
+                    resolved.push((uuid, slot));
+                }
+            }
+            if peer_cape {
+                let slot = format!("volt/cape/{uuid:032x}");
+                if self.skin_slots.contains(&slot) {
+                    capes.insert(uuid, slot);
+                }
+            }
+        }
+        // Equipped custom skin from Volt Launcher always takes priority for the local player
+        // when playing offline / with a custom skin equipped.
+        let has_custom_cape = horizon_client::skins::current_offline_cape().is_some();
+        if let Some((rgba, is_slim, gen)) = horizon_client::skins::current_offline_skin()
+            && horizon_client::auth::current().is_none_or(|s| s.join_url.is_some())
         {
             const OFFLINE: &str = "horizon/offline_skin";
-            if !self.skin_slots.contains(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.clone());
+            let prev_gen = self.remote.as_ref().map_or(0, |r| r.offline_skin_gen);
+            if prev_gen != gen || !self.skin_slots.contains(OFFLINE) {
+                self.store_skin(OFFLINE.into(), rgba);
+                if let Some(r) = self.remote.as_mut() {
+                    r.offline_skin_gen = gen;
+                }
             }
-            if *is_slim {
+            resolved.retain(|(u, _)| *u != local);
+            if is_slim {
                 slim.insert(local);
+            } else {
+                slim.remove(&local);
             }
             resolved.push((local, OFFLINE.into()));
         }
-        // An offline name's cape from the launcher, where the profile has none.
-        if !capes.contains_key(&local)
-            && let Some(rgba) = horizon_client::skins::offline_cape()
-        {
+        // Equipped custom cape from Volt Launcher.
+        if let Some((rgba, gen)) = horizon_client::skins::current_offline_cape() {
             const OFFLINE: &str = "capes/offline";
-            if !self.skin_slots.contains(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.to_vec());
+            let prev_gen = self.remote.as_ref().map_or(0, |r| r.offline_cape_gen);
+            if prev_gen != gen || !self.skin_slots.contains(OFFLINE) {
+                self.store_skin(OFFLINE.into(), rgba);
+                if let Some(r) = self.remote.as_mut() {
+                    r.offline_cape_gen = gen;
+                }
             }
             capes.insert(local, OFFLINE.into());
         }
@@ -4334,10 +4470,10 @@ impl Game<'_> {
         }
         if self.player_model.is_some() {
             let (skin, is_slim) = self.drawn_skin(own, skin_of(&skins, own));
-            // Avatar.isModelPartShown(CAPE): the Skin Customization option.
+            // Avatar.isModelPartShown(CAPE): the Skin Customization option, or an explicitly equipped Volt cape.
             let cape = capes
                 .get(&own)
-                .filter(|_| self.settings.file.bool("modelPart_cape"))
+                .filter(|_| self.settings.file.bool("modelPart_cape") || has_custom_cape)
                 .filter(|c| self.again_skin(c))
                 .cloned();
             if let Some(mob) = self.player_model.as_mut() {

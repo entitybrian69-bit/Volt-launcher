@@ -144,6 +144,7 @@ impl Config {
 #[derive(Clone, Copy, PartialEq)]
 pub enum Page {
     Play,
+    Account,
     Mods,
     Packs,
     Shaders,
@@ -151,8 +152,9 @@ pub enum Page {
     Settings,
 }
 impl Page {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Play,
+        Self::Account,
         Self::Mods,
         Self::Packs,
         Self::Shaders,
@@ -162,6 +164,7 @@ impl Page {
     pub fn name(self) -> &'static str {
         match self {
             Self::Play => "Play",
+            Self::Account => "Account",
             Self::Mods => "Mods",
             Self::Packs => "Packs",
             Self::Shaders => "Shaders",
@@ -195,6 +198,12 @@ pub struct Catalog {
     pub control_presets: Vec<horizon_client::touch::import::PresetEntry>,
     pub editing: Option<&'static str>,
     pub render_scale_text: String,
+    pub account_tab: crate::volt_accounts::AccountProvider,
+    pub offline_name_input: String,
+    pub ely_user_input: String,
+    pub ely_pass_input: String,
+    pub ely_totp_input: String,
+    pub skin_query_input: String,
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
     search_worker: Option<mpsc::Receiver<Result<Vec<Project>, String>>>,
     searches: crate::search_queue::Queue<(Page, browser::SourceId, String, usize), Vec<Project>>,
@@ -228,6 +237,12 @@ impl Catalog {
             control_presets: vec![],
             editing: None,
             render_scale_text: String::new(),
+            account_tab: crate::volt_accounts::AccountProvider::Offline,
+            offline_name_input: String::new(),
+            ely_user_input: String::new(),
+            ely_pass_input: String::new(),
+            ely_totp_input: String::new(),
+            skin_query_input: String::new(),
             worker: None,
             search_worker: None,
             searches: crate::search_queue::Queue::new(),
@@ -682,6 +697,11 @@ impl Catalog {
             Some("server") => &mut self.config.server,
             Some("render_scale") => &mut self.render_scale_text,
             Some("client_id") => &mut self.config.microsoft_client_id,
+            Some("offline_name") => &mut self.offline_name_input,
+            Some("ely_user") => &mut self.ely_user_input,
+            Some("ely_pass") => &mut self.ely_pass_input,
+            Some("ely_totp") => &mut self.ely_totp_input,
+            Some("skin_query") => &mut self.skin_query_input,
             _ => &mut self.query,
         };
         match out {

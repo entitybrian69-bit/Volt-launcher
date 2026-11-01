@@ -295,6 +295,12 @@ pub fn cache_dir() -> Option<std::path::PathBuf> {
 pub fn open_repository() -> bool {
     open_url("https://github.com/entitybrian69-bit/Volt-launcher")
 }
+pub fn open_discord() -> bool {
+    open_url("https://discord.gg/RS7q9KaCm6")
+}
+pub fn open_ely_register() -> bool {
+    open_url("https://account.ely.by/register")
+}
 /// Browse our SAF directory through the system file manager, never a private path.
 pub fn open_documents(id: &str) -> bool {
     with_context(|env, activity| {

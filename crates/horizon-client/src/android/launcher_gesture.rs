@@ -13,6 +13,7 @@ pub(super) fn reveal(scroll: f32, row: [f32; 4], view: [f32; 3]) -> f32 {
 }
 pub(super) struct Drag {
     origin: [f64; 2],
+    previous_x: f64,
     previous_y: f64,
     pub(super) moved: bool,
 }
@@ -21,6 +22,7 @@ impl Drag {
     pub(super) fn new(x: f64, y: f64) -> Self {
         Self {
             origin: [x, y],
+            previous_x: x,
             previous_y: y,
             moved: false,
         }
@@ -30,14 +32,27 @@ impl Drag {
         self.origin[1]
     }
 
+    pub(super) fn origin_xy(&self) -> [f64; 2] {
+        self.origin
+    }
+
     pub(super) fn update(&mut self, x: f64, y: f64, density: f64) -> f32 {
+        let (_, dy) = self.update_xy(x, y, density);
+        dy
+    }
+
+    pub(super) fn update_xy(&mut self, x: f64, y: f64, density: f64) -> (f32, f32) {
         let density = density.max(0.01);
         self.moved |= (x - self.origin[0]).hypot(y - self.origin[1]) > 12.0 * density;
         let delta = if self.moved {
-            ((self.previous_y - y) / density) as f32
+            (
+                ((x - self.previous_x) / density) as f32,
+                ((self.previous_y - y) / density) as f32,
+            )
         } else {
-            0.0
+            (0.0, 0.0)
         };
+        self.previous_x = x;
         self.previous_y = y;
         delta
     }

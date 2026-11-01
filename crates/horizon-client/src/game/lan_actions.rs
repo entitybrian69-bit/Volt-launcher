@@ -1671,6 +1671,55 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.guest_native_net(host, conn, &p.data)
             }
+            S::CustomPayload(p) if p.channel == horizon_client::skins::VOLT_SKIN_CHANNEL => {
+                if let Some(guest_uuid) = host.hub.guest(conn).map(|g| g.uuid)
+                    && let Some((pkt_uuid, skin, cape)) =
+                        horizon_client::skins::parse_volt_skin_packet(&p.data)
+                    && pkt_uuid == guest_uuid
+                {
+                    let slim_opt = skin.map(|(rgba, is_slim)| {
+                        self.store_skin(format!("volt/skin/{guest_uuid:032x}"), rgba);
+                        is_slim
+                    });
+                    let has_cape = if let Some(rgba) = cape {
+                        self.store_skin(format!("volt/cape/{guest_uuid:032x}"), rgba);
+                        true
+                    } else {
+                        false
+                    };
+                    if let Some(r) = self.remote.as_mut() {
+                        r.volt_peer_skins.insert(guest_uuid, (slim_opt, has_cape));
+                    }
+                    if let Some(m) = host.models.get_mut(&conn) {
+                        if let Some(is_slim) = slim_opt {
+                            m.skin = Some(format!("volt/skin/{guest_uuid:032x}"));
+                            m.slim = is_slim;
+                        }
+                        if has_cape {
+                            m.cape = Some(format!("volt/cape/{guest_uuid:032x}"));
+                        }
+                    }
+                    host.hub.broadcast(&C::CustomPayload(
+                        horizon_protocol::packets::configuration::CustomPayload {
+                            channel: horizon_client::skins::VOLT_SKIN_CHANNEL.into(),
+                            data: p.data,
+                        },
+                    ));
+                    if let Some(host_data) =
+                        horizon_client::skins::build_volt_skin_packet(host.host_uuid)
+                    {
+                        host.hub.send_to(
+                            conn,
+                            &C::CustomPayload(
+                                horizon_protocol::packets::configuration::CustomPayload {
+                                    channel: horizon_client::skins::VOLT_SKIN_CHANNEL.into(),
+                                    data: host_data,
+                                },
+                            ),
+                        );
+                    }
+                }
+            }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {

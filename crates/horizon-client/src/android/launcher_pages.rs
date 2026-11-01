@@ -56,6 +56,25 @@ pub(super) enum Action {
     ExportPerformance,
     ExportDiagnostics,
     Account,
+    Discord,
+    AccountProviderTab(crate::volt_accounts::AccountProvider),
+    SelectVoltAccount(usize),
+    RemoveVoltAccount(usize),
+    CreateOfflineAccount,
+    UpdateOfflineName,
+    ElySignIn,
+    ElyRegister,
+    ToggleSlimModel,
+    ToggleServerSkinSync,
+    ImportSkinPng,
+    ImportCapePng,
+    FetchSkinByUsername,
+    LoadSkinUrl,
+    LoadCapeUrl,
+    EquipPresetCape(crate::volt_accounts::PresetCape),
+    ClearCustomSkin,
+    ClearCustomCape,
+    ResetPreviewAngle,
     SignIn,
     DeviceSignIn,
     CopyLoginCode,
@@ -237,10 +256,14 @@ fn toggle(
 fn draw_page_icon(ui: &mut Ui, page: Page, cx: f32, cy: f32, col: u32) {
     match page {
         Page::Play => {
-            ui.border(cx - 8.0, cy - 8.0, 16.0, 16.0, 8.0, col);
+            ui.border(cx - 8.5, cy - 8.5, 17.0, 17.0, 8.5, col);
             ui.rounded(cx - 3.0, cy - 4.5, 2.5, 9.0, 1.0, col);
             ui.rounded(cx - 1.0, cy - 3.0, 2.5, 6.0, 1.0, col);
             ui.rounded(cx + 1.0, cy - 1.5, 2.5, 3.0, 1.0, col);
+        }
+        Page::Account => {
+            ui.border(cx - 4.0, cy - 7.5, 8.0, 8.0, 4.0, col);
+            ui.border(cx - 7.5, cy + 1.5, 15.0, 6.5, 3.2, col);
         }
         Page::Mods => {
             ui.border(cx - 7.0, cy - 7.0, 6.5, 6.5, 1.5, col);
@@ -273,6 +296,24 @@ fn draw_page_icon(ui: &mut Ui, page: Page, cx: f32, cy: f32, col: u32) {
             ui.rounded(cx + 0.5, cy + 2.0, 4.0, 5.0, 2.0, col);
         }
     }
+}
+
+fn draw_discord_icon(ui: &mut Ui, cx: f32, cy: f32, col: u32, bg: u32) {
+    // Crisp recognizable Discord Clyde controller silhouette
+    ui.rounded(cx - 8.0, cy - 5.5, 16.0, 11.0, 4.5, col);
+    ui.rounded(cx - 5.5, cy - 7.0, 4.0, 2.5, 1.2, col);
+    ui.rounded(cx + 1.5, cy - 7.0, 4.0, 2.5, 1.2, col);
+    ui.rounded(cx - 4.5, cy - 1.8, 3.0, 3.2, 1.5, bg);
+    ui.rounded(cx + 1.5, cy - 1.8, 3.0, 3.2, 1.5, bg);
+    ui.rounded(cx - 2.5, cy + 4.0, 5.0, 2.0, 1.0, bg);
+}
+
+fn draw_github_icon(ui: &mut Ui, cx: f32, cy: f32, col: u32) {
+    ui.border(cx - 7.5, cy - 7.5, 15.0, 15.0, 7.5, col);
+    ui.rounded(cx - 4.5, cy - 3.0, 9.0, 5.5, 2.5, col);
+    ui.rounded(cx - 5.0, cy - 5.0, 2.5, 3.0, 1.0, col);
+    ui.rounded(cx + 2.5, cy - 5.0, 2.5, 3.0, 1.0, col);
+    ui.rounded(cx - 1.5, cy + 2.0, 3.0, 4.5, 1.0, col);
 }
 
 fn format_downloads(n: u64) -> String {
@@ -348,7 +389,7 @@ fn draw_account_chip(
         theme::TEXT,
         &label,
     );
-    targets.push((rect, Action::Account));
+    targets.push((rect, Action::Page(Page::Account)));
 }
 
 impl Launcher {
@@ -422,6 +463,11 @@ struct DrawCtx<'a> {
     list_targets: &'a mut Vec<([f32; 4], Action)>,
     list_view: &'a mut Option<[f32; 3]>,
     login: &'a login::Login,
+    volt_accounts: &'a crate::volt_accounts::VoltAccountManager,
+    preview_yaw: f32,
+    preview_pitch: f32,
+    idle_phase: f32,
+    preview_rect: &'a mut Option<[f32; 4]>,
 }
 
 impl DrawCtx<'_> {
@@ -435,7 +481,7 @@ impl DrawCtx<'_> {
         ui.rounded(bx, by, 34.0, 34.0, 9.0, theme::BG);
         ui.border(bx, by, 34.0, 34.0, 9.0, theme::CRIMSON);
         ui.volt_logo(bx + 3.0, by + 3.0, 28.0, 28.0);
-        ui.text(Face::Medium, 17.5, bx + 42.0, by - 1.0, theme::TEXT, "VOLT");
+        ui.text(Face::Medium, 18.0, bx + 42.0, by - 1.0, theme::TEXT, "VOLT");
         ui.text(
             Face::Medium,
             10.5,
@@ -444,14 +490,14 @@ impl DrawCtx<'_> {
             theme::MUTED,
             &format!("LAUNCHER {}", crate::backend::VERSION),
         );
-        ui.rounded(rx + 12.0, ry + 58.0, rw - 24.0, 1.0, 0.0, theme::BORDER);
+        ui.rounded(rx + 12.0, ry + 56.0, rw - 24.0, 1.0, 0.0, theme::BORDER);
 
-        // Vertical navigation items
-        let nav_top = ry + 70.0;
-        let nav_bottom = ry + rh - 58.0;
-        let avail = (nav_bottom - nav_top).max(216.0);
-        let step = (avail / Page::ALL.len() as f32).min(50.0);
-        let item_h = (step - 6.0).clamp(34.0, 44.0);
+        // Full-height vertical navigation items filling the entire sidebar!
+        let nav_top = ry + 64.0;
+        let nav_bottom = ry + rh - 96.0;
+        let avail = (nav_bottom - nav_top).max(252.0);
+        let step = avail / Page::ALL.len() as f32;
+        let item_h = (step - 6.0).max(34.0);
 
         for (i, &page) in Page::ALL.iter().enumerate() {
             let iy = nav_top + i as f32 * step;
@@ -463,7 +509,7 @@ impl DrawCtx<'_> {
                     rect[1],
                     rect[2],
                     rect[3],
-                    9.0,
+                    10.0,
                     if page == Page::Play {
                         theme::CRIMSON
                     } else {
@@ -475,7 +521,7 @@ impl DrawCtx<'_> {
                     rect[1],
                     rect[2],
                     rect[3],
-                    9.0,
+                    10.0,
                     if page == Page::Play {
                         theme::CRIMSON_BRIGHT
                     } else {
@@ -483,41 +529,74 @@ impl DrawCtx<'_> {
                     },
                 );
                 ui.rounded(
-                    rx + 2.0,
-                    iy + 7.0,
-                    3.5,
-                    item_h - 14.0,
+                    rx + 2.5,
+                    iy + (item_h * 0.18).clamp(6.0, 12.0),
+                    4.0,
+                    (item_h * 0.64).max(16.0),
                     2.0,
                     theme::CRIMSON_BRIGHT,
                 );
+            } else {
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CARD);
+                ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::BORDER);
             }
             let fg = if active {
                 theme::ON_CRIMSON
             } else {
-                theme::MUTED
+                theme::TEXT
             };
-            draw_page_icon(ui, page, rect[0] + 18.0, iy + item_h * 0.5, fg);
+            draw_page_icon(ui, page, rect[0] + 20.0, iy + item_h * 0.5, fg);
             ui.text(
                 Face::Medium,
-                14.5,
-                rect[0] + 36.0,
-                text_vcenter(iy, item_h, 14.5),
+                15.5,
+                rect[0] + 40.0,
+                text_vcenter(iy, item_h, 15.5),
                 fg,
                 page.name(),
             );
             self.targets.push((rect, Action::Page(page)));
         }
 
-        // Bottom GitHub button
-        styled_button(
+        // Discord button directly above GitHub button
+        let disc_rect = [rx + 12.0, ry + rh - 86.0, rw - 24.0, 36.0];
+        ui.rounded(disc_rect[0], disc_rect[1], disc_rect[2], disc_rect[3], 9.0, theme::CRIMSON_BADGE);
+        ui.border(disc_rect[0], disc_rect[1], disc_rect[2], disc_rect[3], 9.0, theme::BORDER_CRIMSON);
+        draw_discord_icon(
             ui,
-            self.targets,
-            [rx + 12.0, ry + rh - 46.0, rw - 24.0, 34.0],
-            "GitHub",
-            Action::Repository,
-            BtnStyle::Secondary,
-            true,
+            disc_rect[0] + 26.0,
+            disc_rect[1] + disc_rect[3] * 0.5,
+            theme::CRIMSON_BRIGHT,
+            theme::CRIMSON_BADGE,
         );
+        ui.text(
+            Face::Medium,
+            13.5,
+            disc_rect[0] + 44.0,
+            text_vcenter(disc_rect[1], disc_rect[3], 13.5),
+            theme::TEXT,
+            "Discord",
+        );
+        self.targets.push((disc_rect, Action::Discord));
+
+        // GitHub button at bottom
+        let gh_rect = [rx + 12.0, ry + rh - 44.0, rw - 24.0, 34.0];
+        ui.rounded(gh_rect[0], gh_rect[1], gh_rect[2], gh_rect[3], 9.0, theme::CARD_INNER);
+        ui.border(gh_rect[0], gh_rect[1], gh_rect[2], gh_rect[3], 9.0, theme::BORDER);
+        draw_github_icon(
+            ui,
+            gh_rect[0] + 26.0,
+            gh_rect[1] + gh_rect[3] * 0.5,
+            theme::TEXT,
+        );
+        ui.text(
+            Face::Medium,
+            13.5,
+            gh_rect[0] + 44.0,
+            text_vcenter(gh_rect[1], gh_rect[3], 13.5),
+            theme::TEXT,
+            "GitHub",
+        );
+        self.targets.push((gh_rect, Action::Repository));
     }
 
     fn draw_compact_header(&mut self, ui: &mut Ui, w: f32, account_status: &str) {
@@ -582,21 +661,21 @@ impl DrawCtx<'_> {
         let progress = *self.install.lock().unwrap();
 
         let (hero_rect, right_rect) = if compact {
-            let hero_h = (ch * 0.54).clamp(240.0, 340.0);
+            let hero_h = (ch * 0.42).clamp(176.0, 240.0);
             (
                 [cx, cy, cw, hero_h],
-                Some([cx, cy + hero_h + 12.0, cw, (ch - hero_h - 12.0).max(160.0)]),
+                [cx, cy + hero_h + 12.0, cw, (ch - hero_h - 12.0).max(200.0)],
             )
         } else {
-            let hero_w = (cw * 0.58).round();
+            let hero_w = (cw * 0.56).round();
             let right_w = cw - hero_w - 16.0;
             (
-                [cx, cy, hero_w, ch - 34.0],
-                Some([cx + hero_w + 16.0, cy, right_w, ch - 34.0]),
+                [cx, cy, hero_w, ch - 30.0],
+                [cx + hero_w + 16.0, cy, right_w, ch - 30.0],
             )
         };
 
-        // Hero Launch Card (01-play.png style)
+        // Left Hero Card (Launch overview + active identity; PLAY moved to bottom-right!)
         let [hx, hy, hw, hh] = hero_rect;
         ui.rounded(hx, hy, hw, hh, 16.0, theme::HERO_BG);
         ui.rounded(hx + 8.0, hy + 8.0, hw * 0.65, hh * 0.45, 14.0, theme::HERO_GLOW_SOFT);
@@ -620,21 +699,21 @@ impl DrawCtx<'_> {
         } else {
             "Java Worlds on Android"
         };
-        let heading_sz = if compact { 26.0 } else { 36.0 };
+        let heading_sz = if compact { 24.0 } else { 36.0 };
         let heading_max = if compact { hw - 52.0 } else { hw - 124.0 };
         let fitted_heading = ui.fit_text(Face::Medium, heading_sz, heading, heading_max);
         ui.text(
             Face::Medium,
             heading_sz,
             hx + 26.0,
-            hy + if compact { 18.0 } else { 32.0 },
+            hy + if compact { 16.0 } else { 30.0 },
             theme::TEXT,
             &fitted_heading,
         );
 
         // Version badge pill
-        let badge_y = hy + if compact { 60.0 } else { 92.0 };
-        let ver_w = 192.0f32.min(hw - 52.0);
+        let badge_y = hy + if compact { 56.0 } else { 88.0 };
+        let ver_w = 196.0f32.min(hw - 52.0);
         ui.rounded(hx + 26.0, badge_y, ver_w, 34.0, 9.0, theme::CRIMSON_BADGE);
         ui.border(hx + 26.0, badge_y, ver_w, 34.0, 9.0, theme::BORDER_CRIMSON);
         ui.rounded(hx + 38.0, badge_y + 11.0, 12.0, 12.0, 3.0, theme::CRIMSON_BRIGHT);
@@ -647,8 +726,8 @@ impl DrawCtx<'_> {
             "Minecraft Java 26.3",
         );
 
-        // Profile selector pill (interactive -> Action::Profile!)
-        let prof_y = badge_y + if compact { 42.0 } else { 48.0 };
+        // Profile selector pill
+        let prof_y = badge_y + if compact { 40.0 } else { 46.0 };
         styled_button(
             ui,
             self.targets,
@@ -665,10 +744,10 @@ impl DrawCtx<'_> {
                 .position(|s| *s == progress.stage)
                 .unwrap_or(0);
             let list_top = prof_y + 46.0;
-            let bar_y = hy + hh - 62.0;
+            let bar_y = hy + hh - 42.0;
             let avail_rows = bar_y - list_top - 8.0;
-            if avail_rows >= 132.0 {
-                let step_h = (avail_rows / 6.0).clamp(20.0, 28.0);
+            if avail_rows >= 120.0 {
+                let step_h = (avail_rows / 6.0).clamp(18.0, 26.0);
                 for (idx, stage) in InstallStage::ALL.iter().enumerate() {
                     let sy = list_top + idx as f32 * step_h;
                     let label = if idx < current {
@@ -689,19 +768,11 @@ impl DrawCtx<'_> {
             } else {
                 ui.text(
                     Face::Medium,
-                    15.5,
+                    15.0,
                     hx + 26.0,
                     list_top + 4.0,
                     theme::TEXT,
                     progress.stage.label(),
-                );
-                ui.text(
-                    Face::Regular,
-                    13.0,
-                    hx + 26.0,
-                    list_top + 28.0,
-                    theme::MUTED,
-                    &format!("Step {} of 6", current + 1),
                 );
             }
             let fraction = if progress.total > 0 {
@@ -734,172 +805,181 @@ impl DrawCtx<'_> {
             };
             let fitted = ui.fit_text(Face::Regular, 12.5, &detail, hw - 52.0);
             ui.text(Face::Regular, 12.5, hx + 26.0, bar_y + 14.0, theme::MUTED, &fitted);
-        } else {
-            let cta_h = if compact { 48.0 } else { 58.0 };
-            let cta_y = hy + hh - cta_h - if compact { 18.0 } else { 28.0 };
-            let cta_label = if installed {
-                "PLAY"
-            } else if self.error.is_some() {
-                "RETRY INSTALLATION"
-            } else {
-                "DOWNLOAD MINECRAFT 26.3"
-            };
-            styled_button(
-                ui,
-                self.targets,
-                [hx + 26.0, cta_y, hw - 52.0, cta_h],
-                cta_label,
-                Action::Play,
-                BtnStyle::Primary,
-                true,
-            );
-        }
-
-        // Right Column: Account Card + Quick Start Guide Card
-        if let Some([rx, ry, rw, rh]) = right_rect {
-            let guide_rect = if compact {
-                [rx, ry, rw, rh]
-            } else {
-                // Account Card at top-right (matching 01-play.png)
-                let acc_h = 126.0;
-                ui.rounded(rx, ry, rw, acc_h, 14.0, theme::CARD);
-                ui.border(rx, ry, rw, acc_h, 14.0, theme::BORDER_CRIMSON);
-                ui.text(Face::Medium, 13.5, rx + 20.0, ry + 14.0, theme::MUTED, "Account");
-
-                let avatar_y = ry + 48.0;
-                ui.rounded(rx + 20.0, avatar_y, 44.0, 44.0, 22.0, theme::CRIMSON);
-                let initial = self
-                    .login
-                    .profile
-                    .as_deref()
-                    .or_else(|| {
-                        let trimmed = self.catalog.config.name.trim();
-                        (!trimmed.is_empty()).then_some(trimmed)
-                    })
-                    .and_then(|s| s.chars().next())
-                    .map(|c| c.to_ascii_uppercase().to_string())
-                    .unwrap_or_else(|| "P".into());
-                draw_centered_text(
-                    ui,
-                    Face::Medium,
-                    18.0,
-                    [rx + 20.0, avatar_y, 44.0, 44.0],
-                    theme::ON_CRIMSON,
-                    &initial,
-                );
-
-                let status_line = ui.fit_text(Face::Medium, 15.5, account_status, (rw - 96.0).max(40.0));
-                ui.text(
+        } else if !compact {
+            // Active loadout summary card anchored cleanly at the bottom of the left hero card
+            let info_h = 84.0f32.min((hy + hh - (prof_y + 52.0) - 22.0).max(0.0));
+            if info_h >= 64.0 {
+                let iy = hy + hh - info_h - 22.0;
+                ui.rounded(hx + 26.0, iy, hw - 52.0, info_h, 12.0, theme::CARD);
+                ui.border(hx + 26.0, iy, hw - 52.0, info_h, 12.0, theme::BORDER_CRIMSON);
+                let active_acc = self.volt_accounts.active();
+                let (acc_name, badge_txt, skin_txt, cape_txt) = match active_acc {
+                    Some(a) => (
+                        a.name.as_str(),
+                        a.provider.badge(),
+                        a.skin_label.as_str(),
+                        a.cape_label.as_str(),
+                    ),
+                    None => (account_status, "OFFLINE", "Default", "None"),
+                };
+                let title = ui.fit_text(
                     Face::Medium,
                     15.5,
-                    rx + 76.0,
-                    avatar_y + 2.0,
-                    theme::TEXT,
-                    &status_line,
+                    &format!("{acc_name}  •  {badge_txt}"),
+                    hw - 84.0,
                 );
-                let sub = if self.login.signed_in {
-                    "Microsoft session active"
-                } else {
-                    "Tap to sign in or edit name"
-                };
-                let sub_fit = ui.fit_text(Face::Regular, 12.5, sub, (rw - 96.0).max(40.0));
-                ui.text(Face::Regular, 12.5, rx + 76.0, avatar_y + 24.0, theme::MUTED, &sub_fit);
-                self.targets.push(([rx, ry, rw, acc_h], Action::Account));
-
-                [rx, ry + acc_h + 14.0, rw, (rh - acc_h - 14.0).max(160.0)]
-            };
-
-            let [gx, gy, gw, gh] = guide_rect;
-            ui.rounded(gx, gy, gw, gh, 14.0, theme::CARD);
-            ui.border(gx, gy, gw, gh, 14.0, theme::BORDER_CRIMSON);
-            ui.text(
-                Face::Medium,
-                16.5,
-                gx + 20.0,
-                gy + 16.0,
-                theme::TEXT,
-                "Quick Start Guide",
-            );
-            let rows: [(&str, &str, Option<Action>); 3] = if installed {
-                [
-                    ("01", "Open a world or join a Java server", Some(Action::Play)),
-                    (
-                        "02",
-                        "Touch setup: Options > Controls",
-                        Some(Action::Page(Page::Settings)),
-                    ),
-                    (
-                        "03",
-                        "Find packs and .hmod in the tabs",
-                        Some(Action::Page(Page::Mods)),
-                    ),
-                ]
-            } else {
-                [
-                    ("01", "Download resources from Mojang", Some(Action::Play)),
-                    ("02", "Install and verify on this phone", None),
-                    (
-                        "03",
-                        "Play offline or sign in for servers",
-                        Some(Action::Account),
-                    ),
-                ]
-            };
-            let tiles_top = gy + 52.0;
-            let tiles_avail = (gh - 66.0).max(108.0);
-            let tile_gap = 8.0;
-            let tile_h = ((tiles_avail - 2.0 * tile_gap) / 3.0).clamp(34.0, 56.0);
-            for (idx, (num, text, act)) in rows.into_iter().enumerate() {
-                let ty = tiles_top + idx as f32 * (tile_h + tile_gap);
-                let trect = [gx + 16.0, ty, gw - 32.0, tile_h];
-                ui.rounded(trect[0], trect[1], trect[2], trect[3], 10.0, theme::CARD_INNER);
-                ui.border(trect[0], trect[1], trect[2], trect[3], 10.0, theme::BORDER);
-
-                let bsize = (tile_h - 12.0).clamp(22.0, 32.0);
-                let by = ty + (tile_h - bsize) * 0.5;
-                ui.rounded(
-                    trect[0] + 10.0,
-                    by,
-                    bsize + 4.0,
-                    bsize,
-                    7.0,
-                    theme::CRIMSON_BADGE,
-                );
-                draw_centered_text(
-                    ui,
-                    Face::Medium,
+                ui.text(Face::Medium, 15.5, hx + 42.0, iy + 14.0, theme::TEXT, &title);
+                let sub = ui.fit_text(
+                    Face::Regular,
                     12.5,
-                    [trect[0] + 10.0, by, bsize + 4.0, bsize],
-                    theme::CRIMSON_BRIGHT,
-                    num,
+                    &format!("Skin: {skin_txt}   |   Cape: {cape_txt}   |   Renderer: {}", self.catalog.config.renderer.label()),
+                    hw - 84.0,
                 );
-                let line = ui.fit_text(
-                    Face::Medium,
-                    13.5,
-                    text,
-                    (trect[2] - bsize - 44.0).max(40.0),
-                );
-                ui.text(
-                    Face::Medium,
-                    13.5,
-                    trect[0] + bsize + 24.0,
-                    text_vcenter(ty, tile_h, 13.5),
-                    theme::TEXT,
-                    &line,
-                );
-                ui.text(
-                    Face::Medium,
-                    14.0,
-                    trect[0] + trect[2] - 18.0,
-                    text_vcenter(ty, tile_h, 14.0),
-                    theme::DIM,
-                    ">",
-                );
-                if let Some(action) = act {
-                    self.targets.push((trect, action));
-                }
+                ui.text(Face::Regular, 12.5, hx + 42.0, iy + 42.0, theme::MUTED, &sub);
+                self.targets
+                    .push(([hx + 26.0, iy, hw - 52.0, info_h], Action::Page(Page::Account)));
             }
         }
+
+        // Right Column: Interactive Rotatable 3D Minecraft Character + Bottom-Right PLAY Button!
+        let [rx, ry, rw, rh] = right_rect;
+        let cta_h = if compact { 50.0 } else { 60.0 };
+        let char_h = (rh - cta_h - 14.0).max(140.0);
+        let char_card = [rx, ry, rw, char_h];
+
+        ui.rounded(char_card[0], char_card[1], char_card[2], char_card[3], 16.0, theme::CARD);
+        ui.rounded(
+            char_card[0] + char_card[2] * 0.16,
+            char_card[1] + char_card[3] * 0.14,
+            char_card[2] * 0.68,
+            char_card[3] * 0.68,
+            18.0,
+            theme::HERO_GLOW_SOFT,
+        );
+        ui.border(
+            char_card[0],
+            char_card[1],
+            char_card[2],
+            char_card[3],
+            16.0,
+            theme::BORDER_CRIMSON,
+        );
+
+        let active_acc = self.volt_accounts.active();
+        let (acc_name, provider_badge, default_uuid) = match active_acc {
+            Some(a) => (a.name.as_str(), a.provider.badge(), a.uuid_u128()),
+            None => ("Player", "OFFLINE", 0u128),
+        };
+
+        // Header badge inside 3D character showcase card
+        let pill_w = (ui.measure(Face::Medium, 11.5, provider_badge) + 20.0).min(110.0);
+        ui.rounded(rx + 16.0, ry + 14.0, pill_w, 24.0, 7.0, theme::CRIMSON_BADGE);
+        ui.border(rx + 16.0, ry + 14.0, pill_w, 24.0, 7.0, theme::BORDER_CRIMSON);
+        draw_centered_text(
+            ui,
+            Face::Medium,
+            11.5,
+            [rx + 16.0, ry + 14.0, pill_w, 24.0],
+            theme::CRIMSON_BRIGHT,
+            provider_badge,
+        );
+
+        let name_fit = ui.fit_text(
+            Face::Medium,
+            15.5,
+            acc_name,
+            (rw - pill_w - 114.0).max(48.0),
+        );
+        ui.text(
+            Face::Medium,
+            15.5,
+            rx + 24.0 + pill_w,
+            text_vcenter(ry + 14.0, 24.0, 15.5),
+            theme::TEXT,
+            &name_fit,
+        );
+
+        // Quick 180-deg flip button (registered BEFORE char_card so tapping Flip hits first!)
+        styled_button(
+            ui,
+            self.targets,
+            [rx + rw - 78.0, ry + 12.0, 62.0, 28.0],
+            "Flip",
+            Action::ResetPreviewAngle,
+            BtnStyle::Secondary,
+            true,
+        );
+
+        // Subtle crimson pedestal glow under feet
+        let ped_w = (rw * 0.42).clamp(76.0, 150.0);
+        let ped_y = ry + char_h - 36.0;
+        ui.rounded(
+            rx + (rw - ped_w) * 0.5,
+            ped_y,
+            ped_w,
+            8.0,
+            4.0,
+            theme::CRIMSON_BADGE,
+        );
+
+        // Draw rotatable GPU 3D Minecraft character + 3D cape!
+        let model_bounds = [
+            rx + 12.0,
+            ry + 42.0,
+            (rw - 24.0).max(40.0),
+            (char_h - 72.0).max(60.0),
+        ];
+        crate::skin_preview::draw_player_3d(
+            ui,
+            model_bounds,
+            self.preview_yaw,
+            self.preview_pitch,
+            self.idle_phase,
+            0,
+            1,
+            self.volt_accounts.active_skin_preview(),
+            self.volt_accounts.active_cape_preview(),
+            default_uuid,
+        );
+
+        let hint = ui.fit_text(
+            Face::Regular,
+            12.0,
+            "Drag to rotate  •  Tap character for Account & Skins",
+            rw - 28.0,
+        );
+        draw_centered_text(
+            ui,
+            Face::Regular,
+            12.0,
+            [rx + 14.0, ry + char_h - 26.0, rw - 28.0, 20.0],
+            theme::MUTED,
+            &hint,
+        );
+
+        *self.preview_rect = Some(char_card);
+        self.targets.push((char_card, Action::Page(Page::Account)));
+
+        // Bottom-Right PLAY CTA Button!
+        let cta_y = ry + rh - cta_h;
+        let cta_label = if installing {
+            "INSTALLING..."
+        } else if installed {
+            "PLAY"
+        } else if self.error.is_some() {
+            "RETRY INSTALLATION"
+        } else {
+            "DOWNLOAD MINECRAFT 26.3"
+        };
+        styled_button(
+            ui,
+            self.targets,
+            [rx, cta_y, rw, cta_h],
+            cta_label,
+            Action::Play,
+            BtnStyle::Primary,
+            true,
+        );
 
         if !compact {
             let status = self.error.as_deref().unwrap_or(&self.catalog.status);
@@ -909,7 +989,7 @@ impl DrawCtx<'_> {
                     Face::Regular,
                     13.0,
                     cx + 4.0,
-                    cy + ch - 24.0,
+                    cy + ch - 22.0,
                     if self.error.is_some() {
                         theme::CRIMSON_BRIGHT
                     } else {
@@ -2418,6 +2498,722 @@ impl DrawCtx<'_> {
         }
     }
 
+    fn draw_input_field(
+        &mut self,
+        ui: &mut Ui,
+        rect: [f32; 4],
+        field_name: &'static str,
+        value: &str,
+        placeholder: &str,
+        masked: bool,
+    ) {
+        let [x, y, w, h] = rect;
+        let focused = self.catalog.editing == Some(field_name);
+        ui.rounded(x, y, w, h, 8.0, theme::CARD_INNER);
+        ui.border(
+            x,
+            y,
+            w,
+            h,
+            8.0,
+            if focused {
+                theme::CRIMSON_BRIGHT
+            } else {
+                theme::BORDER
+            },
+        );
+        let display = if value.is_empty() {
+            placeholder.to_owned()
+        } else if masked {
+            "*".repeat(value.chars().count())
+        } else {
+            value.to_owned()
+        };
+        let col = if value.is_empty() {
+            theme::DIM
+        } else {
+            theme::TEXT
+        };
+        let fitted = ui.fit_text(Face::Medium, 13.5, &display, (w - 24.0).max(16.0));
+        ui.text(
+            Face::Medium,
+            13.5,
+            x + 12.0,
+            text_vcenter(y, h, 13.5),
+            col,
+            &fitted,
+        );
+        self.targets.push((rect, Action::Field(field_name)));
+    }
+
+    fn draw_account_page(
+        &mut self,
+        ui: &mut Ui,
+        area: [f32; 4],
+        compact: bool,
+        account_status: &str,
+    ) {
+        use crate::volt_accounts::{AccountProvider, PresetCape};
+        let [cx, cy, cw, ch] = area;
+
+        // Top Page Title + Status Bar
+        let header_h = if compact { 32.0 } else { 36.0 };
+        ui.text(
+            Face::Medium,
+            if compact { 18.0 } else { 22.0 },
+            cx + 4.0,
+            cy + 2.0,
+            theme::TEXT,
+            "Account & Custom Skin Wardrobe",
+        );
+        if !compact {
+            let chip_w = (cw * 0.34).clamp(180.0, 290.0);
+            draw_account_chip(
+                ui,
+                self.targets,
+                [cx + cw - chip_w, cy, chip_w, 34.0],
+                account_status,
+                self.volt_accounts
+                    .active()
+                    .is_some_and(|a| a.provider != AccountProvider::Offline),
+            );
+        }
+
+        let body_y = cy + header_h + 8.0;
+        let body_h = (ch - header_h - if compact { 8.0 } else { 28.0 }).max(180.0);
+
+        let active_acc = self.volt_accounts.active().cloned();
+        let (acc_name, acc_badge, acc_slim, acc_sync, acc_signed, skin_lbl, cape_lbl, default_uuid) =
+            match &active_acc {
+                Some(a) => (
+                    a.name.as_str(),
+                    a.provider.badge(),
+                    a.slim,
+                    a.sync_to_servers,
+                    a.signed_skin_url.is_some() || a.skin_label.starts_with("Mojang:"),
+                    a.skin_label.as_str(),
+                    a.cape_label.as_str(),
+                    a.uuid_u128(),
+                ),
+                None => (
+                    "Player", "OFFLINE", false, true, false, "Default", "None", 0u128,
+                ),
+            };
+
+        if compact {
+            // Stacked scrollable mobile portrait layout
+            let total_h = 260.0 + 320.0 + 310.0 + 24.0;
+            let max_scroll = (total_h - body_h).max(0.0);
+            self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+            *self.list_view = Some([body_y, body_y + body_h, max_scroll]);
+            let s = self.catalog.scroll;
+
+            let p_rect = [cx, body_y - s, cw, 250.0];
+            if p_rect[1] + p_rect[3] > body_y && p_rect[1] < body_y + body_h {
+                self.draw_wardrobe_card(
+                    ui,
+                    p_rect,
+                    acc_name,
+                    acc_badge,
+                    acc_slim,
+                    skin_lbl,
+                    cape_lbl,
+                    default_uuid,
+                );
+            }
+            let a_rect = [cx, body_y + 262.0 - s, cw, 310.0];
+            if a_rect[1] + a_rect[3] > body_y && a_rect[1] < body_y + body_h {
+                self.draw_accounts_auth_card(ui, a_rect);
+            }
+            let c_rect = [cx, body_y + 584.0 - s, cw, 300.0];
+            if c_rect[1] + c_rect[3] > body_y && c_rect[1] < body_y + body_h {
+                self.draw_cosmetics_loader_card(ui, c_rect, acc_sync, acc_signed);
+            }
+            return;
+        }
+
+        // Wide 3-column bento layout (Left: 3D Character Wardrobe | Center: Accounts & Auth | Right: Skin & Cape Loader)
+        let gap = 12.0;
+        let left_w = (cw * 0.29).clamp(200.0, 290.0).round();
+        let rem_w = (cw - left_w - gap * 2.0).max(320.0);
+        let mid_w = (rem_w * 0.48).round();
+        let right_w = rem_w - mid_w;
+
+        self.draw_wardrobe_card(
+            ui,
+            [cx, body_y, left_w, body_h],
+            acc_name,
+            acc_badge,
+            acc_slim,
+            skin_lbl,
+            cape_lbl,
+            default_uuid,
+        );
+        self.draw_accounts_auth_card(ui, [cx + left_w + gap, body_y, mid_w, body_h]);
+        self.draw_cosmetics_loader_card(
+            ui,
+            [cx + left_w + gap + mid_w + gap, body_y, right_w, body_h],
+            acc_sync,
+            acc_signed,
+        );
+
+        let status = self
+            .volt_accounts
+            .busy
+            .as_deref()
+            .or(self.error.as_deref())
+            .or_else(|| {
+                (!self.catalog.status.is_empty()).then_some(self.catalog.status.as_str())
+            })
+            .or(self.volt_accounts.status.as_deref());
+        if let Some(status) = status {
+            let fitted = ui.fit_text(Face::Medium, 12.5, status, cw);
+            ui.text(
+                Face::Medium,
+                12.5,
+                cx + 4.0,
+                cy + ch - 18.0,
+                if self.error.is_some() {
+                    theme::CRIMSON_BRIGHT
+                } else {
+                    theme::MUTED
+                },
+                &fitted,
+            );
+        }
+        let _ = PresetCape::VoltCrimson;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_wardrobe_card(
+        &mut self,
+        ui: &mut Ui,
+        rect: [f32; 4],
+        acc_name: &str,
+        acc_badge: &str,
+        acc_slim: bool,
+        skin_lbl: &str,
+        cape_lbl: &str,
+        default_uuid: u128,
+    ) {
+        let [x, y, w, h] = rect;
+        ui.rounded(x, y, w, h, 14.0, theme::CARD);
+        ui.rounded(
+            x + w * 0.14,
+            y + h * 0.14,
+            w * 0.72,
+            h * 0.58,
+            16.0,
+            theme::HERO_GLOW_SOFT,
+        );
+        ui.border(x, y, w, h, 14.0, theme::BORDER_CRIMSON);
+
+        let badge_w = (ui.measure(Face::Medium, 11.0, acc_badge) + 18.0).min(96.0);
+        ui.rounded(x + 14.0, y + 12.0, badge_w, 22.0, 6.0, theme::CRIMSON_BADGE);
+        ui.border(x + 14.0, y + 12.0, badge_w, 22.0, 6.0, theme::BORDER_CRIMSON);
+        draw_centered_text(
+            ui,
+            Face::Medium,
+            11.0,
+            [x + 14.0, y + 12.0, badge_w, 22.0],
+            theme::CRIMSON_BRIGHT,
+            acc_badge,
+        );
+
+        let nfit = ui.fit_text(
+            Face::Medium,
+            14.5,
+            acc_name,
+            (w - badge_w - 94.0).max(36.0),
+        );
+        ui.text(
+            Face::Medium,
+            14.5,
+            x + 20.0 + badge_w,
+            text_vcenter(y + 12.0, 22.0, 14.5),
+            theme::TEXT,
+            &nfit,
+        );
+
+        styled_button(
+            ui,
+            self.targets,
+            [x + w - 68.0, y + 10.0, 56.0, 26.0],
+            "Flip",
+            Action::ResetPreviewAngle,
+            BtnStyle::Secondary,
+            true,
+        );
+
+        let footer_h = 68.0;
+        let model_bounds = [
+            x + 10.0,
+            y + 40.0,
+            (w - 20.0).max(40.0),
+            (h - 46.0 - footer_h).max(60.0),
+        ];
+        crate::skin_preview::draw_player_3d(
+            ui,
+            model_bounds,
+            self.preview_yaw,
+            self.preview_pitch,
+            self.idle_phase,
+            2,
+            3,
+            self.volt_accounts.active_skin_preview(),
+            self.volt_accounts.active_cape_preview(),
+            default_uuid,
+        );
+        *self.preview_rect = Some(model_bounds);
+
+        // Classic vs Slim arm toggle + equipped summary at bottom of 3D preview card
+        let arm_label = if acc_slim {
+            "Model: Slim (3px)"
+        } else {
+            "Model: Classic (4px)"
+        };
+        styled_button(
+            ui,
+            self.targets,
+            [x + 14.0, y + h - 62.0, w - 28.0, 30.0],
+            arm_label,
+            Action::ToggleSlimModel,
+            BtnStyle::CrimsonOutline,
+            true,
+        );
+        let summary = ui.fit_text(
+            Face::Regular,
+            11.5,
+            &format!("Skin: {skin_lbl}  •  Cape: {cape_lbl}"),
+            w - 24.0,
+        );
+        draw_centered_text(
+            ui,
+            Face::Regular,
+            11.5,
+            [x + 12.0, y + h - 26.0, w - 24.0, 20.0],
+            theme::MUTED,
+            &summary,
+        );
+    }
+
+    fn draw_accounts_auth_card(&mut self, ui: &mut Ui, rect: [f32; 4]) {
+        use crate::volt_accounts::AccountProvider;
+        let [x, y, w, h] = rect;
+        ui.rounded(x, y, w, h, 14.0, theme::CARD);
+        ui.border(x, y, w, h, 14.0, theme::BORDER_CRIMSON);
+
+        ui.text(
+            Face::Medium,
+            15.5,
+            x + 16.0,
+            y + 12.0,
+            theme::TEXT,
+            "Accounts",
+        );
+
+        // Saved accounts list (top section)
+        let max_list_rows = ((h - 216.0) / 36.0).floor().clamp(2.0, 4.0) as usize;
+        let list_start_y = y + 38.0;
+        let active_id = self.volt_accounts.active_id.as_str();
+        for (idx, acc) in self
+            .volt_accounts
+            .accounts
+            .iter()
+            .take(max_list_rows)
+            .enumerate()
+        {
+            let ry = list_start_y + idx as f32 * 36.0;
+            let selected = acc.id == active_id;
+            let row_w = (w - 68.0).max(80.0);
+            let row_rect = [x + 14.0, ry, row_w, 31.0];
+            ui.rounded(
+                row_rect[0],
+                row_rect[1],
+                row_rect[2],
+                row_rect[3],
+                8.0,
+                if selected {
+                    theme::CRIMSON_SOFT
+                } else {
+                    theme::CARD_INNER
+                },
+            );
+            ui.border(
+                row_rect[0],
+                row_rect[1],
+                row_rect[2],
+                row_rect[3],
+                8.0,
+                if selected {
+                    theme::CRIMSON
+                } else {
+                    theme::BORDER
+                },
+            );
+            let tag = format!("[{}] {}", acc.provider.badge(), acc.name);
+            let tfit = ui.fit_text(Face::Medium, 12.5, &tag, row_w - 20.0);
+            ui.text(
+                Face::Medium,
+                12.5,
+                row_rect[0] + 10.0,
+                text_vcenter(row_rect[1], row_rect[3], 12.5),
+                if selected {
+                    theme::ON_CRIMSON
+                } else {
+                    theme::TEXT
+                },
+                &tfit,
+            );
+            self.targets.push((row_rect, Action::SelectVoltAccount(idx)));
+
+            styled_button(
+                ui,
+                self.targets,
+                [x + w - 48.0, ry, 34.0, 31.0],
+                "Del",
+                Action::RemoveVoltAccount(idx),
+                BtnStyle::Subtle,
+                true,
+            );
+        }
+
+        // Provider Tabs: Offline | Ely.by | Microsoft
+        let form_top = list_start_y + (max_list_rows.min(self.volt_accounts.accounts.len().max(1)) as f32) * 36.0 + 8.0;
+        ui.rounded(x + 14.0, form_top, w - 28.0, 30.0, 8.0, theme::RAIL);
+        ui.border(x + 14.0, form_top, w - 28.0, 30.0, 8.0, theme::BORDER);
+        let tabs = [
+            (AccountProvider::Offline, "Offline"),
+            (AccountProvider::ElyBy, "Ely.by"),
+            (AccountProvider::Microsoft, "Microsoft"),
+        ];
+        let tab_w = (w - 32.0) / 3.0;
+        for (ti, (prov, label)) in tabs.into_iter().enumerate() {
+            let tx = x + 16.0 + ti as f32 * tab_w;
+            let trect = [tx, form_top + 2.0, tab_w - 2.0, 26.0];
+            let active = self.catalog.account_tab == prov;
+            if active {
+                ui.rounded(trect[0], trect[1], trect[2], trect[3], 6.0, theme::CRIMSON);
+            }
+            draw_centered_text(
+                ui,
+                Face::Medium,
+                12.0,
+                trect,
+                if active { theme::ON_CRIMSON } else { theme::MUTED },
+                label,
+            );
+            self.targets.push((trect, Action::AccountProviderTab(prov)));
+        }
+
+        let fy = form_top + 38.0;
+        match self.catalog.account_tab {
+            AccountProvider::Offline => {
+                let val = self.catalog.offline_name_input.clone();
+                self.draw_input_field(
+                    ui,
+                    [x + 14.0, fy, w - 28.0, 34.0],
+                    "offline_name",
+                    &val,
+                    "Offline username (1-16 chars)",
+                    false,
+                );
+                let bw = (w - 36.0) * 0.5;
+                styled_button(
+                    ui,
+                    self.targets,
+                    [x + 14.0, fy + 42.0, bw, 34.0],
+                    "Create / Switch",
+                    Action::CreateOfflineAccount,
+                    BtnStyle::Primary,
+                    true,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    [x + 22.0 + bw, fy + 42.0, bw, 34.0],
+                    "Rename Active",
+                    Action::UpdateOfflineName,
+                    BtnStyle::Secondary,
+                    true,
+                );
+                let note = ui.fit_text(
+                    Face::Regular,
+                    11.5,
+                    "Supports full offline skin & cape equipping + server sync.",
+                    w - 28.0,
+                );
+                ui.text(Face::Regular, 11.5, x + 14.0, fy + 84.0, theme::MUTED, &note);
+            }
+            AccountProvider::ElyBy => {
+                let u_val = self.catalog.ely_user_input.clone();
+                let p_val = self.catalog.ely_pass_input.clone();
+                let t_val = self.catalog.ely_totp_input.clone();
+                self.draw_input_field(
+                    ui,
+                    [x + 14.0, fy, w - 28.0, 32.0],
+                    "ely_user",
+                    &u_val,
+                    "Ely.by email or username",
+                    false,
+                );
+                let pw_w = (w - 36.0) * 0.68;
+                let totp_w = (w - 36.0) - pw_w;
+                self.draw_input_field(
+                    ui,
+                    [x + 14.0, fy + 38.0, pw_w, 32.0],
+                    "ely_pass",
+                    &p_val,
+                    "Password",
+                    true,
+                );
+                self.draw_input_field(
+                    ui,
+                    [x + 22.0 + pw_w, fy + 38.0, totp_w, 32.0],
+                    "ely_totp",
+                    &t_val,
+                    "2FA",
+                    false,
+                );
+                let sign_w = (w - 36.0) * 0.62;
+                let reg_w = (w - 36.0) - sign_w;
+                styled_button(
+                    ui,
+                    self.targets,
+                    [x + 14.0, fy + 78.0, sign_w, 34.0],
+                    if self.volt_accounts.busy.is_some() {
+                        "Signing in..."
+                    } else {
+                        "Sign In (Ely.by)"
+                    },
+                    Action::ElySignIn,
+                    BtnStyle::Primary,
+                    true,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    [x + 22.0 + sign_w, fy + 78.0, reg_w, 34.0],
+                    "Register",
+                    Action::ElyRegister,
+                    BtnStyle::CrimsonOutline,
+                    true,
+                );
+            }
+            AccountProvider::Microsoft => {
+                let lines = wrap_lines(
+                    ui,
+                    Face::Regular,
+                    12.0,
+                    "Official Microsoft / Xbox Live login for Hypixel and online-mode Java servers using device code.",
+                    w - 28.0,
+                    3,
+                );
+                for (li, line) in lines.iter().enumerate() {
+                    ui.text(
+                        Face::Regular,
+                        12.0,
+                        x + 14.0,
+                        fy + li as f32 * 17.0,
+                        theme::MUTED,
+                        line,
+                    );
+                }
+                let btn_y = fy + 56.0;
+                styled_button(
+                    ui,
+                    self.targets,
+                    [x + 14.0, btn_y, w - 28.0, 36.0],
+                    if self.login.signed_in {
+                        "Manage / Re-authenticate Microsoft"
+                    } else {
+                        "Sign In with Microsoft"
+                    },
+                    Action::Account,
+                    BtnStyle::Primary,
+                    true,
+                );
+                if self.login.signed_in {
+                    styled_button(
+                        ui,
+                        self.targets,
+                        [x + 14.0, btn_y + 42.0, w - 28.0, 30.0],
+                        "Sign Out Microsoft",
+                        Action::SignOut,
+                        BtnStyle::Subtle,
+                        true,
+                    );
+                }
+            }
+        }
+    }
+
+    fn draw_cosmetics_loader_card(
+        &mut self,
+        ui: &mut Ui,
+        rect: [f32; 4],
+        acc_sync: bool,
+        acc_signed: bool,
+    ) {
+        use crate::volt_accounts::PresetCape;
+        let [x, y, w, h] = rect;
+        ui.rounded(x, y, w, h, 14.0, theme::CARD);
+        ui.border(x, y, w, h, 14.0, theme::BORDER_CRIMSON);
+
+        ui.text(
+            Face::Medium,
+            15.5,
+            x + 16.0,
+            y + 12.0,
+            theme::TEXT,
+            "Custom Skin & Cape Loader",
+        );
+
+        // Server-wide visibility toggle row
+        let sync_sub = if !acc_sync {
+            "Local + LAN only"
+        } else if acc_signed {
+            "Server Sync Ready (Signed + Ely.by + LAN)"
+        } else {
+            "Auto-syncs on SkinsRestorer, Ely.by & LAN"
+        };
+        let sync_fit = ui.fit_text(Face::Regular, 12.0, sync_sub, (w - 86.0).max(60.0));
+        ui.text(Face::Regular, 12.0, x + 16.0, y + 38.0, theme::MUTED, &sync_fit);
+        toggle(
+            ui,
+            self.targets,
+            [x + w - 62.0, y + 33.0, 48.0, 26.0],
+            acc_sync,
+            Action::ToggleServerSkinSync,
+        );
+
+        // Shared Username / URL input box
+        let q_val = self.catalog.skin_query_input.clone();
+        self.draw_input_field(
+            ui,
+            [x + 14.0, y + 66.0, w - 28.0, 34.0],
+            "skin_query",
+            &q_val,
+            "Player name (Mojang/Ely.by) or PNG URL",
+            false,
+        );
+
+        // Skin Loader Buttons
+        ui.text(
+            Face::Medium,
+            12.5,
+            x + 16.0,
+            y + 106.0,
+            theme::CRIMSON_BRIGHT,
+            "SKIN",
+        );
+        let half = (w - 36.0) * 0.5;
+        styled_button(
+            ui,
+            self.targets,
+            [x + 14.0, y + 124.0, half, 32.0],
+            "Import PNG",
+            Action::ImportSkinPng,
+            BtnStyle::Primary,
+            true,
+        );
+        styled_button(
+            ui,
+            self.targets,
+            [x + 22.0 + half, y + 124.0, half, 32.0],
+            "Fetch Username",
+            Action::FetchSkinByUsername,
+            BtnStyle::CrimsonOutline,
+            true,
+        );
+        styled_button(
+            ui,
+            self.targets,
+            [x + 14.0, y + 162.0, half, 30.0],
+            "Load Skin URL",
+            Action::LoadSkinUrl,
+            BtnStyle::Secondary,
+            true,
+        );
+        styled_button(
+            ui,
+            self.targets,
+            [x + 22.0 + half, y + 162.0, half, 30.0],
+            "Reset Skin",
+            Action::ClearCustomSkin,
+            BtnStyle::Subtle,
+            true,
+        );
+
+        // Cape Loader + One-Tap Volt Preset Capes
+        ui.text(
+            Face::Medium,
+            12.5,
+            x + 16.0,
+            y + 198.0,
+            theme::CRIMSON_BRIGHT,
+            "CAPE",
+        );
+        let third = (w - 44.0) / 3.0;
+        styled_button(
+            ui,
+            self.targets,
+            [x + 14.0, y + 216.0, third, 30.0],
+            "Import PNG",
+            Action::ImportCapePng,
+            BtnStyle::CrimsonOutline,
+            true,
+        );
+        styled_button(
+            ui,
+            self.targets,
+            [x + 22.0 + third, y + 216.0, third, 30.0],
+            "Cape URL",
+            Action::LoadCapeUrl,
+            BtnStyle::Secondary,
+            true,
+        );
+        styled_button(
+            ui,
+            self.targets,
+            [x + 30.0 + third * 2.0, y + 216.0, third, 30.0],
+            "Remove",
+            Action::ClearCustomCape,
+            BtnStyle::Subtle,
+            true,
+        );
+
+        if y + 282.0 <= y + h {
+            styled_button(
+                ui,
+                self.targets,
+                [x + 14.0, y + 252.0, third, 30.0],
+                "Volt V",
+                Action::EquipPresetCape(PresetCape::VoltCrimson),
+                BtnStyle::Secondary,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [x + 22.0 + third, y + 252.0, third, 30.0],
+                "Crown",
+                Action::EquipPresetCape(PresetCape::RoyalGold),
+                BtnStyle::Secondary,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [x + 30.0 + third * 2.0, y + 252.0, third, 30.0],
+                "Stealth",
+                Action::EquipPresetCape(PresetCape::ObsidianStealth),
+                BtnStyle::Secondary,
+                true,
+            );
+        }
+    }
+
 }
 
 impl Launcher {
@@ -2431,6 +3227,7 @@ impl Launcher {
         self.targets.clear();
         self.list_targets.clear();
         self.list_view = None;
+        self.preview_rect = None;
         let mut b = HudBatch::new([r.config.width, r.config.height]);
         let mut ui = Ui::mobile(&gui.atlas, &mut b, (0.0, 0.0));
         // OEM navigation bars can remain visible even in fullscreen (keypad phones).
@@ -2455,7 +3252,12 @@ impl Launcher {
             .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, theme::BG);
 
         let compact = w < 760.0;
-        let account_status = self.login.status(&self.catalog.config.name);
+        let account_status = self
+            .volt_accounts
+            .active()
+            .map(|a| format!("{} • {}", a.name, a.provider.badge()))
+            .unwrap_or_else(|| self.login.status(&self.catalog.config.name));
+        let idle_phase = self.launch_start.elapsed().as_secs_f32();
         {
             let mut ctx = DrawCtx {
                 home: &self.home,
@@ -2467,12 +3269,17 @@ impl Launcher {
                 list_targets: &mut self.list_targets,
                 list_view: &mut self.list_view,
                 login: &self.login,
+                volt_accounts: &self.volt_accounts,
+                preview_yaw: self.preview_yaw,
+                preview_pitch: self.preview_pitch,
+                idle_phase,
+                preview_rect: &mut self.preview_rect,
             };
             let content_area = if compact {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
                 [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
-                let rail_w = 176.0;
+                let rail_w = 188.0;
                 ctx.draw_sidebar(&mut ui, 12.0, 12.0, rail_w, (h - 24.0).max(260.0));
                 [
                     12.0 + rail_w + 16.0,
@@ -2485,6 +3292,9 @@ impl Launcher {
             let page = ctx.catalog.page;
             match page {
                 Page::Play => ctx.draw_play_page(&mut ui, content_area, compact, &account_status),
+                Page::Account => {
+                    ctx.draw_account_page(&mut ui, content_area, compact, &account_status)
+                }
                 Page::Mods | Page::Packs | Page::Shaders => {
                     ctx.draw_catalog_page(&mut ui, content_area, compact, page, &account_status)
                 }
@@ -2500,9 +3310,18 @@ impl Launcher {
         if compact {
             let status = self.error.as_deref().unwrap_or(&self.catalog.status);
             if !status.is_empty() {
-                let sfit = ui.fit_text(Face::Regular, 12.0, status, (w - 118.0).max(40.0));
+                let sfit = ui.fit_text(Face::Regular, 12.0, status, (w - 196.0).max(40.0));
                 ui.text(Face::Regular, 12.0, 14.0, h - 32.0, theme::MUTED, &sfit);
             }
+            styled_button(
+                &mut ui,
+                &mut self.targets,
+                [w - 178.0, h - 38.0, 78.0, 28.0],
+                "Discord",
+                Action::Discord,
+                BtnStyle::CrimsonOutline,
+                true,
+            );
             styled_button(
                 &mut ui,
                 &mut self.targets,
@@ -2551,6 +3370,15 @@ impl Launcher {
                 "name" => (self.catalog.config.name.clone(), 14.5, 14.0),
                 "server" => (self.catalog.config.server.clone(), 14.5, 12.0),
                 "render_scale" => (self.catalog.render_scale_text.clone(), 14.5, 12.0),
+                "offline_name" => (self.catalog.offline_name_input.clone(), 13.5, 12.0),
+                "ely_user" => (self.catalog.ely_user_input.clone(), 13.5, 12.0),
+                "ely_pass" => (
+                    "*".repeat(self.catalog.ely_pass_input.chars().count()),
+                    13.5,
+                    12.0,
+                ),
+                "ely_totp" => (self.catalog.ely_totp_input.clone(), 13.5, 12.0),
+                "skin_query" => (self.catalog.skin_query_input.clone(), 13.5, 12.0),
                 _ => (self.catalog.query.clone(), 14.0, 14.0),
             };
             let face = if name == "search" {
@@ -2857,11 +3685,154 @@ impl Launcher {
             }
             Some(Action::Repository) => {
                 self.catalog.status = if crate::platform::open_repository() {
-                    "Repository opened in browser."
+                    "Volt Launcher GitHub opened in browser."
                 } else {
-                    "No browser available to open the repository."
+                    "No browser available to open GitHub."
                 }
                 .into();
+            }
+            Some(Action::Discord) => {
+                self.catalog.status = if crate::platform::open_discord() {
+                    "Volt Launcher Discord opened in browser."
+                } else {
+                    "No browser available to open Discord."
+                }
+                .into();
+            }
+            Some(Action::AccountProviderTab(prov)) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                self.catalog.account_tab = prov;
+            }
+            Some(Action::SelectVoltAccount(idx)) => {
+                if let Some(acc) = self.volt_accounts.accounts.get(idx).cloned() {
+                    self.volt_accounts.select(&acc.id);
+                    self.catalog.config.name = acc.name.clone();
+                    self.catalog.offline_name_input = acc.name;
+                    self.catalog.account_tab = acc.provider;
+                    self.catalog.config.save(&self.home)?;
+                }
+            }
+            Some(Action::RemoveVoltAccount(idx)) => {
+                if let Some(id) = self
+                    .volt_accounts
+                    .accounts
+                    .get(idx)
+                    .map(|a| a.id.clone())
+                {
+                    if self.volt_accounts.remove_account(&id).is_some() {
+                        self.login.sign_out();
+                    }
+                    if let Some(active) = self.volt_accounts.active() {
+                        self.catalog.config.name = active.name.clone();
+                        self.catalog.offline_name_input = active.name.clone();
+                        self.catalog.config.save(&self.home)?;
+                    }
+                }
+            }
+            Some(Action::CreateOfflineAccount) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                let input = self.catalog.offline_name_input.clone();
+                match self.volt_accounts.create_offline(&input) {
+                    Ok(()) => {
+                        if let Some(acc) = self.volt_accounts.active() {
+                            self.catalog.config.name = acc.name.clone();
+                            self.catalog.config.save(&self.home)?;
+                        }
+                        self.catalog.status = "Offline account active.".into();
+                    }
+                    Err(e) => self.catalog.status = e,
+                }
+            }
+            Some(Action::UpdateOfflineName) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                let input = self.catalog.offline_name_input.clone();
+                match self.volt_accounts.rename_active_offline(&input) {
+                    Ok(()) => {
+                        if let Some(acc) = self.volt_accounts.active() {
+                            self.catalog.config.name = acc.name.clone();
+                            self.catalog.config.save(&self.home)?;
+                        }
+                        self.catalog.status = "Offline username updated.".into();
+                    }
+                    Err(e) => self.catalog.status = e,
+                }
+            }
+            Some(Action::ElySignIn) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                self.volt_accounts.begin_ely_login(
+                    &self.catalog.ely_user_input,
+                    &self.catalog.ely_pass_input,
+                    &self.catalog.ely_totp_input,
+                );
+                self.catalog.ely_pass_input.clear();
+                self.catalog.ely_totp_input.clear();
+            }
+            Some(Action::ElyRegister) => {
+                let _ = crate::platform::open_ely_register();
+            }
+            Some(Action::ToggleSlimModel) => {
+                self.volt_accounts.toggle_slim();
+            }
+            Some(Action::ToggleServerSkinSync) => {
+                self.volt_accounts.toggle_server_sync();
+            }
+            Some(Action::ImportSkinPng) => {
+                if let Some(id) = self.volt_accounts.active().map(|a| a.id.clone()) {
+                    let dest = self.volt_accounts.skin_png_path(&id);
+                    if let Err(e) = crate::documents::begin_cosmetic(false, dest) {
+                        self.catalog.status = e;
+                    }
+                }
+            }
+            Some(Action::ImportCapePng) => {
+                if let Some(id) = self.volt_accounts.active().map(|a| a.id.clone()) {
+                    let dest = self.volt_accounts.cape_png_path(&id);
+                    if let Err(e) = crate::documents::begin_cosmetic(true, dest) {
+                        self.catalog.status = e;
+                    }
+                }
+            }
+            Some(Action::FetchSkinByUsername) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                let q = self.catalog.skin_query_input.clone();
+                self.volt_accounts.begin_fetch_skin_by_username(&q);
+            }
+            Some(Action::LoadSkinUrl) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                let q = self.catalog.skin_query_input.clone();
+                self.volt_accounts.begin_fetch_cosmetic_url(&q, false);
+            }
+            Some(Action::LoadCapeUrl) => {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                let q = self.catalog.skin_query_input.clone();
+                self.volt_accounts.begin_fetch_cosmetic_url(&q, true);
+            }
+            Some(Action::EquipPresetCape(preset)) => {
+                if let Err(e) = self.volt_accounts.apply_preset_cape(preset) {
+                    self.catalog.status = e;
+                } else {
+                    // Rotate character toward back so user immediately sees their newly equipped 3D cape!
+                    self.preview_yaw = 162.0;
+                    self.catalog.status = format!("Equipped {}!", preset.label());
+                }
+            }
+            Some(Action::ClearCustomSkin) => {
+                self.volt_accounts.clear_skin();
+            }
+            Some(Action::ClearCustomCape) => {
+                self.volt_accounts.clear_cape();
+            }
+            Some(Action::ResetPreviewAngle) => {
+                let normalized = (self.preview_yaw + 180.0).rem_euclid(360.0) - 180.0;
+                self.preview_yaw = if normalized.abs() < 90.0 { 162.0 } else { -18.0 };
+                self.preview_pitch = 6.0;
             }
             Some(Action::Account) => {
                 self.login.visible = true;
@@ -2881,7 +3852,11 @@ impl Launcher {
             }
             Some(Action::ReviewApp) => self.login.review_app(),
             Some(Action::SignIn) => self.login.start(&self.catalog.config.microsoft_client_id),
-            Some(Action::SignOut) => self.login.sign_out(),
+            Some(Action::SignOut) => {
+                self.login.sign_out();
+                self.volt_accounts
+                    .sync_msa_accounts(&crate::account::Accounts::load(), false);
+            }
             Some(Action::LoginLink) => self.login.open_link(),
             Some(Action::Page(page)) => {
                 self.catalog.editing = None;
@@ -2917,6 +3892,11 @@ impl Launcher {
                     "server" => &self.catalog.config.server,
                     "render_scale" => &self.catalog.render_scale_text,
                     "client_id" => &self.catalog.config.microsoft_client_id,
+                    "offline_name" => &self.catalog.offline_name_input,
+                    "ely_user" => &self.catalog.ely_user_input,
+                    "ely_pass" => &self.catalog.ely_pass_input,
+                    "ely_totp" => &self.catalog.ely_totp_input,
+                    "skin_query" => &self.catalog.skin_query_input,
                     _ => &self.catalog.query,
                 };
                 crate::platform::show(initial);
@@ -3045,15 +4025,28 @@ impl Launcher {
             TouchPhase::Moved => {
                 let density = self.ui_density() as f64;
                 if let Some(drag) = &mut self.drag {
-                    let delta = drag.update(t.location.x, t.location.y, density);
+                    let (dx, dy) = drag.update_xy(t.location.x, t.location.y, density);
                     if drag.moved {
-                        if let Some(chooser) = &mut self.chooser {
-                            chooser.scroll = (chooser.scroll + delta).max(0.0);
+                        let [ox, oy] = drag.origin_xy();
+                        let ux = (ox / density) as f32;
+                        let uy = (oy / density) as f32;
+                        let in_preview = !self.login.visible
+                            && self.chooser.is_none()
+                            && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
+                                ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
+                            });
+                        if in_preview {
+                            self.preview_yaw =
+                                (self.preview_yaw + dx * 0.9).rem_euclid(360.0);
+                            self.preview_pitch =
+                                (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
+                        } else if let Some(chooser) = &mut self.chooser {
+                            chooser.scroll = (chooser.scroll + dy).max(0.0);
                         } else if self
                             .list_view
-                            .is_some_and(|view| drag.origin_y() / density >= view[0] as f64)
+                            .is_some_and(|view| oy / density >= view[0] as f64)
                         {
-                            self.catalog.scroll = (self.catalog.scroll + delta).max(0.0);
+                            self.catalog.scroll = (self.catalog.scroll + dy).max(0.0);
                         }
                     }
                 }

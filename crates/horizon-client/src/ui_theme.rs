@@ -88,8 +88,8 @@ impl Fonts {
         let f = |b: &'static [u8]| FontRef::try_from_slice(b).expect("bundled font");
         Self {
             faces: [
-                f(horizon_theme::fonts::GEIST_REGULAR),
                 f(horizon_theme::fonts::GEIST_MEDIUM),
+                f(horizon_theme::fonts::GEIST_SEMIBOLD),
             ],
         }
     }
@@ -121,6 +121,7 @@ struct Cached {
 struct Cache {
     fonts: Fonts,
     entries: HashMap<Key, Cached>,
+    dynamic_slots: [Option<(u64, u32, u32, Rect)>; 4],
     shelf: (u32, u32, u32),
     pending: Vec<crate::font::Patch>,
     /// The atlas the entries were uploaded to (a new atlas starts over).
@@ -140,6 +141,7 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
         let cache = c.get_or_insert_with(|| Cache {
             fonts: Fonts::load(),
             entries: HashMap::new(),
+            dynamic_slots: [None; 4],
             shelf: (0, 0, 0),
             pending: Vec::new(),
             atlas: id,
@@ -147,6 +149,7 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
         if cache.atlas != id {
             cache.atlas = id;
             cache.entries.clear();
+            cache.dynamic_slots = [None; 4];
             cache.shelf = (0, 0, 0);
             cache.pending.clear();
         }
@@ -168,11 +171,64 @@ impl Cache {
         }
         if y + h > region.h || w > region.w {
             self.entries.clear();
+            self.dynamic_slots = [None; 4];
             self.shelf = (0, 0, 0);
             return None;
         }
         self.shelf = (x + w + 1, y, row.max(h));
         Some((x, y, region))
+    }
+    fn dynamic_rgba(
+        &mut self,
+        atlas: &HudAtlas,
+        slot: usize,
+        hash: u64,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+    ) -> Option<Rect> {
+        if slot >= self.dynamic_slots.len() || rgba.len() < (w * h * 4) as usize {
+            return None;
+        }
+        if let Some((prev_hash, ax, ay, rect)) = self.dynamic_slots[slot]
+            && rect.w == w
+            && rect.h == h
+        {
+            if prev_hash != hash {
+                self.pending.push(crate::font::Patch {
+                    x: ax,
+                    y: ay,
+                    width: w,
+                    height: h,
+                    rgba: rgba[..(w * h * 4) as usize].to_vec(),
+                });
+                self.dynamic_slots[slot] = Some((hash, ax, ay, rect));
+            }
+            return Some(rect);
+        }
+        let (x, y, region) = self.place(atlas, w, h)?;
+        let (ax, ay) = (
+            (region.u0 * atlas.width as f32).round() as u32 + x,
+            (region.v0 * atlas.height as f32).round() as u32 + y,
+        );
+        self.pending.push(crate::font::Patch {
+            x: ax,
+            y: ay,
+            width: w,
+            height: h,
+            rgba: rgba[..(w * h * 4) as usize].to_vec(),
+        });
+        let (aw, ah) = (atlas.width as f32, atlas.height as f32);
+        let rect = Rect {
+            u0: ax as f32 / aw,
+            v0: ay as f32 / ah,
+            u1: (ax + w) as f32 / aw,
+            v1: (ay + h) as f32 / ah,
+            w,
+            h,
+        };
+        self.dynamic_slots[slot] = Some((hash, ax, ay, rect));
+        Some(rect)
     }
     fn upload_rgba(&mut self, atlas: &HudAtlas, w: u32, h: u32, rgba: Vec<u8>) -> Option<Rect> {
         let (x, y, region) = self.place(atlas, w, h)?;
@@ -248,9 +304,9 @@ impl Cache {
                         alpha[(y * w + x) as usize] = c;
                     }
                 });
-                // Light text on dark backgrounds reads thin: a gentle boost.
+                // Light text on dark backgrounds reads thin: boost for bolder readability.
                 for a in &mut alpha {
-                    *a = a.powf(0.85);
+                    *a = a.powf(0.75);
                 }
                 Cached {
                     rect: self.upload(atlas, w, h, &alpha),
@@ -505,6 +561,31 @@ impl<'a> Ui<'a> {
                 color::hex(0xFFFFFF, 255),
             );
         }
+    }
+
+    pub fn dynamic_rgba(
+        &mut self,
+        slot: usize,
+        hash: u64,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+    ) -> Option<Rect> {
+        let atlas = self.atlas;
+        with_cache(atlas, |c| c.dynamic_rgba(atlas, slot, hash, w, h, rgba))
+    }
+
+    pub fn gui_scale(&self) -> f32 {
+        self.scale
+    }
+    pub fn to_batch(&self, v: f32) -> f32 {
+        v * self.density / self.scale
+    }
+    pub fn batch_mut(&mut self) -> &mut HudBatch {
+        self.batch
+    }
+    pub fn atlas_ref(&self) -> &HudAtlas {
+        self.atlas
     }
 
     // ---- text ----

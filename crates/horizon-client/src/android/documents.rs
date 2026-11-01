@@ -28,6 +28,10 @@ enum Target {
         root_home: PathBuf,
         profile_home: PathBuf,
     },
+    Cosmetic {
+        is_cape: bool,
+        dest_path: PathBuf,
+    },
 }
 struct Request {
     target: Target,
@@ -43,6 +47,7 @@ pub struct Notice {
     pub text: String,
     pub changed: bool,
     pub controls_changed: bool,
+    pub cosmetic_imported: Option<(bool, PathBuf)>,
     pub kind: Option<Kind>,
 }
 #[derive(Default)]
@@ -90,6 +95,7 @@ fn notice(text: impl Into<String>, changed: bool) {
         text,
         changed,
         controls_changed: false,
+        cosmetic_imported: None,
         kind: None,
     });
 }
@@ -101,6 +107,7 @@ fn imported(text: impl Into<String>, kind: Kind) {
         text,
         changed: true,
         controls_changed: false,
+        cosmetic_imported: None,
         kind: Some(kind),
     });
 }
@@ -112,6 +119,19 @@ fn controls_imported(text: impl Into<String>) {
         text,
         changed: false,
         controls_changed: true,
+        cosmetic_imported: None,
+        kind: None,
+    });
+}
+fn cosmetic_done(text: impl Into<String>, is_cape: bool, path: PathBuf) {
+    let text = text.into();
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.toast = Some((text.clone(), std::time::Instant::now()));
+    s.notice = Some(Notice {
+        text,
+        changed: false,
+        controls_changed: false,
+        cosmetic_imported: Some((is_cape, path)),
         kind: None,
     });
 }
@@ -121,6 +141,7 @@ pub fn poll() -> Option<Notice> {
             text: "Content files changed. Reload packs to apply.".into(),
             changed: true,
             controls_changed: false,
+            cosmetic_imported: None,
             kind: None,
         });
     }
@@ -174,6 +195,27 @@ pub fn begin_controls(root_home: PathBuf, profile_home: PathBuf) -> std::result:
         "Choose a Java launcher control file (.json or .zip)",
         false,
     );
+    Ok(())
+}
+pub fn begin_cosmetic(is_cape: bool, dest_path: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::Cosmetic { is_cape, dest_path },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    let label = if is_cape { "cape PNG" } else { "skin PNG (64x64 or 64x32)" };
+    notice(format!("Choose a {label} image"), false);
     Ok(())
 }
 pub fn picker_failed(error: &str) {
@@ -233,6 +275,8 @@ pub extern "system" fn document_result(
                     } => "import.hmod",
                     Target::Content { .. } => "import.zip",
                     Target::Controls { .. } => "controls.json",
+                    Target::Cosmetic { is_cape: true, .. } => "cape.png",
+                    Target::Cosmetic { is_cape: false, .. } => "skin.png",
                 };
                 let opened =
                     crate::document_bridge::open(&mut env, activity.as_obj(), &uri, fallback);
@@ -275,6 +319,9 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     } = request.target
     {
         return stage_controls(&request.cache, &root_home, &profile_home, input, &name);
+    }
+    if let Target::Cosmetic { is_cape, dest_path } = request.target {
+        return stage_cosmetic(is_cape, &dest_path, input, &name);
     }
     let Target::Content { kind, home } = request.target else {
         unreachable!()
@@ -674,3 +721,55 @@ pub fn handle_event(event: &winit::event::WindowEvent) -> bool {
         _ => false,
     }
 }
+
+fn stage_cosmetic(
+    is_cape: bool,
+    dest_path: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    input
+        .by_ref()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("Image file is too large (max 4 MB)".into());
+    }
+    let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes)
+        .map_err(|_| "Selected file is not a valid PNG image")?;
+    let normalized_rgba = if is_cape {
+        horizon_client::skins::process_cape(w, h, &rgba)
+            .ok_or("Selected image could not be processed as a cape")?
+    } else {
+        horizon_client::skins::process_legacy_skin(w, h, &rgba)
+            .ok_or("Skin PNG must be 64x64 or 64x32")?
+    };
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, 64, 64);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG encode failed: {e}"))?;
+        writer
+            .write_image_data(&normalized_rgba)
+            .map_err(|e| format!("PNG write failed: {e}"))?;
+    }
+    let tmp = dest_path.with_extension("png.tmp");
+    std::fs::write(&tmp, &png_bytes)?;
+    std::fs::rename(&tmp, dest_path)?;
+    let kind_label = if is_cape { "Cape" } else { "Skin" };
+    cosmetic_done(
+        format!("{kind_label} equipped from {name}"),
+        is_cape,
+        dest_path.to_path_buf(),
+    );
+    Ok(())
+}
+
