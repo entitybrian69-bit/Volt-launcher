@@ -505,6 +505,9 @@ impl Game<'_> {
         };
         m.extra.main_hand_left = self.settings.main_hand_left;
         m.extra.hidden_model_parts = !self.settings.file.model_customisation() & 0x7F;
+        if horizon_client::skins::current_offline_cape().is_some() {
+            m.extra.hidden_model_parts &= !1;
+        }
         m.extra.spectator = spectator;
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;

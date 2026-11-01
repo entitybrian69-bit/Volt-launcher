@@ -4398,15 +4398,15 @@ impl Game<'_> {
         // Equipped custom skin from Volt Launcher always takes priority for the local player
         // when playing offline / with a custom skin equipped.
         let has_custom_cape = horizon_client::skins::current_offline_cape().is_some();
-        if let Some((rgba, is_slim, gen)) = horizon_client::skins::current_offline_skin()
+        if let Some((rgba, is_slim, generation)) = horizon_client::skins::current_offline_skin()
             && horizon_client::auth::current().is_none_or(|s| s.join_url.is_some())
         {
             const OFFLINE: &str = "horizon/offline_skin";
             let prev_gen = self.remote.as_ref().map_or(0, |r| r.offline_skin_gen);
-            if prev_gen != gen || !self.skin_slots.contains(OFFLINE) {
+            if prev_gen != generation || !self.skin_slots.contains(OFFLINE) {
                 self.store_skin(OFFLINE.into(), rgba);
                 if let Some(r) = self.remote.as_mut() {
-                    r.offline_skin_gen = gen;
+                    r.offline_skin_gen = generation;
                 }
             }
             resolved.retain(|(u, _)| *u != local);
@@ -4418,13 +4418,13 @@ impl Game<'_> {
             resolved.push((local, OFFLINE.into()));
         }
         // Equipped custom cape from Volt Launcher.
-        if let Some((rgba, gen)) = horizon_client::skins::current_offline_cape() {
+        if let Some((rgba, generation)) = horizon_client::skins::current_offline_cape() {
             const OFFLINE: &str = "capes/offline";
             let prev_gen = self.remote.as_ref().map_or(0, |r| r.offline_cape_gen);
-            if prev_gen != gen || !self.skin_slots.contains(OFFLINE) {
+            if prev_gen != generation || !self.skin_slots.contains(OFFLINE) {
                 self.store_skin(OFFLINE.into(), rgba);
                 if let Some(r) = self.remote.as_mut() {
-                    r.offline_cape_gen = gen;
+                    r.offline_cape_gen = generation;
                 }
             }
             capes.insert(local, OFFLINE.into());
