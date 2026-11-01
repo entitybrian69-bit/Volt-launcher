@@ -171,15 +171,16 @@ jobs:
                   subprocess.run([adb, "shell", "appops", "set", pkg, "REQUEST_INSTALL_PACKAGES", "allow"], check=False, capture_output=True)
                   subprocess.run([adb, "shell", "appops", "set", "--uid", pkg, "REQUEST_INSTALL_PACKAGES", "allow"], check=False, capture_output=True)
 
-              def tap_text(xml_str: str, target: str) -> bool:
+              def tap_text(xml_str: str, target: str, exact: bool = False) -> bool:
                   try:
                       root = ET.fromstring(xml_str)
                   except Exception:
                       return False
                   for node in root.iter():
-                      txt = node.attrib.get("text", "")
+                      txt = node.attrib.get("text", "").strip()
                       b = node.attrib.get("bounds", "")
-                      if target.lower() in txt.lower() and b:
+                      matched = (txt.lower() == target.lower()) if exact else (target.lower() in txt.lower())
+                      if matched and b:
                           m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", b)
                           if m:
                               cx = (int(m.group(1)) + int(m.group(3))) // 2
@@ -212,9 +213,9 @@ jobs:
                           time.sleep(1)
                           subprocess.run([adb, "shell", "input", "keyevent", "KEYCODE_BACK"], check=False)
                           continue
-                      if any(t.lower() in ("install", "update") for t in texts):
-                          if not tap_text(xml, "Update"):
-                              tap_text(xml, "Install")
+                      if any(t.strip().lower() in ("install", "update") for t in texts):
+                          if not tap_text(xml, "Update", True):
+                              tap_text(xml, "Install", True)
                           continue
                       if any("Continue" == t for t in texts):
                           tap_text(xml, "Continue")
