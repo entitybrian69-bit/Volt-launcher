@@ -70,10 +70,15 @@ impl TouchControls {
                 self.settings.layouts[self.settings.mode.index()] =
                     Settings::default().layouts[self.settings.mode.index()];
                 self.settings.button_visibility = [0; 14];
-                for (i, button) in self.settings.custom_buttons.iter_mut().enumerate() {
-                    button.layouts[self.settings.mode.index()] =
-                        CustomButton::new(button.key.clone(), i).layouts
-                            [self.settings.mode.index()];
+                if self.settings.imported_from.take().is_some() {
+                    self.settings.custom_buttons.clear();
+                    e.selected_custom = None;
+                } else {
+                    for (i, button) in self.settings.custom_buttons.iter_mut().enumerate() {
+                        button.layouts[self.settings.mode.index()] =
+                            CustomButton::new(button.key.clone(), i).layouts
+                                [self.settings.mode.index()];
+                    }
                 }
             } else if layout::contains([0.02, 0.13, 0.335, 0.075], p) {
                 e.palette = !e.palette;
@@ -383,7 +388,7 @@ impl TouchControls {
             return true;
         }
         if e.palette && started && layout::contains([0.22, 0.84, 0.56, 0.07], p) {
-            if self.settings.custom_buttons.len() < 32 {
+            if self.settings.custom_buttons.len() < layout::MAX_CUSTOM_BUTTONS {
                 let index = self.settings.custom_buttons.len();
                 self.settings
                     .custom_buttons

@@ -8,6 +8,7 @@ use std::{
 const HOLD_DELAY: Duration = Duration::from_millis(350);
 mod custom;
 mod editor;
+pub mod import;
 pub use custom::CustomButton;
 pub mod layout;
 pub use layout::{Control, Mode, Settings};
@@ -132,7 +133,11 @@ pub struct TouchControls {
     pub inventory_mode: bool,
     pub editor: Option<editor::Editor>,
     fingers: BTreeMap<u64, (Role, [f32; 2])>,
-    custom_fingers: BTreeMap<u64, String>,
+    custom_fingers: BTreeMap<u64, custom::CustomFinger>,
+    toggled_custom: BTreeMap<usize, Vec<String>>,
+    active_custom_tokens: Vec<String>,
+    open_drawers: std::collections::BTreeSet<u16>,
+    pub controls_hidden: bool,
     custom_events: Vec<(String, bool)>,
     pending: PadState,
     pub aim: Option<[f32; 2]>,
@@ -227,6 +232,9 @@ impl TouchControls {
         self.pending.set(button, true);
     }
     fn visible(&self, c: Control) -> bool {
+        if self.controls_hidden && self.editor.is_none() {
+            return false;
+        }
         if c == Control::Shield && !self.shield_available && self.editor.is_none() {
             return false;
         }
@@ -550,8 +558,8 @@ impl TouchControls {
     }
     /// Coordinates are fractions of the drawable surface. Returns a look delta.
     pub fn update(&mut self, id: u64, point: [f32; 2], started: bool, ended: bool) -> [f32; 2] {
-        if self.custom_update(id, point, started, ended) {
-            return [0.0; 2];
+        if let Some(delta) = self.custom_update(id, point, started, ended) {
+            return delta;
         }
         if ended {
             if let Some((

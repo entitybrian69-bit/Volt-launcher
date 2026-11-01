@@ -191,6 +191,8 @@ pub struct Catalog {
     pub offset: usize,
     pub scroll: f32,
     pub config: Config,
+    pub active_controls: Option<horizon_client::touch::layout::ImportedMeta>,
+    pub control_presets: Vec<horizon_client::touch::import::PresetEntry>,
     pub editing: Option<&'static str>,
     pub render_scale_text: String,
     worker: Option<mpsc::Receiver<Result<Reply, String>>>,
@@ -222,6 +224,8 @@ impl Catalog {
             offset: 0,
             scroll: 0.0,
             config,
+            active_controls: None,
+            control_presets: vec![],
             editing: None,
             render_scale_text: String::new(),
             worker: None,
@@ -289,6 +293,12 @@ impl Catalog {
             }
         }
         self.local.sort_by_key(|e| e.title.to_lowercase());
+        self.refresh_controls(home);
+    }
+    pub fn refresh_controls(&mut self, home: &Path) {
+        let game = self.config.game_home(home);
+        self.active_controls = horizon_client::touch::import::active_meta(&game);
+        self.control_presets = horizon_client::touch::import::list_presets(home);
     }
     pub fn busy(&self) -> bool {
         self.worker.is_some()

@@ -83,6 +83,11 @@ pub(super) enum Action {
     ChooseDisplayHz(u16),
     PerformanceHints,
     GpuProfile,
+    ImportControl,
+    ControlLayouts,
+    ChooseControlLayout(usize),
+    ApplyControlsAllProfiles,
+    ResetControls,
 }
 
 #[derive(Clone, Copy)]
@@ -2019,39 +2024,158 @@ impl DrawCtx<'_> {
             ),
         ];
 
-        if !compact {
-            // Two-Column Categorized Settings Deck (matching 06-settings.png)
-            let gap = 16.0;
-            let col_w = (cw - gap) * 0.5;
-            let footer_h = 84.0;
-            let cards_h = (ch - footer_h - 12.0).max(200.0);
+        let active_ctrl_summary = if let Some(m) = &self.catalog.active_controls {
+            format!(
+                "Active: {} • {} ({} buttons{})",
+                m.name,
+                m.format,
+                m.buttons,
+                if m.has_joystick { ", joystick" } else { "" }
+            )
+        } else {
+            format!(
+                "Active: Default Volt Touch Controls (Profile {})",
+                c.profile
+            )
+        };
+        let saved_label = format!("Saved Layouts ({})", self.catalog.control_presets.len());
 
-            ui.rounded(cx, cy, col_w, cards_h, 14.0, theme::CARD);
-            ui.border(cx, cy, col_w, cards_h, 14.0, theme::BORDER);
+        if !compact {
+            // Dedicated "Import Control" Hero Section Card at top of Settings
+            let import_h = 96.0;
+            ui.rounded(cx, cy, cw, import_h, 14.0, theme::HERO_BG);
+            ui.rounded(
+                cx + 8.0,
+                cy + 8.0,
+                cw * 0.46,
+                import_h - 16.0,
+                12.0,
+                theme::HERO_GLOW_SOFT,
+            );
+            ui.border(cx, cy, cw, import_h, 14.0, theme::BORDER_CRIMSON);
+
+            let btn_grid_w = (cw * 0.45).clamp(256.0, 344.0);
+            let btn_x = cx + cw - btn_grid_w - 16.0;
+            let half_btn_w = (btn_grid_w - 8.0) * 0.5;
+            let text_max = (btn_x - cx - 32.0).max(140.0);
+
             ui.text(
                 Face::Medium,
                 18.0,
                 cx + 20.0,
-                cy + 14.0,
+                cy + 11.0,
+                theme::TEXT,
+                "Import Control",
+            );
+            if text_max >= 260.0 {
+                let badge_x = cx + 162.0;
+                ui.rounded(badge_x, cy + 12.0, 108.0, 22.0, 6.0, theme::CRIMSON_BADGE);
+                ui.border(badge_x, cy + 12.0, 108.0, 22.0, 6.0, theme::BORDER_CRIMSON);
+                draw_centered_text(
+                    ui,
+                    Face::Medium,
+                    11.5,
+                    [badge_x, cy + 12.0, 108.0, 22.0],
+                    theme::CRIMSON_BRIGHT,
+                    "Java Controls",
+                );
+            }
+
+            let active_fit = ui.fit_text(Face::Medium, 13.5, &active_ctrl_summary, text_max);
+            ui.text(
+                Face::Medium,
+                13.5,
+                cx + 20.0,
+                cy + 41.0,
+                if self.catalog.active_controls.is_some() {
+                    theme::CRIMSON_BRIGHT
+                } else {
+                    theme::TEXT
+                },
+                &active_fit,
+            );
+            let sub_hint =
+                "Import .json / .zip from PojavLauncher, Amethyst, Mojo, Zalith or FCL";
+            let sub_fit = ui.fit_text(Face::Regular, 12.5, sub_hint, text_max);
+            ui.text(
+                Face::Regular,
+                12.5,
+                cx + 20.0,
+                cy + 65.0,
+                theme::MUTED,
+                &sub_fit,
+            );
+
+            styled_button(
+                ui,
+                self.targets,
+                [btn_x, cy + 13.0, half_btn_w, 34.0],
+                "Import Control",
+                Action::ImportControl,
+                BtnStyle::Primary,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [btn_x + half_btn_w + 8.0, cy + 13.0, half_btn_w, 34.0],
+                &saved_label,
+                Action::ControlLayouts,
+                BtnStyle::CrimsonOutline,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [btn_x, cy + 53.0, half_btn_w, 31.0],
+                "Apply All Profiles",
+                Action::ApplyControlsAllProfiles,
+                BtnStyle::Secondary,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [btn_x + half_btn_w + 8.0, cy + 53.0, half_btn_w, 31.0],
+                "Reset Default",
+                Action::ResetControls,
+                BtnStyle::Secondary,
+                true,
+            );
+
+            // Two-Column Categorized Settings Deck below Import Control
+            let gap = 16.0;
+            let col_w = (cw - gap) * 0.5;
+            let footer_h = 52.0;
+            let cards_y = cy + import_h + 10.0;
+            let cards_h = (ch - import_h - 10.0 - footer_h - 10.0).max(142.0);
+
+            ui.rounded(cx, cards_y, col_w, cards_h, 14.0, theme::CARD);
+            ui.border(cx, cards_y, col_w, cards_h, 14.0, theme::BORDER);
+            ui.text(
+                Face::Medium,
+                17.0,
+                cx + 20.0,
+                cards_y + 12.0,
                 theme::TEXT,
                 "Display & Graphics",
             );
 
             let rx = cx + col_w + gap;
-            ui.rounded(rx, cy, col_w, cards_h, 14.0, theme::CARD);
-            ui.border(rx, cy, col_w, cards_h, 14.0, theme::BORDER);
+            ui.rounded(rx, cards_y, col_w, cards_h, 14.0, theme::CARD);
+            ui.border(rx, cards_y, col_w, cards_h, 14.0, theme::BORDER);
             ui.text(
                 Face::Medium,
-                18.0,
+                17.0,
                 rx + 20.0,
-                cy + 14.0,
+                cards_y + 12.0,
                 theme::TEXT,
                 "Profile, Input & Diagnostics",
             );
 
-            let list_top = cy + 52.0;
-            let list_bottom = cy + cards_h - 10.0;
-            let row_h = 52.0;
+            let list_top = cards_y + 46.0;
+            let list_bottom = cards_y + cards_h - 8.0;
+            let row_h = 48.0;
             let max_rows = left_items.len().max(right_items.len());
             let max_scroll = (max_rows as f32 * row_h - (list_bottom - list_top)).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
@@ -2061,7 +2185,7 @@ impl DrawCtx<'_> {
                 for (i, (label, val, act, sw, dropdown)) in slice.iter().enumerate() {
                     let y = list_top + i as f32 * row_h - self.catalog.scroll;
                     let ctrl_w = (col_w * 0.50).clamp(132.0, 236.0);
-                    let ctrl_rect = [base_x + col_w - ctrl_w - 16.0, y + 6.0, ctrl_w, 36.0];
+                    let ctrl_rect = [base_x + col_w - ctrl_w - 16.0, y + 5.0, ctrl_w, 34.0];
                     self.list_targets.push((ctrl_rect, *act));
                     if y < list_top - 4.0 || y + row_h - 4.0 > list_bottom {
                         continue;
@@ -2107,14 +2231,16 @@ impl DrawCtx<'_> {
                 }
             }
 
-            // Bottom row matching 06-settings.png: status on left, Startup diagnostics + crimson Microsoft/Xbox account + account pill on right
-            let btn_y = cy + cards_h + 12.0;
-            let half_right = (col_w - 12.0) * 0.5;
+            // Bottom row: status on left, Diagnostics + Microsoft/Xbox + account chip inline on right
+            let btn_y = cards_y + cards_h + 10.0;
+            let acc_chip_w = 152.0f32.min(col_w * 0.36);
+            let btns_avail = (col_w - acc_chip_w - 16.0).max(160.0);
+            let half_right = (btns_avail - 8.0) * 0.5;
             styled_button(
                 ui,
                 self.targets,
-                [rx, btn_y, half_right, 44.0],
-                "Startup diagnostics",
+                [rx, btn_y, half_right, 40.0],
+                "Diagnostics",
                 Action::Logs,
                 BtnStyle::Secondary,
                 true,
@@ -2122,8 +2248,8 @@ impl DrawCtx<'_> {
             styled_button(
                 ui,
                 self.targets,
-                [rx + half_right + 12.0, btn_y, half_right, 44.0],
-                "Microsoft / Xbox account",
+                [rx + half_right + 8.0, btn_y, half_right, 40.0],
+                "Xbox / MS Login",
                 Action::Account,
                 BtnStyle::Primary,
                 true,
@@ -2131,7 +2257,7 @@ impl DrawCtx<'_> {
             draw_account_chip(
                 ui,
                 self.targets,
-                [rx + col_w - 190.0, btn_y + 52.0, 190.0, 30.0],
+                [rx + col_w - acc_chip_w, btn_y + 3.0, acc_chip_w, 34.0],
                 account_status,
                 self.login.signed_in,
             );
@@ -2144,7 +2270,7 @@ impl DrawCtx<'_> {
                         Face::Regular,
                         13.0,
                         cx + 4.0,
-                        btn_y + 6.0 + li as f32 * 19.0,
+                        btn_y + 2.0 + li as f32 * 18.0,
                         if self.error.is_some() {
                             theme::CRIMSON_BRIGHT
                         } else {
@@ -2155,18 +2281,96 @@ impl DrawCtx<'_> {
                 }
             }
         } else {
-            // Compact single-column Settings
+            // Compact single-column Settings with "Import Control" section at top
             let footer_h = 52.0;
             let top = cy;
             let bottom = cy + ch - footer_h;
             let all_items: Vec<_> = left_items.into_iter().chain(right_items).collect();
+            let import_card_h = 154.0;
+            let import_block_h = import_card_h + 12.0;
             let row_h = 68.0;
-            let max_scroll = (all_items.len() as f32 * row_h - (bottom - top)).max(0.0);
+            let total_h = import_block_h + all_items.len() as f32 * row_h;
+            let max_scroll = (total_h - (bottom - top)).max(0.0);
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
             *self.list_view = Some([top, bottom, max_scroll]);
 
+            let iy = top - self.catalog.scroll;
+            let half_btn = (cw - 32.0 - 8.0) * 0.5;
+            let imp_btn_r = [cx + 16.0, iy + 68.0, half_btn, 36.0];
+            let sav_btn_r = [cx + 16.0 + half_btn + 8.0, iy + 68.0, half_btn, 36.0];
+            let all_btn_r = [cx + 16.0, iy + 110.0, half_btn, 32.0];
+            let rst_btn_r = [cx + 16.0 + half_btn + 8.0, iy + 110.0, half_btn, 32.0];
+            self.list_targets.push((imp_btn_r, Action::ImportControl));
+            self.list_targets.push((sav_btn_r, Action::ControlLayouts));
+            self.list_targets
+                .push((all_btn_r, Action::ApplyControlsAllProfiles));
+            self.list_targets.push((rst_btn_r, Action::ResetControls));
+
+            if iy >= top - 4.0 && iy + import_card_h <= bottom + 4.0 {
+                ui.rounded(cx, iy, cw, import_card_h, 12.0, theme::HERO_BG);
+                ui.border(cx, iy, cw, import_card_h, 12.0, theme::BORDER_CRIMSON);
+                ui.text(
+                    Face::Medium,
+                    16.5,
+                    cx + 16.0,
+                    iy + 10.0,
+                    theme::TEXT,
+                    "Import Control",
+                );
+                let act_fit =
+                    ui.fit_text(Face::Regular, 12.5, &active_ctrl_summary, cw - 32.0);
+                ui.text(
+                    Face::Regular,
+                    12.5,
+                    cx + 16.0,
+                    iy + 38.0,
+                    if self.catalog.active_controls.is_some() {
+                        theme::CRIMSON_BRIGHT
+                    } else {
+                        theme::MUTED
+                    },
+                    &act_fit,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    imp_btn_r,
+                    "Import Control",
+                    Action::ImportControl,
+                    BtnStyle::Primary,
+                    true,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    sav_btn_r,
+                    &saved_label,
+                    Action::ControlLayouts,
+                    BtnStyle::CrimsonOutline,
+                    true,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    all_btn_r,
+                    "Apply All",
+                    Action::ApplyControlsAllProfiles,
+                    BtnStyle::Secondary,
+                    true,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    rst_btn_r,
+                    "Reset Default",
+                    Action::ResetControls,
+                    BtnStyle::Secondary,
+                    true,
+                );
+            }
+
             for (i, (label, val, act, sw, dropdown)) in all_items.iter().enumerate() {
-                let y = top + i as f32 * row_h - self.catalog.scroll;
+                let y = top + import_block_h + i as f32 * row_h - self.catalog.scroll;
                 let ctrl_rect = [cx, y + 24.0, cw, 38.0];
                 self.list_targets.push((ctrl_rect, *act));
                 if y < top || y + row_h - 4.0 > bottom {
@@ -2563,6 +2767,77 @@ impl Launcher {
                 let home = self.catalog.config.game_home(&self.home);
                 if let Err(e) = crate::documents::begin(kind, home) {
                     self.catalog.status = e;
+                }
+            }
+            Some(Action::ImportControl) => {
+                crate::platform::hide();
+                self.chooser = None;
+                let profile_home = self.catalog.config.game_home(&self.home);
+                if let Err(e) = crate::documents::begin_controls(self.home.clone(), profile_home) {
+                    self.catalog.status = e;
+                }
+            }
+            Some(Action::ControlLayouts) => {
+                self.catalog.refresh_controls(&self.home);
+                self.open_chooser(chooser::Kind::ControlLayout);
+            }
+            Some(Action::ChooseControlLayout(idx)) => {
+                self.chooser = None;
+                if let Some(preset) = self.catalog.control_presets.get(idx).cloned() {
+                    let profile_home = self.catalog.config.game_home(&self.home);
+                    match horizon_client::touch::import::load_preset(&self.home, &preset.slug)
+                        .and_then(|s| {
+                            horizon_client::touch::import::apply_to_profile(&profile_home, &s)
+                        }) {
+                        Ok(()) => {
+                            if matches!(
+                                self.catalog.config.input_host,
+                                crate::catalog::InputHost::KeyboardMouse
+                                    | crate::catalog::InputHost::Controller
+                            ) {
+                                self.catalog.config.input_host = crate::catalog::InputHost::Auto;
+                                let _ = self.catalog.config.save(&self.home);
+                                crate::configure_input_mode(self.catalog.config.input_host);
+                            }
+                            self.catalog.refresh_controls(&self.home);
+                            self.catalog.status = format!(
+                                "Activated \"{}\" ({}) for Profile {}.",
+                                preset.meta.name,
+                                preset.meta.format,
+                                self.catalog.config.profile
+                            );
+                        }
+                        Err(e) => self.catalog.status = format!("Could not apply preset: {e}"),
+                    }
+                }
+            }
+            Some(Action::ApplyControlsAllProfiles) => {
+                let profile_home = self.catalog.config.game_home(&self.home);
+                let current = horizon_client::touch::Settings::load_from(
+                    &profile_home.join("horizon-touch.json"),
+                );
+                match horizon_client::touch::import::apply_to_all_profiles(&self.home, &current) {
+                    Ok(count) => {
+                        self.catalog.refresh_controls(&self.home);
+                        self.catalog.status = format!(
+                            "Applied active touch control layout across {count} profile(s)."
+                        );
+                    }
+                    Err(e) => self.catalog.status = format!("Apply failed: {e}"),
+                }
+            }
+            Some(Action::ResetControls) => {
+                self.chooser = None;
+                let profile_home = self.catalog.config.game_home(&self.home);
+                match horizon_client::touch::import::reset_profile(&profile_home) {
+                    Ok(()) => {
+                        self.catalog.refresh_controls(&self.home);
+                        self.catalog.status = format!(
+                            "Restored default Volt touch controls for Profile {}.",
+                            self.catalog.config.profile
+                        );
+                    }
+                    Err(e) => self.catalog.status = format!("Reset failed: {e}"),
                 }
             }
             Some(Action::ToggleSection(i)) => {

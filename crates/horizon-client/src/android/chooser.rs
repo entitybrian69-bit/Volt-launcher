@@ -14,6 +14,7 @@ pub(super) enum Kind {
     Profile,
     Orientation,
     InputHost,
+    ControlLayout,
 }
 pub(super) struct Chooser {
     title: &'static str,
@@ -205,6 +206,53 @@ impl Launcher {
                 (
                     "Choose profile",
                     "Each profile keeps its own game settings and saves.",
+                    choices,
+                )
+            }
+            Kind::ControlLayout => {
+                let mut choices = vec![(
+                    "Default Volt Touch Controls".into(),
+                    "Built-in joystick, attack, use & quick HUD buttons".into(),
+                    Action::ResetControls,
+                    self.catalog.active_controls.is_none(),
+                )];
+                for (idx, preset) in self.catalog.control_presets.iter().enumerate() {
+                    let is_active = self
+                        .catalog
+                        .active_controls
+                        .as_ref()
+                        .is_some_and(|m| m.name == preset.meta.name && m.format == preset.meta.format);
+                    let detail = format!(
+                        "{} • {} buttons{}{}",
+                        preset.meta.format,
+                        preset.meta.buttons,
+                        if preset.meta.drawers > 0 {
+                            format!(" • {} drawers", preset.meta.drawers)
+                        } else {
+                            String::new()
+                        },
+                        if preset.meta.has_joystick {
+                            " • joystick"
+                        } else {
+                            ""
+                        }
+                    );
+                    choices.push((
+                        preset.meta.name.clone(),
+                        detail,
+                        Action::ChooseControlLayout(idx),
+                        is_active,
+                    ));
+                }
+                choices.push((
+                    "Import control file (.json / .zip)...".into(),
+                    "PojavLauncher, Amethyst, Mojo, Zalith, Fold Craft (FCL) or Volt JSON".into(),
+                    Action::ImportControl,
+                    false,
+                ));
+                (
+                    "Import Control Layouts",
+                    "Select an imported Java launcher layout for this profile or import a new file.",
                     choices,
                 )
             }

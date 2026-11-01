@@ -19,9 +19,18 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+enum Target {
+    Content {
+        kind: Kind,
+        home: PathBuf,
+    },
+    Controls {
+        root_home: PathBuf,
+        profile_home: PathBuf,
+    },
+}
 struct Request {
-    kind: Kind,
-    home: PathBuf,
+    target: Target,
     cache: PathBuf,
 }
 struct Conflict {
@@ -33,6 +42,7 @@ struct Conflict {
 pub struct Notice {
     pub text: String,
     pub changed: bool,
+    pub controls_changed: bool,
     pub kind: Option<Kind>,
 }
 #[derive(Default)]
@@ -79,6 +89,7 @@ fn notice(text: impl Into<String>, changed: bool) {
     s.notice = Some(Notice {
         text,
         changed,
+        controls_changed: false,
         kind: None,
     });
 }
@@ -89,7 +100,19 @@ fn imported(text: impl Into<String>, kind: Kind) {
     s.notice = Some(Notice {
         text,
         changed: true,
+        controls_changed: false,
         kind: Some(kind),
+    });
+}
+fn controls_imported(text: impl Into<String>) {
+    let text = text.into();
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.toast = Some((text.clone(), std::time::Instant::now()));
+    s.notice = Some(Notice {
+        text,
+        changed: false,
+        controls_changed: true,
+        kind: None,
     });
 }
 pub fn poll() -> Option<Notice> {
@@ -97,6 +120,7 @@ pub fn poll() -> Option<Notice> {
         return Some(Notice {
             text: "Content files changed. Reload packs to apply.".into(),
             changed: true,
+            controls_changed: false,
             kind: None,
         });
     }
@@ -115,12 +139,41 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
     let cache = crate::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("content-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request { kind, home, cache });
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::Content { kind, home },
+        cache,
+    });
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
     notice(format!("Choose a {} file", kind.label()), false);
+    Ok(())
+}
+pub fn begin_controls(root_home: PathBuf, profile_home: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::Controls {
+            root_home,
+            profile_home,
+        },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice(
+        "Choose a Java launcher control file (.json or .zip)",
+        false,
+    );
     Ok(())
 }
 pub fn picker_failed(error: &str) {
@@ -174,10 +227,12 @@ pub extern "system" fn document_result(
         .spawn(move || {
             let result = (|| -> Result<()> {
                 let mut env = vm.attach_current_thread()?;
-                let fallback = if pending.kind == Kind::Mods {
-                    "import.hmod"
-                } else {
-                    "import.zip"
+                let fallback = match &pending.target {
+                    Target::Content {
+                        kind: Kind::Mods, ..
+                    } => "import.hmod",
+                    Target::Content { .. } => "import.zip",
+                    Target::Controls { .. } => "controls.json",
                 };
                 let opened =
                     crate::document_bridge::open(&mut env, activity.as_obj(), &uri, fallback);
@@ -198,14 +253,6 @@ pub extern "system" fn document_result(
     }
 }
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
-    if !content_files::plain_name(&name) || !request.kind.accepts(&name) {
-        return Err("Selected file has the wrong extension for this folder".into());
-    }
-    let dir = request.home.join(request.kind.folder());
-    std::fs::create_dir_all(&dir)?;
-    if std::fs::symlink_metadata(&dir)?.file_type().is_symlink() {
-        return Err("Refusing a redirected content directory".into());
-    }
     std::fs::create_dir_all(&request.cache)?;
     if std::fs::symlink_metadata(&request.cache)?
         .file_type()
@@ -214,10 +261,31 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         return Err("Refusing a redirected import cache".into());
     }
     for entry in std::fs::read_dir(&request.cache)?.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(".import-") && name.ends_with(".part") && entry.file_type()?.is_file() {
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        if entry_name.starts_with(".import-")
+            && entry_name.ends_with(".part")
+            && entry.file_type()?.is_file()
+        {
             let _ = std::fs::remove_file(entry.path());
         }
+    }
+    if let Target::Controls {
+        root_home,
+        profile_home,
+    } = request.target
+    {
+        return stage_controls(&request.cache, &root_home, &profile_home, input, &name);
+    }
+    let Target::Content { kind, home } = request.target else {
+        unreachable!()
+    };
+    if !content_files::plain_name(&name) || !kind.accepts(&name) {
+        return Err("Selected file has the wrong extension for this folder".into());
+    }
+    let dir = home.join(kind.folder());
+    std::fs::create_dir_all(&dir)?;
+    if std::fs::symlink_metadata(&dir)?.file_type().is_symlink() {
+        return Err("Refusing a redirected content directory".into());
     }
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let staged = request.cache.join(format!(".import-{stamp}.part"));
@@ -228,7 +296,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             .open(&staged)?;
         content_files::copy_bounded(&mut input, &mut output, |bytes| {
             notice(
-                format!("Importing {}: {} KiB", request.kind.label(), bytes / 1024),
+                format!("Importing {}: {} KiB", kind.label(), bytes / 1024),
                 false,
             );
             !CANCEL.load(Ordering::Relaxed)
@@ -236,10 +304,10 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         output.sync_all()?;
         drop(output);
         notice("Checking archive...", false);
-        let native_shader = content_files::validate(&staged, request.kind, &name, || {
+        let native_shader = content_files::validate(&staged, kind, &name, || {
             CANCEL.load(Ordering::Relaxed)
         })?;
-        let name = if request.kind == Kind::Mods {
+        let name = if kind == Kind::Mods {
             format!("{}.hmod", horizon_mods::Package::read(&staged)?.manifest.id)
         } else if native_shader || name.to_ascii_lowercase().ends_with(".hshader") {
             let pack = horizon_shader_api::Pack::read(&staged)?;
@@ -259,7 +327,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         let target = dir.join(name);
         if target.exists() {
             STATE.lock().unwrap_or_else(|e| e.into_inner()).conflict = Some(Conflict {
-                kind: request.kind,
+                kind,
                 staged: staged.clone(),
                 target,
             });
@@ -273,9 +341,9 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 format!(
                     "Imported {} into {}. Enable it in game settings.",
                     target.file_name().unwrap_or_default().to_string_lossy(),
-                    request.kind.label()
+                    kind.label()
                 ),
-                request.kind,
+                kind,
             );
         }
         Ok(())
@@ -283,6 +351,51 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     if result.is_err() {
         let _ = std::fs::remove_file(staged);
     }
+    result
+}
+
+fn stage_controls(
+    cache: &std::path::Path,
+    root_home: &std::path::Path,
+    profile_home: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let staged = cache.join(format!(".import-controls-{stamp}.part"));
+    let result = (|| -> Result<()> {
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        content_files::copy_bounded(&mut input, &mut output, |bytes| {
+            notice(
+                format!("Importing control layout: {} KiB", bytes / 1024),
+                false,
+            );
+            !CANCEL.load(Ordering::Relaxed)
+        })?;
+        output.sync_all()?;
+        drop(output);
+        if CANCEL.load(Ordering::Relaxed) {
+            return Err("Import cancelled".into());
+        }
+        notice("Converting Java launcher controls...", false);
+        let parsed = horizon_client::touch::import::import_file(&staged, name)?;
+        horizon_client::touch::import::save_preset_and_apply(root_home, profile_home, &parsed)?;
+        let extras = match (parsed.meta.drawers > 0, parsed.meta.has_joystick) {
+            (true, true) => format!(", {} drawers, joystick", parsed.meta.drawers),
+            (true, false) => format!(", {} drawers", parsed.meta.drawers),
+            (false, true) => ", joystick".into(),
+            (false, false) => String::new(),
+        };
+        controls_imported(format!(
+            "Imported \"{}\" ({} • {} buttons{}) — active now!",
+            parsed.meta.name, parsed.meta.format, parsed.meta.buttons, extras
+        ));
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&staged);
     result
 }
 pub fn resolve(choice: Choice) {

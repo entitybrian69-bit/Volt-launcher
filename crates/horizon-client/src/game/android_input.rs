@@ -139,20 +139,94 @@ impl Game<'_> {
         })
     }
     pub(super) fn android_custom_mouse_held(&self, button: MouseButton) -> bool {
-        self.pad.touch.held_custom_tokens().any(|token| {
-            token.strip_prefix("action:").is_some_and(|mapping| {
+        self.pad.touch.held_custom_tokens().any(|token| match token {
+            "special:mouse_pri" => button == MouseButton::Left,
+            "special:mouse_sec" => button == MouseButton::Right,
+            "special:mouse_mid" => button == MouseButton::Middle,
+            _ => token.strip_prefix("action:").is_some_and(|mapping| {
                 horizon_client::keybinds::mouse_button(
                     horizon_client::keybinds::KeyBinds::default_of(mapping),
                 ) == Some(button)
-            })
+            }),
         })
     }
     pub(super) fn android_custom_events(&mut self) {
         for (name, down) in self.pad.touch.key_events() {
+            match name.as_str() {
+                "special:keyboard" => {
+                    if down {
+                        if crate::platform::active() {
+                            crate::platform::hide();
+                        } else {
+                            self.android_show_keyboard();
+                        }
+                    }
+                    continue;
+                }
+                "special:virtual_mouse" => {
+                    if down {
+                        if matches!(self.screen, Screen::Inventory | Screen::Creative) {
+                            self.inv_clicks = Default::default();
+                            self.inv_drag = None;
+                            self.creative_screen.release();
+                            self.loom_release();
+                        }
+                        for right in self.pad.touch_ui.release_all_mouse() {
+                            let b = if right {
+                                MouseButton::Right
+                            } else {
+                                MouseButton::Left
+                            };
+                            let _ = self.android_custom_mouse(b, false);
+                        }
+                        self.pad.touch_ui.cancel();
+                        self.pad.touch_ui.virtual_mouse ^= true;
+                    }
+                    continue;
+                }
+                "special:menu" => {
+                    if down {
+                        crate::platform::hide();
+                        if let Err(error) = self.pad_back() {
+                            log::warn!("Custom menu button: {error}");
+                        }
+                    }
+                    continue;
+                }
+                "special:scroll_up" | "special:scroll_down" => {
+                    if down {
+                        let step = if name == "special:scroll_up" {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        if let Err(error) = self.android_custom_scroll(step) {
+                            log::warn!("Custom scroll button: {error}");
+                        }
+                    }
+                    continue;
+                }
+                "special:mouse_pri" | "special:mouse_sec" | "special:mouse_mid" => {
+                    let button = match name.as_str() {
+                        "special:mouse_pri" => MouseButton::Left,
+                        "special:mouse_sec" => MouseButton::Right,
+                        _ => MouseButton::Middle,
+                    };
+                    if let Err(error) = self.android_custom_mouse(button, down) {
+                        log::warn!("Custom mouse button: {error}");
+                    }
+                    continue;
+                }
+                _ => {}
+            }
             if let Some(mapping) = name.strip_prefix("action:") {
                 let default = horizon_client::keybinds::KeyBinds::default_of(mapping);
                 let result = if let Some(key) = horizon_client::keybinds::key_code(default) {
-                    self.mapped_key(key, down, false)
+                    if down && self.screenshot_shortcut(key, false) {
+                        Ok(())
+                    } else {
+                        self.mapped_key(key, down, false)
+                    }
                 } else if let Some(button) = horizon_client::keybinds::mouse_button(default) {
                     self.android_custom_mouse(button, down)
                 } else {
@@ -187,6 +261,9 @@ impl Game<'_> {
             } else {
                 self.physical_keys.remove(&key);
             }
+            if down && self.screenshot_shortcut(key, false) {
+                continue;
+            }
             self.mod_key(key, down, false);
             self.native_key_event(key, down, false);
             let action = if down {
@@ -213,9 +290,76 @@ impl Game<'_> {
         }
     }
 
+    fn android_custom_scroll(&mut self, raw_y: f64) -> Result<()> {
+        let discrete = self.settings.discrete_scroll;
+        let wheel_sensitivity = f64::from(self.settings.mouse_wheel_sensitivity);
+        let scaled = (if discrete {
+            horizon_client::mouse::java_signum(raw_y)
+        } else {
+            raw_y
+        }) * wheel_sensitivity;
+        let d = scaled as f32;
+        if self.screen == Screen::Playing
+            && !self.screen_over_playing()
+            && self.sleeping.is_none()
+            && self.player.is_some()
+            && !self.native_wheel_event(d)
+            && !self.mod_wheel(d)
+            && let Some((wheel, (_, vertical_steps))) =
+                self.mouse
+                    .on_scroll(0.0, raw_y, discrete, wheel_sensitivity)
+        {
+            if self.spectator() && self.spectator_gui.is_menu_active() {
+                self.spectator_scroll(-wheel);
+            } else if self.spectator() {
+                if let Some(player) = &mut self.player {
+                    player.flying_speed = horizon_client::mouse::spectator_flying_speed(
+                        player.flying_speed,
+                        vertical_steps,
+                    );
+                }
+            } else {
+                self.selected = horizon_client::mouse::ScrollWheelHandler::next_selection(
+                    f64::from(wheel),
+                    self.selected as i32,
+                    9,
+                ) as usize;
+            }
+            return Ok(());
+        }
+        let bundle = bundles::takes_bundle_wheel(self.screen)
+            && d != 0.0
+            && self.bundle_scroll(0.0, scaled);
+        if self.screen == Screen::Creative && d != 0.0 && !bundle {
+            self.creative_screen.wheel(f64::from(d), &self.pack.names);
+        } else if self.screen == Screen::Inventory
+            && d != 0.0
+            && !bundle
+            && !self.tweak_scroll(d, self.inventory_target().0)
+        {
+            self.station_scroll(d);
+        } else if self.screen == Screen::Chat && d != 0.0 {
+            self.chat_scroll(d);
+        } else if self.screen == Screen::Options && d != 0.0 {
+            self.options_scroll(d)?;
+        }
+        Ok(())
+    }
+
     fn android_custom_mouse(&mut self, button: MouseButton, down: bool) -> Result<()> {
         if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
             return self.play_mouse(button, down);
+        }
+        if button == MouseButton::Middle {
+            if down {
+                self.inventory_pick_press();
+            } else {
+                self.inventory_pick_release();
+            }
+            if let Some(container) = self.container {
+                self.container_changed(container);
+            }
+            return Ok(());
         }
         let right = button == MouseButton::Right;
         if !matches!(button, MouseButton::Left | MouseButton::Right) {
@@ -463,7 +607,12 @@ impl Game<'_> {
     pub(super) fn android_poll_keyboard(&mut self) {
         self.android_custom_events();
         if let Some(notice) = crate::documents::poll() {
-            if notice.changed {
+            if notice.controls_changed {
+                let path = crate::backend::game_home().join("horizon-touch.json");
+                self.settings.touch = horizon_client::touch::Settings::load_from(&path);
+                self.pad.touch.clear();
+                self.pad.touch.settings = self.settings.touch.clone();
+            } else if notice.changed {
                 self.refresh_pack_lists();
                 self.settings.shader_packs =
                     horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());

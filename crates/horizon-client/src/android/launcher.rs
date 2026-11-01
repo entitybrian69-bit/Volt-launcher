@@ -533,7 +533,17 @@ impl ApplicationHandler for Launcher {
         self.catalog.poll(&self.home);
         if let Some(notice) = crate::documents::poll() {
             self.catalog.status = notice.text;
-            if notice.changed {
+            if notice.controls_changed {
+                if matches!(
+                    self.catalog.config.input_host,
+                    crate::catalog::InputHost::KeyboardMouse | crate::catalog::InputHost::Controller
+                ) {
+                    self.catalog.config.input_host = crate::catalog::InputHost::Auto;
+                    let _ = self.catalog.config.save(&self.home);
+                    crate::configure_input_mode(self.catalog.config.input_host);
+                }
+                self.catalog.refresh_controls(&self.home);
+            } else if notice.changed {
                 self.catalog.refresh(&self.home);
                 self.catalog.show_installed(notice.kind);
             }
