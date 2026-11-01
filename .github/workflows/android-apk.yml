@@ -243,12 +243,25 @@ jobs:
 
       - name: Run touch control and Volt settings unit tests
         run: |
-          cargo test -p horizon-client-core --lib lang
-          cargo test -p horizon-client-render --lib graphics
-          cargo test -p horizon-client-render --lib touch
-          cargo test -p horizon-client-render --lib volt_features
-          cargo test -p horizon-client-render --lib extras
-          cargo test -p horizon-client-render --lib options_ui
+          python3 - <<'PY'
+          import subprocess, sys
+          cmds = [
+              ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
+          ]
+          for cmd in cmds:
+              proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              sys.stdout.write(proc.stdout)
+              sys.stdout.flush()
+              if proc.returncode != 0:
+                  tail = proc.stdout[-6000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"\n::error title=Unit test failed ({' '.join(cmd)})::{tail}")
+                  sys.exit(proc.returncode)
+          PY
 
       - name: Cache Gradle 8.14 distribution
         uses: actions/cache@v4

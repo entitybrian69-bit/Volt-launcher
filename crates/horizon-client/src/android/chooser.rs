@@ -137,7 +137,6 @@ impl Launcher {
                     .collect(),
             ),
             Kind::Renderer => (
-            Kind::Renderer => (
                 "Rendering mode",
                 "Selects Vulkan, Volt's built-in Vulkan Supporter for unsupported/Vulkan-1.0 GPUs, or OpenGL ES.",
                 vec![

@@ -183,22 +183,24 @@ unsafe fn open_library_with_companions(
 ) -> Result<(libloading::Library, Vec<libloading::Library>), String> {
     let mut companions = Vec::new();
     #[cfg(unix)]
-    if let Some(parent) = path.parent()
-        && let Ok(entries) = std::fs::read_dir(parent)
-    {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p == path {
-                continue;
-            }
-            let is_so = p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(".so") || n.contains(".so."));
-            if is_so {
-                let flags = libloading::os::unix::RTLD_NOW | libloading::os::unix::RTLD_GLOBAL;
-                if let Ok(lib) = unsafe { libloading::os::unix::Library::open(Some(&p), flags) } {
-                    companions.push(lib.into());
+    if let Some(parent) = path.parent() {
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p == path {
+                    continue;
+                }
+                let is_so = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with(".so") || n.contains(".so."));
+                if is_so {
+                    let flags =
+                        libloading::os::unix::RTLD_NOW | libloading::os::unix::RTLD_GLOBAL;
+                    if let Ok(lib) = unsafe { libloading::os::unix::Library::open(Some(&p), flags) }
+                    {
+                        companions.push(lib.into());
+                    }
                 }
             }
         }
@@ -250,25 +252,25 @@ unsafe fn resolve_entry_from_lib(
     }
 
     // 3. Android HAL `hwvulkan` module (`HMI` / `HAL_MODULE_INFO_SYM`).
-    if let Ok(hmi) = unsafe { lib.get::<*const HwModule>(b"HMI\0") } {
-        let module_ptr: *const HwModule = ptr::from_ref::<*const HwModule>(&*hmi).cast::<HwModule>();
+    if let Ok(hmi) = unsafe { lib.get::<HwModule>(b"HMI\0") } {
+        let module_ptr: *const HwModule = ptr::from_ref::<HwModule>(&*hmi);
         if !module_ptr.is_null() {
             let methods = unsafe { (*module_ptr).methods };
-            if !methods.is_null()
-                && let Some(open_fn) = unsafe { (*methods).open }
-            {
-                let mut hw_dev: *mut HwDevice = ptr::null_mut();
-                let rc = unsafe { open_fn(module_ptr, c"vk0".as_ptr(), &mut hw_dev) };
-                if rc == 0 && !hw_dev.is_null() {
-                    let vk_dev = hw_dev.cast::<HwVulkanDevice>();
-                    let get_instance_proc_addr = unsafe { (*vk_dev).get_instance_proc_addr };
-                    #[allow(unused_unsafe)]
-                    let entry = unsafe {
-                        ash::Entry::from_static_fn(ash::StaticFn {
-                            get_instance_proc_addr,
-                        })
-                    };
-                    return Ok((entry, "hwvulkan (HMI)"));
+            if !methods.is_null() {
+                if let Some(open_fn) = unsafe { (*methods).open } {
+                    let mut hw_dev: *mut HwDevice = ptr::null_mut();
+                    let rc = unsafe { open_fn(module_ptr, c"vk0".as_ptr(), &mut hw_dev) };
+                    if rc == 0 && !hw_dev.is_null() {
+                        let vk_dev = hw_dev.cast::<HwVulkanDevice>();
+                        let get_instance_proc_addr = unsafe { (*vk_dev).get_instance_proc_addr };
+                        #[allow(unused_unsafe)]
+                        let entry = unsafe {
+                            ash::Entry::from_static_fn(ash::StaticFn {
+                                get_instance_proc_addr,
+                            })
+                        };
+                        return Ok((entry, "hwvulkan (HMI)"));
+                    }
                 }
             }
         }
