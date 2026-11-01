@@ -527,6 +527,11 @@ impl Game<'_> {
             return None;
         }
         let e = &self.settings.extras;
+        let protocol = if self.remote.is_none() {
+            PlacementProtocol::Carpet
+        } else {
+            e.placement_protocol
+        };
         Some(resolve_accurate_placement(
             item,
             hit.pos,
@@ -537,7 +542,7 @@ impl Game<'_> {
             e.placement_quadrant,
             e.placement_reverse,
             e.placement_lock,
-            e.placement_protocol,
+            protocol,
         ))
     }
 
@@ -599,79 +604,6 @@ impl Game<'_> {
                 }
                 true
             }
-        }
-    }
-
-    /// Applies singleplayer post-placement axis / half overrides for blocks whose
-    /// vanilla `getStateForPlacement` uses `ctx.face` directly (logs, pillars,
-    /// hoppers, slabs on Up/Down faces) without shifting `clicked_pos + face`.
-    pub(super) fn refine_singleplayer_placed_state(
-        &mut self,
-        target: [i32; 3],
-        state: BlockStateId,
-        resolved: &ResolvedPlacement,
-    ) -> BlockStateId {
-        let Some(mut reg_state) = self.pack.assets.registry.state(state).cloned() else {
-            return state;
-        };
-        let dir_str = match resolved.facing {
-            horizon_core::geometry::Direction::Down => "down",
-            horizon_core::geometry::Direction::Up => "up",
-            horizon_core::geometry::Direction::North => "north",
-            horizon_core::geometry::Direction::South => "south",
-            horizon_core::geometry::Direction::West => "west",
-            horizon_core::geometry::Direction::East => "east",
-        };
-        let axis_str = match resolved.facing {
-            horizon_core::geometry::Direction::West | horizon_core::geometry::Direction::East => {
-                "x"
-            }
-            horizon_core::geometry::Direction::Down | horizon_core::geometry::Direction::Up => "y",
-            horizon_core::geometry::Direction::North | horizon_core::geometry::Direction::South => {
-                "z"
-            }
-        };
-        let mut changed = false;
-        if reg_state.properties.contains_key("axis")
-            && reg_state.properties.get("axis").map(String::as_str) != Some(axis_str)
-        {
-            reg_state.properties.insert("axis".into(), axis_str.into());
-            changed = true;
-        }
-        if &*reg_state.name == "minecraft:hopper" {
-            let hopper_dir = if dir_str == "up" { "down" } else { dir_str };
-            if reg_state.properties.get("facing").map(String::as_str) != Some(hopper_dir) {
-                reg_state
-                    .properties
-                    .insert("facing".into(), hopper_dir.into());
-                changed = true;
-            }
-        }
-        if let Some(top) = resolved.top_half {
-            let want = if top { "top" } else { "bottom" };
-            if let Some(cur) = reg_state.properties.get("type").cloned()
-                && (cur == "top" || cur == "bottom")
-                && cur != want
-            {
-                reg_state.properties.insert("type".into(), want.into());
-                changed = true;
-            }
-            if let Some(cur) = reg_state.properties.get("half").cloned()
-                && (cur == "top" || cur == "bottom")
-                && cur != want
-            {
-                reg_state.properties.insert("half".into(), want.into());
-                changed = true;
-            }
-        }
-        if !changed {
-            return state;
-        }
-        if let Ok(new_id) = self.pack.assets.registry.resolve(&reg_state) {
-            let _ = self.level_set(target, new_id);
-            new_id
-        } else {
-            state
         }
     }
 

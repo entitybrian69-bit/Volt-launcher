@@ -72,6 +72,8 @@ pub(super) struct Launcher {
     session_ready: bool,
     focus: Option<usize>,
     diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
+    update_check_rx: Option<mpsc::Receiver<crate::volt_updater::UpdateInfo>>,
+    update_prompt: Option<crate::volt_updater::UpdatePrompt>,
 }
 
 impl Launcher {
@@ -90,13 +92,45 @@ impl Launcher {
             catalog.status = crate::diagnostics::summary(&home);
         }
         horizon_client::android_runtime::graphics_startup::configure(home.clone());
+        if let Some(driver_path) = catalog
+            .config
+            .custom_vulkan_driver
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|p| p.is_file())
+        {
+            horizon_client::android_runtime::configure_custom_vulkan_driver(Some(driver_path));
+        } else {
+            horizon_client::android_runtime::configure_custom_vulkan_driver(None);
+        }
         if horizon_client::android_runtime::graphics_startup::recover(&home) {
-            catalog.config.renderer = crate::catalog::RendererMode::OpenGl;
+            catalog.config.renderer = match catalog.config.renderer {
+                crate::catalog::RendererMode::Vulkan
+                | crate::catalog::RendererMode::VulkanCompatibility => {
+                    catalog.status = "Previous Vulkan startup was interrupted. Switched to Volt Vulkan Supporter; you can change Rendering mode in Settings.".into();
+                    crate::catalog::RendererMode::VulkanSupporter
+                }
+                _ => {
+                    if catalog.config.custom_vulkan_driver.is_some() {
+                        catalog.config.custom_vulkan_driver = None;
+                        catalog.config.custom_vulkan_driver_name = None;
+                        horizon_client::android_runtime::configure_custom_vulkan_driver(None);
+                        catalog.status = "Custom Vulkan driver crashed on startup. Reverted to built-in Vulkan Supporter.".into();
+                        crate::catalog::RendererMode::VulkanSupporter
+                    } else {
+                        catalog.status = "Previous Vulkan startup was interrupted. Using OpenGL ES fallback; you can change Rendering mode in Settings.".into();
+                        crate::catalog::RendererMode::OpenGl
+                    }
+                }
+            };
             if let Err(error) = catalog.config.save(&home) {
                 log::warn!("Could not save graphics recovery choice: {error}");
             }
-            catalog.status = "Previous Vulkan startup was interrupted. Using OpenGL ES recovery; you can change Rendering mode in Settings.".into();
         }
+        horizon_client::android_runtime::configure_graphics_api(
+            catalog.config.renderer.graphics_api(),
+        );
+        let update_check_rx = Some(crate::volt_updater::spawn_startup_check(home.clone()));
         crate::configure_input_mode(catalog.config.input_host);
         crate::device_runtime::configure(catalog.config.device);
         let msa_store = crate::account::Accounts::load();
@@ -149,6 +183,8 @@ impl Launcher {
             session_ready: false,
             focus: None,
             diagnostic_export: None,
+            update_check_rx,
+            update_prompt: None,
         }
     }
 
@@ -160,6 +196,7 @@ impl Launcher {
             game.exiting(events);
             drop(game);
         }
+        horizon_threads::release_free_memory();
         crate::performance::stop();
         crate::platform::hide();
         horizon_client::auth::clear_current();
@@ -232,16 +269,15 @@ impl Launcher {
                 pixels: [0u8; 4].repeat(6),
             }),
         };
+        horizon_client::android_runtime::configure_graphics_api(
+            self.catalog.config.renderer.graphics_api(),
+        );
         self.renderer = Some(game::loading_renderer(
             window.clone(),
             false,
             Some(&gui),
             None,
-            if self.catalog.config.renderer == crate::catalog::RendererMode::OpenGl {
-                horizon_client::graphics::GraphicsApi::OpenGl
-            } else {
-                horizon_client::graphics::GraphicsApi::Auto
-            },
+            self.catalog.config.renderer.graphics_api(),
         )?);
         self.window = Some(window);
         self.gui = Some(gui);
@@ -271,8 +307,8 @@ impl Launcher {
             )?;
             crate::platform::hide();
             self.catalog.config.save(&self.home)?;
-            horizon_client::android_runtime::configure_graphics(
-                self.catalog.config.renderer == crate::catalog::RendererMode::OpenGl,
+            horizon_client::android_runtime::configure_graphics_api(
+                self.catalog.config.renderer.graphics_api(),
             );
             horizon_client::android_runtime::configure_gpu(
                 self.catalog.config.renderer == crate::catalog::RendererMode::Vulkan,
@@ -377,18 +413,22 @@ impl Launcher {
             horizon_client::android_runtime::clear_gamepads();
             self.controller_edges = Default::default();
             self.controller_repeat = None;
-            let game = match game::android_game() {
-                Ok(game) => game,
-                Err(error) => {
-                    crate::performance::stop();
-                    return Err(error);
-                }
-            };
-            // Android has one native window; release its surface before handing it over.
+            // Release the launcher's GPU device, swapchain surface, and UI atlas BEFORE
+            // creating the game so first-launch asset extraction + game startup never
+            // hold two live Vulkan/GL contexts or exceed mobile LMKD budgets.
             self.renderer = None;
             self.window = None;
             self.gui = None;
             horizon_client::ui_theme::reset_atlas();
+            horizon_threads::release_free_memory();
+            let game = match game::android_game() {
+                Ok(game) => game,
+                Err(error) => {
+                    crate::performance::stop();
+                    let _ = self.open(events);
+                    return Err(error);
+                }
+            };
             self.game = Some(game);
             self.game.as_mut().unwrap().resumed(events);
         } else {
@@ -460,6 +500,15 @@ impl ApplicationHandler for Launcher {
         }
         let result = match event {
             WindowEvent::CloseRequested => {
+                if let Some(prompt) = self.update_prompt.take() {
+                    if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
+                        &prompt.state
+                    {
+                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                    return;
+                }
                 if self.login.visible || self.login.pending() {
                     self.login.hide();
                     return;
@@ -535,7 +584,9 @@ impl ApplicationHandler for Launcher {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y * 42.0,
                     winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / self.ui_density(),
                 };
-                if let Some(chooser) = &mut self.chooser {
+                if let Some(prompt) = &mut self.update_prompt {
+                    prompt.scroll = (prompt.scroll - y).max(0.0);
+                } else if let Some(chooser) = &mut self.chooser {
                     chooser.scroll = (chooser.scroll - y).max(0.0);
                 } else {
                     self.catalog.scroll = (self.catalog.scroll - y).max(0.0);
@@ -636,7 +687,19 @@ impl ApplicationHandler for Launcher {
         self.catalog.poll(&self.home);
         if let Some(notice) = crate::documents::poll() {
             self.catalog.status = notice.text;
-            if let Some((is_cape, path)) = notice.cosmetic_imported {
+            if let Some((driver_label, driver_path)) = notice.driver_imported {
+                let path_str = driver_path.to_string_lossy().into_owned();
+                self.catalog.config.custom_vulkan_driver = Some(path_str);
+                self.catalog.config.custom_vulkan_driver_name = Some(driver_label);
+                if self.catalog.config.renderer == crate::catalog::RendererMode::OpenGl {
+                    self.catalog.config.renderer = crate::catalog::RendererMode::VulkanSupporter;
+                }
+                let _ = self.catalog.config.save(&self.home);
+                horizon_client::android_runtime::configure_custom_vulkan_driver(Some(driver_path));
+                horizon_client::android_runtime::configure_graphics_api(
+                    self.catalog.config.renderer.graphics_api(),
+                );
+            } else if let Some((is_cape, path)) = notice.cosmetic_imported {
                 self.volt_accounts.on_saf_cosmetic_imported(is_cape, &path);
                 if is_cape {
                     self.preview_target_yaw = Some(162.0);
@@ -655,6 +718,56 @@ impl ApplicationHandler for Launcher {
                 self.catalog.refresh(&self.home);
                 self.catalog.show_installed(notice.kind);
             }
+        }
+        if let Some(rx) = &self.update_check_rx {
+            match rx.try_recv() {
+                Ok(info) => {
+                    self.update_check_rx = None;
+                    if self.update_prompt.is_none() {
+                        self.update_prompt = Some(crate::volt_updater::UpdatePrompt {
+                            info,
+                            state: crate::volt_updater::UpdateModalState::Ready,
+                            scroll: 0.0,
+                        });
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.update_check_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(prompt) = &mut self.update_prompt {
+            let finished = match &prompt.state {
+                crate::volt_updater::UpdateModalState::Downloading { done_rx, .. } => {
+                    done_rx.try_recv().ok()
+                }
+                _ => None,
+            };
+            if let Some(res) = finished {
+                match res {
+                    Ok(apk_path) => {
+                        self.update_prompt = None;
+                        self.catalog.status = "Opening Android package installer...".into();
+                        if !crate::native_ime::install_update_apk(
+                            apk_path.to_string_lossy().into_owned(),
+                        ) {
+                            self.catalog.status =
+                                "Could not invoke Android package installer.".into();
+                        }
+                    }
+                    Err(err) if err == "CANCELLED" => {
+                        self.update_prompt = None;
+                        self.catalog.status = "Update cancelled.".into();
+                    }
+                    Err(err) => {
+                        prompt.state = crate::volt_updater::UpdateModalState::Error(err);
+                    }
+                }
+            }
+        }
+        if let Some(installer_msg) = crate::volt_updater::take_installer_status() {
+            self.catalog.status = installer_msg;
         }
         for result in crate::gallery::poll() {
             self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
@@ -762,7 +875,14 @@ impl Launcher {
             } else if b == Button::East {
                 crate::platform::hide();
                 self.catalog.editing = None;
-                if self.chooser.take().is_none() {
+                if let Some(prompt) = self.update_prompt.take() {
+                    if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
+                        &prompt.state
+                    {
+                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                } else if self.chooser.take().is_none() {
                     if self.login.visible {
                         self.login.visible = false;
                     } else {

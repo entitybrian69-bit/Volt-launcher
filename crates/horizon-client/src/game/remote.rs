@@ -6795,12 +6795,20 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
+        let acc_override = if self.settings.extras.placement_protocol
+            == horizon_client::volt_features::PlacementProtocol::Carpet
+        {
+            acc.as_ref().map(|a| (a.facing, a.top_half))
+        } else {
+            None
+        };
         self.with_level(|b, level, _| {
             let mut level = DryLevel::new(level);
-            match b.place_block(
+            match b.place_block_accurate(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),
                 &ctx,
+                acc_override,
             ) {
                 horizon_world::level::PlaceOutcome::Placed { pos, .. } => {
                     Some((pos, level.changed.into_iter().collect()))

@@ -954,20 +954,34 @@ pub struct ResolvedPlacement {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OrientKind {
-    /// `nearest_looking_direction().opposite()` (piston, dispenser, dropper, barrel, command).
+    /// `nearest_looking_direction().opposite()` (piston, dispenser, dropper, barrel, crafter, command).
     LookOppositeAll,
     /// `nearest_looking_direction()` (observer).
     LookSameAll,
-    /// `horizontal.opposite()` (repeater, comparator, furnace, chest, lectern, terracotta...).
+    /// 6-way face-oriented blocks (shulker_box, end_rod, lightning_rod, amethyst_cluster).
+    FaceDir,
+    /// `horizontal.opposite()` (repeater, comparator, furnace, chest, lectern, terracotta, trapdoor...).
     HorizontalOpposite,
-    /// `horizontal` (stairs).
+    /// `horizontal` (stairs, fence_gate, door, campfire, decorated_pot).
     HorizontalSame,
-    /// `axis_of(ctx.face)` (logs, wood, pillars, hay, chain, basalt, bone_block).
+    /// `clockwise(horizontal)` (anvil).
+    Anvil,
+    /// `axis_of(ctx.face)` (logs, wood, pillars, hay, chain, basalt, bone_block, creaking_heart).
     FaceAxis,
     /// Hopper (`ctx.face.opposite()`, Up -> Down).
     Hopper,
-    /// Slab / Trapdoor / general block.
+    /// Slab / general block.
     Other,
+}
+
+fn counter_clockwise_horiz(dir: Direction) -> Direction {
+    match dir {
+        Direction::North => Direction::West,
+        Direction::West => Direction::South,
+        Direction::South => Direction::East,
+        Direction::East => Direction::North,
+        other => other,
+    }
 }
 
 fn classify_block_item(item: &str) -> (OrientKind, bool) {
@@ -983,14 +997,37 @@ fn classify_block_item(item: &str) -> (OrientKind, bool) {
             | "dispenser"
             | "dropper"
             | "barrel"
+            | "crafter"
             | "command_block"
             | "chain_command_block"
             | "repeating_command_block"
     ) {
         return (OrientKind::LookOppositeAll, false);
     }
+    if b == "shulker_box"
+        || b.ends_with("_shulker_box")
+        || b == "end_rod"
+        || b == "lightning_rod"
+        || b.ends_with("_lightning_rod")
+        || b == "amethyst_cluster"
+        || b.ends_with("_amethyst_bud")
+    {
+        return (OrientKind::FaceDir, false);
+    }
+    if matches!(b, "anvil" | "chipped_anvil" | "damaged_anvil") {
+        return (OrientKind::Anvil, false);
+    }
     if b.ends_with("_stairs") {
         return (OrientKind::HorizontalSame, true);
+    }
+    if b.ends_with("_fence_gate")
+        || b.ends_with("_door")
+        || matches!(b, "campfire" | "soul_campfire" | "decorated_pot")
+    {
+        return (OrientKind::HorizontalSame, false);
+    }
+    if b.ends_with("_trapdoor") {
+        return (OrientKind::HorizontalOpposite, true);
     }
     if b == "hopper" {
         return (OrientKind::Hopper, false);
@@ -1012,12 +1049,14 @@ fn classify_block_item(item: &str) -> (OrientKind, bool) {
                 | "verdant_froglight"
                 | "pearlescent_froglight"
                 | "chain"
+                | "creaking_heart"
         )
     {
         return (OrientKind::FaceAxis, false);
     }
     if b.ends_with("_glazed_terracotta")
-        || b.ends_with("shulker_box") && false
+        || b.ends_with("_chest")
+        || b.ends_with("_shelf")
         || matches!(
             b,
             "repeater"
@@ -1029,15 +1068,14 @@ fn classify_block_item(item: &str) -> (OrientKind, bool) {
                 | "loom"
                 | "stonecutter"
                 | "chest"
-                | "trapped_chest"
-                | "ender_chest"
                 | "beehive"
                 | "bee_nest"
                 | "carved_pumpkin"
                 | "jack_o_lantern"
                 | "chiseled_bookshelf"
                 | "end_portal_frame"
-                | "crafter"
+                | "vault"
+                | "dried_ghast"
         )
     {
         return (OrientKind::HorizontalOpposite, false);
@@ -1094,7 +1132,7 @@ pub fn subface_quadrant_direction(face: [i32; 3], local: [f32; 3]) -> Direction 
             Direction::Down,
         ),
     };
-    if u.abs() <= 0.20 && v.abs() <= 0.20 {
+    if u.abs() <= 0.24 && v.abs() <= 0.24 {
         return base;
     }
     if u.abs() >= v.abs() {
@@ -1182,7 +1220,7 @@ pub fn resolve_accurate_placement(
     }
     if matches!(
         orient_kind,
-        OrientKind::HorizontalOpposite | OrientKind::HorizontalSame
+        OrientKind::HorizontalOpposite | OrientKind::HorizontalSame | OrientKind::Anvil
     ) {
         facing = horizontal_fallback(facing, if reverse { player_yaw + 180.0 } else { player_yaw });
     }
@@ -1245,12 +1283,15 @@ pub fn resolve_accurate_placement(
             effective_pitch = 0.0;
             needs_rotation_packet = true;
         }
-        OrientKind::FaceAxis | OrientKind::Hopper => {
-            // Note: in singleplayer `PlaceContext` we only change `face` when
-            // `replace_clicked` or post-state adjustment applies, because changing
-            // `clicked_pos + face` in vanilla `UseItemOn` would shift the target block!
-            // Keep `effective_face = face` so the block always lands in the exact
-            // air cell adjacent to the clicked face.
+        OrientKind::Anvil => {
+            let (y, _) = angles_looking_toward(counter_clockwise_horiz(facing));
+            effective_yaw = y;
+            effective_pitch = 0.0;
+            needs_rotation_packet = true;
+        }
+        OrientKind::FaceDir | OrientKind::FaceAxis | OrientKind::Hopper => {
+            // Note: in singleplayer / Carpet / Volt LAN, `place_block_accurate`
+            // applies `facing` directly without shifting `clicked_pos + face`.
             let _ = &mut effective_face;
         }
         OrientKind::Other => {}
@@ -1264,7 +1305,7 @@ pub fn resolve_accurate_placement(
         if top_half == Some(true) {
             code |= 0x10;
         }
-        cursor[0] = local[0].clamp(0.0, 1.0) + 2.0 + (code * 2) as f32;
+        cursor[0] = local[0].clamp(0.0, 0.999) + 2.0 + (code * 2) as f32;
         needs_rotation_packet = false;
     }
 
@@ -1296,6 +1337,27 @@ pub fn resolve_accurate_placement(
         needs_rotation_packet,
         badge: badge_parts.join(" · "),
     }
+}
+
+/// Decodes Carpet / Tweakeroo / Volt Accurate Block Placement `UseItemOn` cursor
+/// encoding (`cursor[0] >= 2.0`), returning `(restored_cursor, desired_facing, top_half)`.
+pub fn decode_carpet_cursor(cursor: [f32; 3]) -> Option<([f32; 3], Direction, Option<bool>)> {
+    if !cursor.iter().all(|c| c.is_finite())
+        || cursor[0] < 2.0
+        || !(0.0..=1.0).contains(&cursor[1])
+        || !(0.0..=1.0).contains(&cursor[2])
+    {
+        return None;
+    }
+    let raw = cursor[0] - 2.0;
+    if raw > 128.0 {
+        return None;
+    }
+    let code = (raw.floor() as u32) / 2;
+    let dir = *Direction::ALL.get((code & 0x7) as usize)?;
+    let top_half = Some((code & 0x10) != 0);
+    let clean_x = (raw - (code * 2) as f32).clamp(0.0, 1.0);
+    Some(([clean_x, cursor[1], cursor[2]], dir, top_half))
 }
 
 #[cfg(test)]
@@ -1380,6 +1442,10 @@ mod tests {
         assert_eq!(carpet.top_half, Some(true));
         assert!(carpet.cursor[0] >= 2.0);
         assert!(!carpet.needs_rotation_packet);
+        let (clean, dir, half) = decode_carpet_cursor(carpet.cursor).unwrap();
+        assert_eq!(dir, carpet.facing);
+        assert_eq!(half, Some(true));
+        assert!((0.0..=1.0).contains(&clean[0]));
     }
 
     #[test]

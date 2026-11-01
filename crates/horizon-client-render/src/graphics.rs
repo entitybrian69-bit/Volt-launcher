@@ -131,14 +131,17 @@ pub enum GraphicsApi {
     #[default]
     Auto,
     Vulkan,
+    /// Built-in Volt Vulkan Supporter bridge for older, non-conformant, or buggy mobile GPUs.
+    VulkanSupporter,
     Dx12,
     /// OpenGL, for GPUs with no Vulkan or DirectX 12 driver (Windows and Linux).
     OpenGl,
 }
 impl GraphicsApi {
-    pub const ALL: [GraphicsApi; 4] = [
+    pub const ALL: [GraphicsApi; 5] = [
         GraphicsApi::Auto,
         GraphicsApi::Vulkan,
+        GraphicsApi::VulkanSupporter,
         GraphicsApi::Dx12,
         GraphicsApi::OpenGl,
     ];
@@ -151,6 +154,12 @@ impl GraphicsApi {
             GraphicsApi::Dx12,
             GraphicsApi::OpenGl,
         ];
+        const ANDROID: [GraphicsApi; 4] = [
+            GraphicsApi::Auto,
+            GraphicsApi::Vulkan,
+            GraphicsApi::VulkanSupporter,
+            GraphicsApi::OpenGl,
+        ];
         const LINUX: [GraphicsApi; 3] =
             [GraphicsApi::Auto, GraphicsApi::Vulkan, GraphicsApi::OpenGl];
         const MACOS: [GraphicsApi; 1] = [GraphicsApi::Auto];
@@ -158,6 +167,8 @@ impl GraphicsApi {
             &WINDOWS
         } else if cfg!(target_os = "macos") {
             &MACOS
+        } else if cfg!(target_os = "android") {
+            &ANDROID
         } else {
             &LINUX
         }
@@ -166,6 +177,7 @@ impl GraphicsApi {
         match self {
             GraphicsApi::Auto => "auto",
             GraphicsApi::Vulkan => "vulkan",
+            GraphicsApi::VulkanSupporter => "vulkan_supporter",
             GraphicsApi::Dx12 => "dx12",
             GraphicsApi::OpenGl => "opengl",
         }
@@ -174,6 +186,7 @@ impl GraphicsApi {
         match self {
             GraphicsApi::Auto => "Auto",
             GraphicsApi::Vulkan => "Vulkan",
+            GraphicsApi::VulkanSupporter => "Vulkan (Supporter)",
             GraphicsApi::Dx12 => "DirectX 12",
             GraphicsApi::OpenGl => "OpenGL",
         }
@@ -669,9 +682,27 @@ mod tests {
     fn the_api_choice_matches_the_system() {
         let choices = GraphicsApi::choices();
         if cfg!(windows) {
-            assert_eq!(choices, GraphicsApi::ALL);
+            assert_eq!(
+                choices,
+                [
+                    GraphicsApi::Auto,
+                    GraphicsApi::Vulkan,
+                    GraphicsApi::Dx12,
+                    GraphicsApi::OpenGl
+                ]
+            );
         } else if cfg!(target_os = "macos") {
             assert_eq!(choices, [GraphicsApi::Auto]);
+        } else if cfg!(target_os = "android") {
+            assert_eq!(
+                choices,
+                [
+                    GraphicsApi::Auto,
+                    GraphicsApi::Vulkan,
+                    GraphicsApi::VulkanSupporter,
+                    GraphicsApi::OpenGl
+                ]
+            );
         } else {
             assert_eq!(
                 choices,

@@ -771,11 +771,12 @@ impl Opt {
                 "options.textureFiltering.rgss",
                 "options.textureFiltering.anisotropic",
             ][s.file.int("textureFiltering").clamp(0, 2) as usize]),
-            Opt::GraphicsBackend => tr(match s.horizon.api {
-                crate::graphics::GraphicsApi::OpenGl => "options.graphicsApi.opengl",
-                crate::graphics::GraphicsApi::Vulkan => "options.graphicsApi.vulkan",
-                _ => "options.graphicsApi.default",
-            }),
+            Opt::GraphicsBackend => match s.horizon.api {
+                crate::graphics::GraphicsApi::OpenGl => tr("options.graphicsApi.opengl"),
+                crate::graphics::GraphicsApi::Vulkan => tr("options.graphicsApi.vulkan"),
+                crate::graphics::GraphicsApi::VulkanSupporter => "Vulkan (Supporter)".to_owned(),
+                _ => tr("options.graphicsApi.default"),
+            },
             Opt::SmoothLighting => on_off(s.smooth_lighting),
             Opt::Clouds => tr(match s.clouds.as_str() {
                 "false" => "options.off",
@@ -1095,9 +1096,9 @@ impl Opt {
                 );
             }
             Opt::GraphicsBackend => {
-                // PreferredGraphicsApi: Default, OpenGL, Vulkan; a platform lacking one skips it.
-                use crate::graphics::GraphicsApi::{Auto, OpenGl, Vulkan};
-                let offered: Vec<_> = [Auto, OpenGl, Vulkan]
+                // PreferredGraphicsApi: Default, OpenGL, Vulkan (+ Volt Supporter on Android).
+                use crate::graphics::GraphicsApi::{Auto, OpenGl, Vulkan, VulkanSupporter};
+                let offered: Vec<_> = [Auto, OpenGl, Vulkan, VulkanSupporter]
                     .into_iter()
                     .filter(|a| crate::graphics::GraphicsApi::choices().contains(a))
                     .collect();

@@ -1159,6 +1159,32 @@ impl Game<'_> {
         );
     }
 
+    /// Dispatches `S::UseItemOn` with the guest's `(yaw, pitch)` snapshotted at
+    /// inbox arrival time so rotation packets queued around `UseItemOn` cannot
+    /// clobber the placement look direction.
+    pub(super) fn lan_guest_use_item_on(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        packet: play::UseItemOn,
+        rot: Option<(f32, f32)>,
+    ) {
+        let saved = rot.and_then(|(yaw, pitch)| {
+            let gi = host.hub.guests.iter().position(|g| g.conn == conn)?;
+            let prev = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
+            host.hub.guests[gi].yaw = yaw;
+            host.hub.guests[gi].pitch = pitch;
+            Some((gi, prev))
+        });
+        self.lan_guest_packet(host, conn, S::UseItemOn(packet));
+        if let Some((gi, (prev_yaw, prev_pitch))) = saved
+            && let Some(guest) = host.hub.guests.get_mut(gi)
+        {
+            guest.yaw = prev_yaw;
+            guest.pitch = prev_pitch;
+        }
+    }
+
     /// A packet from a guest that the hub does not handle itself.
     pub(super) fn lan_guest_packet(&mut self, host: &mut LanHost, conn: u32, packet: S) {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
@@ -1364,8 +1390,12 @@ impl Game<'_> {
                 if !host.hub.guests[gi].may_reach_block(p.pos) {
                     return;
                 }
-                let inside = p
-                    .cursor
+                let (cursor, carpet_acc) =
+                    match horizon_client::volt_features::decode_carpet_cursor(p.cursor) {
+                        Some((clean, dir, top_half)) => (clean, Some((dir, top_half))),
+                        None => (p.cursor, None),
+                    };
+                let inside = cursor
                     .iter()
                     .all(|&c| (f64::from(c) - 0.5).abs() < 1.0000001);
                 if !inside {
@@ -1389,9 +1419,9 @@ impl Game<'_> {
                     pos: p.pos,
                     face,
                     point: [
-                        f64::from(p.pos[0]) + f64::from(p.cursor[0]),
-                        f64::from(p.pos[1]) + f64::from(p.cursor[1]),
-                        f64::from(p.pos[2]) + f64::from(p.cursor[2]),
+                        f64::from(p.pos[0]) + f64::from(cursor[0]),
+                        f64::from(p.pos[1]) + f64::from(cursor[1]),
+                        f64::from(p.pos[2]) + f64::from(cursor[2]),
                     ],
                 };
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
@@ -1421,10 +1451,12 @@ impl Game<'_> {
                     let used = self.as_guest(host, conn, |g| {
                         let attempt = g.was_block_placement_attempt(hand);
                         g.forced_hit = Some(hit);
+                        g.forced_accurate = carpet_acc;
                         g.guest_use = Some(GuestUse::OnBlock(hand));
                         let swings = g.swings_started;
                         let consumed = matches!(g.use_item(), Ok(Some(_)));
                         g.forced_hit = None;
+                        g.forced_accurate = None;
                         g.guest_use = None;
                         (g.swings_started != swings, consumed, attempt)
                     });

@@ -32,6 +32,9 @@ enum Target {
         is_cape: bool,
         dest_path: PathBuf,
     },
+    VulkanDriver {
+        home: PathBuf,
+    },
 }
 struct Request {
     target: Target,
@@ -48,6 +51,7 @@ pub struct Notice {
     pub changed: bool,
     pub controls_changed: bool,
     pub cosmetic_imported: Option<(bool, PathBuf)>,
+    pub driver_imported: Option<(String, PathBuf)>,
     pub kind: Option<Kind>,
 }
 #[derive(Default)]
@@ -96,6 +100,7 @@ fn notice(text: impl Into<String>, changed: bool) {
         changed,
         controls_changed: false,
         cosmetic_imported: None,
+        driver_imported: None,
         kind: None,
     });
 }
@@ -108,6 +113,7 @@ fn imported(text: impl Into<String>, kind: Kind) {
         changed: true,
         controls_changed: false,
         cosmetic_imported: None,
+        driver_imported: None,
         kind: Some(kind),
     });
 }
@@ -120,6 +126,7 @@ fn controls_imported(text: impl Into<String>) {
         changed: false,
         controls_changed: true,
         cosmetic_imported: None,
+        driver_imported: None,
         kind: None,
     });
 }
@@ -132,6 +139,20 @@ fn cosmetic_done(text: impl Into<String>, is_cape: bool, path: PathBuf) {
         changed: false,
         controls_changed: false,
         cosmetic_imported: Some((is_cape, path)),
+        driver_imported: None,
+        kind: None,
+    });
+}
+fn driver_done(text: impl Into<String>, label: String, path: PathBuf) {
+    let text = text.into();
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.toast = Some((text.clone(), std::time::Instant::now()));
+    s.notice = Some(Notice {
+        text,
+        changed: false,
+        controls_changed: false,
+        cosmetic_imported: None,
+        driver_imported: Some((label, path)),
         kind: None,
     });
 }
@@ -142,6 +163,7 @@ pub fn poll() -> Option<Notice> {
             changed: true,
             controls_changed: false,
             cosmetic_imported: None,
+            driver_imported: None,
             kind: None,
         });
     }
@@ -218,6 +240,29 @@ pub fn begin_cosmetic(is_cape: bool, dest_path: PathBuf) -> std::result::Result<
     notice(format!("Choose a {label} image"), false);
     Ok(())
 }
+pub fn begin_vulkan_driver(home: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::VulkanDriver { home },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice(
+        "Choose a custom Vulkan driver (.zip, .adpkg, or .so)",
+        false,
+    );
+    Ok(())
+}
 pub fn picker_failed(error: &str) {
     STATE.lock().unwrap_or_else(|e| e.into_inner()).request = None;
     notice(error, false);
@@ -277,6 +322,7 @@ pub extern "system" fn document_result(
                     Target::Controls { .. } => "controls.json",
                     Target::Cosmetic { is_cape: true, .. } => "cape.png",
                     Target::Cosmetic { is_cape: false, .. } => "skin.png",
+                    Target::VulkanDriver { .. } => "driver.zip",
                 };
                 let opened =
                     crate::document_bridge::open(&mut env, activity.as_obj(), &uri, fallback);
@@ -322,6 +368,9 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     }
     if let Target::Cosmetic { is_cape, dest_path } = request.target {
         return stage_cosmetic(is_cape, &dest_path, input, &name);
+    }
+    if let Target::VulkanDriver { home } = request.target {
+        return stage_vulkan_driver(&request.cache, &home, input, &name);
     }
     let Target::Content { kind, home } = request.target else {
         unreachable!()
@@ -786,4 +835,189 @@ fn stage_cosmetic(
     );
     Ok(())
 }
+
+fn validate_driver_elf(path: &std::path::Path) -> std::result::Result<(), String> {
+    use std::io::Read as _;
+    let mut f = std::fs::File::open(path).map_err(|e| format!("Could not read driver .so: {e}"))?;
+    let mut hdr = [0u8; 20];
+    let n = f
+        .read(&mut hdr)
+        .map_err(|e| format!("Could not inspect driver header: {e}"))?;
+    if n < 20 || hdr[..4] != [0x7F, b'E', b'L', b'F'] {
+        return Err("Selected driver library is not a valid Android ELF .so binary.".into());
+    }
+    let want_class = if cfg!(target_pointer_width = "64") {
+        2u8
+    } else {
+        1u8
+    };
+    if hdr[4] != want_class {
+        return Err(if want_class == 2 {
+            "Selected Vulkan driver is 32-bit, but this device is running 64-bit Volt Launcher."
+                .into()
+        } else {
+            "Selected Vulkan driver is 64-bit, but this device is running 32-bit Volt Launcher."
+                .into()
+        });
+    }
+    Ok(())
+}
+
+fn stage_vulkan_driver(
+    cache: &std::path::Path,
+    home: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    use std::io::Read as _;
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let staged = cache.join(format!(".import-vkdriver-{stamp}.part"));
+    let result = (|| -> Result<()> {
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        content_files::copy_bounded(&mut input, &mut output, |bytes| {
+            notice(
+                format!("Importing Vulkan driver: {} KiB", bytes / 1024),
+                false,
+            );
+            !CANCEL.load(Ordering::Relaxed)
+        })?;
+        output.sync_all()?;
+        drop(output);
+        if CANCEL.load(Ordering::Relaxed) {
+            return Err("Import cancelled".into());
+        }
+
+        let driver_dir = home.join("drivers").join("vulkan");
+        std::fs::create_dir_all(&driver_dir)?;
+        if let Ok(entries) = std::fs::read_dir(&driver_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_file() {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+
+        let mut magic = [0u8; 4];
+        {
+            let mut f = std::fs::File::open(&staged)?;
+            let _ = f.read(&mut magic)?;
+        }
+
+        let (driver_label, primary_so) = if magic == [b'P', b'K', 3, 4] {
+            let zip_file = std::fs::File::open(&staged)?;
+            let mut archive = zip::ZipArchive::new(zip_file)
+                .map_err(|e| format!("Invalid Vulkan driver package (.zip/.adpkg): {e}"))?;
+            let mut meta_label: Option<String> = None;
+            let mut meta_lib: Option<String> = None;
+            let mut extracted_sos: Vec<PathBuf> = Vec::new();
+
+            for idx in 0..archive.len() {
+                let mut entry = archive
+                    .by_index(idx)
+                    .map_err(|e| format!("Driver archive read error: {e}"))?;
+                if entry.is_dir() {
+                    continue;
+                }
+                let Some(file_name) = PathBuf::from(entry.name())
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                else {
+                    continue;
+                };
+                if file_name.eq_ignore_ascii_case("meta.json") {
+                    let mut raw = Vec::new();
+                    entry.by_ref().take(64 * 1024).read_to_end(&mut raw)?;
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&raw) {
+                        meta_label = v
+                            .get("name")
+                            .and_then(|s| s.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned);
+                        meta_lib = v
+                            .get("libraryName")
+                            .or_else(|| v.get("library"))
+                            .and_then(|s| s.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned);
+                    }
+                    continue;
+                }
+                if file_name.to_ascii_lowercase().ends_with(".so")
+                    && content_files::plain_name(&file_name)
+                {
+                    let out_path = driver_dir.join(&file_name);
+                    let mut out_file = std::fs::File::create(&out_path)?;
+                    std::io::copy(&mut entry.take(128 * 1024 * 1024), &mut out_file)?;
+                    out_file.sync_all()?;
+                    extracted_sos.push(out_path);
+                }
+            }
+
+            if extracted_sos.is_empty() {
+                return Err("Archive does not contain any Vulkan .so driver libraries.".into());
+            }
+            let chosen = meta_lib
+                .as_deref()
+                .and_then(|want| {
+                    extracted_sos
+                        .iter()
+                        .find(|p| {
+                            p.file_name()
+                                .is_some_and(|n| n.to_string_lossy() == want)
+                        })
+                        .cloned()
+                })
+                .or_else(|| {
+                    extracted_sos
+                        .iter()
+                        .find(|p| {
+                            let lower = p
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_ascii_lowercase();
+                            lower.contains("vulkan") || lower.contains("turnip")
+                        })
+                        .cloned()
+                })
+                .unwrap_or_else(|| extracted_sos[0].clone());
+            validate_driver_elf(&chosen)?;
+            let label = meta_label.unwrap_or_else(|| {
+                PathBuf::from(name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "Custom Vulkan Driver".into())
+            });
+            (label, chosen)
+        } else if magic == [0x7F, b'E', b'L', b'F'] {
+            validate_driver_elf(&staged)?;
+            let clean_name = PathBuf::from(name)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".so") && content_files::plain_name(n))
+                .unwrap_or_else(|| "libvulkan_custom.so".into());
+            let dest = driver_dir.join(&clean_name);
+            std::fs::copy(&staged, &dest)?;
+            (clean_name, dest)
+        } else {
+            return Err("Choose a Turnip/AdrenoTools .zip/.adpkg package or an ELF .so library.".into());
+        };
+
+        driver_done(
+            format!("Custom Vulkan driver \"{driver_label}\" imported & active!"),
+            driver_label,
+            primary_so,
+        );
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&staged);
+    result
+}
+
 

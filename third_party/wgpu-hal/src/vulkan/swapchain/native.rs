@@ -64,7 +64,7 @@ impl Surface for NativeSurface {
         if !adapter.private_caps.can_present {
             return None;
         }
-        let queue_family_index = 0; //TODO
+        let queue_family_index = adapter.private_caps.graphics_queue_family;
         {
             profiling::scope!("vkGetPhysicalDeviceSurfaceSupportKHR");
             match unsafe {

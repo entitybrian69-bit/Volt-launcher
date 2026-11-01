@@ -108,6 +108,10 @@ pub(super) enum Action {
     ChooseControlLayout(usize),
     ApplyControlsAllProfiles,
     ResetControls,
+    ImportVulkanDriver,
+    ResetVulkanDriver,
+    InstallUpdate,
+    CancelUpdate,
 }
 
 #[derive(Clone, Copy)]
@@ -2197,13 +2201,26 @@ impl DrawCtx<'_> {
             c.server.clone()
         };
 
-        let left_items: [(&str, String, Action, Option<bool>, bool); 8] = [
+        let vulkan_driver_val = match &c.custom_vulkan_driver_name {
+            Some(name) if !name.trim().is_empty() => format!("Custom: {name}"),
+            _ if c.custom_vulkan_driver.is_some() => "Custom .so active".to_owned(),
+            _ => "Built-in Supporter".to_owned(),
+        };
+
+        let left_items: [(&str, String, Action, Option<bool>, bool); 9] = [
             (
                 "Rendering",
                 c.renderer.label().to_owned(),
                 Action::Renderer,
                 None,
                 true,
+            ),
+            (
+                "Vulkan driver",
+                vulkan_driver_val,
+                Action::ImportVulkanDriver,
+                None,
+                false,
             ),
             (
                 "Client resolution",
@@ -2256,13 +2273,24 @@ impl DrawCtx<'_> {
             ),
         ];
 
-        let right_items: [(&str, String, Action, Option<bool>, bool); 7] = [
+        let right_items: [(&str, String, Action, Option<bool>, bool); 8] = [
             (
                 "Profile",
                 format!("Profile {}", c.profile),
                 Action::Profile,
                 None,
                 true,
+            ),
+            (
+                "Reset GPU driver",
+                if c.custom_vulkan_driver.is_some() {
+                    "Switch to Built-in".to_owned()
+                } else {
+                    "Using Built-in".to_owned()
+                },
+                Action::ResetVulkanDriver,
+                None,
+                false,
             ),
             (
                 "Input",
@@ -3445,7 +3473,15 @@ impl Launcher {
         if self.preview_target_yaw.is_some() || self.preview_vel_yaw.abs() > 0.4 {
             return true;
         }
-        if self.worker.is_some() || self.catalog.animating_icons_or_cards() {
+        if self.worker.is_some()
+            || self.catalog.animating_icons_or_cards()
+            || self.update_prompt.as_ref().is_some_and(|p| {
+                matches!(
+                    p.state,
+                    crate::volt_updater::UpdateModalState::Downloading { .. }
+                )
+            })
+        {
             return true;
         }
         has_active_toggle_anims()
@@ -3482,8 +3518,9 @@ impl Launcher {
             self.sidebar_anim = target_idx;
         }
 
-        // Detect modal pop-in transitions (Chooser / Microsoft Login)
-        let modal_open = self.chooser.is_some() || self.login.visible;
+        // Detect modal pop-in transitions (Chooser / Microsoft Login / Update Prompt)
+        let modal_open =
+            self.chooser.is_some() || self.login.visible || self.update_prompt.is_some();
         if modal_open && !self.modal_was_open {
             self.modal_anim = Some(now);
         }
@@ -3677,8 +3714,15 @@ impl Launcher {
             chooser.draw(&mut ui, &mut self.targets);
             self.list_targets = chooser.navigation(ui.w, ui.h);
             self.list_view = Some(chooser.viewport(ui.h));
+        } else if !self.login.visible
+            && let Some(prompt) = &mut self.update_prompt
+        {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = None;
+            draw_update_prompt(&mut ui, &mut self.targets, prompt);
         }
-        if (self.login.visible || self.chooser.is_some())
+        if (self.login.visible || self.chooser.is_some() || self.update_prompt.is_some())
             && let Some(anim_start) = self.modal_anim
         {
             let el = anim_start.elapsed().as_secs_f32();
@@ -4306,7 +4350,41 @@ impl Launcher {
             Some(Action::ChooseRenderer(mode)) => {
                 self.catalog.config.renderer = mode;
                 self.catalog.config.save(&self.home)?;
+                horizon_client::android_runtime::configure_graphics_api(mode.graphics_api());
                 self.chooser = None;
+            }
+            Some(Action::ImportVulkanDriver) => {
+                if let Err(err) = crate::documents::begin_vulkan_driver(self.home.clone()) {
+                    self.catalog.status = err;
+                }
+            }
+            Some(Action::ResetVulkanDriver) => {
+                self.catalog.config.custom_vulkan_driver = None;
+                self.catalog.config.custom_vulkan_driver_name = None;
+                self.catalog.config.save(&self.home)?;
+                horizon_client::android_runtime::configure_custom_vulkan_driver(None);
+                self.catalog.status =
+                    "Switched back to Volt's built-in Vulkan Supporter driver.".into();
+            }
+            Some(Action::InstallUpdate) => {
+                if let Some(prompt) = &mut self.update_prompt
+                    && !matches!(
+                        prompt.state,
+                        crate::volt_updater::UpdateModalState::Downloading { .. }
+                    )
+                {
+                    prompt.state = crate::volt_updater::begin_download(&self.home, &prompt.info);
+                }
+            }
+            Some(Action::CancelUpdate) => {
+                if let Some(prompt) = self.update_prompt.take() {
+                    if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
+                        &prompt.state
+                    {
+                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                }
             }
             Some(Action::ChooseProfile(profile)) => {
                 std::fs::create_dir_all(if profile == 0 {
@@ -4402,6 +4480,7 @@ impl Launcher {
                         let uy = (oy / density) as f32;
                         let in_preview = !self.login.visible
                             && self.chooser.is_none()
+                            && self.update_prompt.is_none()
                             && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
                                 ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
                             });
@@ -4412,6 +4491,8 @@ impl Launcher {
                             self.preview_vel_yaw = (dx * 42.0).clamp(-360.0, 360.0);
                             self.preview_pitch =
                                 (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
+                        } else if let Some(prompt) = &mut self.update_prompt {
+                            prompt.scroll = (prompt.scroll + dy).max(0.0);
                         } else if let Some(chooser) = &mut self.chooser {
                             chooser.scroll = (chooser.scroll + dy).max(0.0);
                         } else if self
@@ -4440,6 +4521,15 @@ impl Launcher {
             || key.logical_key
                 == winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack)
         {
+            if let Some(prompt) = self.update_prompt.take() {
+                if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
+                    &prompt.state
+                {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                return;
+            }
             if self.login.visible {
                 self.login.hide();
                 crate::platform::hide();
@@ -4470,3 +4560,243 @@ impl Launcher {
         }
     }
 }
+
+fn wrap_modal_lines(ui: &Ui, lines: &[String], font_sz: f32, max_w: f32) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    for raw in lines {
+        let is_bullet = raw.starts_with("• ");
+        let mut rest = raw.as_str();
+        let mut first = true;
+        while !rest.is_empty() {
+            let prefix = if !first && is_bullet { "   " } else { "" };
+            let avail = (max_w - if !first && is_bullet { 14.0 } else { 0.0 }).max(80.0);
+            let fitted = ui.fit_text(Face::Regular, font_sz, rest, avail);
+            if fitted == rest || !fitted.ends_with("...") {
+                out.push((format!("{prefix}{rest}"), is_bullet && first));
+                break;
+            }
+            let cut_target = fitted.trim_end_matches("...").len().max(1).min(rest.len());
+            let split_at = rest[..cut_target]
+                .rfind(' ')
+                .filter(|&i| i > 8)
+                .unwrap_or(cut_target);
+            let head = rest[..split_at].trim_end();
+            out.push((format!("{prefix}{head}"), is_bullet && first));
+            rest = rest[split_at..].trim_start();
+            first = false;
+        }
+    }
+    out
+}
+
+fn draw_update_prompt(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    prompt: &mut crate::volt_updater::UpdatePrompt,
+) {
+    let (w, h) = (ui.w, ui.h);
+    ui.rounded(0.0, 0.0, w, h, 0.0, theme::BACKDROP);
+    let mw = (w - 44.0).clamp(300.0, 580.0);
+    let mh = (h - 36.0).clamp(250.0, 396.0);
+    let mx = (w - mw) * 0.5;
+    let my = (h - mh) * 0.5;
+
+    ui.rounded(mx, my, mw, mh, 16.0, theme::CARD);
+    ui.rounded(mx + 6.0, my + 6.0, mw - 12.0, 62.0, 12.0, theme::HERO_BG);
+    ui.border(mx, my, mw, mh, 16.0, theme::BORDER_CRIMSON);
+
+    ui.text(
+        Face::Medium,
+        20.0,
+        mx + 22.0,
+        my + 15.0,
+        theme::TEXT,
+        "Update Available",
+    );
+
+    let ver_badge_w = 82.0;
+    let ver_badge_x = mx + mw - ver_badge_w - 20.0;
+    ui.rounded(
+        ver_badge_x,
+        my + 15.0,
+        ver_badge_w,
+        24.0,
+        7.0,
+        theme::CRIMSON_BADGE,
+    );
+    ui.border(
+        ver_badge_x,
+        my + 15.0,
+        ver_badge_w,
+        24.0,
+        7.0,
+        theme::BORDER_CRIMSON,
+    );
+    draw_centered_text(
+        ui,
+        Face::Medium,
+        12.5,
+        [ver_badge_x, my + 15.0, ver_badge_w, 24.0],
+        theme::CRIMSON_BRIGHT,
+        &prompt.info.display_version,
+    );
+
+    let size_mb = if prompt.info.size_bytes > 0 {
+        format!(" · {:.1} MB", prompt.info.size_bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        String::new()
+    };
+    let subtitle = format!(
+        "Matched build for your device: {}{}",
+        prompt.info.abi_label, size_mb
+    );
+    let sub_fit = ui.fit_text(Face::Regular, 12.5, &subtitle, mw - 44.0);
+    ui.text(
+        Face::Regular,
+        12.5,
+        mx + 22.0,
+        my + 43.0,
+        theme::MUTED,
+        &sub_fit,
+    );
+
+    ui.text(
+        Face::Medium,
+        14.0,
+        mx + 22.0,
+        my + 76.0,
+        theme::CRIMSON_BRIGHT,
+        "What's New",
+    );
+
+    let box_x = mx + 20.0;
+    let box_y = my + 98.0;
+    let box_w = mw - 40.0;
+    let box_h = (mh - 170.0).max(80.0);
+    ui.rounded(box_x, box_y, box_w, box_h, 11.0, theme::CARD_INNER);
+    ui.border(box_x, box_y, box_w, box_h, 11.0, theme::BORDER);
+
+    let wrapped = wrap_modal_lines(ui, &prompt.info.whats_new, 13.0, box_w - 28.0);
+    let line_h = 21.0;
+    let max_scroll = ((wrapped.len() as f32) * line_h + 14.0 - box_h).max(0.0);
+    prompt.scroll = prompt.scroll.clamp(0.0, max_scroll);
+
+    for (idx, (line, highlight)) in wrapped.iter().enumerate() {
+        let ly = box_y + 8.0 + idx as f32 * line_h - prompt.scroll;
+        if ly < box_y + 3.0 || ly + 17.0 > box_y + box_h - 3.0 {
+            continue;
+        }
+        ui.text(
+            if *highlight { Face::Medium } else { Face::Regular },
+            13.0,
+            box_x + 14.0,
+            ly,
+            if *highlight { theme::TEXT } else { theme::MUTED },
+            line,
+        );
+    }
+
+    if max_scroll > 1.0 {
+        let track_h = box_h - 12.0;
+        let thumb_h = (track_h * (box_h / (box_h + max_scroll))).clamp(18.0, track_h);
+        let thumb_y =
+            box_y + 6.0 + (track_h - thumb_h) * (prompt.scroll / max_scroll).clamp(0.0, 1.0);
+        ui.rounded(box_x + box_w - 7.0, thumb_y, 3.0, thumb_h, 1.5, theme::CRIMSON);
+    }
+
+    let footer_y = my + mh - 56.0;
+    match &prompt.state {
+        crate::volt_updater::UpdateModalState::Downloading { progress, .. } => {
+            let snap = progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let pct = if snap.total > 0 {
+                (snap.downloaded as f32 / snap.total as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let cancel_w = 112.0;
+            let bar_w = (mw - 40.0 - cancel_w - 14.0).max(120.0);
+            let bar_x = mx + 20.0;
+            let dl_mb = snap.downloaded as f64 / (1024.0 * 1024.0);
+            let tot_mb = snap.total as f64 / (1024.0 * 1024.0);
+            let label = if snap.total > 0 {
+                format!(
+                    "Downloading {} APK... {:.0}% ({:.1} / {:.1} MB)",
+                    prompt.info.abi_label,
+                    pct * 100.0,
+                    dl_mb,
+                    tot_mb
+                )
+            } else {
+                format!("Downloading {} APK... {:.1} MB", prompt.info.abi_label, dl_mb)
+            };
+            let fit_lbl = ui.fit_text(Face::Medium, 12.0, &label, bar_w);
+            ui.text(Face::Medium, 12.0, bar_x, footer_y + 2.0, theme::TEXT, &fit_lbl);
+            ui.rounded(bar_x, footer_y + 24.0, bar_w, 12.0, 6.0, theme::CARD_INNER);
+            ui.border(bar_x, footer_y + 24.0, bar_w, 12.0, 6.0, theme::BORDER);
+            if pct > 0.01 {
+                ui.rounded(
+                    bar_x,
+                    footer_y + 24.0,
+                    (bar_w * pct).max(10.0),
+                    12.0,
+                    6.0,
+                    theme::CRIMSON,
+                );
+            }
+            styled_button(
+                ui,
+                targets,
+                [mx + mw - 20.0 - cancel_w, footer_y + 4.0, cancel_w, 38.0],
+                "Cancel",
+                Action::CancelUpdate,
+                BtnStyle::Secondary,
+                true,
+            );
+        }
+        other => {
+            if let crate::volt_updater::UpdateModalState::Error(err) = other {
+                let max_err_w = (mw - 290.0).max(110.0);
+                let err_fit = ui.fit_text(Face::Regular, 11.5, err, max_err_w);
+                ui.text(
+                    Face::Regular,
+                    11.5,
+                    mx + 22.0,
+                    footer_y + 12.0,
+                    theme::CRIMSON_BRIGHT,
+                    &err_fit,
+                );
+            } else {
+                ui.text(
+                    Face::Regular,
+                    11.5,
+                    mx + 22.0,
+                    footer_y + 12.0,
+                    theme::DIM,
+                    "This reminder appears once.",
+                );
+            }
+            let btn_w = 116.0;
+            let install_x = mx + mw - 20.0 - btn_w;
+            let cancel_x = install_x - 10.0 - btn_w;
+            styled_button(
+                ui,
+                targets,
+                [cancel_x, footer_y + 4.0, btn_w, 38.0],
+                "Cancel",
+                Action::CancelUpdate,
+                BtnStyle::Secondary,
+                true,
+            );
+            styled_button(
+                ui,
+                targets,
+                [install_x, footer_y + 4.0, btn_w, 38.0],
+                "Install",
+                Action::InstallUpdate,
+                BtnStyle::Primary,
+                true,
+            );
+        }
+    }
+}
+

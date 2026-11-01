@@ -33,6 +33,7 @@ enum Command {
     Capture(bool),
     Bounds,
     ImportDocument,
+    InstallUpdateApk(String),
     Screen(bool, bool),
 }
 struct Ui {
@@ -368,6 +369,32 @@ impl Ui {
                     let _ = env.exception_clear();
                     log::warn!("Document picker: {error}");
                     crate::documents::picker_failed("No Android document picker is available");
+                }
+            }
+            Command::InstallUpdateApk(path) => {
+                let result = (|| -> jni::errors::Result<String> {
+                    let arg = JObject::from(env.new_string(&path)?);
+                    let ret = env
+                        .call_method(
+                            &self.activity,
+                            "installUpdateApk",
+                            "(Ljava/lang/String;)Ljava/lang/String;",
+                            &[JValue::Object(&arg)],
+                        )?
+                        .l()?;
+                    if ret.is_null() {
+                        return Ok("ERR:Installer returned null".into());
+                    }
+                    let s: String = env.get_string(&JString::from(ret))?.into();
+                    Ok(s)
+                })();
+                match result {
+                    Ok(code) => crate::volt_updater::note_installer_result(&code),
+                    Err(error) => {
+                        let _ = env.exception_clear();
+                        log::warn!("PackageInstaller launch failed: {error}");
+                        crate::volt_updater::note_installer_result(&format!("ERR:{error}"));
+                    }
                 }
             }
             Command::Show(text) => {
@@ -709,6 +736,72 @@ pub fn pick_document() -> bool {
     };
     ui.enqueue(Command::ImportDocument);
     true
+}
+
+pub fn install_update_apk(path: String) -> bool {
+    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+        return false;
+    };
+    ui.enqueue(Command::InstallUpdateApk(path));
+    true
+}
+
+pub fn device_supported_abis() -> Vec<String> {
+    if let Some(ui) = UI.get()
+        && let Ok(mut env) = ui.vm.attach_current_thread()
+    {
+        let fetched = (|| -> jni::errors::Result<String> {
+            let cls = env.get_object_class(&ui.activity)?;
+            let ret = env
+                .call_static_method(cls, "supportedAbis", "()Ljava/lang/String;", &[])?
+                .l()?;
+            if ret.is_null() {
+                return Ok(String::new());
+            }
+            Ok(env.get_string(&JString::from(ret))?.into())
+        })();
+        if let Ok(csv) = fetched {
+            let list: Vec<String> = csv
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            if !list.is_empty() {
+                return list;
+            }
+        } else {
+            let _ = env.exception_clear();
+        }
+    }
+    vec![if cfg!(target_arch = "aarch64") {
+        "arm64-v8a".into()
+    } else {
+        "armeabi-v7a".into()
+    }]
+}
+
+pub fn app_version_name() -> String {
+    if let Some(ui) = UI.get()
+        && let Ok(mut env) = ui.vm.attach_current_thread()
+    {
+        let fetched = (|| -> jni::errors::Result<String> {
+            let ret = env
+                .call_method(&ui.activity, "appVersionName", "()Ljava/lang/String;", &[])?
+                .l()?;
+            if ret.is_null() {
+                return Ok(String::new());
+            }
+            Ok(env.get_string(&JString::from(ret))?.into())
+        })();
+        if let Ok(ver) = fetched
+            && !ver.trim().is_empty()
+        {
+            return ver;
+        }
+        let _ = env.exception_clear();
+    }
+    "0.8.1".into()
 }
 
 pub fn configure_screen(immersive: bool, avoid_cutout: bool) {

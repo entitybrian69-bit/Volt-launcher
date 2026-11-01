@@ -739,6 +739,20 @@ pub struct Renderer {
     pub animated_textures: bool,
     present_modes: Vec<wgpu::PresentMode>,
 }
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        // Ensure all in-flight command buffers and swapchain image acquisitions finish
+        // BEFORE destroying `VkSwapchainKHR` (`VUID-vkDestroySwapchainKHR-swapchain-01288`).
+        // Without this, Rust's field-declaration drop order destroys `surface` before `device`,
+        // causing native driver SIGSEGV/SIGABRT during Launcher -> Game handoff on mobile GPUs.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self.surface.take();
+        if let Ok(spare) = self.spare_surface.get_mut() {
+            let _ = spare.take();
+        }
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+}
 /// Every layer's mip levels, layer major (`first` is the first layer's
 /// index into `settings`), made by `MipmapGenerator`.
 /// Block sprite layers per texture array: the smallest
@@ -776,6 +790,18 @@ fn instance_buffer_usage(limits: &wgpu::Limits) -> wgpu::BufferUsages {
 }
 /// Sprite arrays terrain.wgsl binds (`sprites`, `sprites_1`...).
 const SPRITE_ARRAYS: u32 = 8;
+/// Effective `SPRITE_ARRAYS` constant compiled into `terrain.wgsl`.
+/// When `split < SPRITE_SPLIT` (OpenGL ES or Vulkan GPUs with <2048 array layers),
+/// compile the multi-array branch (`SPRITE_ARRAYS > 1`) up front so the 1-layer
+/// loading renderer upgrades in-place to the ~1450-layer world textures without
+/// building a second `Renderer` on the live Android window surface.
+fn effective_sprite_arrays(layers: u32, split: u32) -> u32 {
+    if split < SPRITE_SPLIT {
+        SPRITE_ARRAYS
+    } else {
+        layers.div_ceil(split).max(1)
+    }
+}
 /// The layers to give a square texture of `count` layers viewed as a 2D
 /// array. wgpu's OpenGL backend picks a texture's target from its layer
 /// count when it is created: one layer makes a 2D texture and a multiple of
@@ -1064,8 +1090,49 @@ fn backend_order(api: GraphicsApi, os: &str, wgpu_backend: bool) -> Vec<wgpu::Ba
         GraphicsApi::Auto if windows => vec![Backends::VULKAN, Backends::DX12, Backends::GL],
         GraphicsApi::Auto => vec![Backends::VULKAN, Backends::GL],
         GraphicsApi::Dx12 if windows => vec![Backends::DX12],
-        GraphicsApi::Vulkan | GraphicsApi::Dx12 => vec![Backends::VULKAN],
+        GraphicsApi::Vulkan | GraphicsApi::VulkanSupporter | GraphicsApi::Dx12 => {
+            vec![Backends::VULKAN]
+        }
         GraphicsApi::OpenGl => vec![Backends::GL],
+    }
+}
+/// Ordered `(Backends, supporter_mode)` pairs `open_device` tries before giving up.
+/// On Android, `Auto` and `Vulkan` try native Vulkan first, then the built-in
+/// Volt Vulkan Supporter compatibility bridge (Vulkan 1.0/1.1 downlevel + shader Y-flip
+/// + non-zero queue family + extension sanitization), and finally OpenGL ES only if
+/// no Vulkan ICD/hardware exists at all.
+fn backend_attempts(api: GraphicsApi, os: &str, wgpu_backend: bool) -> Vec<(wgpu::Backends, bool)> {
+    use wgpu::Backends;
+    if wgpu_backend || os == "macos" {
+        return vec![(Backends::default(), false)];
+    }
+    if os == "android" {
+        return match api {
+            GraphicsApi::OpenGl => vec![(Backends::GL, false)],
+            GraphicsApi::VulkanSupporter => vec![(Backends::VULKAN, true), (Backends::GL, false)],
+            GraphicsApi::Auto | GraphicsApi::Vulkan | GraphicsApi::Dx12 => vec![
+                (Backends::VULKAN, false),
+                (Backends::VULKAN, true),
+                (Backends::GL, false),
+            ],
+        };
+    }
+    if api == GraphicsApi::VulkanSupporter {
+        return vec![(Backends::VULKAN, true)];
+    }
+    let mut out = Vec::new();
+    for backend in backend_order(api, os, wgpu_backend) {
+        out.push((backend, false));
+        if backend == Backends::VULKAN && api == GraphicsApi::Auto {
+            out.push((Backends::VULKAN, true));
+        }
+    }
+    out
+}
+fn attempt_name(backends: wgpu::Backends, supporter: bool) -> &'static str {
+    match (backends, supporter) {
+        (wgpu::Backends::VULKAN, true) => "Vulkan (Volt Supporter)",
+        _ => backends_name(backends),
     }
 }
 fn backends_name(backends: wgpu::Backends) -> &'static str {
@@ -1158,22 +1225,34 @@ async fn open_device(
     api: GraphicsApi,
     layers: u32,
 ) -> Result<Opened> {
-    let order = backend_order(
+    let attempts = backend_attempts(
         api.with_env(),
         std::env::consts::OS,
         std::env::var_os("WGPU_BACKEND").is_some(),
     );
     let mut failures = Vec::new();
-    for (attempt, backends) in order.iter().copied().enumerate() {
-        let name = backends_name(backends);
+    for (attempt, (backends, supporter)) in attempts.iter().copied().enumerate() {
+        let name = attempt_name(backends, supporter);
         if attempt > 0 {
             log::warn!("Horizon renderer: trying {name} ({})", failures.join("; "));
         }
+        horizon_hdr::set_vulkan_supporter_mode(backends == wgpu::Backends::VULKAN && supporter);
         match open_with_retry(backends, window, offscreen, layers).await {
-            Ok(opened) => return Ok(opened),
-            Err(e) => failures.push(e),
+            Ok(opened) => {
+                let is_gl = opened.adapter.get_info().backend == wgpu::Backend::Gl;
+                crate::android_runtime::note_opened_backend(is_gl, supporter);
+                if supporter && !is_gl {
+                    log::info!(
+                        "Volt Vulkan Supporter active on {}",
+                        opened.adapter.get_info().name
+                    );
+                }
+                return Ok(opened);
+            }
+            Err(e) => failures.push(format!("{name}: {e}")),
         }
     }
+    horizon_hdr::set_vulkan_supporter_mode(false);
     Err(format!("{NO_GPU_DRIVER} ({})", failures.join("; ")).into())
 }
 /// Why a backend gave no device: no adapter at all, which a second try with the
@@ -1447,9 +1526,23 @@ impl Renderer {
         api: GraphicsApi,
     ) -> Result<Self> {
         #[cfg(target_os = "android")]
-        let startup = (!offscreen && api != GraphicsApi::OpenGl)
-            .then(crate::android_runtime::graphics_startup::begin)
-            .flatten();
+        struct CleanExitStartupGuard(Option<crate::android_runtime::graphics_startup::Startup>);
+        #[cfg(target_os = "android")]
+        impl Drop for CleanExitStartupGuard {
+            fn drop(&mut self) {
+                // Only native driver SIGSEGV/SIGABRT skips Drop; caught Rust errors must not
+                // leave a stale `vulkan-startup.pending` marker that falsely downgrades Vulkan.
+                if let Some(startup) = self.0.take() {
+                    startup.complete();
+                }
+            }
+        }
+        #[cfg(target_os = "android")]
+        let mut startup_guard = CleanExitStartupGuard(
+            (!offscreen && api != GraphicsApi::OpenGl)
+                .then(crate::android_runtime::graphics_startup::begin)
+                .flatten(),
+        );
 
         let split = sprite_split();
         if layers > split * SPRITE_ARRAYS {
@@ -1490,7 +1583,7 @@ impl Renderer {
             }
             None => open_device(&window, offscreen, api, layers).await?,
         };
-        let split = split.min(device.limits().max_texture_array_layers);
+        let split = sprite_split().min(device.limits().max_texture_array_layers);
         #[cfg(target_os = "android")]
         crate::android_runtime::configure_atlas_limit(device.limits().max_texture_dimension_2d);
         let info = adapter.get_info();
@@ -1601,8 +1694,8 @@ impl Renderer {
             view_dimension: wgpu::TextureViewDimension::D2Array,
             multisampled: false,
         };
-        let sprite_arrays = layers.div_ceil(split).max(1);
-        if sprite_arrays > 1 {
+        let sprite_arrays = effective_sprite_arrays(layers, split);
+        if layers.div_ceil(split).max(1) > 1 {
             log::info!("Horizon: {layers} block textures in {sprite_arrays} arrays");
         }
         let sprite_constants = [
@@ -3150,7 +3243,11 @@ impl Renderer {
             #[cfg(target_os = "android")]
             opaque_output: None,
             #[cfg(target_os = "android")]
-            startup,
+            startup: if info.backend == wgpu::Backend::Gl {
+                None
+            } else {
+                startup_guard.0.take()
+            },
             hdr: None,
             hdr_output,
             hdr_marker: None,
@@ -3461,7 +3558,7 @@ impl Renderer {
         let split = sprite_split().min(self.device.limits().max_texture_array_layers);
         split > 0
             && layers <= split.saturating_mul(SPRITE_ARRAYS)
-            && f64::from(layers.div_ceil(split).max(1)) == self.terrain_sprites[0]
+            && f64::from(effective_sprite_arrays(layers, split)) == self.terrain_sprites[0]
             && f64::from(split) == self.terrain_sprites[1]
     }
     /// Upgrade a loading renderer with the world's block sprite arrays,

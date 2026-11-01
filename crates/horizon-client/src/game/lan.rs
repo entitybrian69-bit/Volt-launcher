@@ -1904,6 +1904,19 @@ impl Game<'_> {
                             host = self.lan.take().expect("the hub is back after the commands");
                         }
                     }
+                    HostEvent::UseItemOn {
+                        conn,
+                        packet,
+                        yaw,
+                        pitch,
+                    } => {
+                        self.lan_guest_use_item_on(&mut host, conn, *packet, Some((yaw, pitch)));
+                        if !host.commands.is_empty() {
+                            self.lan = Some(host);
+                            self.run_guest_commands();
+                            host = self.lan.take().expect("the hub is back after the commands");
+                        }
+                    }
                 }
             }
             host.states = states;

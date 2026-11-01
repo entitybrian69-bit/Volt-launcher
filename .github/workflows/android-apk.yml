@@ -16,13 +16,14 @@ on:
         description: 'Target ABIs to build'
         type: choice
         options:
+          - arm64-v8a,armeabi-v7a
           - arm64-v8a
+          - armeabi-v7a
           - all
           - arm64-v8a,x86_64
-          - armeabi-v7a
           - x86_64
           - x86
-        default: arm64-v8a
+        default: arm64-v8a,armeabi-v7a
       profile:
         description: 'Rust compilation profile'
         type: choice
@@ -87,7 +88,7 @@ jobs:
           elif event == "workflow_dispatch" and raw_abis:
               selected = [abi.strip() for abi in raw_abis.split(",") if abi.strip()]
           else:
-              selected = ["arm64-v8a"]
+              selected = ["arm64-v8a", "armeabi-v7a"]
 
           unknown = [abi for abi in selected if abi not in targets]
           if unknown:
@@ -243,6 +244,7 @@ jobs:
       - name: Run touch control and Volt settings unit tests
         run: |
           cargo test -p horizon-client-core --lib lang
+          cargo test -p horizon-client-render --lib graphics
           cargo test -p horizon-client-render --lib touch
           cargo test -p horizon-client-render --lib volt_features
           cargo test -p horizon-client-render --lib extras
@@ -518,7 +520,9 @@ jobs:
           import time
 
           env = dict(os.environ)
-          version_code = 280000 + int(os.environ.get("RUN_NUMBER", "1"))
+          abi = os.environ["ABI"]
+          abi_offset = 1 if abi == "arm64-v8a" else 0
+          version_code = 280000 + int(os.environ.get("RUN_NUMBER", "1")) * 2 + abi_offset
           env["VOLT_VERSION_CODE"] = str(version_code)
           env["ORG_GRADLE_PROJECT_versionCode"] = str(version_code)
           gradle_user_dir = Path.home() / ".gradle"
@@ -611,7 +615,8 @@ jobs:
           try:
               abi = os.environ["ABI"]
               run_num = int(os.environ.get("RUN_NUMBER", "1"))
-              expected_vc = 280000 + run_num
+              abi_offset = 1 if abi == "arm64-v8a" else 0
+              expected_vc = 280000 + run_num * 2 + abi_offset
               min_sdk = 27 if abi in ("armeabi-v7a", "x86") else 28
 
               gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
@@ -970,7 +975,15 @@ jobs:
           TITLE: ${{ steps.bundle.outputs.title }}
           PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
         run: |
-          NOTES="Automated public APK build (ae.net.Voltlauncher) from commit ${GITHUB_SHA}. Original Minecraft 26.3 assets download from Mojang on first launch."
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          cat > "$NOTES_FILE" <<EOF
+          ### What's New in Volt Launcher
+          - Built-in **Vulkan Supporter** & custom Vulkan driver loader (.zip / .adpkg / .so) so Vulkan 1.0, Mali, PowerVR, Adreno, and 32-bit GPUs run fast on Vulkan instead of slow OpenGL ES
+          - Fixed **first-launch game crash** by releasing launcher GPU resources before handoff and serializing initial asset & sprite-array loading within mobile memory limits
+          - Fixed **Accurate Block Placement** across Singleplayer, LAN, Multiplayer, and Android Touch Controls (6-way pistons/observers/dispensers/crafters/rods/shulkers, logs, hoppers, slabs, corner stairs, trapdoors, and anvils)
+          - Native **64-bit (arm64-v8a)** and **32-bit (armeabi-v7a)** Android APK builds with automatic ABI-matched one-time in-app update reminders
+          EOF
+          sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
@@ -978,6 +991,7 @@ jobs:
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
               --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
           else
             EXTRA_FLAGS=()
             if [ "$PRERELEASE" = "true" ]; then
@@ -989,6 +1003,6 @@ jobs:
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
               --title "$TITLE" \
-              --notes "$NOTES" \
+              --notes-file "$NOTES_FILE" \
               "${EXTRA_FLAGS[@]}"
           fi

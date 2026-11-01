@@ -14,11 +14,12 @@ pub fn source_only_mod(project: &Project) -> bool {
 /// Account tokens and client secrets are never bundled.
 pub const MICROSOFT_CLIENT_ID: &str = "00000000441cc96b";
 
-/// Real Vulkan rendering paths; these do not select a different driver or API.
+/// Vulkan, Volt Vulkan Supporter, and OpenGL ES rendering paths.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RendererMode {
     Vulkan,
+    VulkanSupporter,
     OpenGl,
     #[default]
     VulkanCompatibility,
@@ -27,8 +28,18 @@ impl RendererMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Vulkan => "Vulkan / GPU batching",
-            Self::OpenGl => "OpenGL ES / experimental",
-            Self::VulkanCompatibility => "Vulkan / compatibility",
+            Self::VulkanSupporter => "Vulkan Supporter / legacy GPUs",
+            Self::OpenGl => "OpenGL ES / fallback",
+            Self::VulkanCompatibility => "Vulkan / compatibility (auto)",
+        }
+    }
+
+    pub fn graphics_api(self) -> horizon_client::graphics::GraphicsApi {
+        match self {
+            Self::Vulkan => horizon_client::graphics::GraphicsApi::Vulkan,
+            Self::VulkanSupporter => horizon_client::graphics::GraphicsApi::VulkanSupporter,
+            Self::OpenGl => horizon_client::graphics::GraphicsApi::OpenGl,
+            Self::VulkanCompatibility => horizon_client::graphics::GraphicsApi::Auto,
         }
     }
 }
@@ -60,6 +71,10 @@ pub struct Config {
     pub mod_source: crate::shader_catalog::Origin,
     #[serde(default = "default_pack_source")]
     pub pack_source: crate::shader_catalog::Origin,
+    #[serde(default)]
+    pub custom_vulkan_driver: Option<String>,
+    #[serde(default)]
+    pub custom_vulkan_driver_name: Option<String>,
 }
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
@@ -110,7 +125,7 @@ impl Config {
             .unwrap_or_default();
         let mut config: Self = serde_json::from_value(value.clone()).unwrap_or_default();
         if cfg!(target_pointer_width = "32") && value.get("renderer").is_none() {
-            config.renderer = RendererMode::OpenGl;
+            config.renderer = RendererMode::VulkanSupporter;
         }
         // Ignore saved app registrations while this dev build uses the fixed ID.
         config.microsoft_client_id =

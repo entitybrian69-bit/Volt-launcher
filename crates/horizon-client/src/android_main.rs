@@ -61,6 +61,8 @@ mod shader_catalog;
 mod skin_preview;
 #[path = "android/volt_accounts.rs"]
 mod volt_accounts;
+#[path = "android/volt_updater.rs"]
+mod volt_updater;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/skins.rs"]
@@ -68,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.8.0"
+        "0.8.1"
     } else {
-        "0.8.0-dev"
+        "0.8.1-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {

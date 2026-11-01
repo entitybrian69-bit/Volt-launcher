@@ -137,27 +137,36 @@ impl Launcher {
                     .collect(),
             ),
             Kind::Renderer => (
+            Kind::Renderer => (
                 "Rendering mode",
-                "Uses the system GPU driver. Applies on the next game launch.",
+                "Selects Vulkan, Volt's built-in Vulkan Supporter for unsupported/Vulkan-1.0 GPUs, or OpenGL ES.",
                 vec![
                     (
-                        "OpenGL ES / experimental".into(),
-                        "For older GPUs. Requires ES 3.0+ and sufficient driver limits.".into(),
-                        Action::ChooseRenderer(RendererMode::OpenGl),
-                        c.renderer == RendererMode::OpenGl,
+                        "Vulkan / compatibility (auto)".into(),
+                        "Tries fast Vulkan first and auto-falls back to Vulkan Supporter if needed."
+                            .into(),
+                        Action::ChooseRenderer(RendererMode::VulkanCompatibility),
+                        c.renderer == RendererMode::VulkanCompatibility,
+                    ),
+                    (
+                        "Vulkan Supporter / legacy GPUs".into(),
+                        "Built-in Vulkan 1.0 & driver-quirk supporter for Mali, PowerVR, Adreno & 32-bit GPUs."
+                            .into(),
+                        Action::ChooseRenderer(RendererMode::VulkanSupporter),
+                        c.renderer == RendererMode::VulkanSupporter,
                     ),
                     (
                         "Vulkan / GPU batching".into(),
-                        "Groups terrain draws and enables supported GPU culling.".into(),
+                        "Groups terrain draws and enables supported GPU culling on modern GPUs."
+                            .into(),
                         Action::ChooseRenderer(RendererMode::Vulkan),
                         c.renderer == RendererMode::Vulkan,
                     ),
                     (
-                        "Vulkan / compatibility".into(),
-                        "Direct terrain draws for drivers with missing or transparent blocks."
-                            .into(),
-                        Action::ChooseRenderer(RendererMode::VulkanCompatibility),
-                        c.renderer == RendererMode::VulkanCompatibility,
+                        "OpenGL ES / fallback".into(),
+                        "Fallback only if Vulkan drivers fail completely on your device.".into(),
+                        Action::ChooseRenderer(RendererMode::OpenGl),
+                        c.renderer == RendererMode::OpenGl,
                     ),
                 ],
             ),

@@ -2419,6 +2419,8 @@ struct Game<'a> {
     world_icon: Option<WorldIcon>,
     /// The block a guest is acting on (game/lan_actions.rs).
     forced_hit: Option<Hit>,
+    /// Decoded Carpet/Volt Accurate Block Placement `(facing, top_half)` for a guest's `UseItemOn`.
+    forced_accurate: Option<(Direction, Option<bool>)>,
     /// `Minecraft.hitResult` while the clicks of a tick act (game/remote.rs
     /// `remote_handle_input`): picked once, so a creative break does not
     /// move the use that follows it past the broken block.
@@ -2695,8 +2697,20 @@ impl Game<'_> {
     /// Whether a world hold should use the held item instead of mining.
     #[cfg(target_os = "android")]
     pub(super) fn touch_projectile_crosshair(&self) -> bool {
-        self.held()
-            .is_some_and(|s| horizon_client::touch::projectile_crosshair(&s.item))
+        let accurate_block = self.settings.extras.accurate_placement
+            && (self
+                .held()
+                .and_then(|s| self.items().get(&s.item))
+                .is_some_and(|i| i.block.is_some())
+                || self
+                    .offhand
+                    .as_ref()
+                    .and_then(|s| self.items().get(&s.item))
+                    .is_some_and(|i| i.block.is_some()));
+        accurate_block
+            || self
+                .held()
+                .is_some_and(|s| horizon_client::touch::projectile_crosshair(&s.item))
     }
     #[cfg(target_os = "android")]
     pub(super) fn touch_item_held_use(&self) -> bool {
@@ -5618,7 +5632,13 @@ impl Game<'_> {
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        let outcome = self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx));
+        let acc_override = accurate
+            .as_ref()
+            .map(|a| (a.facing, a.top_half))
+            .or(self.forced_accurate);
+        let outcome = self.with_level(|b, level, ticks| {
+            b.place_block_accurate(level, ticks, &ctx, acc_override)
+        });
         let PlaceOutcome::Placed { pos, state } = outcome else {
             self.process_level_events()?;
             // BlockItem.useOn: a consumable that could not be placed is used,
@@ -5629,11 +5649,6 @@ impl Game<'_> {
             return Ok(true);
         };
         let target = [pos.x, pos.y, pos.z];
-        let state = if let Some(acc) = &accurate {
-            self.refine_singleplayer_placed_state(target, state, acc)
-        } else {
-            state
-        };
         let state = self.apply_item_block_state(target, state, &stack)?;
         self.mod_block_event(target, state, true);
         let name = self.res.facts().get(state).name.clone();
@@ -16810,6 +16825,7 @@ impl<'a> Game<'a> {
             pending_save: None,
             world_icon: None,
             forced_hit: None,
+            forced_accurate: None,
             tick_hit: None,
             guest_use: None,
             lan_events: Vec::new(),
@@ -17333,46 +17349,92 @@ fn load_core(
     progress.set(1);
     let registry = assets.registry;
     let (render, gameplay, visibility, biomes, environment, collision) =
-        std::thread::scope(|scope| {
-            let assets = &assets;
-            let render = Step::spawn(scope, parallel, move || {
-                // A server reads no block sprites' pixels, which only the
-                // renderer draws (32 MB).
-                let render = if headless {
-                    assets.reload_for_server(root)
-                } else {
-                    assets.reload(root)
-                }
-                .map_err(|e| e.to_string())?;
-                let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
-                    root,
-                    render.model_library.clone(),
+        if cfg!(target_os = "android") {
+            // On unified mobile RAM (and 32-bit virtual address space), finish sprite/model
+            // decoding and return freed pages BEFORE parsing the ~140 MB block-behaviours.json DOM.
+            let (render, visibility, biomes, environment, collision) = std::thread::scope(|scope| {
+                let assets = &assets;
+                let render = Step::spawn(scope, parallel, move || {
+                    let render = if headless {
+                        assets.reload_for_server(root)
+                    } else {
+                        assets.reload(root)
+                    }
+                    .map_err(|e| e.to_string())?;
+                    let item_renderer =
+                        horizon_client::item_render::ItemRenderer::load_with_library(
+                            root,
+                            render.model_library.clone(),
+                        )
+                        .map_err(|e| e.to_string());
+                    Ok((render, item_renderer))
+                });
+                let visibility = Step::spawn(scope, parallel, || {
+                    models::load_visibility(root, registry).map_err(|e| e.to_string())
+                });
+                let biomes = Step::spawn(scope, parallel, || {
+                    Biomes::load(root).map_err(|e| e.to_string())
+                });
+                let environment = Step::spawn(scope, parallel, || {
+                    Environment::load(root).map_err(|e| e.to_string())
+                });
+                let collision = Step::spawn(scope, parallel, || {
+                    collisions::load(root, registry).map_err(|e| e.to_string())
+                });
+                (
+                    render.join(),
+                    visibility.join(),
+                    biomes.join(),
+                    environment.join(),
+                    collision.join(),
                 )
-                .map_err(|e| e.to_string());
-                Ok((render, item_renderer))
             });
-            let visibility = Step::spawn(scope, parallel, || {
-                models::load_visibility(root, registry).map_err(|e| e.to_string())
-            });
-            let biomes = Step::spawn(scope, parallel, || {
-                Biomes::load(root).map_err(|e| e.to_string())
-            });
-            let environment = Step::spawn(scope, parallel, || {
-                Environment::load(root).map_err(|e| e.to_string())
-            });
-            let collision = Step::spawn(scope, parallel, || {
-                collisions::load(root, registry).map_err(|e| e.to_string())
-            });
-            let gameplay = gameplay_tables(root, assets, parallel, progress);
-            (
-                render.join(),
-                gameplay,
-                visibility.join(),
-                biomes.join(),
-                environment.join(),
-                collision.join(),
-            )
-        });
+            horizon_threads::release_free_memory();
+            let gameplay = gameplay_tables(root, &assets, parallel, progress);
+            (render, gameplay, visibility, biomes, environment, collision)
+        } else {
+            std::thread::scope(|scope| {
+                let assets = &assets;
+                let render = Step::spawn(scope, parallel, move || {
+                    // A server reads no block sprites' pixels, which only the
+                    // renderer draws (32 MB).
+                    let render = if headless {
+                        assets.reload_for_server(root)
+                    } else {
+                        assets.reload(root)
+                    }
+                    .map_err(|e| e.to_string())?;
+                    let item_renderer =
+                        horizon_client::item_render::ItemRenderer::load_with_library(
+                            root,
+                            render.model_library.clone(),
+                        )
+                        .map_err(|e| e.to_string());
+                    Ok((render, item_renderer))
+                });
+                let visibility = Step::spawn(scope, parallel, || {
+                    models::load_visibility(root, registry).map_err(|e| e.to_string())
+                });
+                let biomes = Step::spawn(scope, parallel, || {
+                    Biomes::load(root).map_err(|e| e.to_string())
+                });
+                let environment = Step::spawn(scope, parallel, || {
+                    Environment::load(root).map_err(|e| e.to_string())
+                });
+                let collision = Step::spawn(scope, parallel, || {
+                    collisions::load(root, registry).map_err(|e| e.to_string())
+                });
+                let gameplay = gameplay_tables(root, assets, parallel, progress);
+                (
+                    render.join(),
+                    gameplay,
+                    visibility.join(),
+                    biomes.join(),
+                    environment.join(),
+                    collision.join(),
+                )
+            })
+        };
     // The packs' failure first: it rolls back whatever else failed.
     let (render, item_renderer) = match render {
         Ok(render) => render,
@@ -17472,26 +17534,48 @@ fn load_resources(
         }
     };
     let (core, loaded_gui) = loop {
-        let (ui, core) = std::thread::scope(|scope| {
-            let core = Step::spawn(scope, parallel, || {
-                load_core(&root, headless, parallel, progress)
-            });
-            let ui = load_ui(&root).map(|ui| offer(ui, &root));
-            (ui, core.join())
-        });
         let packs = root != vanilla_root;
-        let failure = match (ui, core) {
-            (Ok(gui), Ok(Ok(core))) => break (core, gui),
-            (Err(e), _) if packs => e.to_string(),
-            (_, Ok(Err(e))) if packs => e,
-            (_, Ok(Err(e))) => {
-                return Err(format!(
-                    "{e}\nPrepare resources with the launcher, or: horizon-prepare --prepare"
-                )
-                .into());
+        let failure = if cfg!(target_os = "android") {
+            // Publish UI artwork first and release temporary image buffers so the 144 MB UI
+            // decode never overlaps `load_core` on unified mobile RAM / 32-bit address space.
+            let ui_res = load_ui(&root).map(|ui| offer(ui, &root));
+            horizon_threads::release_free_memory();
+            match ui_res {
+                Err(e) if packs => e.to_string(),
+                Err(e) => return Err(e),
+                Ok(gui) => match load_core(&root, headless, parallel, progress) {
+                    Ok(Ok(core)) => break (core, gui),
+                    Ok(Err(e)) if packs => e,
+                    Ok(Err(e)) => {
+                        return Err(format!(
+                            "{e}\nPrepare resources with the launcher, or: horizon-prepare --prepare"
+                        )
+                        .into());
+                    }
+                    Err(e) => return Err(e.into()),
+                },
             }
-            (_, Err(e)) => return Err(e.into()),
-            (Err(e), Ok(Ok(_))) => return Err(e),
+        } else {
+            let (ui, core) = std::thread::scope(|scope| {
+                let core = Step::spawn(scope, parallel, || {
+                    load_core(&root, headless, parallel, progress)
+                });
+                let ui = load_ui(&root).map(|ui| offer(ui, &root));
+                (ui, core.join())
+            });
+            match (ui, core) {
+                (Ok(gui), Ok(Ok(core))) => break (core, gui),
+                (Err(e), _) if packs => e.to_string(),
+                (_, Ok(Err(e))) if packs => e,
+                (_, Ok(Err(e))) => {
+                    return Err(format!(
+                        "{e}\nPrepare resources with the launcher, or: horizon-prepare --prepare"
+                    )
+                    .into());
+                }
+                (_, Err(e)) => return Err(e.into()),
+                (Err(e), Ok(Ok(_))) => return Err(e),
+            }
         };
         log::warn!(
             "Horizon: resource packs failed to load ({failure}); using the default resources"
@@ -17562,6 +17646,58 @@ fn load_resources(
             started.elapsed().as_millis()
         );
     }
+    // The block entity renderer's face visibility: the meshes' own, whose
+    // shapes already hold their faces, not a second load of the same tables.
+    let visibility = pack.context.tables.visibility.clone();
+    // On Android, finish `load_world_rest` (which consumes and drops the ~140 MB
+    // `behaviour_json` AST and builds `.horizon-cache/behaviours-v2.bin` on first launch)
+    // BEFORE allocating `prepare_renderer_textures(&pack)` (~100 MB RGBA mipmaps) and
+    // uploading GPU textures on the main thread, preventing unified RAM / 32-bit OOM.
+    if cfg!(target_os = "android") {
+        let rest = load_world_rest(
+            &root,
+            &resources,
+            &assets,
+            behaviour_json,
+            &gameplay_projection,
+            visibility,
+            progress,
+            started,
+        )?;
+        resources
+            .rest
+            .set(rest)
+            .map_err(|_| "world resources already loaded")?;
+        horizon_threads::release_free_memory();
+        progress.set(9);
+        if menu {
+            horizon_client::telemetry::mark_rest_ready();
+            log::info!(
+                "Horizon: rest-ready after {} ms",
+                started.elapsed().as_millis()
+            );
+        }
+        let prepared_at = Instant::now();
+        let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
+        let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
+        horizon_threads::release_free_memory();
+        if menu {
+            log::info!(
+                "Horizon: handoff CPU resources prepared on worker in {} ms",
+                prepared_at.elapsed().as_millis()
+            );
+        }
+        return Ok(Loaded {
+            game_cpu,
+            renderer_cpu,
+            root,
+            pack_error,
+            resources,
+            rest_loader: None,
+            pack,
+            gui: loaded_gui,
+        });
+    }
     // Finish fallible CPU preparation before starting the tail, so an error
     // cannot detach a tail worker that races the next pack-loader generation.
     let prepared_at = Instant::now();
@@ -17574,9 +17710,6 @@ fn load_resources(
             prepared_at.elapsed().as_millis()
         );
     }
-    // The block entity renderer's face visibility: the meshes' own, whose
-    // shapes already hold their faces, not a second load of the same tables.
-    let visibility = pack.context.tables.visibility.clone();
     let rest_loader = if menu {
         let resources = resources.clone();
         let root = root.clone();

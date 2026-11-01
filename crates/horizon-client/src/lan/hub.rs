@@ -162,6 +162,15 @@ pub enum HostEvent {
     /// A guest left (state to save, entities to drop).
     Left(Box<Guest>),
     Packet(u32, Box<S>),
+    /// A `UseItemOn` packet paired with the guest's `(yaw, pitch)` at the exact
+    /// instant the packet arrived in the inbox (so rotation packets queued
+    /// around `UseItemOn` cannot overwrite the placement look direction).
+    UseItemOn {
+        conn: u32,
+        packet: Box<play::UseItemOn>,
+        yaw: f32,
+        pitch: f32,
+    },
     /// A chat line to show on the host (already broadcast to the guests);
     /// a dedicated server logs it, `[Not Secure]` unless signed and fresh.
     Chat {
@@ -2771,7 +2780,14 @@ impl Hub {
                 // refused: the block went down without the place sound that only the
                 // placer's client plays (BlockItem.place's playSound(player, ...)).
                 S::UseItemOn(p) => {
-                    events.push(HostEvent::Packet(conn, Box::new(S::UseItemOn(p))));
+                    let yaw = self.guests[i].yaw;
+                    let pitch = self.guests[i].pitch;
+                    events.push(HostEvent::UseItemOn {
+                        conn,
+                        packet: Box::new(p),
+                        yaw,
+                        pitch,
+                    });
                     if self.move_queued(i) {
                         break;
                     }
