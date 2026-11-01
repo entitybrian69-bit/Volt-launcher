@@ -148,6 +148,22 @@ jobs:
               abilist = subprocess.run([adb, "shell", "getprop", "ro.product.cpu.abilist"], capture_output=True, text=True).stdout.strip()
               emu_out.append(f"abilist={abilist}")
 
+              # 1) Test adb install + upgrade on Android 14 (API 34) first!
+              for tag in tags:
+                  subprocess.run([adb, "logcat", "-c"], check=False)
+                  r = subprocess.run([adb, "install", str(apk_paths[tag])], capture_output=True, text=True)
+                  lc = subprocess.run([adb, "logcat", "-d", "*:W"], capture_output=True, text=True).stdout
+                  pm_lines = [ln for ln in lc.splitlines() if any(k in ln for k in ("Package", "Install", "Volt", "horizon", "Sign", "Cert", "Downgrade", "dex", "Native"))]
+                  emu_out.append(f"API34 ADB {tag} rc={r.returncode} out={r.stdout.strip()} err={r.stderr.strip()}\n" + "\n".join(pm_lines[-15:]))
+
+              # Uninstall and test real Google PackageInstaller GUI (INSTALL_FROM_ADB == 0)
+              subprocess.run([adb, "uninstall", "ae.net.Voltlauncher"], check=False, capture_output=True)
+              for _ in range(20):
+                  mk = subprocess.run([adb, "shell", "mkdir", "-p", "/sdcard/Download"], capture_output=True, text=True)
+                  if mk.returncode == 0:
+                      break
+                  time.sleep(1)
+
               for tag in tags:
                   subprocess.run([adb, "push", str(apk_paths[tag]), f"/sdcard/Download/{tag}.apk"], check=True, capture_output=True)
 
