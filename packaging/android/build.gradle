@@ -8,7 +8,7 @@ android {
         minSdk providers.gradleProperty('minSdk').getOrElse('28').toInteger()
         targetSdk 35
         versionCode providers.gradleProperty('versionCode').orElse(providers.environmentVariable('VOLT_VERSION_CODE')).getOrElse('28').toInteger()
-        versionName '0.7.7'
+        versionName '0.7.8'
         ndk { abiFilters providers.gradleProperty('abi').get() }
     }
     signingConfigs {
@@ -17,6 +17,10 @@ android {
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing false
+            enableV4Signing false
         }
     }
     buildTypes {
@@ -41,6 +45,6 @@ android {
         assets.srcDirs = ['../../.local/android/gradle-assets']
         res.srcDirs = ['res']
     }
-    packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols += '**/*.so' } }
+    packaging { jniLibs { useLegacyPackaging = false; keepDebugSymbols += '**/*.so' } }
 }
 layout.buildDirectory = file('../../.local/android/gradle-build')

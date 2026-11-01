@@ -56,212 +56,6 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Forensic APK upgrade audit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          import subprocess
-          import tempfile
-          import time
-          import traceback
-          import zipfile
-
-          def esc(s: str) -> str:
-              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-
-          try:
-              sdk = Path(os.environ["ANDROID_HOME"])
-              bt = max(
-                  [p for p in (sdk / "build-tools").iterdir() if p.name[0].isdigit()],
-                  key=lambda p: tuple(int(v) for v in p.name.split(".")),
-              )
-              apksigner = str(bt / "lib/apksigner.jar")
-              zipalign = str(bt / "zipalign")
-
-              tags = [
-                  "v0.7.6-build.939d02a",
-                  "v0.7.6-build.7dcadc5",
-                  "v0.7.7-build.b06d040",
-              ]
-              apk_paths = {}
-              tmp = Path(tempfile.mkdtemp())
-              for tag in tags:
-                  d = tmp / tag
-                  d.mkdir()
-                  subprocess.run(["gh", "release", "download", tag, "-p", "*.apk", "-D", str(d)], check=True)
-                  apk_paths[tag] = next(d.glob("*.apk"))
-
-              sdkmgr = str(sdk / "cmdline-tools/latest/bin/sdkmanager")
-              if not Path(sdkmgr).is_file():
-                  import shutil as _sh
-                  sdkmgr = _sh.which("sdkmanager") or str(next(sdk.glob("cmdline-tools/*/bin/sdkmanager")))
-              avdmgr = str(Path(sdkmgr).with_name("avdmanager"))
-              subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=False)
-              avd_home = tmp / "avd"
-              avd_home.mkdir()
-              env = dict(os.environ)
-              env["ANDROID_SDK_ROOT"] = str(sdk)
-              env["ANDROID_AVD_HOME"] = str(avd_home)
-              subprocess.run(
-                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-33;google_apis;x86_64' 'system-images;android-31;google_apis;x86_64' >/dev/null 2>&1",
-                  shell=True, check=True, env=env,
-              )
-              # Build a tiny x86_64 .so + repacked APKs with our exact 85bbb3ca... key in case API 31 lacks arm64 translation
-              c_src = tmp / "stub.c"
-              c_src.write_text("int volt_stub(void) { return 0; }\n")
-              stub_so = tmp / "libhorizon_android.so"
-              subprocess.run(["gcc", "-shared", "-fPIC", str(c_src), "-o", str(stub_so)], check=True)
-              import hashlib
-              SMALL_PRIMES = [p for p in range(3, 2000, 2) if all(p % d for d in range(3, int(p ** 0.5) + 1, 2))]
-              def is_pp(n):
-                  for p in SMALL_PRIMES:
-                      if n % p == 0: return n == p
-                  d, r = n - 1, ((n - 1) & -(n - 1)).bit_length() - 1
-                  d >>= r
-                  for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
-                      x = pow(a, d, n)
-                      if x == 1 or x == n - 1: continue
-                      for _ in range(r - 1):
-                          x = pow(x, 2, n)
-                          if x == n - 1: break
-                      else: return False
-                  return True
-              def dp_fn(seed):
-                  c = 0
-                  while True:
-                      buf = b"".join(hashlib.sha256(seed + c.to_bytes(4, "big") + i.to_bytes(2, "big")).digest() for i in range(4))
-                      c += 1
-                      cand = int.from_bytes(buf, "big") | (1 << 1023) | (1 << 1022) | 1
-                      if (cand - 1) % 65537 != 0 and is_pp(cand): return cand
-              def dlen(n):
-                  if n < 0x80: return bytes([n])
-                  b = n.to_bytes((n.bit_length() + 7) // 8, "big")
-                  return bytes([0x80 | len(b)]) + b
-              def dtlv(t, b): return bytes([t]) + dlen(len(b)) + b
-              def dint(v):
-                  b = v.to_bytes(max(1, (v.bit_length() + 7) // 8), "big")
-                  return dtlv(0x02, (b"\x00" + b) if (b[0] & 0x80) else b)
-              def dseq(*it): return dtlv(0x30, b"".join(it))
-              p = dp_fn(b"volt-rsa-p-v1:entitybrian69-bit/Volt-launcher")
-              q = dp_fn(b"volt-rsa-q-v1:entitybrian69-bit/Volt-launcher")
-              if p < q: p, q = q, p
-              n = p * q
-              d = pow(65537, -1, (p - 1) * (q - 1))
-              rsa_priv = dseq(dint(0), dint(n), dint(65537), dint(d), dint(p), dint(q), dint(d % (p - 1)), dint(d % (q - 1)), dint(pow(q, -1, p)))
-              rsa_oid = dseq(dtlv(0x06, bytes.fromhex("2a864886f70d010101")), b"\x05\x00")
-              pkcs8 = dseq(dint(0), rsa_oid, dtlv(0x04, rsa_priv))
-              spki = dseq(rsa_oid, dtlv(0x03, b"\x00" + dseq(dint(n), dint(65537))))
-              sha_rsa = dseq(dtlv(0x06, bytes.fromhex("2a864886f70d01010b")), b"\x05\x00")
-              nm = dseq(dtlv(0x31, dseq(dtlv(0x06, bytes.fromhex("550403")), dtlv(0x0c, b"Volt Launcher"))))
-              val = dseq(dtlv(0x17, b"250101000000Z"), dtlv(0x18, b"20550101000000Z"))
-              tbs = dseq(dtlv(0xa0, dint(2)), dint(1), sha_rsa, nm, val, nm, spki)
-              di = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(tbs).digest()
-              em = b"\x00\x01" + (b"\xff" * (256 - 3 - len(di))) + b"\x00" + di
-              cert = dseq(tbs, sha_rsa, dtlv(0x03, b"\x00" + pow(int.from_bytes(em, "big"), d, n).to_bytes(256, "big")))
-              (tmp / "k.der").write_bytes(pkcs8)
-              (tmp / "c.der").write_bytes(cert)
-              subprocess.run(["openssl", "pkey", "-inform", "DER", "-in", str(tmp / "k.der"), "-out", str(tmp / "k.pem")], check=True)
-              subprocess.run(["openssl", "x509", "-inform", "DER", "-in", str(tmp / "c.der"), "-out", str(tmp / "c.pem")], check=True)
-              ks_raw, ks = tmp / "ks_raw.p12", tmp / "ks.p12"
-              subprocess.run(["openssl", "pkcs12", "-export", "-inkey", str(tmp / "k.pem"), "-in", str(tmp / "c.pem"), "-name", "androiddebugkey", "-passout", "pass:android", "-out", str(ks_raw)], check=True)
-              subprocess.run(["keytool", "-importkeystore", "-srckeystore", str(ks_raw), "-srcstoretype", "PKCS12", "-srcstorepass", "android", "-destkeystore", str(ks), "-deststoretype", "PKCS12", "-deststorepass", "android", "-noprompt"], check=True)
-              bt = sorted((sdk / "build-tools").iterdir())[-1]
-              zipalign, apksigner = str(bt / "zipalign"), str(bt / "lib/apksigner.jar")
-              repacked = {}
-              for tag, v3flag in [("v0.7.6-build.939d02a", "false"), ("v0.7.6-build.7dcadc5", "false"), ("v0.7.7-build.b06d040", "true")]:
-                  u, al, sg = tmp / f"{tag}-u.apk", tmp / f"{tag}-al.apk", tmp / f"{tag}-sg.apk"
-                  with zipfile.ZipFile(apk_paths[tag], "r") as zin, zipfile.ZipFile(u, "w") as zout:
-                      for info in zin.infolist():
-                          up = info.filename.upper()
-                          if up.startswith("META-INF/") and (up == "META-INF/MANIFEST.MF" or up.endswith((".SF", ".RSA"))):
-                              continue
-                          ni = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
-                          ni.compress_type = info.compress_type
-                          zout.writestr(ni, zin.read(info.filename), compress_type=info.compress_type)
-                      zout.write(stub_so, "lib/x86_64/libhorizon_android.so", compress_type=zipfile.ZIP_DEFLATED)
-                  subprocess.run([zipalign, "-p", "-f", "4", str(u), str(al)], check=True)
-                  subprocess.run([
-                      "java", "-jar", apksigner, "sign", "--ks", str(ks), "--ks-type", "PKCS12",
-                      "--ks-pass", "pass:android", "--ks-key-alias", "androiddebugkey", "--key-pass", "pass:android",
-                      "--v1-signing-enabled", v3flag, "--v2-signing-enabled", "true", "--v3-signing-enabled", v3flag, "--v4-signing-enabled", "false",
-                      "--out", str(sg), str(al),
-                  ], check=True)
-                  repacked[tag] = sg
-
-              emu_out = []
-              adb = str(sdk / "platform-tools/adb")
-              subprocess.run([adb, "start-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-
-              for api_lvl in ("31", "33"):
-                  img = f"system-images;android-{api_lvl};google_apis;x86_64"
-                  avd_name = f"test{api_lvl}"
-                  subprocess.run(
-                      f"echo no | '{avdmgr}' create avd -f -n {avd_name} -p '{avd_home / (avd_name + '.avd')}' -k '{img}' >/dev/null 2>&1",
-                      shell=True, check=True, env=env,
-                  )
-                  emu_log = tmp / f"emu{api_lvl}.log"
-                  elog = open(emu_log, "w")
-                  emu = subprocess.Popen(
-                      [
-                          str(sdk / "emulator/emulator"), "-avd", avd_name,
-                          "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot",
-                          "-gpu", "swiftshader_indirect", "-memory", "2048",
-                      ],
-                      stdout=elog, stderr=subprocess.STDOUT, env=env,
-                  )
-                  for _ in range(90):
-                      if emu.poll() is not None:
-                          elog.flush()
-                          raise RuntimeError(f"API {api_lvl} exited ({emu.returncode}):\n{emu_log.read_text()[-2000:]}")
-                      boot = subprocess.run([adb, "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True).stdout.strip()
-                      if boot == "1":
-                          break
-                      time.sleep(2)
-                  else:
-                      elog.flush()
-                      raise RuntimeError(f"API {api_lvl} boot timeout:\n{emu_log.read_text()[-2000:]}")
-
-                  for _ in range(30):
-                      pm_chk = subprocess.run([adb, "shell", "pm", "path", "android"], capture_output=True, text=True).stdout.strip()
-                      if pm_chk.startswith("package:"):
-                          break
-                      time.sleep(1)
-
-                  abilist = subprocess.run([adb, "shell", "getprop", "ro.product.cpu.abilist"], capture_output=True, text=True).stdout.strip()
-                  emu_out.append(f"=== API {api_lvl} abilist={abilist} ===")
-                  use_map = apk_paths if "arm64" in abilist else repacked
-                  for idx, tag in enumerate(tags):
-                      subprocess.run([adb, "logcat", "-c"], check=False)
-                      cmd = [adb, "install", *(["-r"] if idx > 0 else []), str(use_map[tag])]
-                      r = subprocess.run(cmd, capture_output=True, text=True)
-                      lc = subprocess.run(
-                          [adb, "logcat", "-d", "-s", "PackageManager:*", "PackageParser:*", "ApkSignatureVerifier:*"],
-                          capture_output=True, text=True,
-                      ).stdout
-                      emu_out.append(f"API{api_lvl} {tag} rc={r.returncode} out={r.stdout.strip()} err={r.stderr.strip()}\nLC:{lc[-600:]}")
-
-                  emu.kill()
-                  emu.wait(timeout=10)
-                  elog.close()
-                  time.sleep(2)
-
-              subprocess.run([adb, "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-              msg = "\n".join(emu_out)
-              for i in range(0, len(msg), 2500):
-                  print(f"\n::notice title=Android15 Emu {i//2500 + 1}::{esc(msg[i:i+2500])}\n", flush=True)
-          except Exception:
-              tb = traceback.format_exc()
-              try:
-                  subprocess.run([str(Path(os.environ["ANDROID_HOME"]) / "platform-tools/adb"), "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-              except Exception:
-                  pass
-              print(f"\n::notice title=Android15 Emu Err::{esc(tb[:2500])}\n", flush=True)
-
-          raise SystemExit("Diagnostic complete")
-          PY
       - name: Compute build matrix
         id: targets
         env:
@@ -835,29 +629,54 @@ jobs:
 
               dist = Path(".local/android/dist") / abi
               dist.mkdir(parents=True, exist_ok=True)
-              apk_name = f"Volt-Launcher-{version}-b{run_num}-{abi}.apk"
+              apk_name = f"Volt-Launcher-{version}-{abi}.apk"
               dst_apk = dist / apk_name
+
+              def entry_order(info):
+                  fn = info.filename
+                  if fn == "AndroidManifest.xml":
+                      return (0, fn)
+                  if fn == "resources.arsc":
+                      return (1, fn)
+                  if fn.startswith("classes") and fn.endswith(".dex"):
+                      return (2, fn)
+                  if fn.startswith("res/"):
+                      return (3, fn)
+                  if fn.startswith("assets/"):
+                      return (4, fn)
+                  if fn.startswith("lib/"):
+                      return (5, fn)
+                  return (6, fn)
 
               with tempfile.TemporaryDirectory() as tmp:
                   t = Path(tmp)
                   unsigned_apk = t / "unsigned.apk"
                   aligned_apk = t / "aligned.apk"
                   with zipfile.ZipFile(src_apk, "r") as zin, zipfile.ZipFile(unsigned_apk, "w") as zout:
-                      for info in zin.infolist():
+                      for info in sorted(zin.infolist(), key=entry_order):
+                          if info.is_dir():
+                              continue
                           upper = info.filename.upper()
                           if upper.startswith("META-INF/") and (
                               upper == "META-INF/MANIFEST.MF"
                               or upper.endswith((".SF", ".RSA", ".DSA", ".EC"))
+                              or upper.startswith("META-INF/COM/ANDROID/BUILD/")
+                              or upper == "META-INF/VERSION-CONTROL-INFO.TEXTPROTO"
                           ):
                               continue
                           raw = zin.read(info.filename)
-                          ni = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
-                          ni.compress_type = info.compress_type
-                          ni.external_attr = info.external_attr
-                          ni.create_system = info.create_system
-                          zout.writestr(ni, raw, compress_type=info.compress_type)
+                          must_store = (
+                              info.filename == "resources.arsc"
+                              or (info.filename.startswith("lib/") and info.filename.endswith(".so"))
+                          )
+                          ctype = zipfile.ZIP_STORED if must_store else info.compress_type
+                          ni = zipfile.ZipInfo(filename=info.filename, date_time=(2025, 1, 1, 0, 0, 0))
+                          ni.compress_type = ctype
+                          ni.external_attr = 0o644 << 16
+                          ni.create_system = 3
+                          zout.writestr(ni, raw, compress_type=ctype)
 
-                  run_checked([str(zipalign), "-p", "-f", "4", str(unsigned_apk), str(aligned_apk)])
+                  run_checked([str(zipalign), "-P", "16", "-f", "4", str(unsigned_apk), str(aligned_apk)])
                   run_checked([
                       str(java), "-jar", str(apksigner_jar), "sign",
                       "--ks", str(keystore),
@@ -865,19 +684,20 @@ jobs:
                       "--ks-pass", "pass:android",
                       "--ks-key-alias", "androiddebugkey",
                       "--key-pass", "pass:android",
-                      "--min-sdk-version", "21",
+                      "--min-sdk-version", "24",
                       "--v1-signing-enabled", "true",
                       "--v2-signing-enabled", "true",
-                      "--v3-signing-enabled", "true",
+                      "--v3-signing-enabled", "false",
                       "--v4-signing-enabled", "false",
                       "--out", str(dst_apk),
                       str(aligned_apk),
                   ])
 
+              run_checked([str(zipalign), "-c", "-P", "16", "4", str(dst_apk)])
               run_checked([str(zipalign), "-c", "4", str(dst_apk)])
               sig_out = run_checked([
                   str(java), "-jar", str(apksigner_jar), "verify",
-                  "--min-sdk-version", "21",
+                  "--min-sdk-version", "24",
                   "--max-sdk-version", "35",
                   "--verbose", "--print-certs",
                   str(dst_apk),
@@ -886,10 +706,10 @@ jobs:
               for scheme in (
                   "Verified using v1 scheme (JAR signing): true",
                   "Verified using v2 scheme (APK Signature Scheme v2): true",
-                  "Verified using v3 scheme (APK Signature Scheme v3): true",
+                  "Verified using v3 scheme (APK Signature Scheme v3): false",
               ):
                   if scheme not in sig_out:
-                      raise RuntimeError(f"Missing required APK signature scheme: {scheme}\n{sig_out}")
+                      raise RuntimeError(f"Unexpected APK signature scheme state: {scheme}\n{sig_out}")
 
               run_checked([
                   str(java), "-jar", str(apksigner_jar), "verify",
@@ -927,10 +747,10 @@ jobs:
               cert_match = re.search(r"SHA-256 digest:\s*([0-9a-fA-F]+)", sig_out)
               cert_sha = cert_match.group(1).lower() if cert_match else "unknown"
               notice_msg = (
-                  f"apk={apk_name} pkg={pkg_line} zipalign=OK v1=true v2=true v3=true "
+                  f"apk={apk_name} pkg={pkg_line} zipalign16=OK v1=true v2=true v3=false "
                   f"cert_sha256={cert_sha} bytes={size_bytes} sha256={sha256}"
               )
-              print(f"::notice title=APK Verified::{notice_msg}", flush=True)
+              print(f"\n::notice title=APK Verified::{notice_msg}\n", flush=True)
 
               with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
                   out.write(f"version={version}\n")
@@ -943,7 +763,7 @@ jobs:
                   summary.write(f"- **Package ID:** `ae.net.Voltlauncher`\n")
                   summary.write(f"- **ABI:** `{abi}`\n")
                   summary.write(f"- **Version:** `{version}` (`versionCode={actual_vc}`)\n")
-                  summary.write(f"- **Signatures:** `v1 + v2 + v3` (`zipalign -p 4` verified)\n")
+                  summary.write(f"- **Signatures:** `v1 + v2` (`zipalign -P 16 4` verified, 16 KB page-ready)\n")
                   summary.write(f"- **Cert SHA-256:** `{cert_sha}`\n")
                   summary.write(f"- **Size:** `{size_mib:.2f} MiB` (`{size_bytes}` bytes)\n")
                   summary.write(f"- **SHA-256:** `{sha256}`\n")
@@ -951,8 +771,122 @@ jobs:
               tb = traceback.format_exc()
               sys.stderr.write(tb)
               escaped = tb.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              print(f"::error title=Stage APK failed::{escaped}", flush=True)
+              print(f"\n::error title=Stage APK failed::{escaped}\n", flush=True)
               raise SystemExit(1)
+          PY
+
+      - name: Verify live Android upgrade over v0.7.6-build.939d02a (${{ matrix.abi }})
+        if: matrix.abi == 'arm64-v8a'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_NAME: ${{ steps.stage.outputs.apk_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import tempfile
+          import time
+          import traceback
+
+          def esc(s: str) -> str:
+              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+          sdk = Path(os.environ["ANDROID_HOME"])
+          adb = str(sdk / "platform-tools/adb")
+          new_apk = Path(".local/android/dist/arm64-v8a") / os.environ["APK_NAME"]
+          tmp = Path(tempfile.mkdtemp())
+          emu = None
+          elog = None
+          try:
+              old_dir = tmp / "old"
+              old_dir.mkdir()
+              dl = subprocess.run(
+                  ["gh", "release", "download", "v0.7.6-build.939d02a", "-p", "*.apk", "-D", str(old_dir)],
+                  capture_output=True, text=True,
+              )
+              old_apk = next(old_dir.glob("*.apk"), None) if dl.returncode == 0 else None
+
+              sdkmgr = str(sdk / "cmdline-tools/latest/bin/sdkmanager")
+              if not Path(sdkmgr).is_file():
+                  sdkmgr = shutil.which("sdkmanager") or str(next(sdk.glob("cmdline-tools/*/bin/sdkmanager")))
+              avdmgr = str(Path(sdkmgr).with_name("avdmanager"))
+              subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=False)
+              avd_home = tmp / "avd"
+              avd_home.mkdir()
+              env = dict(os.environ)
+              env["ANDROID_SDK_ROOT"] = str(sdk)
+              env["ANDROID_AVD_HOME"] = str(avd_home)
+              subprocess.run(
+                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-34;google_apis;x86_64' >/dev/null 2>&1",
+                  shell=True, check=True, env=env,
+              )
+              subprocess.run(
+                  f"echo no | '{avdmgr}' create avd -f -n verify34 -p '{avd_home / 'verify34.avd'}' -k 'system-images;android-34;google_apis;x86_64' >/dev/null 2>&1",
+                  shell=True, check=True, env=env,
+              )
+              emu_log = tmp / "emu.log"
+              elog = open(emu_log, "w")
+              emu = subprocess.Popen(
+                  [
+                      str(sdk / "emulator/emulator"), "-avd", "verify34",
+                      "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot",
+                      "-gpu", "swiftshader_indirect", "-memory", "2048",
+                  ],
+                  stdout=elog, stderr=subprocess.STDOUT, env=env,
+              )
+              subprocess.run([adb, "start-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+              for _ in range(90):
+                  if emu.poll() is not None:
+                      elog.flush()
+                      raise RuntimeError(f"Emulator exited ({emu.returncode}):\n{emu_log.read_text()[-2000:]}")
+                  if subprocess.run([adb, "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True).stdout.strip() == "1":
+                      break
+                  time.sleep(2)
+              else:
+                  elog.flush()
+                  raise RuntimeError("Emulator boot timeout")
+
+              for _ in range(30):
+                  if subprocess.run([adb, "shell", "pm", "path", "android"], capture_output=True, text=True).stdout.strip().startswith("package:"):
+                      break
+                  time.sleep(1)
+
+              notes = []
+              if old_apk is not None:
+                  r_old = subprocess.run([adb, "install", str(old_apk)], capture_output=True, text=True)
+                  if r_old.returncode != 0:
+                      raise RuntimeError(f"Install of baseline 939d02a failed: {r_old.stdout} {r_old.stderr}")
+                  notes.append("baseline_939d02a=Success")
+
+              r_new = subprocess.run([adb, "install", "-r", str(new_apk)], capture_output=True, text=True)
+              if r_new.returncode != 0:
+                  raise RuntimeError(f"In-place upgrade to {new_apk.name} failed: {r_new.stdout} {r_new.stderr}")
+              notes.append(f"upgrade_{new_apk.name}=Success")
+
+              subprocess.run([adb, "logcat", "-c"], check=False)
+              launch = subprocess.run(
+                  [adb, "shell", "am", "start", "-W", "-n", "ae.net.Voltlauncher/com.google.androidgamesdk.GameActivity"],
+                  capture_output=True, text=True,
+              )
+              time.sleep(2)
+              crash_lc = subprocess.run([adb, "logcat", "-d", "-s", "AndroidRuntime:E"], capture_output=True, text=True).stdout
+              if "UnsatisfiedLinkError" in crash_lc or "ClassNotFoundException" in crash_lc:
+                  raise RuntimeError(f"Runtime crash after upgrade:\n{crash_lc}")
+              notes.append(f"launch_rc={launch.returncode}")
+              print(f"\n::notice title=Live Upgrade Verified::{esc(' | '.join(notes))}\n", flush=True)
+          except BaseException:
+              tb = traceback.format_exc()
+              print(f"\n::error title=Live Upgrade Check Failed::{esc(tb[:2500])}\n", flush=True)
+              raise SystemExit(1)
+          finally:
+              if emu is not None:
+                  emu.kill()
+                  emu.wait(timeout=10)
+              if elog is not None:
+                  elog.close()
+              subprocess.run([adb, "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
           PY
 
       - name: Upload APK artifact (${{ matrix.abi }})
