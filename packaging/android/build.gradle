@@ -7,10 +7,8 @@ android {
         applicationId providers.gradleProperty('appId').getOrElse('ae.net.Voltlauncher')
         minSdk providers.gradleProperty('minSdk').getOrElse('28').toInteger()
         targetSdk 35
-        versionCode providers.gradleProperty('versionCode')
-            .orElse(providers.environmentVariable('VOLT_VERSION_CODE'))
-            .getOrElse('28').toInteger()
-        versionName '0.7.6'
+        versionCode providers.gradleProperty('versionCode').orElse(providers.environmentVariable('VOLT_VERSION_CODE')).getOrElse('28').toInteger()
+        versionName '0.7.7'
         ndk { abiFilters providers.gradleProperty('abi').get() }
     }
     signingConfigs {
