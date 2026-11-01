@@ -2,7 +2,7 @@
 //! No project Java classes or cross-thread View operations are required.
 use jni::{
     JNIEnv, JavaVM,
-    objects::{GlobalRef, JObject, JValue},
+    objects::{GlobalRef, JObject, JString, JValue},
 };
 use std::{
     collections::VecDeque,

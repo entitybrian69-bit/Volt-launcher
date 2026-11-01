@@ -22,13 +22,12 @@ use horizon_client::{
     text::{self, Text},
     title::Mode,
     volt_features::{
-        MinimapEntities, MinimapTerrainMode, PlacementLock, PlaneLock, RadarKind,
-        ResolvedPlacement, classify_mob_id, effective_waypoint_coords, format_coords,
+        MinimapEntities, MinimapTerrainMode, PlacementLock, PlacementProtocol, PlaneLock,
+        RadarKind, ResolvedPlacement, classify_mob_id, effective_waypoint_coords, format_coords,
         format_heading_and_biome, format_world_clock, is_orientable_block_item, plane_lock_allows,
         project_waypoint, resolve_accurate_placement, world_to_minimap_offset,
     },
 };
-use horizon_world::registry::BlockStateId;
 use std::time::Duration;
 use winit::{event::MouseButton, keyboard::KeyCode};
 
