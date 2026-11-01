@@ -45,7 +45,7 @@ concurrency:
 jobs:
   plan:
     name: Plan build targets
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.targets.outputs.matrix }}
@@ -61,139 +61,97 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import hashlib
           import os
           from pathlib import Path
-          import re
           import subprocess
           import tempfile
-          import zipfile
+          import time
+          import traceback
 
           def esc(s: str) -> str:
               return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
-          sdk = Path(os.environ["ANDROID_HOME"])
-          bt = max(
-              [p for p in (sdk / "build-tools").iterdir() if re.fullmatch(r"\d+(?:\.\d+)*", p.name)],
-              key=lambda p: tuple(int(v) for v in p.name.split(".")),
-          )
-          aapt2 = str(bt / "aapt2")
-          zipalign = str(bt / "zipalign")
-          apksigner = str(bt / "lib/apksigner.jar")
-
-          tags = [
-              "v0.7.6-build.55dea51",
-              "v0.7.6-build.9e7552e",
-              "v0.7.6-build.be32bde",
-              "v0.7.6-build.6cb40e3",
-              "v0.7.6-build.939d02a",
-              "v0.7.6-build.7dcadc5",
-              "v0.7.7-build.b06d040",
-          ]
-          report = []
-          apk_paths = {}
-          tmp = Path(tempfile.mkdtemp())
-          for tag in tags:
-              d = tmp / tag
-              d.mkdir()
-              subprocess.run(
-                  ["gh", "release", "download", tag, "-p", "*.apk", "-D", str(d)],
-                  check=True,
-              )
-              apk = next(d.glob("*.apk"))
-              apk_paths[tag] = apk
-              badging = subprocess.run([aapt2, "dump", "badging", str(apk)], capture_output=True, text=True).stdout
-              pkg_line = badging.splitlines()[0] if badging.splitlines() else ""
-              za4 = subprocess.run([zipalign, "-c", "4", str(apk)], capture_output=True, text=True).returncode
-              za16 = subprocess.run([zipalign, "-P", "16", "-c", "4", str(apk)], capture_output=True, text=True).returncode
-              sig = subprocess.run(
-                  ["java", "-jar", apksigner, "verify", "--verbose", "--print-certs", str(apk)],
-                  capture_output=True, text=True,
-              )
-              with zipfile.ZipFile(apk, "r") as zf:
-                  entries = []
-                  for info in zf.infolist():
-                      if info.filename in ("AndroidManifest.xml", "resources.arsc", "classes.dex") or info.filename.startswith(("lib/", "META-INF/")):
-                          entries.append(f"{info.filename}(ctype={info.compress_type},sz={info.file_size},hdr={info.header_offset})")
-                  so_bytes = zf.read("lib/arm64-v8a/libhorizon_android.so")
-                  dex_sha = hashlib.sha256(zf.read("classes.dex")).hexdigest()[:12]
-                  arsc_sha = hashlib.sha256(zf.read("resources.arsc")).hexdigest()[:12]
-              so_path = d / "libhorizon_android.so"
-              so_path.write_bytes(so_bytes)
-              elf = subprocess.run(["readelf", "-l", "-d", str(so_path)], capture_output=True, text=True).stdout
-              elf_lines = [
-                  ln.strip() for ln in elf.splitlines()
-                  if any(k in ln for k in ("LOAD", "TLS", "NEEDED", "SONAME", "FLAGS", "GNU_RELRO"))
-              ]
-              xml = subprocess.run(
-                  [aapt2, "dump", "xmltree", str(apk), "--file", "AndroidManifest.xml"],
-                  capture_output=True, text=True,
-              ).stdout
-              report.append(
-                  f"=== {tag} ({apk.name}, {apk.stat().st_size} B) ===\n"
-                  f"PKG: {pkg_line}\n"
-                  f"za4={za4} za16={za16} dex={dex_sha} arsc={arsc_sha}\n"
-                  f"SIG({sig.returncode}): {sig.stdout.strip()} {sig.stderr.strip()}\n"
-                  f"ZIP: {'; '.join(entries)}\n"
-                  f"ELF: {' | '.join(elf_lines[:18])}\n"
-              )
-              if tag in ("v0.7.6-build.939d02a", "v0.7.7-build.b06d040"):
-                  report.append(f"XML({tag}):\n{xml[:1800]}\n")
-
-          full_static = "\n".join(report)
-          for i in range(0, len(full_static), 3500):
-              chunk = full_static[i:i+3500]
-              print(f"::notice title=Forensic Static {i//3500 + 1}::{esc(chunk)}", flush=True)
-
-          # Now test real Android PackageManagerService install + upgrade on KVM emulator!
           try:
-              sdkmgr = str(sdk / "cmdline-tools/latest/bin/sdkmanager")
-              avdmgr = str(sdk / "cmdline-tools/latest/bin/avdmanager")
-              if Path("/dev/kvm").exists():
-                  subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=False)
-                  subprocess.run(
-                      f"(yes || true) | {sdkmgr} 'platform-tools' 'emulator' 'system-images;android-30;google_apis_playstore;x86_64' >/dev/null",
-                      shell=True, check=True,
-                  )
-                  subprocess.run(
-                      f"echo no | {avdmgr} create avd -f -n testavd -k 'system-images;android-30;google_apis_playstore;x86_64' -d pixel_5",
-                      shell=True, check=True,
-                  )
+              sdk = Path(os.environ["ANDROID_HOME"])
+              tags = [
+                  "v0.7.6-build.939d02a",
+                  "v0.7.6-build.7dcadc5",
+                  "v0.7.7-build.b06d040",
+              ]
+              apk_paths = {}
+              tmp = Path(tempfile.mkdtemp())
+              for tag in tags:
+                  d = tmp / tag
+                  d.mkdir()
+                  subprocess.run(["gh", "release", "download", tag, "-p", "*.apk", "-D", str(d)], check=True)
+                  apk_paths[tag] = next(d.glob("*.apk"))
+
+              sdkmgr = next(sdk.glob("cmdline-tools/*/bin/sdkmanager"), None) or Path(subprocess.check_output(["which", "sdkmanager"], text=True).strip())
+              avdmgr = sdkmgr.with_name("avdmanager")
+              subprocess.run(
+                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;arm64-v8a' >/dev/null",
+                  shell=True, check=True,
+              )
+              subprocess.run(
+                  f"echo no | '{avdmgr}' create avd -f -n testarm -k 'system-images;android-35;google_apis;arm64-v8a'",
+                  shell=True, check=True,
+              )
+              emu_log = tmp / "emu.log"
+              with open(emu_log, "w") as elog:
                   emu = subprocess.Popen(
                       [
-                          str(sdk / "emulator/emulator"), "-avd", "testavd",
+                          str(sdk / "emulator/emulator"), "-avd", "testarm",
                           "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot",
                           "-gpu", "swiftshader_indirect",
                       ],
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                      stdout=elog, stderr=subprocess.STDOUT,
                   )
-                  adb = str(sdk / "platform-tools/adb")
-                  subprocess.run([adb, "wait-for-device"], timeout=120, check=True)
-                  import time
-                  for _ in range(90):
-                      boot = subprocess.run([adb, "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True).stdout.strip()
-                      if boot == "1":
-                          break
-                      time.sleep(2)
-                  abilist = subprocess.run([adb, "shell", "getprop", "ro.product.cpu.abilist"], capture_output=True, text=True).stdout.strip()
-                  emu_out = [f"Emulator booted! abilist={abilist}"]
-                  for step_name, cmd in [
-                      ("fresh_939d02a", [adb, "install", str(apk_paths["v0.7.6-build.939d02a"])]),
-                      ("upgrade_7dcadc5", [adb, "install", "-r", str(apk_paths["v0.7.6-build.7dcadc5"])]),
-                      ("upgrade_b06d040", [adb, "install", "-r", str(apk_paths["v0.7.7-build.b06d040"])]),
-                  ]:
-                      subprocess.run([adb, "logcat", "-c"], check=False)
-                      r = subprocess.run(cmd, capture_output=True, text=True)
-                      lc = subprocess.run(
-                          [adb, "logcat", "-d", "-s", "PackageManager:*", "PackageInstaller:*", "ApkSignatureVerifier:*"],
-                          capture_output=True, text=True,
-                      ).stdout
-                      emu_out.append(f"--- {step_name} (rc={r.returncode}) ---\nOUT: {r.stdout.strip()}\nERR: {r.stderr.strip()}\nLOGCAT:\n{lc[-1200:]}")
-                  emu.terminate()
-                  print(f"::notice title=Forensic Emulator::{esc(chr(10).join(emu_out)[:3800])}", flush=True)
-          except Exception as exc:
-              import traceback
-              print(f"::notice title=Forensic Emulator Error::{esc(traceback.format_exc()[:3500])}", flush=True)
+              adb = str(sdk / "platform-tools/adb")
+              for _ in range(90):
+                  if emu.poll() is not None:
+                      raise RuntimeError(f"Emulator exited early ({emu.returncode}):\n{emu_log.read_text()[-2500:]}")
+                  boot = subprocess.run([adb, "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True).stdout.strip()
+                  if boot == "1":
+                      break
+                  time.sleep(2)
+              else:
+                  raise RuntimeError(f"Emulator boot timeout:\n{emu_log.read_text()[-2500:]}")
+
+              # Wait until PackageManager service is ready
+              for _ in range(30):
+                  pm_chk = subprocess.run([adb, "shell", "pm", "path", "android"], capture_output=True, text=True).stdout.strip()
+                  if pm_chk.startswith("package:"):
+                      break
+                  time.sleep(1)
+
+              abilist = subprocess.run([adb, "shell", "getprop", "ro.product.cpu.abilist"], capture_output=True, text=True).stdout.strip()
+              sdk_ver = subprocess.run([adb, "shell", "getprop", "ro.build.version.sdk"], capture_output=True, text=True).stdout.strip()
+              emu_out = [f"Booted ARM64 Android SDK={sdk_ver} abilist={abilist}"]
+
+              for step_name, cmd in [
+                  ("fresh_939d02a", [adb, "install", str(apk_paths["v0.7.6-build.939d02a"])]),
+                  ("upgrade_7dcadc5", [adb, "install", "-r", str(apk_paths["v0.7.6-build.7dcadc5"])]),
+                  ("upgrade_b06d040", [adb, "install", "-r", str(apk_paths["v0.7.7-build.b06d040"])]),
+                  ("uninstall_all", [adb, "uninstall", "ae.net.Voltlauncher"]),
+                  ("fresh_b06d040", [adb, "install", str(apk_paths["v0.7.7-build.b06d040"])]),
+              ]:
+                  subprocess.run([adb, "logcat", "-c"], check=False)
+                  r = subprocess.run(cmd, capture_output=True, text=True)
+                  lc = subprocess.run(
+                      [adb, "logcat", "-d", "-s", "PackageManager:*", "PackageInstaller:*", "ApkSignatureVerifier:*"],
+                      capture_output=True, text=True,
+                  ).stdout
+                  emu_out.append(
+                      f"=== {step_name} (rc={r.returncode}) ===\n"
+                      f"OUT: {r.stdout.strip()}\nERR: {r.stderr.strip()}\n"
+                      f"LOGCAT:\n{lc[-900:]}"
+                  )
+              emu.terminate()
+              msg = "\n".join(emu_out)
+              for i in range(0, len(msg), 3500):
+                  print(f"::notice title=ARM64 Android 15 {i//3500 + 1}::{esc(msg[i:i+3500])}", flush=True)
+          except Exception:
+              print(f"::notice title=ARM64 Emulator Error::{esc(traceback.format_exc()[:3500])}", flush=True)
 
           raise SystemExit("Diagnostic complete")
           PY
