@@ -106,11 +106,11 @@ jobs:
               env["ANDROID_SDK_ROOT"] = str(sdk)
               env["ANDROID_AVD_HOME"] = str(avd_home)
               subprocess.run(
-                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
+                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-34;google_apis;x86_64' >/dev/null 2>&1",
                   shell=True, check=True, env=env,
               )
               subprocess.run(
-                  f"echo no | '{avdmgr}' create avd -f -n testx86 -p '{avd_home / 'testx86.avd'}' -k 'system-images;android-35;google_apis;x86_64' >/dev/null 2>&1",
+                  f"echo no | '{avdmgr}' create avd -f -n testx86 -p '{avd_home / 'testx86.avd'}' -k 'system-images;android-34;google_apis;x86_64' >/dev/null 2>&1",
                   shell=True, check=True, env=env,
               )
               emu_log = tmp / "emu.log"
@@ -143,112 +143,55 @@ jobs:
                       break
                   time.sleep(1)
 
-              # First test exact unmodified APKs (verifies ApkSignatureVerifier + BoringSSL X.509 + ParsingPackageUtils!)
-              emu_out = ["Booted Android 15 (API 35) x86_64 KVM!"]
+              import re
+              emu_out = ["Booted Android 14 (API 34) x86_64 KVM!"]
+              abilist = subprocess.run([adb, "shell", "getprop", "ro.product.cpu.abilist"], capture_output=True, text=True).stdout.strip()
+              emu_out.append(f"abilist={abilist}")
+
               for tag in tags:
+                  subprocess.run([adb, "push", str(apk_paths[tag]), f"/sdcard/Download/{tag}.apk"], check=True, capture_output=True)
+
+              def ui_install(apk_remote: str, label: str):
                   subprocess.run([adb, "logcat", "-c"], check=False)
-                  r = subprocess.run([adb, "install", str(apk_paths[tag])], capture_output=True, text=True)
-                  lc = subprocess.run(
-                      [adb, "logcat", "-d", "-s", "PackageManager:*", "ApkSignatureVerifier:*"],
-                      capture_output=True, text=True,
-                  ).stdout
-                  emu_out.append(f"RAW {tag} rc={r.returncode} out={r.stdout.strip()} err={r.stderr.strip()}\nLC:{lc[-500:]}")
-
-              # Also build a minimal valid x86_64 shared library and inject lib/x86_64/libhorizon_android.so signed with our exact deterministic key to test FULL install + replace upgrade!
-              c_src = tmp / "stub.c"
-              c_src.write_text("int volt_stub(void) { return 0; }\n")
-              stub_so = tmp / "libhorizon_android.so"
-              subprocess.run(["gcc", "-shared", "-fPIC", str(c_src), "-o", str(stub_so)], check=True)
-
-              # Derive exact same deterministic keystore as build job
-              import hashlib
-              SMALL_PRIMES = [p for p in range(3, 2000, 2) if all(p % d for d in range(3, int(p ** 0.5) + 1, 2))]
-              def is_pp(n):
-                  for p in SMALL_PRIMES:
-                      if n % p == 0: return n == p
-                  d, r = n - 1, ((n - 1) & -(n - 1)).bit_length() - 1
-                  d >>= r
-                  for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
-                      x = pow(a, d, n)
-                      if x == 1 or x == n - 1: continue
-                      for _ in range(r - 1):
-                          x = pow(x, 2, n)
-                          if x == n - 1: break
-                      else: return False
-                  return True
-              def dp_fn(seed):
-                  c = 0
-                  while True:
-                      buf = b"".join(hashlib.sha256(seed + c.to_bytes(4, "big") + i.to_bytes(2, "big")).digest() for i in range(4))
-                      c += 1
-                      cand = int.from_bytes(buf, "big") | (1 << 1023) | (1 << 1022) | 1
-                      if (cand - 1) % 65537 != 0 and is_pp(cand): return cand
-              def dlen(n):
-                  if n < 0x80: return bytes([n])
-                  b = n.to_bytes((n.bit_length() + 7) // 8, "big")
-                  return bytes([0x80 | len(b)]) + b
-              def dtlv(t, b): return bytes([t]) + dlen(len(b)) + b
-              def dint(v):
-                  b = v.to_bytes(max(1, (v.bit_length() + 7) // 8), "big")
-                  return dtlv(0x02, (b"\x00" + b) if (b[0] & 0x80) else b)
-              def dseq(*it): return dtlv(0x30, b"".join(it))
-              p = dp_fn(b"volt-rsa-p-v1:entitybrian69-bit/Volt-launcher")
-              q = dp_fn(b"volt-rsa-q-v1:entitybrian69-bit/Volt-launcher")
-              if p < q: p, q = q, p
-              n = p * q
-              d = pow(65537, -1, (p - 1) * (q - 1))
-              rsa_priv = dseq(dint(0), dint(n), dint(65537), dint(d), dint(p), dint(q), dint(d % (p - 1)), dint(d % (q - 1)), dint(pow(q, -1, p)))
-              rsa_oid = dseq(dtlv(0x06, bytes.fromhex("2a864886f70d010101")), b"\x05\x00")
-              pkcs8 = dseq(dint(0), rsa_oid, dtlv(0x04, rsa_priv))
-              spki = dseq(rsa_oid, dtlv(0x03, b"\x00" + dseq(dint(n), dint(65537))))
-              sha_rsa = dseq(dtlv(0x06, bytes.fromhex("2a864886f70d01010b")), b"\x05\x00")
-              nm = dseq(dtlv(0x31, dseq(dtlv(0x06, bytes.fromhex("550403")), dtlv(0x0c, b"Volt Launcher"))))
-              val = dseq(dtlv(0x17, b"250101000000Z"), dtlv(0x18, b"20550101000000Z"))
-              tbs = dseq(dtlv(0xa0, dint(2)), dint(1), sha_rsa, nm, val, nm, spki)
-              di = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(tbs).digest()
-              em = b"\x00\x01" + (b"\xff" * (256 - 3 - len(di))) + b"\x00" + di
-              cert = dseq(tbs, sha_rsa, dtlv(0x03, b"\x00" + pow(int.from_bytes(em, "big"), d, n).to_bytes(256, "big")))
-              (tmp / "k.der").write_bytes(pkcs8)
-              (tmp / "c.der").write_bytes(cert)
-              subprocess.run(["openssl", "pkey", "-inform", "DER", "-in", str(tmp / "k.der"), "-out", str(tmp / "k.pem")], check=True)
-              subprocess.run(["openssl", "x509", "-inform", "DER", "-in", str(tmp / "c.der"), "-out", str(tmp / "c.pem")], check=True)
-              ks_raw = tmp / "ks_raw.p12"
-              ks = tmp / "ks.p12"
-              subprocess.run(["openssl", "pkcs12", "-export", "-inkey", str(tmp / "k.pem"), "-in", str(tmp / "c.pem"), "-name", "androiddebugkey", "-passout", "pass:android", "-out", str(ks_raw)], check=True)
-              subprocess.run(["keytool", "-importkeystore", "-srckeystore", str(ks_raw), "-srcstoretype", "PKCS12", "-srcstorepass", "android", "-destkeystore", str(ks), "-deststoretype", "PKCS12", "-deststorepass", "android", "-noprompt"], check=True)
-
-              repacked = {}
-              for tag, v3flag in [("v0.7.6-build.939d02a", "false"), ("v0.7.6-build.7dcadc5", "false"), ("v0.7.7-build.b06d040", "true")]:
-                  u = tmp / f"{tag}-u.apk"
-                  al = tmp / f"{tag}-al.apk"
-                  sg = tmp / f"{tag}-sg.apk"
-                  with zipfile.ZipFile(apk_paths[tag], "r") as zin, zipfile.ZipFile(u, "w") as zout:
-                      for info in zin.infolist():
-                          up = info.filename.upper()
-                          if up.startswith("META-INF/") and (up == "META-INF/MANIFEST.MF" or up.endswith((".SF", ".RSA"))):
-                              continue
-                          ni = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
-                          ni.compress_type = info.compress_type
-                          zout.writestr(ni, zin.read(info.filename), compress_type=info.compress_type)
-                      zout.write(stub_so, "lib/x86_64/libhorizon_android.so", compress_type=zipfile.ZIP_DEFLATED)
-                  subprocess.run([zipalign, "-p", "-f", "4", str(u), str(al)], check=True)
                   subprocess.run([
-                      "java", "-jar", apksigner, "sign", "--ks", str(ks), "--ks-type", "PKCS12",
-                      "--ks-pass", "pass:android", "--ks-key-alias", "androiddebugkey", "--key-pass", "pass:android",
-                      "--v1-signing-enabled", v3flag, "--v2-signing-enabled", "true", "--v3-signing-enabled", v3flag, "--v4-signing-enabled", "false",
-                      "--out", str(sg), str(al),
-                  ], check=True)
-                  repacked[tag] = sg
+                      adb, "shell", "appops", "set", "com.android.externalstorage", "REQUEST_INSTALL_PACKAGES", "allow"
+                  ], check=False, capture_output=True)
+                  subprocess.run([
+                      adb, "shell", "appops", "set", "com.google.android.documentsui", "REQUEST_INSTALL_PACKAGES", "allow"
+                  ], check=False, capture_output=True)
+                  uri = f"content://com.android.externalstorage.documents/document/primary%3ADownload%2F{apk_remote}"
+                  subprocess.run([
+                      adb, "shell", "am", "start",
+                      "-a", "android.intent.action.VIEW",
+                      "-d", uri,
+                      "-t", "application/vnd.android.package-archive",
+                      "--grant-read-uri-permission",
+                  ], check=False, capture_output=True)
+                  screens = []
+                  for step in range(8):
+                      time.sleep(2)
+                      subprocess.run([adb, "shell", "uiautomator", "dump", "/sdcard/ui.xml"], check=False, capture_output=True)
+                      xml = subprocess.run([adb, "shell", "cat", "/sdcard/ui.xml"], capture_output=True, text=True).stdout
+                      texts = re.findall(r'text="([^"]+)"', xml)
+                      if texts:
+                          screens.append(f"t{step}:{texts}")
+                      for btn in ("Install", "Update", "INSTALL", "UPDATE", "Settings"):
+                          m = re.search(rf'text="{btn}"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml)
+                          if m and btn != "Settings":
+                              cx = (int(m.group(1)) + int(m.group(3))) // 2
+                              cy = (int(m.group(2)) + int(m.group(4))) // 2
+                              subprocess.run([adb, "shell", "input", "tap", str(cx), str(cy)], check=False)
+                              break
+                      if any("App installed" in t or "not installed" in t.lower() or "invalid" in t.lower() for t in texts):
+                          break
+                  lc = subprocess.run([adb, "logcat", "-d", "*:W"], capture_output=True, text=True).stdout
+                  pm_lines = [ln for ln in lc.splitlines() if any(k in ln for k in ("Package", "Install", "Volt", "horizon", "Sign", "Cert", "Downgrade", "dex", "Native"))]
+                  subprocess.run([adb, "shell", "input", "keyevent", "KEYCODE_HOME"], check=False)
+                  emu_out.append(f"UI {label}: {' -> '.join(screens)}\nWARN/ERR:\n" + "\n".join(pm_lines[-25:]))
 
-              for name, cmd in [
-                  ("install_939d02a", [adb, "install", str(repacked["v0.7.6-build.939d02a"])]),
-                  ("upgrade_7dcadc5", [adb, "install", "-r", str(repacked["v0.7.6-build.7dcadc5"])]),
-                  ("upgrade_b06d040", [adb, "install", "-r", str(repacked["v0.7.7-build.b06d040"])]),
-              ]:
-                  subprocess.run([adb, "logcat", "-c"], check=False)
-                  r = subprocess.run(cmd, capture_output=True, text=True)
-                  lc = subprocess.run([adb, "logcat", "-d", "-s", "PackageManager:*", "ApkSignatureVerifier:*"], capture_output=True, text=True).stdout
-                  emu_out.append(f"=== {name} rc={r.returncode} ===\nOUT:{r.stdout.strip()} ERR:{r.stderr.strip()}\nLC:{lc[-600:]}")
+              ui_install("v0.7.6-build.939d02a.apk", "fresh_939d02a")
+              ui_install("v0.7.6-build.7dcadc5.apk", "update_7dcadc5")
+              ui_install("v0.7.7-build.b06d040.apk", "update_b06d040")
 
               emu.kill()
               emu.wait(timeout=10)
