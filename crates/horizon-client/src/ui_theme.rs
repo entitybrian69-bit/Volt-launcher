@@ -594,9 +594,6 @@ impl<'a> Ui<'a> {
         draw_h: f32,
         alpha: u8,
     ) -> bool {
-        if self.dry {
-            return false;
-        }
         let Some(rect) = self.dynamic_rgba(slot, hash, w, h, rgba) else {
             return false;
         };
@@ -632,7 +629,7 @@ impl<'a> Ui<'a> {
         pivot_dp: [f32; 2],
         alpha_mul: f32,
     ) {
-        if self.dry || start >= self.batch.vertices.len() {
+        if start >= self.batch.vertices.len() {
             return;
         }
         let dx = self.to_batch(dx_dp);
