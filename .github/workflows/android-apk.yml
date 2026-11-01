@@ -684,7 +684,7 @@ jobs:
                       "--ks-pass", "pass:android",
                       "--ks-key-alias", "androiddebugkey",
                       "--key-pass", "pass:android",
-                      "--min-sdk-version", "24",
+                      "--min-sdk-version", "21",
                       "--v1-signing-enabled", "true",
                       "--v2-signing-enabled", "true",
                       "--v3-signing-enabled", "false",
@@ -697,7 +697,7 @@ jobs:
               run_checked([str(zipalign), "-c", "4", str(dst_apk)])
               sig_out = run_checked([
                   str(java), "-jar", str(apksigner_jar), "verify",
-                  "--min-sdk-version", "24",
+                  "--min-sdk-version", "21",
                   "--max-sdk-version", "35",
                   "--verbose", "--print-certs",
                   str(dst_apk),
