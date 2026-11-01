@@ -10,6 +10,7 @@
 //! while its master switch is off.
 use super::{Dim, Game, Hit, Screen, native_hooks::NativeMinimap};
 use horizon_client::{
+    blocks::Fluid,
     clipboard::Clipboard,
     extras::{Corner, Cps, FpsCounter, MINIMAP_ZOOMS, fov_target},
     extras_hud::{self, Corners, MinimapPin, RadarDot, WorldWaypointDraw},
@@ -27,6 +28,7 @@ use horizon_client::{
         project_waypoint, resolve_accurate_placement, world_to_minimap_offset,
     },
 };
+use horizon_world::registry::BlockStateId;
 use std::time::Duration;
 use winit::{event::MouseButton, keyboard::KeyCode};
 
@@ -441,9 +443,8 @@ impl Game<'_> {
                 p[2].floor() as i32,
             ];
             let cell_state = self.world.block(cell[0], cell[1], cell[2]);
-            if self.world.shape(cell[0], cell[1], cell[2]).is_empty()
-                && facts.get(cell_state).fluid == 0
-            {
+            let cell_facts = facts.get(cell_state);
+            if cell_facts.outline.is_empty() && cell_facts.fluid == Fluid::None {
                 let mut best: Option<(f64, [i32; 3], [i32; 3])> = None;
                 for normal in [
                     [1, 0, 0],
@@ -460,7 +461,11 @@ impl Game<'_> {
                         cell[2] - normal[2],
                     ];
                     let sup_state = self.world.block(support[0], support[1], support[2]);
-                    if sup_state == 0 || self.world.shape(support[0], support[1], support[2]).is_empty() {
+                    let sup_facts = facts.get(sup_state);
+                    if self.world.is_air(sup_state)
+                        || sup_facts.replaceable
+                        || sup_facts.outline.is_empty()
+                    {
                         continue;
                     }
                     // Distance from ray sample `p` inside `cell` to the shared face plane:
@@ -569,8 +574,7 @@ impl Game<'_> {
             return true;
         }
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let replaceable = self.world.shape(hit.pos[0], hit.pos[1], hit.pos[2]).is_empty()
-            && state != 0;
+        let replaceable = self.res.facts().get(state).replaceable && !self.world.is_air(state);
         let target = if replaceable {
             hit.pos
         } else {
@@ -604,9 +608,9 @@ impl Game<'_> {
     pub(super) fn refine_singleplayer_placed_state(
         &mut self,
         target: [i32; 3],
-        state: u16,
+        state: BlockStateId,
         resolved: &ResolvedPlacement,
-    ) -> u16 {
+    ) -> BlockStateId {
         let Some(mut reg_state) = self.pack.assets.registry.state(state).cloned() else {
             return state;
         };
@@ -926,11 +930,10 @@ impl Game<'_> {
         let Some(scope) = self.current_world_scope() else {
             return Vec::new();
         };
-        let Some((cam_pos, cam_yaw)) = self.locator_camera else {
+        let Some((cam_pos, cam_yaw, cam_pitch, cam_fov)) = self.locator_camera else {
             return Vec::new();
         };
         let cur_dim = self.dim.id();
-        let fov = self.zoomed_fov_degrees(self.settings.fov);
         let scale = f32::from(e.waypoint_scale) / 100.0;
         let max_dist = f64::from(e.waypoint_max_distance);
         let mut out = Vec::new();
@@ -947,8 +950,8 @@ impl Game<'_> {
             let projected = project_waypoint(
                 cam_pos,
                 cam_yaw,
-                self.pitch,
-                fov,
+                cam_pitch,
+                cam_fov,
                 screen_w,
                 screen_h,
                 coords,
