@@ -397,7 +397,7 @@ impl Game<'_> {
             r.improved_transparency = s.improved_transparency;
             r.set_present_mode(s.vsync, s.horizon.present_mode);
             r.animated_textures = s.horizon.animated_textures;
-            r.animation_step_ticks = s.extras.smart_animations.step_ticks();
+            r.animation_step_ticks = if s.extras.anim_throttle { 2 } else { 1 };
             r.set_mipmap_levels(s.mipmap_levels.max(0) as u32);
             r.set_texture_filtering(
                 s.file.int("textureFiltering"),
@@ -419,7 +419,7 @@ impl Game<'_> {
             );
         }
         self.particles.max_particles = s.extras.particle_budget.max_particles();
-        self.particles.max_render_distance_sq = s.extras.particle_distance.max_dist_sq();
+        self.particles.max_render_distance_sq = s.extras.particle_budget.max_distance_sq();
         self.particles.burst_shield = s.extras.chaos_particle_shield;
         horizon_threads::set_thread_boost(s.extras.thread_boost);
         #[cfg(target_os = "android")]
@@ -491,18 +491,17 @@ impl Game<'_> {
             .settings
             .horizon
             .battery_limit(limit, self.title.is_none(), self.focused);
-        let dyn_fps = self.settings.extras.dynamic_fps;
-        if dyn_fps != horizon_client::volt_features::DynamicFpsMode::Off {
-            let eco = dyn_fps == horizon_client::volt_features::DynamicFpsMode::Eco;
+        if let Some(idle_cap) = self.settings.extras.dynamic_fps.cap_fps() {
+            let cap = idle_cap as i32;
             let now_ms = self.started.elapsed().as_millis() as i64;
             let latest_input_ms =
                 self.last_input.duration_since(self.started).as_millis() as i64;
             if !self.focused {
-                limit = limit.min(if eco { 10 } else { 15 });
+                limit = limit.min(cap.min(15));
             } else if self.title.is_some() || self.screen != super::Screen::Playing {
-                limit = limit.min(if eco { 30 } else { 60 });
+                limit = limit.min(cap);
             } else if now_ms.saturating_sub(latest_input_ms) > 45_000 {
-                limit = limit.min(if eco { 20 } else { 30 });
+                limit = limit.min(cap);
             }
         }
         limit

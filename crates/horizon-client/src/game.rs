@@ -9609,12 +9609,12 @@ impl Game<'_> {
         self.mark_translucent_entity(out.len(), "minecraft:entity_shadow");
         let shadow_mode = self.settings.extras.fast_shadows;
         let shadow_sprite = (self.settings.entity_shadows
-            && shadow_mode != horizon_client::volt_features::FastShadowsMode::Off)
+            && shadow_mode != horizon_client::volt_features::FastShadowMode::Off)
             .then(|| self.gui.atlas.sprites.get("misc/shadow").copied())
             .flatten();
         if let Some(sprite) = shadow_sprite {
             let nearby_only =
-                shadow_mode == horizon_client::volt_features::FastShadowsMode::Nearby16;
+                shadow_mode == horizon_client::volt_features::FastShadowMode::Nearby16;
             // DimensionType.ambientLight: the_nether 0.1, the_end 0.25.
             let ambient = match self.dim {
                 Dim::Nether => 0.1,
@@ -9725,7 +9725,12 @@ impl Game<'_> {
                         | "minecraft:test_instance_block"
                 )
             };
-            let max_be = self.settings.extras.block_entity_cap.max_block_entities();
+            let (max_be, max_be_dist_sq) = self
+                .settings
+                .extras
+                .block_entity_cap
+                .limit_and_dist_sq()
+                .unwrap_or((usize::MAX, f64::INFINITY));
             let mut visible_vec: Vec<([i32; 3], u32)> = r
                 .visible_block_entities(self.settings.chunk_fade)
                 .filter(|(p, state)| {
@@ -9735,13 +9740,16 @@ impl Game<'_> {
                     if off_screen(*state) {
                         return true;
                     }
+                    let rel = glam::DVec3::new(
+                        f64::from(p[0]),
+                        f64::from(p[1]),
+                        f64::from(p[2]),
+                    ) - camera;
+                    if rel.length_squared() > max_be_dist_sq {
+                        return false;
+                    }
                     let in_view = view.is_none_or(|v| {
-                        let o = (glam::DVec3::new(
-                            f64::from(p[0]),
-                            f64::from(p[1]),
-                            f64::from(p[2]),
-                        ) - camera)
-                            .as_vec3();
+                        let o = rel.as_vec3();
                         v.intersects(o - glam::Vec3::ONE, o + glam::Vec3::splat(2.0))
                     });
                     if !in_view {
@@ -14720,7 +14728,12 @@ impl Game<'_> {
         let (far_distance, far_reduced) = self.far_terrain_choice();
         if let Some(renderer) = self.renderer.as_mut() {
             let g = &self.settings.horizon;
-            let volt_cap = self.settings.extras.chunk_upload_cap.max_sections_per_frame();
+            let volt_cap = self
+                .settings
+                .extras
+                .chunk_upload_cap
+                .max_uploads()
+                .unwrap_or(usize::MAX);
             let frustum_prio = self.settings.extras.frustum_priority_mesh;
             let look_dir = self.forward();
             let cam_pos = self.player.as_ref().map(|p| p.position);

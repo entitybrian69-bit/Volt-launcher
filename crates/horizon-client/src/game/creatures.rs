@@ -5214,7 +5214,12 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
-        let max_entities = self.settings.extras.entity_cap.max_entities();
+        let max_entities = self
+            .settings
+            .extras
+            .entity_cap
+            .limit()
+            .unwrap_or(usize::MAX);
         let hub_shield = self.settings.extras.hub_lag_shield && self.mobs.len() > 24;
         let throttle_distant = self.settings.extras.distant_mob_throttle;
         let mut sorted: Vec<(usize, f64)> = Vec::new();

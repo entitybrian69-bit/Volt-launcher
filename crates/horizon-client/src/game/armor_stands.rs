@@ -764,7 +764,7 @@ impl Game<'_> {
             // which is 0.0 (reverse Z; the bytecode is `dconst_0`): an empty
             // marker box falls back to 4, so a visible marker stand draws.
             // Holograms stay hidden through the invisible flag instead.
-            let base_range = if edge == 0.0 { 4.0 } else { edge } * 64.0;
+            let base_range: f64 = if edge == 0.0 { 4.0 } else { edge } * 64.0;
             let range = if hub_shield {
                 base_range.min(16.0)
             } else {

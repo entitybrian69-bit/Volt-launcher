@@ -318,7 +318,7 @@ impl Game<'_> {
     /// frame, not per item (`GameRenderer.extractOptions`).
     pub(super) fn capture_glint_frame(&self) -> item_render::GlintFrame {
         let alpha = if self.settings.extras.glint_mode
-            == horizon_client::volt_features::GlintMode::Off
+            == horizon_client::volt_features::GlintTrimMode::Off
         {
             0.0
         } else {
@@ -362,7 +362,7 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         let glint = if self.settings.extras.glint_mode
-            == horizon_client::volt_features::GlintMode::NearbyOnly12m
+            == horizon_client::volt_features::GlintTrimMode::NearbyOnly
             && pose.w_axis.truncate().length_squared() > 144.0
         {
             None
@@ -412,10 +412,14 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
-        let max_items = self.settings.extras.item_render_cap.max_items();
-        let mut ordered_live: Vec<(usize, [f64; 3], f64)> = Vec::new();
-        if max_items < usize::MAX && self.dropped.len() > max_items {
-            ordered_live.reserve(self.dropped.len());
+        let (max_items, max_dist_sq) = self
+            .settings
+            .extras
+            .item_render_cap
+            .limit_and_dist_sq()
+            .unwrap_or((usize::MAX, 64.0 * 64.0));
+        let live_indices: Vec<usize> = if max_items < usize::MAX && self.dropped.len() > max_items {
+            let mut ordered: Vec<(usize, f64)> = Vec::with_capacity(self.dropped.len());
             for (idx, item) in self.dropped.iter().enumerate() {
                 let (p, q) = (item.previous, item.position);
                 let at = [
@@ -424,32 +428,26 @@ impl Game<'_> {
                     p.z + (q.z - p.z) * alpha,
                 ];
                 let d_sq = (glam::DVec3::from_array(at) - camera).length_squared();
-                if d_sq <= 64.0 * 64.0 {
-                    ordered_live.push((idx, at, d_sq));
+                if d_sq <= max_dist_sq {
+                    ordered.push((idx, d_sq));
                 }
             }
-            ordered_live.sort_unstable_by(|a, b| a.2.total_cmp(&b.2));
-            ordered_live.truncate(max_items);
-        }
-        let use_sorted = max_items < usize::MAX && self.dropped.len() > max_items;
-        let live_iter: Box<dyn Iterator<Item = (&horizon_client::DroppedItem, [f64; 3], f32)>> =
-            if use_sorted {
-                Box::new(
-                    ordered_live
-                        .iter()
-                        .map(|&(idx, at, _)| (&self.dropped[idx], at, alpha as f32)),
-                )
-            } else {
-                Box::new(self.dropped.iter().map(|item| {
-                    let (p, q) = (item.previous, item.position);
-                    let at = [
-                        p.x + (q.x - p.x) * alpha,
-                        p.y + (q.y - p.y) * alpha,
-                        p.z + (q.z - p.z) * alpha,
-                    ];
-                    (item, at, alpha as f32)
-                }))
-            };
+            ordered.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            ordered.truncate(max_items);
+            ordered.into_iter().map(|(idx, _)| idx).collect()
+        } else {
+            (0..self.dropped.len()).collect()
+        };
+        let live = live_indices.into_iter().map(|idx| {
+            let item = &self.dropped[idx];
+            let (p, q) = (item.previous, item.position);
+            let at = [
+                p.x + (q.x - p.x) * alpha,
+                p.y + (q.y - p.y) * alpha,
+                p.z + (q.z - p.z) * alpha,
+            ];
+            (item, at, alpha as f32)
+        });
         // ItemPickupParticle: the render state extracted at partial tick 1.
         let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
             super::pickups::Taken::Item(item) => {
@@ -458,7 +456,7 @@ impl Game<'_> {
             _ => None,
         });
         let mut rendered = 0usize;
-        for (item, at, partial) in live_iter.chain(taken) {
+        for (item, at, partial) in live.chain(taken) {
             if rendered >= max_items {
                 break;
             }
@@ -466,7 +464,7 @@ impl Game<'_> {
             let q = item.position;
             let pos = glam::DVec3::from_array(at) - camera;
             let dist_sq = pos.length_squared();
-            if dist_sq > 64.0 * 64.0 {
+            if dist_sq > max_dist_sq {
                 continue;
             }
             if self.is_aabb_occluded(

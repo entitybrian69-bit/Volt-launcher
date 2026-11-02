@@ -548,7 +548,12 @@ impl Game<'_> {
         self.particles.tick(&level);
         self.tick_pickups();
         let camera = self.particles.camera;
-        let max_voices = self.settings.extras.audio_voice_cap.max_voices();
+        let max_voices = self
+            .settings
+            .extras
+            .audio_voice_cap
+            .max_per_tick()
+            .unwrap_or(usize::MAX);
         for (idx, (name, at, volume, pitch, delayed)) in
             std::mem::take(&mut self.particles.sounds)
                 .into_iter()
