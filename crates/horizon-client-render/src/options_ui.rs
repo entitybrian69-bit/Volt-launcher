@@ -5865,7 +5865,7 @@ mod tests {
         assert!(vb_widgets.iter().any(|w| matches!(
             &w.kind,
             WKind::Button {
-                act: Act::Extra(crate::extras::Item::VoltPresetCompetitive),
+                act: Act::Extra(crate::extras::Item::VoltPreset),
                 active: true,
                 ..
             }
