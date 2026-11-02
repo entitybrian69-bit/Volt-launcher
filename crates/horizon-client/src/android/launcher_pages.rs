@@ -802,7 +802,7 @@ impl DrawCtx<'_> {
         // Interactive Crimson Version Selector Pill (`1.20.1` .. `26.3`)
         let badge_y = hy + if compact { 56.0 } else { 88.0 };
         let ver_btn_label = format!("Minecraft Java {}   v", selected_ver.id());
-        let ver_w = (ui.width(Face::Medium, 15.0, &ver_btn_label) + 52.0)
+        let ver_w = (ui.measure(Face::Medium, 15.0, &ver_btn_label) + 52.0)
             .clamp(216.0, (hw - 52.0).max(160.0));
         let ver_rect = [hx + 26.0, badge_y, ver_w, 38.0];
         ui.rounded(ver_rect[0], ver_rect[1], ver_rect[2], ver_rect[3], 10.0, theme::CRIMSON_BADGE);
