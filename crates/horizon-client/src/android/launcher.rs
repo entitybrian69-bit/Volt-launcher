@@ -41,7 +41,6 @@ pub(super) struct Launcher {
     renderer: Option<Renderer>,
     renderer_signature: Option<(crate::catalog::RendererMode, Option<String>)>,
     gui: Option<game::UiResources>,
-    pub(super) audio: Option<horizon_client::audio::Audio>,
     game: Option<game::AndroidGame>,
     cursor: (f64, f64),
     mouse_down: bool,
@@ -79,8 +78,9 @@ pub(super) struct Launcher {
     update_prompt: Option<crate::volt_updater::UpdatePrompt>,
     pub(super) controls_studio: controls_studio::ControlsStudio,
     pub(super) pending_play: bool,
-    audio_init_attempted: bool,
-    pub(super) last_click_sound: Option<Instant>,
+    pub(super) pending_activate: Option<(f64, f64, Option<usize>)>,
+    pub(super) pending_escape: bool,
+    pub(super) transition_guard_until: Option<Instant>,
     pub(super) needs_redraw: bool,
     last_redraw: Instant,
 }
@@ -89,13 +89,16 @@ impl Launcher {
     pub(super) fn new(home: PathBuf) -> Self {
         // Upgrade existing installations that retained the old download cache.
         let cleanup_home = home.clone();
-        std::thread::spawn(move || {
-            if let Err(error) =
-                horizon_client::official_install::cleanup_completed_downloads(&cleanup_home)
-            {
-                log::warn!("Could not clean completed Minecraft downloads: {error}");
-            }
-        });
+        let _ = std::thread::Builder::new()
+            .name("volt-cleanup".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                if let Err(error) =
+                    horizon_client::official_install::cleanup_completed_downloads(&cleanup_home)
+                {
+                    log::warn!("Could not clean completed Minecraft downloads: {error}");
+                }
+            });
         let mut catalog = Catalog::new(&home);
         if crate::diagnostics::previous_unclean(&home) {
             catalog.status = crate::diagnostics::summary(&home);
@@ -162,7 +165,6 @@ impl Launcher {
             renderer: None,
             renderer_signature: None,
             gui: None,
-            audio: None,
             game: None,
             cursor: (0.0, 0.0),
             mouse_down: false,
@@ -199,10 +201,18 @@ impl Launcher {
             update_prompt: None,
             controls_studio: Default::default(),
             pending_play: false,
-            audio_init_attempted: false,
-            last_click_sound: None,
+            pending_activate: None,
+            pending_escape: false,
+            transition_guard_until: None,
             needs_redraw: true,
             last_redraw: Instant::now() - Duration::from_secs(1),
+        }
+    }
+
+    pub(super) fn request_activate(&mut self) {
+        if self.pending_activate.is_none() {
+            self.pending_activate = Some((self.cursor.0, self.cursor.1, self.focus));
+            self.needs_redraw = true;
         }
     }
 
@@ -246,7 +256,9 @@ impl Launcher {
         self.focus = None;
         self.pending_focus = None;
         self.pending_play = false;
-        self.audio_init_attempted = false;
+        self.pending_activate = None;
+        self.pending_escape = false;
+        self.transition_guard_until = None;
         self.needs_redraw = true;
         if let Err(error) = std::env::set_current_dir(&self.home) {
             self.fail(error);
@@ -447,21 +459,28 @@ impl Launcher {
                             let (sender, receiver) = mpsc::channel();
                             self.session_worker = Some(receiver);
                             self.catalog.status = "Preparing Microsoft session...".into();
-                            std::thread::spawn(move || {
-                                let result = (|| {
-                                    login::Login::session(&id)?
-                                        .map(|(a, s)| {
-                                            crate::account::write_session_file(
-                                                &game_home.join("sessions"),
-                                                &a,
-                                                &s,
-                                            )
-                                        })
-                                        .transpose()
-                                        .map(|path| (path, None))
-                                })();
-                                let _ = sender.send(result);
-                            });
+                            if let Err(err) = std::thread::Builder::new()
+                                .name("volt-msa-session".into())
+                                .stack_size(4 * 1024 * 1024)
+                                .spawn(move || {
+                                    let result = (|| {
+                                        login::Login::session(&id)?
+                                            .map(|(a, s)| {
+                                                crate::account::write_session_file(
+                                                    &game_home.join("sessions"),
+                                                    &a,
+                                                    &s,
+                                                )
+                                            })
+                                            .transpose()
+                                            .map(|path| (path, None))
+                                    })();
+                                    let _ = sender.send(result);
+                                })
+                            {
+                                self.session_worker = None;
+                                return Err(format!("Could not start Microsoft session worker: {err}").into());
+                            }
                             return Ok(());
                         }
                         SESSION.with(|s| *s.borrow_mut() = None);
@@ -477,17 +496,24 @@ impl Launcher {
                         let (sender, receiver) = mpsc::channel();
                         self.session_worker = Some(receiver);
                         self.catalog.status = "Preparing Ely.by session...".into();
-                        std::thread::spawn(move || {
-                            let out = crate::volt_accounts::prepare_ely_session_off_thread(
-                                account_id,
-                                name,
-                                uuid_hex,
-                                access_token,
-                                client_token,
-                                session_path,
-                            );
-                            let _ = sender.send(Ok(out));
-                        });
+                        if let Err(err) = std::thread::Builder::new()
+                            .name("volt-ely-session".into())
+                            .stack_size(4 * 1024 * 1024)
+                            .spawn(move || {
+                                let out = crate::volt_accounts::prepare_ely_session_off_thread(
+                                    account_id,
+                                    name,
+                                    uuid_hex,
+                                    access_token,
+                                    client_token,
+                                    session_path,
+                                );
+                                let _ = sender.send(Ok(out));
+                            })
+                        {
+                            self.session_worker = None;
+                            return Err(format!("Could not start Ely.by session worker: {err}").into());
+                        }
                         return Ok(());
                     }
                     crate::volt_accounts::LaunchSession::Immediate(session_file) => {
@@ -498,7 +524,6 @@ impl Launcher {
             self.session_ready = false;
             std::fs::create_dir_all(&game_home)?;
             std::env::set_current_dir(game_home)?;
-            self.audio = None;
             self.error = None;
             let _ = std::fs::remove_file(self.home.join("android-error.txt"));
             if self.catalog.config.record_performance || self.catalog.config.device.gpu_profile {
@@ -613,6 +638,9 @@ impl ApplicationHandler for Launcher {
             return game.suspended(events);
         }
         self.drag = None;
+        self.mouse_down = false;
+        self.pending_activate = None;
+        self.pending_escape = false;
         if let Some(renderer) = &mut self.renderer {
             renderer.suspend_surface();
         }
@@ -715,6 +743,8 @@ impl ApplicationHandler for Launcher {
                 self.controller_repeat = None;
                 self.mouse_down = false;
                 self.drag = None;
+                self.pending_activate = None;
+                self.pending_escape = false;
                 Ok(())
             }
             WindowEvent::MouseInput {
@@ -736,11 +766,10 @@ impl ApplicationHandler for Launcher {
                 } else if std::mem::take(&mut self.mouse_down) {
                     let studio_dragged = self.controls_studio.pointer_up();
                     let dragged = self.drag.take().is_some_and(|d| d.moved);
-                    if dragged || studio_dragged {
-                        Ok(())
-                    } else {
-                        self.activate(events)
+                    if !dragged && !studio_dragged {
+                        self.request_activate();
                     }
+                    Ok(())
                 } else {
                     Ok(())
                 }
@@ -774,7 +803,8 @@ impl ApplicationHandler for Launcher {
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
                     )
                 {
-                    self.activate(events)
+                    self.request_activate();
+                    Ok(())
                 } else {
                     self.type_key(event);
                     Ok(())
@@ -807,36 +837,34 @@ impl ApplicationHandler for Launcher {
             self.restore_launcher(events);
             return;
         }
-        if std::mem::take(&mut self.pending_play) {
-            if let Err(error) = self.action(events) {
+        // Process deferred input activations outside android-activity's InputQueue critical section.
+        if std::mem::take(&mut self.pending_escape) {
+            self.handle_escape();
+            self.needs_redraw = true;
+        }
+        if let Some((cx, cy, focus)) = self.pending_activate.take() {
+            self.cursor = (cx, cy);
+            self.focus = focus;
+            if let Err(error) = self.activate(events) {
                 self.fail(error);
             }
-            if self.game.is_some() {
-                return;
+            self.needs_redraw = true;
+        }
+        if self.pending_play {
+            if horizon_client::official_install::ready(&self.home) && !crate::engine_data_ready() {
+                self.catalog.status = "Preparing bundled Minecraft 26.3 engine...".into();
+                self.needs_redraw = true;
+            } else {
+                self.pending_play = false;
+                if let Err(error) = self.action(events) {
+                    self.fail(error);
+                }
+                if self.game.is_some() {
+                    return;
+                }
             }
         }
         crate::diagnostics::heartbeat("launcher", || serde_json::json!({}));
-        if !self.audio_init_attempted
-            && self.renderer.is_some()
-            && !self.needs_redraw
-            && horizon_client::official_install::ready(&self.home)
-        {
-            self.audio_init_attempted = true;
-            let mut audio =
-                horizon_client::audio::Audio::new(&self.home.join(".local/horizon-client/26.3"));
-            let settings = horizon_client::settings::Settings::load(
-                &self
-                    .catalog
-                    .config
-                    .game_home(&self.home)
-                    .join("options.txt"),
-            );
-            audio.master = settings.volumes[0];
-            let mut volumes = settings.volumes;
-            volumes[0] = 1.0;
-            horizon_client::settings::set_source_volumes(volumes);
-            self.audio = Some(audio);
-        }
         if let Some(result) = self
             .diagnostic_export
             .as_ref()
@@ -883,9 +911,6 @@ impl ApplicationHandler for Launcher {
                 crate::platform::hide();
             }
             self.catalog.edit(out, &self.home);
-        }
-        if let Some(audio) = &mut self.audio {
-            audio.tick(false, &Default::default());
         }
         self.catalog.poll(&self.home);
         if let Some(notice) = crate::documents::poll() {
@@ -1019,10 +1044,13 @@ impl ApplicationHandler for Launcher {
         }
 
         let now = Instant::now();
+        let min_frame = Duration::from_millis(14);
+        let since_last = now.saturating_duration_since(self.last_redraw);
         let frame_wait = if self.drag.is_some()
             || self.is_animating()
             || self.worker.is_some()
             || self.catalog.busy()
+            || (self.pending_play && !crate::engine_data_ready())
         {
             Duration::from_millis(16)
         } else if matches!(self.catalog.page, Page::Play | Page::Account) {
@@ -1030,11 +1058,22 @@ impl ApplicationHandler for Launcher {
         } else {
             Duration::from_millis(50)
         };
-        if self.needs_redraw || now.duration_since(self.last_redraw) >= frame_wait {
+        if self.needs_redraw {
+            // Coalesce high-rate touch bursts to <= ~70 FPS so swapchain acquire/present
+            // never outpaces Android's BufferQueue during rapid multi-finger taps.
+            if since_last >= min_frame {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                events.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(8)));
+            } else {
+                events.set_control_flow(ControlFlow::WaitUntil(self.last_redraw + min_frame));
+            }
+        } else if since_last >= frame_wait {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
-            events.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(4)));
+            events.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(8)));
         } else {
             events.set_control_flow(ControlFlow::WaitUntil(self.last_redraw + frame_wait));
         }

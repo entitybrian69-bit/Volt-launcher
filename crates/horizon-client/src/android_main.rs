@@ -70,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.9.3"
+        "0.9.4"
     } else {
-        "0.9.3-dev"
+        "0.9.4-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -313,6 +313,10 @@ pub(crate) fn ensure_engine_data(app: &AndroidApp, home: &std::path::Path) {
     }
 }
 
+pub(crate) fn engine_data_ready() -> bool {
+    *ENGINE_DATA_DONE.0.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub(crate) fn wait_for_engine_data() {
     let (lock, cvar) = &ENGINE_DATA_DONE;
     let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -344,6 +348,9 @@ fn android_main(app: AndroidApp) {
         log::error!("Cannot initialize local diagnostics: {error}");
     }
     if let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
+        // Keep the main native loop thread permanently attached so periodic JNI calls
+        // never churn ART AttachCurrentThread/DetachCurrentThread per frame.
+        let _ = vm.attach_current_thread_permanently();
         secure_store::initialize(vm);
     }
     let app_for_engine = app.clone();

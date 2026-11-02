@@ -197,14 +197,16 @@ impl Surface for NativeSurface {
 
         let original_format = device.shared.private_caps.map_texture_format(config.format);
         let mut raw_flags = vk::SwapchainCreateFlagsKHR::empty();
-        let mut raw_view_formats: Vec<vk::Format> = vec![];
-        if !config.view_formats.is_empty() {
+        let mut raw_view_formats: Vec<vk::Format> = config
+            .view_formats
+            .iter()
+            .map(|f| device.shared.private_caps.map_texture_format(*f))
+            .filter(|&f| f != original_format)
+            .collect();
+        raw_view_formats.sort_unstable();
+        raw_view_formats.dedup();
+        if !raw_view_formats.is_empty() {
             raw_flags |= vk::SwapchainCreateFlagsKHR::MUTABLE_FORMAT;
-            raw_view_formats = config
-                .view_formats
-                .iter()
-                .map(|f| device.shared.private_caps.map_texture_format(*f))
-                .collect();
             raw_view_formats.push(original_format);
         }
 

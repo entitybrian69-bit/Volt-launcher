@@ -419,9 +419,16 @@ impl Catalog {
         self.status = status.into();
         let (tx, rx) = mpsc::channel();
         self.worker = Some(rx);
-        std::thread::spawn(move || {
-            let _ = tx.send(job());
-        });
+        if let Err(err) = std::thread::Builder::new()
+            .name("volt-catalog-job".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let _ = tx.send(job());
+            })
+        {
+            self.worker = None;
+            self.status = format!("Could not start launcher worker: {err}");
+        }
     }
     pub fn poll(&mut self, home: &Path) {
         let reply = self.worker.as_ref().and_then(|rx| match rx.try_recv() {
@@ -595,10 +602,17 @@ impl Catalog {
             self.icon_pending.insert(url.clone());
             let tx = self.icon_tx.clone();
             let home_buf = home.to_path_buf();
-            std::thread::spawn(move || {
-                let decoded = fetch_and_round_icon(&home_buf, &url);
-                let _ = tx.send((url, decoded));
-            });
+            if std::thread::Builder::new()
+                .name("volt-icon-fetch".into())
+                .stack_size(4 * 1024 * 1024)
+                .spawn(move || {
+                    let decoded = fetch_and_round_icon(&home_buf, &url);
+                    let _ = tx.send((url, decoded));
+                })
+                .is_err()
+            {
+                self.icon_pending.remove(&p.icon_url);
+            }
         }
     }
     fn start_search(&mut self) {
@@ -610,10 +624,17 @@ impl Catalog {
         };
         let (tx, rx) = mpsc::channel();
         self.search_worker = Some(rx);
-        std::thread::spawn(move || {
-            let result = run_catalog_query(page, origin, &text, offset);
-            let _ = tx.send(result);
-        });
+        if let Err(err) = std::thread::Builder::new()
+            .name("volt-catalog-search".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let result = run_catalog_query(page, origin, &text, offset);
+                let _ = tx.send(result);
+            })
+        {
+            self.search_worker = None;
+            self.status = format!("Search unavailable: {err}");
+        }
     }
     pub fn import_native(&mut self, home: &Path) {
         let url = self.query.trim().to_owned();

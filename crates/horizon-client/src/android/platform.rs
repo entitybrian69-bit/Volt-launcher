@@ -27,8 +27,8 @@ fn with_vibrator(f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::R
         let Ok(mut env) = vm.attach_current_thread() else {
             return;
         };
-        let result = env.with_local_frame(16, |env| -> jni::errors::Result<()> {
-            VIBRATOR.with(|cache| {
+        let result = env.with_local_frame(64, |env| -> jni::errors::Result<()> {
+            let out = VIBRATOR.with(|cache| {
                 let mut cache = cache.borrow_mut();
                 if cache.is_none() {
                     let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
@@ -53,7 +53,11 @@ fn with_vibrator(f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::R
                     f(env, service.as_obj())?;
                 }
                 Ok(())
-            })
+            });
+            if out.is_err() {
+                let _ = env.exception_clear();
+            }
+            out
         });
         if let Err(error) = result {
             // A device without a vibrator must not leave a pending Java exception.
@@ -206,9 +210,13 @@ pub(crate) fn with_context<R>(
         let app = app.as_ref()?;
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
         let mut env = vm.attach_current_thread().ok()?;
-        let result = env.with_local_frame(16, |env| {
+        let result = env.with_local_frame(64, |env| {
             let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
-            f(env, &activity)
+            let out = f(env, &activity);
+            if out.is_err() {
+                let _ = env.exception_clear();
+            }
+            out
         });
         match result {
             Ok(value) => Some(value),
@@ -598,56 +606,63 @@ pub fn open_login_url(url: &str) -> Result<(), String> {
         let app = app.as_ref().ok_or("Android activity unavailable")?;
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.map_err(|e| e.to_string())?;
         let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-        env.with_local_frame(16, |env| -> jni::errors::Result<()> {
-            let url = JObject::from(env.new_string(url)?);
-            let uri = env
-                .call_static_method(
-                    "android/net/Uri",
-                    "parse",
-                    "(Ljava/lang/String;)Landroid/net/Uri;",
-                    &[JValue::Object(&url)],
-                )?
-                .l()?;
-            let action = JObject::from(env.new_string("android.intent.action.VIEW")?);
-            let intent = env.new_object(
-                "android/content/Intent",
-                "(Ljava/lang/String;Landroid/net/Uri;)V",
-                &[JValue::Object(&action), JValue::Object(&uri)],
-            )?;
-            // The documented Custom Tabs intent protocol uses a nullable session
-            // binder. Unsupported browsers fall back to ordinary ACTION_VIEW.
-            let extras = env.new_object("android/os/Bundle", "()V", &[])?;
-            let session =
-                JObject::from(env.new_string("android.support.customtabs.extra.SESSION")?);
-            let null = JObject::null();
-            env.call_method(
-                &extras,
-                "putBinder",
-                "(Ljava/lang/String;Landroid/os/IBinder;)V",
-                &[JValue::Object(&session), JValue::Object(&null)],
-            )?;
-            env.call_method(
-                &intent,
-                "putExtras",
-                "(Landroid/os/Bundle;)Landroid/content/Intent;",
-                &[JValue::Object(&extras)],
-            )?;
-            let title =
-                JObject::from(env.new_string("android.support.customtabs.extra.TITLE_VISIBILITY")?);
-            env.call_method(
-                &intent,
-                "putExtra",
-                "(Ljava/lang/String;I)Landroid/content/Intent;",
-                &[JValue::Object(&title), JValue::Int(1)],
-            )?;
-            let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
-            env.call_method(
-                &activity,
-                "startActivity",
-                "(Landroid/content/Intent;)V",
-                &[JValue::Object(&intent)],
-            )?;
-            Ok(())
+        env.with_local_frame(64, |env| -> jni::errors::Result<()> {
+            let out = (|| -> jni::errors::Result<()> {
+                let url = JObject::from(env.new_string(url)?);
+                let uri = env
+                    .call_static_method(
+                        "android/net/Uri",
+                        "parse",
+                        "(Ljava/lang/String;)Landroid/net/Uri;",
+                        &[JValue::Object(&url)],
+                    )?
+                    .l()?;
+                let action = JObject::from(env.new_string("android.intent.action.VIEW")?);
+                let intent = env.new_object(
+                    "android/content/Intent",
+                    "(Ljava/lang/String;Landroid/net/Uri;)V",
+                    &[JValue::Object(&action), JValue::Object(&uri)],
+                )?;
+                // The documented Custom Tabs intent protocol uses a nullable session
+                // binder. Unsupported browsers fall back to ordinary ACTION_VIEW.
+                let extras = env.new_object("android/os/Bundle", "()V", &[])?;
+                let session =
+                    JObject::from(env.new_string("android.support.customtabs.extra.SESSION")?);
+                let null = JObject::null();
+                env.call_method(
+                    &extras,
+                    "putBinder",
+                    "(Ljava/lang/String;Landroid/os/IBinder;)V",
+                    &[JValue::Object(&session), JValue::Object(&null)],
+                )?;
+                env.call_method(
+                    &intent,
+                    "putExtras",
+                    "(Landroid/os/Bundle;)Landroid/content/Intent;",
+                    &[JValue::Object(&extras)],
+                )?;
+                let title = JObject::from(
+                    env.new_string("android.support.customtabs.extra.TITLE_VISIBILITY")?,
+                );
+                env.call_method(
+                    &intent,
+                    "putExtra",
+                    "(Ljava/lang/String;I)Landroid/content/Intent;",
+                    &[JValue::Object(&title), JValue::Int(1)],
+                )?;
+                let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
+                env.call_method(
+                    &activity,
+                    "startActivity",
+                    "(Landroid/content/Intent;)V",
+                    &[JValue::Object(&intent)],
+                )?;
+                Ok(())
+            })();
+            if out.is_err() {
+                let _ = env.exception_clear();
+            }
+            out
         })
         .map_err(|e| {
             let _ = env.exception_clear();

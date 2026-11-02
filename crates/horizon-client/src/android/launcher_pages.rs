@@ -1066,7 +1066,7 @@ impl DrawCtx<'_> {
         let hint = ui.fit_text(
             Face::Regular,
             13.0,
-            "Drag to rotate  •  Tap character for Account & Skins",
+            "Drag to rotate 3D model  •  Open Account for skins & capes",
             rw - 28.0,
         );
         draw_centered_text(
@@ -1079,7 +1079,6 @@ impl DrawCtx<'_> {
         );
 
         *self.preview_rect = Some(char_card);
-        self.targets.push((char_card, Action::Page(Page::Account)));
 
         // Bottom-Right PLAY CTA Button!
         let cta_y = ry + rh - cta_h;
@@ -4516,16 +4515,25 @@ impl Launcher {
             return Ok(());
         }
         let now = std::time::Instant::now();
+        if let Some(act) = action
+            && !matches!(act, Action::Page(_))
+            && self.transition_guard_until.is_some_and(|until| now < until)
+        {
+            self.focus = None;
+            return Ok(());
+        }
+        let prev_view = (
+            self.catalog.page,
+            self.chooser.is_some(),
+            self.login.visible,
+            self.catalog.volt_boost_modal,
+            self.controls_studio.open,
+            self.update_prompt.is_some(),
+        );
         self.feedback = action.map(|action| (action, now));
         self.focus = None;
-        if action.is_some()
-            && self
-                .last_click_sound
-                .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(75))
-            && let Some(audio) = &mut self.audio
-        {
-            self.last_click_sound = Some(now);
-            audio.play_button_click();
+        if action.is_some() {
+            crate::native_ime::play_click_sound();
         }
         match action {
             Some(Action::Immersive) => {
@@ -5032,15 +5040,22 @@ impl Launcher {
                 self.diagnostic_export = Some(receiver);
                 self.catalog.status =
                     "Preparing local diagnostic ZIP. No upload; review before sharing.".into();
-                std::thread::spawn(move || {
-                    let result = crate::diagnostics::export(&home).map(|p| {
-                        p.file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned()
-                    });
-                    let _ = sender.send(result);
-                });
+                if let Err(err) = std::thread::Builder::new()
+                    .name("volt-diag-export".into())
+                    .stack_size(4 * 1024 * 1024)
+                    .spawn(move || {
+                        let result = crate::diagnostics::export(&home).map(|p| {
+                            p.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned()
+                        });
+                        let _ = sender.send(result);
+                    })
+                {
+                    self.diagnostic_export = None;
+                    self.catalog.status = format!("Diagnostic export failed: {err}");
+                }
             }
             Some(Action::ExportDiagnostics) => {}
             Some(Action::RecordPerformance) => {
@@ -5142,6 +5157,23 @@ impl Launcher {
             }
             None => {}
         }
+        let next_view = (
+            self.catalog.page,
+            self.chooser.is_some(),
+            self.login.visible,
+            self.catalog.volt_boost_modal,
+            self.controls_studio.open,
+            self.update_prompt.is_some(),
+        );
+        if next_view != prev_view {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.drag = None;
+            self.mouse_down = false;
+            self.pending_activate = None;
+            self.transition_guard_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(180));
+        }
         Ok(())
     }
 
@@ -5153,7 +5185,7 @@ impl Launcher {
         Ui::mobile(&gui.atlas, &mut batch, (0.0, 0.0)).density
     }
 
-    pub(super) fn touch_event(&mut self, events: &ActiveEventLoop, t: Touch) -> Result<()> {
+    pub(super) fn touch_event(&mut self, _events: &ActiveEventLoop, t: Touch) -> Result<()> {
         self.focus = None;
         self.pending_focus = None;
         self.needs_redraw = true;
@@ -5246,7 +5278,7 @@ impl Launcher {
                         && !drag.moved
                         && !studio_dragged
                     {
-                        self.activate(events)?;
+                        self.request_activate();
                     }
                 }
             }
@@ -5264,32 +5296,51 @@ impl Launcher {
         Ok(())
     }
 
+    pub(super) fn handle_escape(&mut self) {
+        if let Some(prompt) = self.update_prompt.take() {
+            if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
+                &prompt.state
+            {
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+            return;
+        }
+        if self.login.visible {
+            self.login.hide();
+            crate::platform::hide();
+            self.catalog.editing = None;
+            return;
+        }
+        if self.controls_studio.open {
+            if self.controls_studio.bind_picker_open {
+                self.controls_studio.bind_picker_open = false;
+            } else {
+                self.controls_studio.open = false;
+                self.controls_studio.dragging = None;
+                self.controls_studio.editing_label = false;
+                crate::platform::hide();
+            }
+            return;
+        }
+        if self.catalog.volt_boost_modal {
+            self.catalog.volt_boost_modal = false;
+            return;
+        }
+        if self.chooser.take().is_some() {
+            return;
+        }
+        crate::platform::hide();
+        self.catalog.editing = None;
+        let _ = self.catalog.config.save(&self.home);
+    }
+
     pub(super) fn type_key(&mut self, key: KeyEvent) {
         if key.physical_key == PhysicalKey::Code(KeyCode::Escape)
             || key.logical_key
                 == winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack)
         {
-            if let Some(prompt) = self.update_prompt.take() {
-                if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
-                    &prompt.state
-                {
-                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
-                return;
-            }
-            if self.login.visible {
-                self.login.hide();
-                crate::platform::hide();
-                self.catalog.editing = None;
-                return;
-            }
-            if self.chooser.take().is_some() {
-                return;
-            }
-            crate::platform::hide();
-            self.catalog.editing = None;
-            let _ = self.catalog.config.save(&self.home);
+            self.pending_escape = true;
             return;
         }
         if self.catalog.editing.is_none() {
@@ -5323,11 +5374,20 @@ fn wrap_modal_lines(ui: &Ui, lines: &[String], font_sz: f32, max_w: f32) -> Vec<
                 out.push((format!("{prefix}{rest}"), is_bullet && first));
                 break;
             }
-            let cut_target = fitted.trim_end_matches("...").len().max(1).min(rest.len());
+            let min_step = rest.chars().next().map_or(1, char::len_utf8);
+            let mut cut_target = fitted
+                .trim_end_matches("...")
+                .len()
+                .max(min_step)
+                .min(rest.len());
+            while cut_target < rest.len() && !rest.is_char_boundary(cut_target) {
+                cut_target += 1;
+            }
             let split_at = rest[..cut_target]
                 .rfind(' ')
                 .filter(|&i| i > 8)
-                .unwrap_or(cut_target);
+                .unwrap_or(cut_target)
+                .max(min_step);
             let head = rest[..split_at].trim_end();
             out.push((format!("{prefix}{head}"), is_bullet && first));
             rest = rest[split_at..].trim_start();
@@ -5445,7 +5505,7 @@ fn draw_update_prompt(
     }
 
     if max_scroll > 1.0 {
-        let track_h = box_h - 12.0;
+        let track_h = (box_h - 12.0).max(18.0);
         let thumb_h = (track_h * (box_h / (box_h + max_scroll))).clamp(18.0, track_h);
         let thumb_y =
             box_y + 6.0 + (track_h - thumb_h) * (prompt.scroll / max_scroll).clamp(0.0, 1.0);

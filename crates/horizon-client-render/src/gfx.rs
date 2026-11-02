@@ -1420,13 +1420,18 @@ async fn open_backend(
         None => adapter.request_device(&desc).await,
     };
     match opened {
-        Ok((device, queue)) => Ok(Opened {
-            instance,
-            surface,
-            adapter,
-            device,
-            queue,
-        }),
+        Ok((device, queue)) => {
+            device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
+                log::error!("Horizon wgpu uncaptured error: {error}");
+            }));
+            Ok(Opened {
+                instance,
+                surface,
+                adapter,
+                device,
+                queue,
+            })
+        }
         Err(e) => Err(NoDevice::Failed(format!("{name} device: {e}"))),
     }
 }

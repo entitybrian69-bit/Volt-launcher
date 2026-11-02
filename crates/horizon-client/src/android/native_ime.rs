@@ -37,6 +37,7 @@ enum Command {
     InstallUpdateApk(String),
     Screen(bool, bool),
     KeepAwake(bool),
+    ClickSound,
 }
 struct Ui {
     vm: JavaVM,
@@ -58,6 +59,7 @@ struct Ui {
     last_bounds: Mutex<Option<std::time::Instant>>,
     last_screen: Mutex<Option<(bool, bool)>>,
     last_keep_awake: Mutex<Option<bool>>,
+    last_click: Mutex<Option<std::time::Instant>>,
     avoid_cutout: AtomicBool,
     immersive: AtomicBool,
 }
@@ -211,6 +213,7 @@ pub unsafe fn initialize(
         last_bounds: Mutex::new(None),
         last_screen: Mutex::new(None),
         last_keep_awake: Mutex::new(None),
+        last_click: Mutex::new(None),
         avoid_cutout: AtomicBool::new(false),
         immersive: AtomicBool::new(true),
     });
@@ -244,8 +247,13 @@ impl Ui {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if q.len() >= 64 {
-                // Drop stale duplicate Poll/Bounds entries if the UI looper falls behind.
-                q.retain(|existing| !matches!(existing, Command::Bounds | Command::Poll));
+                // Drop stale duplicate Poll/Bounds/ClickSound entries if the UI looper falls behind.
+                q.retain(|existing| {
+                    !matches!(
+                        existing,
+                        Command::Bounds | Command::Poll | Command::ClickSound
+                    )
+                });
                 if q.len() >= 64 {
                     return;
                 }
@@ -690,6 +698,12 @@ impl Ui {
                 );
                 let _ = env.exception_clear();
             }
+            Command::ClickSound => {
+                // SoundEffectConstants.CLICK = 0; uses Android's lightweight UI feedback
+                // without opening a separate AAudio stream in the launcher.
+                let _ = env.call_method(&self.native, "playSoundEffect", "(I)V", &[JValue::Int(0)]);
+                let _ = env.exception_clear();
+            }
         }
         Ok(())
     }
@@ -724,7 +738,14 @@ fn callback_inner(ui: &Ui) -> i32 {
     match ui.vm.attach_current_thread() {
         Ok(mut env) => {
             for c in commands {
-                if let Err(e) = env.with_local_frame(16, |env| ui.apply(env, c)) {
+                let res = env.with_local_frame(64, |env| {
+                    let out = ui.apply(env, c);
+                    if out.is_err() {
+                        let _ = env.exception_clear();
+                    }
+                    out
+                });
+                if let Err(e) = res {
                     let _ = env.exception_clear();
                     log::warn!("IME command failed transiently: {e}");
                     ui.bounds_pending.store(false, Ordering::Release);
@@ -845,16 +866,22 @@ pub fn device_supported_abis() -> Vec<String> {
     if let Some(ui) = current_ui()
         && let Ok(mut env) = ui.vm.attach_current_thread()
     {
-        let fetched = (|| -> jni::errors::Result<String> {
-            let cls = env.get_object_class(&ui.activity)?;
-            let ret = env
-                .call_static_method(cls, "supportedAbis", "()Ljava/lang/String;", &[])?
-                .l()?;
-            if ret.is_null() {
-                return Ok(String::new());
+        let fetched = env.with_local_frame(16, |env| -> jni::errors::Result<String> {
+            let out = (|| -> jni::errors::Result<String> {
+                let cls = env.get_object_class(&ui.activity)?;
+                let ret = env
+                    .call_static_method(cls, "supportedAbis", "()Ljava/lang/String;", &[])?
+                    .l()?;
+                if ret.is_null() {
+                    return Ok(String::new());
+                }
+                Ok(env.get_string(&JString::from(ret))?.into())
+            })();
+            if out.is_err() {
+                let _ = env.exception_clear();
             }
-            Ok(env.get_string(&JString::from(ret))?.into())
-        })();
+            out
+        });
         if let Ok(csv) = fetched {
             let list: Vec<String> = csv
                 .split(',')
@@ -880,15 +907,21 @@ pub fn app_version_name() -> String {
     if let Some(ui) = current_ui()
         && let Ok(mut env) = ui.vm.attach_current_thread()
     {
-        let fetched = (|| -> jni::errors::Result<String> {
-            let ret = env
-                .call_method(&ui.activity, "appVersionName", "()Ljava/lang/String;", &[])?
-                .l()?;
-            if ret.is_null() {
-                return Ok(String::new());
+        let fetched = env.with_local_frame(16, |env| -> jni::errors::Result<String> {
+            let out = (|| -> jni::errors::Result<String> {
+                let ret = env
+                    .call_method(&ui.activity, "appVersionName", "()Ljava/lang/String;", &[])?
+                    .l()?;
+                if ret.is_null() {
+                    return Ok(String::new());
+                }
+                Ok(env.get_string(&JString::from(ret))?.into())
+            })();
+            if out.is_err() {
+                let _ = env.exception_clear();
             }
-            Ok(env.get_string(&JString::from(ret))?.into())
-        })();
+            out
+        });
         if let Ok(ver) = fetched
             && !ver.trim().is_empty()
         {
@@ -896,7 +929,27 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.9.3".into()
+    "0.9.4".into()
+}
+
+pub fn play_click_sound() {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        let allow = {
+            let mut last = ui
+                .last_click
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(65)) {
+                false
+            } else {
+                *last = Some(std::time::Instant::now());
+                true
+            }
+        };
+        if allow {
+            ui.enqueue(Command::ClickSound);
+        }
+    }
 }
 
 pub fn set_keep_screen_awake(awake: bool) {

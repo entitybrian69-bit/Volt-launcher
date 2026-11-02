@@ -294,10 +294,16 @@ impl Backend for MixerBackend {
         if sound.stream {
             // A streamed sound loops by restarting its stream.
             let mixer = self.mixer.clone();
-            std::thread::spawn(move || {
-                let samples = decode(&file).map(|(s, r)| (Arc::new(s), r));
-                attach(&mixer, channel, samples, looping);
-            });
+            if let Err(e) = std::thread::Builder::new()
+                .name("sound stream".into())
+                .stack_size(4 * 1024 * 1024)
+                .spawn(move || {
+                    let samples = decode(&file).map(|(s, r)| (Arc::new(s), r));
+                    attach(&mixer, channel, samples, looping);
+                })
+            {
+                log::warn!("Horizon: could not start sound stream thread: {e}");
+            }
             return;
         }
         let key = format!("{namespace}:{path}");
@@ -306,11 +312,12 @@ impl Backend for MixerBackend {
             attach(&self.mixer, channel, samples, false);
             return;
         }
-        let decoder = self.decoder.get_or_insert_with(|| {
+        if self.decoder.is_none() {
             let (send, receive) = std::sync::mpsc::channel::<Decode>();
             let (mixer, cache) = (self.mixer.clone(), self.cache.clone());
-            std::thread::Builder::new()
+            match std::thread::Builder::new()
                 .name("sound decoder".into())
+                .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
                     for job in receive {
                         // Queued twice before the first decode finished.
@@ -324,11 +331,17 @@ impl Backend for MixerBackend {
                         });
                         attach(&mixer, job.channel, samples, false);
                     }
-                })
-                .expect("sound decoder thread");
-            send
-        });
-        let _ = decoder.send(Decode { key, file, channel });
+                }) {
+                Ok(_) => self.decoder = Some(send),
+                Err(e) => {
+                    log::warn!("Horizon: could not start sound decoder thread: {e}");
+                    return;
+                }
+            }
+        }
+        if let Some(decoder) = &self.decoder {
+            let _ = decoder.send(Decode { key, file, channel });
+        }
     }
     /// `alSourceStop`: any state becomes stopped, an initial source too (a
     /// sound still decoding then never starts).
@@ -587,7 +600,7 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
 /// Available audio output device names.
 #[cfg(feature = "audio")]
 pub fn output_devices() -> Vec<String> {
-    if output_disabled(|name| std::env::var_os(name)).is_some() {
+    if cfg!(target_os = "android") || output_disabled(|name| std::env::var_os(name)).is_some() {
         return Vec::new();
     }
     let host = cpal::default_host();
@@ -695,7 +708,8 @@ impl Audio {
             return Err(reason.into());
         }
         let host = cpal::default_host();
-        if !target.is_empty()
+        if !cfg!(target_os = "android")
+            && !target.is_empty()
             && let Ok(devices) = host.output_devices()
         {
             for device in devices {
@@ -747,17 +761,12 @@ impl Audio {
         }
         let host = cpal::default_host();
         let mut errors = Vec::new();
-        // The default device first, then any other output a host lists:
-        // a default that cannot open (busy, or a stale ALSA default) should
-        // not leave the game silent when another device works.
-        let default = host.default_output_device();
-        let others = host.output_devices().into_iter().flatten();
         let mut tried = Vec::new();
-        for device in default.into_iter().chain(others) {
+        // Open the host default device first without eagerly enumerating all devices:
+        // on Android, cpal's Java AudioDeviceInfo enumeration overflows its 16-slot
+        // local JNI frame and can detach a worker thread with a pending exception.
+        if let Some(device) = host.default_output_device() {
             let name = device.name().unwrap_or_else(|_| "unnamed device".into());
-            if tried.contains(&name) {
-                continue;
-            }
             tried.push(name.clone());
             match open_device(&device, mixer.clone()) {
                 Ok((stream, config)) => {
@@ -770,6 +779,27 @@ impl Audio {
                     return Ok(stream);
                 }
                 Err(e) => errors.push(format!("{name}: {e}")),
+            }
+        }
+        if !cfg!(target_os = "android") {
+            for device in host.output_devices().into_iter().flatten() {
+                let name = device.name().unwrap_or_else(|_| "unnamed device".into());
+                if tried.contains(&name) {
+                    continue;
+                }
+                tried.push(name.clone());
+                match open_device(&device, mixer.clone()) {
+                    Ok((stream, config)) => {
+                        log::info!(
+                            "Horizon: audio output {name} ({} Hz, {} channels, {})",
+                            config.sample_rate().0,
+                            config.channels(),
+                            config.sample_format()
+                        );
+                        return Ok(stream);
+                    }
+                    Err(e) => errors.push(format!("{name}: {e}")),
+                }
             }
         }
         if errors.is_empty() {
@@ -877,7 +907,10 @@ impl Audio {
                 }
             }
         }
-        if self._stream.is_some()
+        // Android AAudio signals route/disconnect changes via its native error
+        // callback (`device_lost`); avoid 1Hz JNI device-probe thread churn.
+        if !cfg!(target_os = "android")
+            && self._stream.is_some()
             && self.device_probe.is_none()
             && self.device_probe_started.elapsed() >= std::time::Duration::from_secs(1)
         {

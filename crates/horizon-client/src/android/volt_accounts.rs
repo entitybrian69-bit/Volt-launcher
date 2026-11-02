@@ -352,15 +352,18 @@ impl VoltAccountManager {
             let tx = self.tx.clone();
             let id = active.id.clone();
             let uuid_hex = active.uuid_hex.clone();
-            std::thread::spawn(move || {
-                if let Some((skin_rgba, cape_rgba)) = fetch_mojang_preview_by_uuid(&uuid_hex) {
-                    let _ = tx.send(WorkerEvent::MsaPreview {
-                        account_id: id,
-                        skin_rgba,
-                        cape_rgba,
-                    });
-                }
-            });
+            let _ = std::thread::Builder::new()
+                .name("volt-msa-preview".into())
+                .stack_size(4 * 1024 * 1024)
+                .spawn(move || {
+                    if let Some((skin_rgba, cape_rgba)) = fetch_mojang_preview_by_uuid(&uuid_hex) {
+                        let _ = tx.send(WorkerEvent::MsaPreview {
+                            account_id: id,
+                            skin_rgba,
+                            cape_rgba,
+                        });
+                    }
+                });
         }
     }
 
@@ -577,20 +580,27 @@ impl VoltAccountManager {
         }
         self.busy = Some("Signing in to Ely.by...".into());
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            match authenticate_ely_by(&login, &password, &totp) {
-                Ok((account, skin_rgba, cape_rgba)) => {
-                    let _ = tx.send(WorkerEvent::ElySignedIn {
-                        account,
-                        skin_rgba,
-                        cape_rgba,
-                    });
+        if let Err(err) = std::thread::Builder::new()
+            .name("volt-ely-auth".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                match authenticate_ely_by(&login, &password, &totp) {
+                    Ok((account, skin_rgba, cape_rgba)) => {
+                        let _ = tx.send(WorkerEvent::ElySignedIn {
+                            account,
+                            skin_rgba,
+                            cape_rgba,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(WorkerEvent::Failed(e));
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(WorkerEvent::Failed(e));
-                }
-            }
-        });
+            })
+        {
+            self.busy = None;
+            self.status = Some(format!("Could not start Ely.by login thread: {err}"));
+        }
     }
 
     pub fn begin_fetch_skin_by_username(&mut self, username: &str) {
@@ -604,21 +614,28 @@ impl VoltAccountManager {
         }
         self.busy = Some(format!("Fetching skin for {username}..."));
         let tx = self.tx.clone();
-        std::thread::spawn(move || match fetch_skin_by_username_blocking(&username) {
-            Ok((skin_rgba, slim, cape_rgba, signed_url, source_label)) => {
-                let _ = tx.send(WorkerEvent::SkinFetched {
-                    account_id,
-                    skin_rgba,
-                    slim,
-                    cape_rgba,
-                    signed_url,
-                    source_label,
-                });
-            }
-            Err(e) => {
-                let _ = tx.send(WorkerEvent::Failed(e));
-            }
-        });
+        if let Err(err) = std::thread::Builder::new()
+            .name("volt-skin-fetch".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || match fetch_skin_by_username_blocking(&username) {
+                Ok((skin_rgba, slim, cape_rgba, signed_url, source_label)) => {
+                    let _ = tx.send(WorkerEvent::SkinFetched {
+                        account_id,
+                        skin_rgba,
+                        slim,
+                        cape_rgba,
+                        signed_url,
+                        source_label,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(WorkerEvent::Failed(e));
+                }
+            })
+        {
+            self.busy = None;
+            self.status = Some(format!("Could not start skin fetch thread: {err}"));
+        }
     }
 
     pub fn begin_fetch_cosmetic_url(&mut self, url: &str, is_cape: bool) {
@@ -636,19 +653,26 @@ impl VoltAccountManager {
             "Downloading skin PNG...".into()
         });
         let tx = self.tx.clone();
-        std::thread::spawn(move || match fetch_cosmetic_url_blocking(&url, is_cape) {
-            Ok(rgba) => {
-                let _ = tx.send(WorkerEvent::UrlCosmeticFetched {
-                    account_id,
-                    is_cape,
-                    rgba,
-                    label: "Custom URL".into(),
-                });
-            }
-            Err(e) => {
-                let _ = tx.send(WorkerEvent::Failed(e));
-            }
-        });
+        if let Err(err) = std::thread::Builder::new()
+            .name("volt-cosmetic-url".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || match fetch_cosmetic_url_blocking(&url, is_cape) {
+                Ok(rgba) => {
+                    let _ = tx.send(WorkerEvent::UrlCosmeticFetched {
+                        account_id,
+                        is_cape,
+                        rgba,
+                        label: "Custom URL".into(),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(WorkerEvent::Failed(e));
+                }
+            })
+        {
+            self.busy = None;
+            self.status = Some(format!("Could not start cosmetic download thread: {err}"));
+        }
     }
 
     fn spawn_mineskin_sign(&self, account_id: &str, slim: bool) {
@@ -658,16 +682,19 @@ impl VoltAccountManager {
         }
         let id = account_id.to_owned();
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            if let Ok(png_bytes) = std::fs::read(&path)
-                && let Some(signed_url) = upload_mineskin_signed_url(&png_bytes, slim)
-            {
-                let _ = tx.send(WorkerEvent::SkinSigned {
-                    account_id: id,
-                    signed_url,
-                });
-            }
-        });
+        let _ = std::thread::Builder::new()
+            .name("volt-mineskin".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                if let Ok(png_bytes) = std::fs::read(&path)
+                    && let Some(signed_url) = upload_mineskin_signed_url(&png_bytes, slim)
+                {
+                    let _ = tx.send(WorkerEvent::SkinSigned {
+                        account_id: id,
+                        signed_url,
+                    });
+                }
+            });
     }
 
     pub fn poll(&mut self) -> Option<String> {
