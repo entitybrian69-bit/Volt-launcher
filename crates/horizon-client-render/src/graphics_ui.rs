@@ -385,7 +385,9 @@ impl H {
                 Some(i as f32 / (UPLOAD_STEPS.len() - 1) as f32)
             }
             H::Workers => Some(g.workers as f32 / max_workers() as f32),
-            H::ResolutionScale => Some((g.resolution_scale as f32 - 50.0) / 150.0),
+            H::ResolutionScale => {
+                Some((g.resolution_scale.clamp(25, 200) as f32 - 25.0) / 175.0)
+            }
             // Auto, then 80..480 by 10.
             H::HdrPaperWhite => Some(match g.hdr_paper_white {
                 0 => 0.0,
@@ -500,7 +502,9 @@ impl H {
                     UPLOAD_STEPS[(v * (UPLOAD_STEPS.len() - 1) as f32).round() as usize]
             }
             H::Workers => g.workers = (v * max_workers() as f32).round() as u32,
-            H::ResolutionScale => g.resolution_scale = (50.0 + (v * 30.0).round() * 5.0) as u32,
+            H::ResolutionScale => {
+                g.resolution_scale = (25.0 + (v * 35.0).round() * 5.0) as u32
+            }
             H::HdrPaperWhite => {
                 g.hdr_paper_white = match (v * 41.0).round() as u32 {
                     0 => 0,

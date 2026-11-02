@@ -9,6 +9,8 @@ pub(crate) fn session_argument() -> Option<PathBuf> {
 }
 #[path = "chooser.rs"]
 mod chooser;
+#[path = "controls_studio.rs"]
+pub(crate) mod controls_studio;
 #[path = "launcher_gesture.rs"]
 mod gesture;
 #[path = "launcher_pages.rs"]
@@ -75,6 +77,12 @@ pub(super) struct Launcher {
     diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
     update_check_rx: Option<mpsc::Receiver<crate::volt_updater::UpdateInfo>>,
     update_prompt: Option<crate::volt_updater::UpdatePrompt>,
+    pub(super) controls_studio: controls_studio::ControlsStudio,
+    pub(super) pending_play: bool,
+    audio_init_attempted: bool,
+    pub(super) last_click_sound: Option<Instant>,
+    pub(super) needs_redraw: bool,
+    last_redraw: Instant,
 }
 
 impl Launcher {
@@ -105,27 +113,29 @@ impl Launcher {
             horizon_client::android_runtime::configure_custom_vulkan_driver(None);
         }
         if horizon_client::android_runtime::graphics_startup::recover(&home) {
-            catalog.config.renderer = match catalog.config.renderer {
-                crate::catalog::RendererMode::Vulkan
-                | crate::catalog::RendererMode::VulkanCompatibility => {
-                    catalog.status = "Previous Vulkan startup was interrupted. Switched to Volt Vulkan Supporter; you can change Rendering mode in Settings.".into();
-                    crate::catalog::RendererMode::VulkanSupporter
+            if catalog.config.custom_vulkan_driver.is_some() {
+                catalog.config.custom_vulkan_driver = None;
+                catalog.config.custom_vulkan_driver_name = None;
+                horizon_client::android_runtime::configure_custom_vulkan_driver(None);
+                if matches!(
+                    catalog.config.renderer,
+                    crate::catalog::RendererMode::Vulkan
+                        | crate::catalog::RendererMode::VulkanCompatibility
+                ) {
+                    catalog.config.renderer = crate::catalog::RendererMode::VulkanSupporter;
                 }
-                _ => {
-                    if catalog.config.custom_vulkan_driver.is_some() {
-                        catalog.config.custom_vulkan_driver = None;
-                        catalog.config.custom_vulkan_driver_name = None;
-                        horizon_client::android_runtime::configure_custom_vulkan_driver(None);
-                        catalog.status = "Custom Vulkan driver crashed on startup. Reverted to built-in Vulkan Supporter.".into();
-                        crate::catalog::RendererMode::VulkanSupporter
-                    } else {
-                        catalog.status = "Previous Vulkan startup was interrupted. Using OpenGL ES fallback; you can change Rendering mode in Settings.".into();
-                        crate::catalog::RendererMode::OpenGl
-                    }
+                catalog.status =
+                    "Custom Vulkan driver crashed on startup. Reverted to built-in Vulkan Supporter."
+                        .into();
+                if let Err(error) = catalog.config.save(&home) {
+                    log::warn!("Could not save graphics recovery choice: {error}");
                 }
-            };
-            if let Err(error) = catalog.config.save(&home) {
-                log::warn!("Could not save graphics recovery choice: {error}");
+            } else {
+                // Never auto-downgrade or fall back to OpenGL on crash; preserve the configured Vulkan mode.
+                log::warn!(
+                    "Previous startup ended before first frame; keeping renderer mode {:?}",
+                    catalog.config.renderer
+                );
             }
         }
         horizon_client::android_runtime::configure_graphics_api(
@@ -187,6 +197,12 @@ impl Launcher {
             diagnostic_export: None,
             update_check_rx,
             update_prompt: None,
+            controls_studio: Default::default(),
+            pending_play: false,
+            audio_init_attempted: false,
+            last_click_sound: None,
+            needs_redraw: true,
+            last_redraw: Instant::now() - Duration::from_secs(1),
         }
     }
 
@@ -229,6 +245,9 @@ impl Launcher {
         self.chooser = None;
         self.focus = None;
         self.pending_focus = None;
+        self.pending_play = false;
+        self.audio_init_attempted = false;
+        self.needs_redraw = true;
         if let Err(error) = std::env::set_current_dir(&self.home) {
             self.fail(error);
             return;
@@ -613,6 +632,9 @@ impl ApplicationHandler for Launcher {
             self.restore_launcher(events);
             return;
         }
+        if !matches!(event, WindowEvent::RedrawRequested) {
+            self.needs_redraw = true;
+        }
         let result = match event {
             WindowEvent::CloseRequested => {
                 if let Some(prompt) = self.update_prompt.take() {
@@ -628,6 +650,17 @@ impl ApplicationHandler for Launcher {
                     self.login.hide();
                     return;
                 }
+                if self.controls_studio.open {
+                    if self.controls_studio.bind_picker_open {
+                        self.controls_studio.bind_picker_open = false;
+                    } else {
+                        self.controls_studio.open = false;
+                        self.controls_studio.dragging = None;
+                        self.controls_studio.editing_label = false;
+                        crate::platform::hide();
+                    }
+                    return;
+                }
                 events.exit();
                 Ok(())
             }
@@ -640,13 +673,23 @@ impl ApplicationHandler for Launcher {
             WindowEvent::CursorMoved { position, .. } => {
                 self.focus = None;
                 self.pending_focus = None;
+                let density = self.ui_density() as f64;
                 if self.mouse_down {
-                    let density = self.ui_density() as f64;
-                    if let Some(drag) = &mut self.drag {
+                    if self.controls_studio.open
+                        && self.controls_studio.pointer_move(
+                            (position.x / density) as f32,
+                            (position.y / density) as f32,
+                        )
+                    {
+                        if let Some(drag) = &mut self.drag {
+                            let _ = drag.update_xy(position.x, position.y, density);
+                        }
+                    } else if let Some(drag) = &mut self.drag {
                         let (dx, dy) = drag.update_xy(position.x, position.y, density);
                         if drag.moved
                             && !self.login.visible
                             && self.chooser.is_none()
+                            && !self.controls_studio.open
                             && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
                                 let [ox, oy] = drag.origin_xy();
                                 let ux = (ox / density) as f32;
@@ -681,11 +724,19 @@ impl ApplicationHandler for Launcher {
             } => {
                 if state == ElementState::Pressed {
                     self.mouse_down = true;
+                    if self.controls_studio.open {
+                        let density = self.ui_density() as f64;
+                        let _ = self.controls_studio.pointer_down(
+                            (self.cursor.0 / density) as f32,
+                            (self.cursor.1 / density) as f32,
+                        );
+                    }
                     self.drag = Some(gesture::Drag::new(self.cursor.0, self.cursor.1));
                     Ok(())
                 } else if std::mem::take(&mut self.mouse_down) {
+                    let studio_dragged = self.controls_studio.pointer_up();
                     let dragged = self.drag.take().is_some_and(|d| d.moved);
-                    if dragged {
+                    if dragged || studio_dragged {
                         Ok(())
                     } else {
                         self.activate(events)
@@ -708,7 +759,11 @@ impl ApplicationHandler for Launcher {
                 }
                 Ok(())
             }
-            WindowEvent::RedrawRequested => self.draw_pages(),
+            WindowEvent::RedrawRequested => {
+                self.needs_redraw = false;
+                self.last_redraw = Instant::now();
+                self.draw_pages()
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if self.navigate(&event) {
                     Ok(())
@@ -752,7 +807,36 @@ impl ApplicationHandler for Launcher {
             self.restore_launcher(events);
             return;
         }
+        if std::mem::take(&mut self.pending_play) {
+            if let Err(error) = self.action(events) {
+                self.fail(error);
+            }
+            if self.game.is_some() {
+                return;
+            }
+        }
         crate::diagnostics::heartbeat("launcher", || serde_json::json!({}));
+        if !self.audio_init_attempted
+            && self.renderer.is_some()
+            && !self.needs_redraw
+            && horizon_client::official_install::ready(&self.home)
+        {
+            self.audio_init_attempted = true;
+            let mut audio =
+                horizon_client::audio::Audio::new(&self.home.join(".local/horizon-client/26.3"));
+            let settings = horizon_client::settings::Settings::load(
+                &self
+                    .catalog
+                    .config
+                    .game_home(&self.home)
+                    .join("options.txt"),
+            );
+            audio.master = settings.volumes[0];
+            let mut volumes = settings.volumes;
+            volumes[0] = 1.0;
+            horizon_client::settings::set_source_volumes(volumes);
+            self.audio = Some(audio);
+        }
         if let Some(result) = self
             .diagnostic_export
             .as_ref()
@@ -791,6 +875,10 @@ impl ApplicationHandler for Launcher {
             }
         }
         for out in crate::platform::poll() {
+            if self.controls_studio.handle_osk(&out) {
+                self.needs_redraw = true;
+                continue;
+            }
             if matches!(out, horizon_client::osk::Output::Enter) {
                 crate::platform::hide();
             }
@@ -829,6 +917,12 @@ impl ApplicationHandler for Launcher {
                     crate::configure_input_mode(self.catalog.config.input_host);
                 }
                 self.catalog.refresh_controls(&self.home);
+                if self.controls_studio.open {
+                    let profile_home = self.catalog.config.game_home(&self.home);
+                    self.controls_studio.open_for_profile(&profile_home);
+                    self.controls_studio.status_hint =
+                        "Imported external control layout into Controls Studio.".into();
+                }
             } else if notice.changed {
                 self.catalog.refresh(&self.home);
                 self.catalog.show_installed(notice.kind);
@@ -924,17 +1018,26 @@ impl ApplicationHandler for Launcher {
             }
         }
 
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
-        let frame_wait = if matches!(self.catalog.page, Page::Play | Page::Account)
+        let now = Instant::now();
+        let frame_wait = if self.drag.is_some()
             || self.is_animating()
+            || self.worker.is_some()
+            || self.catalog.busy()
         {
             Duration::from_millis(16)
+        } else if matches!(self.catalog.page, Page::Play | Page::Account) {
+            Duration::from_millis(33)
         } else {
-            Duration::from_millis(40)
+            Duration::from_millis(50)
         };
-        events.set_control_flow(ControlFlow::WaitUntil(Instant::now() + frame_wait));
+        if self.needs_redraw || now.duration_since(self.last_redraw) >= frame_wait {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            events.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(4)));
+        } else {
+            events.set_control_flow(ControlFlow::WaitUntil(self.last_redraw + frame_wait));
+        }
     }
     fn exiting(&mut self, events: &ActiveEventLoop) {
         if let Some(game) = &mut self.game {

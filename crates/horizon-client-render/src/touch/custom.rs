@@ -57,6 +57,9 @@ pub struct CustomButton {
     /// Imported border RGBA `[r, g, b, a]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stroke_color: Option<[u8; 4]>,
+    /// Optional rounded corner radius in logical pixels (`0.0..=24.0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_radius: Option<f32>,
     /// Parent drawer group ID when this button belongs to an expandable drawer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawer_parent: Option<u16>,
@@ -91,6 +94,7 @@ impl CustomButton {
             in_menu: true,
             bg_color: None,
             stroke_color: None,
+            corner_radius: None,
             drawer_parent: None,
         }
     }
@@ -124,6 +128,13 @@ impl CustomButton {
         } else {
             1.0
         };
+        if let Some(r) = &mut self.corner_radius {
+            if r.is_finite() && *r > 0.25 {
+                *r = r.clamp(0.5, 24.0);
+            } else {
+                self.corner_radius = None;
+            }
+        }
         self.extra_keys.retain(|k| Self::valid_token(k) && k != "key.keyboard.unknown");
         self.extra_keys.truncate(8);
         if let Some(label) = &mut self.label {
@@ -153,7 +164,7 @@ impl CustomButton {
         Self::token_label(&self.key)
     }
 
-    fn token_label(token: &str) -> String {
+    pub fn token_label(token: &str) -> String {
         match token {
             "key.keyboard.unknown" => "Button".into(),
             "special:keyboard" => "KBD".into(),
@@ -556,8 +567,11 @@ impl TouchControls {
             if opacity <= 0.0 {
                 continue;
             }
-            let text_color = if button.bg_color.is_some() || button.stroke_color.is_some() {
-                let bg = button.bg_color.unwrap_or([0, 0, 0, 115]);
+            let text_color = if button.bg_color.is_some()
+                || button.stroke_color.is_some()
+                || button.corner_radius.is_some()
+            {
+                let bg = button.bg_color.unwrap_or([18, 18, 24, 138]);
                 let fill_alpha = ((f32::from(bg[3]) / 255.0) * opacity * 255.0).round() as u8;
                 let fill = if pressed {
                     rgba(
@@ -569,7 +583,6 @@ impl TouchControls {
                 } else {
                     rgba(bg[0], bg[1], bg[2], fill_alpha)
                 };
-                b.fill(a, rect[0], rect[1], rect[2], rect[3], fill);
                 let stroke = if pressed {
                     rgba(255, 68, 96, (opacity * 235.0) as u8)
                 } else if let Some(sc) = button.stroke_color
@@ -580,11 +593,21 @@ impl TouchControls {
                 } else {
                     rgba(255, 255, 255, (opacity * 95.0) as u8)
                 };
-                let t = 1.0;
-                b.fill(a, rect[0], rect[1], rect[2], t, stroke);
-                b.fill(a, rect[0], rect[1] + rect[3] - t, rect[2], t, stroke);
-                b.fill(a, rect[0], rect[1], t, rect[3], stroke);
-                b.fill(a, rect[0] + rect[2] - t, rect[1], t, rect[3], stroke);
+                let rad = button
+                    .corner_radius
+                    .unwrap_or(0.0)
+                    .min(rect[2] * 0.48)
+                    .min(rect[3] * 0.48);
+                if rad >= 2.0 {
+                    draw_rounded_hud_box(b, a, rect, rad, fill, stroke);
+                } else {
+                    b.fill(a, rect[0], rect[1], rect[2], rect[3], fill);
+                    let t = 1.0;
+                    b.fill(a, rect[0], rect[1], rect[2], t, stroke);
+                    b.fill(a, rect[0], rect[1] + rect[3] - t, rect[2], t, stroke);
+                    b.fill(a, rect[0], rect[1], t, rect[3], stroke);
+                    b.fill(a, rect[0] + rect[2] - t, rect[1], t, rect[3], stroke);
+                }
                 rgba(248, 248, 252, (opacity * 255.0) as u8)
             } else {
                 let tint = if pressed {
@@ -608,7 +631,9 @@ impl TouchControls {
             let label = button.label();
             let width = HudBatch::text_width(a, &label);
             let start = b.vertices.len();
-            let shadow = button.bg_color.is_some() || button.stroke_color.is_some();
+            let shadow = button.bg_color.is_some()
+                || button.stroke_color.is_some()
+                || button.corner_radius.is_some();
             b.text(
                 a,
                 &label,
@@ -626,6 +651,44 @@ impl TouchControls {
                 scale,
                 scale,
             );
+        }
+    }
+}
+
+fn draw_rounded_hud_box(
+    b: &mut HudBatch,
+    a: &HudAtlas,
+    rect: [f32; 4],
+    radius: f32,
+    fill: [f32; 4],
+    stroke: [f32; 4],
+) {
+    let [x, y, w, h] = rect;
+    let r = radius.floor().clamp(2.0, (w.min(h) * 0.48).max(2.0)) as i32;
+    let rf = r as f32;
+    let body_h = (h - 2.0 * rf).max(0.0);
+    if body_h > 0.0 {
+        b.fill(a, x, y + rf, w, body_h, fill);
+        b.fill(a, x, y + rf, 1.0, body_h, stroke);
+        b.fill(a, x + w - 1.0, y + rf, 1.0, body_h, stroke);
+    }
+    for row in 0..r {
+        let dy = rf - (row as f32 + 0.5);
+        let dx = (rf * rf - dy * dy).max(0.0).sqrt();
+        let inset = (rf - dx).round().clamp(0.0, w * 0.48);
+        let span = (w - 2.0 * inset).max(1.0);
+        let ty = y + row as f32;
+        let by = y + h - 1.0 - row as f32;
+        b.fill(a, x + inset, ty, span, 1.0, fill);
+        b.fill(a, x + inset, by, span, 1.0, fill);
+        if row == 0 {
+            b.fill(a, x + inset, ty, span, 1.0, stroke);
+            b.fill(a, x + inset, by, span, 1.0, stroke);
+        } else {
+            b.fill(a, x + inset, ty, 1.5, 1.0, stroke);
+            b.fill(a, x + inset + span - 1.5, ty, 1.5, 1.0, stroke);
+            b.fill(a, x + inset, by, 1.5, 1.0, stroke);
+            b.fill(a, x + inset + span - 1.5, by, 1.5, 1.0, stroke);
         }
     }
 }

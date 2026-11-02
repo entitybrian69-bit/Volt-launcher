@@ -56,6 +56,8 @@ struct Ui {
     failed: AtomicBool,
     keyboard_request: Mutex<Option<std::time::Instant>>,
     last_bounds: Mutex<Option<std::time::Instant>>,
+    last_screen: Mutex<Option<(bool, bool)>>,
+    last_keep_awake: Mutex<Option<bool>>,
     avoid_cutout: AtomicBool,
     immersive: AtomicBool,
 }
@@ -88,6 +90,18 @@ pub unsafe fn initialize(
             })
             .unwrap_or(false);
         if same && !existing.failed.load(Ordering::Acquire) {
+            *existing
+                .last_screen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *existing
+                .last_keep_awake
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *existing
+                .last_bounds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             return Ok(());
         }
         existing.failed.store(true, Ordering::Release);
@@ -195,6 +209,8 @@ pub unsafe fn initialize(
         failed: AtomicBool::new(false),
         keyboard_request: Mutex::new(None),
         last_bounds: Mutex::new(None),
+        last_screen: Mutex::new(None),
+        last_keep_awake: Mutex::new(None),
         avoid_cutout: AtomicBool::new(false),
         immersive: AtomicBool::new(true),
     });
@@ -219,10 +235,23 @@ pub unsafe fn initialize(
 }
 impl Ui {
     fn enqueue(&self, c: Command) {
-        self.commands
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push_back(c);
+        if self.failed.load(Ordering::Acquire) {
+            return;
+        }
+        {
+            let mut q = self
+                .commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if q.len() >= 64 {
+                // Drop stale duplicate Poll/Bounds entries if the UI looper falls behind.
+                q.retain(|existing| !matches!(existing, Command::Bounds | Command::Poll));
+                if q.len() >= 64 {
+                    return;
+                }
+            }
+            q.push_back(c);
+        }
         let _ = self
             .writer
             .lock()
@@ -477,12 +506,17 @@ impl Ui {
                 let token = env
                     .call_method(&self.edit, "getWindowToken", "()Landroid/os/IBinder;", &[])?
                     .l()?;
-                env.call_method(
-                    &self.input,
-                    "hideSoftInputFromWindow",
-                    "(Landroid/os/IBinder;I)Z",
-                    &[JValue::Object(&token), JValue::Int(0)],
-                )?;
+                if !token.is_null() {
+                    let _ = env.call_method(
+                        &self.input,
+                        "hideSoftInputFromWindow",
+                        "(Landroid/os/IBinder;I)Z",
+                        &[JValue::Object(&token), JValue::Int(0)],
+                    );
+                    if env.exception_check().unwrap_or(false) {
+                        let _ = env.exception_clear();
+                    }
+                }
                 env.call_method(&self.edit, "clearFocus", "()V", &[])?;
                 env.call_method(&self.edit, "setFocusable", "(Z)V", &[JValue::Bool(0)])?;
                 env.call_method(&self.native, "requestFocus", "()Z", &[])?;
@@ -692,11 +726,9 @@ fn callback_inner(ui: &Ui) -> i32 {
             for c in commands {
                 if let Err(e) = env.with_local_frame(16, |env| ui.apply(env, c)) {
                     let _ = env.exception_clear();
-                    log::error!("IME command: {e}");
-                    ui.failed.store(true, Ordering::Release);
-                    ui.active.store(false, Ordering::Release);
-                    winit::platform::android::set_native_text_input_active(false);
-                    return 0;
+                    log::warn!("IME command failed transiently: {e}");
+                    ui.bounds_pending.store(false, Ordering::Release);
+                    ui.polling.store(false, Ordering::Release);
                 }
             }
         }
@@ -716,6 +748,9 @@ pub fn show(text: &str) -> bool {
         // Do not diff an earlier editor buffer while Show is queued on the UI thread.
         ui.ready.store(false, Ordering::Release);
         ui.active.store(true, Ordering::Release);
+        *ui.last_bounds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         ui.enqueue(Command::Show(text.into()));
         true
     } else {
@@ -724,9 +759,13 @@ pub fn show(text: &str) -> bool {
 }
 pub fn hide() {
     winit::platform::android::set_native_text_input_active(false);
-    if let Some(ui) = current_ui() {
-        ui.active.store(false, Ordering::Release);
-        ui.enqueue(Command::Hide)
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        if ui.active.swap(false, Ordering::AcqRel) {
+            *ui.last_bounds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            ui.enqueue(Command::Hide);
+        }
     }
 }
 pub fn text() -> Option<String> {
@@ -756,9 +795,27 @@ pub fn capture_mouse(capture: bool) -> bool {
 }
 
 /// Launcher-only safe bounds; View geometry is read on the Android UI thread.
+/// Throttled so rapid touch events and 60-120 Hz redraws never flood the UI looper.
 pub fn viewport_bottom() -> Option<u32> {
     let ui = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
-    if !ui.bounds_pending.swap(true, Ordering::AcqRel) {
+    let min_interval = if ui.active.load(Ordering::Relaxed) {
+        std::time::Duration::from_millis(60)
+    } else {
+        std::time::Duration::from_millis(250)
+    };
+    let should_request = {
+        let mut last = ui
+            .last_bounds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.is_none_or(|t| t.elapsed() >= min_interval) {
+            *last = Some(std::time::Instant::now());
+            true
+        } else {
+            false
+        }
+    };
+    if should_request && !ui.bounds_pending.swap(true, Ordering::AcqRel) {
         ui.enqueue(Command::Bounds);
     }
     let bottom = ui.bottom.load(Ordering::Acquire);
@@ -839,18 +896,46 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.9.2".into()
+    "0.9.3".into()
 }
 
 pub fn set_keep_screen_awake(awake: bool) {
     if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
-        ui.enqueue(Command::KeepAwake(awake));
+        let changed = {
+            let mut last = ui
+                .last_keep_awake
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *last == Some(awake) {
+                false
+            } else {
+                *last = Some(awake);
+                true
+            }
+        };
+        if changed {
+            ui.enqueue(Command::KeepAwake(awake));
+        }
     }
 }
 
 pub fn configure_screen(immersive: bool, avoid_cutout: bool) {
-    if let Some(ui) = current_ui() {
-        ui.enqueue(Command::Screen(immersive, avoid_cutout));
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        let changed = {
+            let mut last = ui
+                .last_screen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *last == Some((immersive, avoid_cutout)) {
+                false
+            } else {
+                *last = Some((immersive, avoid_cutout));
+                true
+            }
+        };
+        if changed {
+            ui.enqueue(Command::Screen(immersive, avoid_cutout));
+        }
     }
 }
 pub fn refresh_bounds() {

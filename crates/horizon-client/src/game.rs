@@ -14628,6 +14628,17 @@ impl Game<'_> {
                 (p.position.x.floor() as i32) >> 4,
                 (p.position.z.floor() as i32) >> 4,
             );
+            if self.settings.extras.lookahead_stream {
+                let yaw = p.yaw.to_radians();
+                let vx = p.velocity.x * 4.0 - yaw.sin();
+                let vz = p.velocity.z * 4.0 + yaw.cos();
+                let len = (vx * vx + vz * vz).sqrt();
+                self.streaming.lookahead_dir = (len > 1e-3).then_some([vx / len, vz / len]);
+            } else {
+                self.streaming.lookahead_dir = None;
+            }
+        } else {
+            self.streaming.lookahead_dir = None;
         }
         // The loading screen's chunk map fills ring by ring, as vanilla's.
         self.streaming.loading =

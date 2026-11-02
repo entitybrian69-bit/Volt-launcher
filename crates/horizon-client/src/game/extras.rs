@@ -175,7 +175,7 @@ impl Game<'_> {
             if let Some(r) = self.renderer.as_mut() {
                 let base = self.settings.horizon.resolution_scale as f32 / 100.0;
                 r.set_world_post(
-                    (base * desired_drs).clamp(0.45, 1.0),
+                    (base * desired_drs).clamp(0.25, 2.0),
                     self.settings.horizon.fxaa,
                     self.settings.horizon.taa,
                     self.settings.horizon.upscaling.ratio(),

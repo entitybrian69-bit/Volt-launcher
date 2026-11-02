@@ -177,6 +177,10 @@ pub struct Extras {
     pub audio_voice_cap: AudioVoiceCap,
     pub memory_saver: bool,
     pub keep_screen_awake: bool,
+    pub active_anim_cull: bool,
+    pub lookahead_stream: bool,
+    pub fast_translucency: bool,
+    pub particle_frustum_cull: bool,
     /// Transient one-shot flag triggered when the user taps "Purge Unused RAM Now".
     pub purge_ram_requested: bool,
 }
@@ -267,6 +271,10 @@ impl Default for Extras {
             audio_voice_cap: AudioVoiceCap::Vanilla,
             memory_saver: false,
             keep_screen_awake: false,
+            active_anim_cull: false,
+            lookahead_stream: false,
+            fast_translucency: false,
+            particle_frustum_cull: false,
             purge_ram_requested: false,
         }
     }
@@ -417,7 +425,7 @@ impl Extras {
                     }
                 }
                 "voltFastWeather" => e.fast_weather = flag(e.fast_weather),
-                "voltDistantLod" => e.distant_lod_boost = flag(e.distant_lod_boost),
+                "voltDistantLodManual" => e.distant_lod_boost = flag(e.distant_lod_boost),
                 "voltEntityCap" => {
                     if let Some(v) = EntityCap::parse(value) {
                         e.entity_cap = v;
@@ -481,6 +489,10 @@ impl Extras {
                 }
                 "voltMemorySaver" => e.memory_saver = flag(e.memory_saver),
                 "voltKeepAwake" => e.keep_screen_awake = flag(e.keep_screen_awake),
+                "voltActiveAnimCull" => e.active_anim_cull = flag(e.active_anim_cull),
+                "voltLookaheadStream" => e.lookahead_stream = flag(e.lookahead_stream),
+                "voltFastTranslucency" => e.fast_translucency = flag(e.fast_translucency),
+                "voltParticleFrustum" => e.particle_frustum_cull = flag(e.particle_frustum_cull),
                 _ => {}
             }
         }
@@ -567,7 +579,7 @@ impl Extras {
         push("voltCaveSkyCull", bool_text(self.cave_sky_cull));
         push("voltChunkUploadCap", self.chunk_upload_cap.as_str());
         push("voltFastWeather", bool_text(self.fast_weather));
-        push("voltDistantLod", bool_text(self.distant_lod_boost));
+        push("voltDistantLodManual", bool_text(self.distant_lod_boost));
         push("voltEntityCap", self.entity_cap.as_str());
         push("voltItemCap", self.item_render_cap.as_str());
         push("voltBlockEntityCap", self.block_entity_cap.as_str());
@@ -592,6 +604,10 @@ impl Extras {
         push("voltAudioCap", self.audio_voice_cap.as_str());
         push("voltMemorySaver", bool_text(self.memory_saver));
         push("voltKeepAwake", bool_text(self.keep_screen_awake));
+        push("voltActiveAnimCull", bool_text(self.active_anim_cull));
+        push("voltLookaheadStream", bool_text(self.lookahead_stream));
+        push("voltFastTranslucency", bool_text(self.fast_translucency));
+        push("voltParticleFrustum", bool_text(self.particle_frustum_cull));
         s
     }
 
@@ -625,6 +641,10 @@ impl Extras {
             self.prewarm_pipelines,
             self.audio_voice_cap != AudioVoiceCap::Vanilla,
             self.memory_saver,
+            self.active_anim_cull,
+            self.lookahead_stream,
+            self.fast_translucency,
+            self.particle_frustum_cull,
         ] {
             if b {
                 n += 1;
@@ -634,6 +654,7 @@ impl Extras {
     }
 
     /// Applies a full **Volt Boost** profile across Tier 1, Tier 2, and Tier 3 settings.
+    /// Note: LOD (`distant_lod_boost`) is kept OFF in every Volt Boost profile.
     pub fn apply_volt_preset(&mut self, preset: VoltBoostPreset) {
         self.volt_preset = preset;
         match preset {
@@ -664,6 +685,10 @@ impl Extras {
                 self.prewarm_pipelines = false;
                 self.audio_voice_cap = AudioVoiceCap::Vanilla;
                 self.memory_saver = false;
+                self.active_anim_cull = false;
+                self.lookahead_stream = false;
+                self.fast_translucency = false;
+                self.particle_frustum_cull = false;
             }
             VoltBoostPreset::Balanced => {
                 self.cull_leaves = true;
@@ -671,7 +696,7 @@ impl Extras {
                 self.cave_sky_cull = true;
                 self.chunk_upload_cap = ChunkUploadCap::Balanced16;
                 self.fast_weather = false;
-                self.distant_lod_boost = true;
+                self.distant_lod_boost = false;
                 self.entity_cap = EntityCap::Cap128;
                 self.item_render_cap = ItemRenderCap::Cap128;
                 self.block_entity_cap = BlockEntityCap::Cap64;
@@ -692,6 +717,10 @@ impl Extras {
                 self.prewarm_pipelines = true;
                 self.audio_voice_cap = AudioVoiceCap::Cap32;
                 self.memory_saver = false;
+                self.active_anim_cull = true;
+                self.lookahead_stream = true;
+                self.fast_translucency = true;
+                self.particle_frustum_cull = true;
             }
             VoltBoostPreset::Competitive => {
                 self.cull_leaves = true;
@@ -720,6 +749,10 @@ impl Extras {
                 self.prewarm_pipelines = true;
                 self.audio_voice_cap = AudioVoiceCap::Cap32;
                 self.memory_saver = false;
+                self.active_anim_cull = true;
+                self.lookahead_stream = true;
+                self.fast_translucency = true;
+                self.particle_frustum_cull = true;
             }
             VoltBoostPreset::UltraFps => {
                 self.cull_leaves = true;
@@ -727,7 +760,7 @@ impl Extras {
                 self.cave_sky_cull = true;
                 self.chunk_upload_cap = ChunkUploadCap::Smooth8;
                 self.fast_weather = true;
-                self.distant_lod_boost = true;
+                self.distant_lod_boost = false;
                 self.entity_cap = EntityCap::Cap64;
                 self.item_render_cap = ItemRenderCap::Cap32;
                 self.block_entity_cap = BlockEntityCap::Cap16;
@@ -748,6 +781,10 @@ impl Extras {
                 self.prewarm_pipelines = true;
                 self.audio_voice_cap = AudioVoiceCap::Cap16;
                 self.memory_saver = true;
+                self.active_anim_cull = true;
+                self.lookahead_stream = true;
+                self.fast_translucency = true;
+                self.particle_frustum_cull = true;
             }
             VoltBoostPreset::BatterySaver => {
                 self.cull_leaves = true;
@@ -755,7 +792,7 @@ impl Extras {
                 self.cave_sky_cull = true;
                 self.chunk_upload_cap = ChunkUploadCap::Smooth8;
                 self.fast_weather = true;
-                self.distant_lod_boost = true;
+                self.distant_lod_boost = false;
                 self.entity_cap = EntityCap::Cap96;
                 self.item_render_cap = ItemRenderCap::Cap64;
                 self.block_entity_cap = BlockEntityCap::Cap32;
@@ -776,6 +813,10 @@ impl Extras {
                 self.prewarm_pipelines = true;
                 self.audio_voice_cap = AudioVoiceCap::Cap16;
                 self.memory_saver = true;
+                self.active_anim_cull = true;
+                self.lookahead_stream = true;
+                self.fast_translucency = true;
+                self.particle_frustum_cull = true;
             }
             VoltBoostPreset::LowRam => {
                 self.cull_leaves = true;
@@ -804,6 +845,10 @@ impl Extras {
                 self.prewarm_pipelines = false;
                 self.audio_voice_cap = AudioVoiceCap::Cap16;
                 self.memory_saver = true;
+                self.active_anim_cull = true;
+                self.lookahead_stream = false;
+                self.fast_translucency = true;
+                self.particle_frustum_cull = true;
             }
         }
     }
@@ -1032,6 +1077,10 @@ pub enum Item {
     VoltAudioCap,
     VoltMemorySaver,
     VoltKeepAwake,
+    VoltActiveAnimCull,
+    VoltLookaheadStream,
+    VoltFastTranslucency,
+    VoltParticleFrustum,
 }
 
 /// The Volt Extras page: headers and items.
@@ -1113,6 +1162,8 @@ pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
         Err("Tier 1 - Terrain, Chunks & World Culling"),
         Ok(VoltCullLeaves),
         Ok(VoltFrustumMesh),
+        Ok(VoltLookaheadStream),
+        Ok(VoltFastTranslucency),
         Ok(VoltCaveSkyCull),
         Ok(VoltChunkUploadCap),
         Ok(VoltFastWeather),
@@ -1127,8 +1178,10 @@ pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
         Ok(VoltHubLagShield),
         Err("Tier 1 & 2 - Particles, Animations & Shaders"),
         Ok(VoltParticleBudget),
+        Ok(VoltParticleFrustum),
         Ok(VoltChaosShield),
         Ok(VoltAnimThrottle),
+        Ok(VoltActiveAnimCull),
         Ok(VoltGlintMode),
         Err("Tier 2 & 3 - Scaling, Pacing, Thermal, CPU & RAM"),
         Ok(VoltAutoDrs),
@@ -1222,6 +1275,10 @@ impl Item {
             Item::VoltAudioCap => "Audio Voice Cap",
             Item::VoltMemorySaver => "RAM Compactor",
             Item::VoltKeepAwake => "Keep Screen Awake",
+            Item::VoltActiveAnimCull => "Active-Only Sprite Anim",
+            Item::VoltLookaheadStream => "Velocity Lookahead Stream",
+            Item::VoltFastTranslucency => "Adaptive Water Sort",
+            Item::VoltParticleFrustum => "Frustum Particle Cull",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -1299,7 +1356,11 @@ impl Item {
             | VoltPrewarm
             | VoltAudioCap
             | VoltMemorySaver
-            | VoltKeepAwake => {
+            | VoltKeepAwake
+            | VoltActiveAnimCull
+            | VoltLookaheadStream
+            | VoltFastTranslucency
+            | VoltParticleFrustum => {
                 return None;
             }
         })
@@ -1510,6 +1571,18 @@ impl Item {
             Item::VoltKeepAwake => {
                 "Keeps the mobile display awake during asset downloads, world generation and active sessions."
             }
+            Item::VoltActiveAnimCull => {
+                "Skips GPU compute and mip-blending for animated block sprites that are not present in any resident chunk."
+            }
+            Item::VoltLookaheadStream => {
+                "Prioritizes chunk generation, lighting and meshing ahead of your movement and camera direction."
+            }
+            Item::VoltFastTranslucency => {
+                "Uses distance-adaptive hysteresis when re-sorting distant translucent water and glass sections."
+            }
+            Item::VoltParticleFrustum => {
+                "Rejects off-screen and behind-camera particles before sprite lookup, lighting and billboard generation."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -1574,6 +1647,10 @@ impl Item {
             Item::VoltPrewarm => e.prewarm_pipelines,
             Item::VoltMemorySaver => e.memory_saver,
             Item::VoltKeepAwake => e.keep_screen_awake,
+            Item::VoltActiveAnimCull => e.active_anim_cull,
+            Item::VoltLookaheadStream => e.lookahead_stream,
+            Item::VoltFastTranslucency => e.fast_translucency,
+            Item::VoltParticleFrustum => e.particle_frustum_cull,
             _ => return None,
         })
     }
@@ -1774,6 +1851,10 @@ impl Item {
             }
             Item::VoltMemorySaver => e.memory_saver = !e.memory_saver,
             Item::VoltKeepAwake => e.keep_screen_awake = !e.keep_screen_awake,
+            Item::VoltActiveAnimCull => e.active_anim_cull = !e.active_anim_cull,
+            Item::VoltLookaheadStream => e.lookahead_stream = !e.lookahead_stream,
+            Item::VoltFastTranslucency => e.fast_translucency = !e.fast_translucency,
+            Item::VoltParticleFrustum => e.particle_frustum_cull = !e.particle_frustum_cull,
             Item::SortKey | Item::WaypointKey | Item::MinimapZoomKey => {}
         }
     }
@@ -1916,7 +1997,18 @@ mod tests {
         }
         let mut vb = Extras::default();
         assert_eq!(vb.active_volt_optimizations(), 0);
+        for preset in VoltBoostPreset::ALL {
+            vb.apply_volt_preset(preset);
+            assert!(
+                !vb.distant_lod_boost,
+                "LOD must be off in preset {preset:?}"
+            );
+        }
+        vb.auto_optimize_device();
+        assert!(!vb.distant_lod_boost, "LOD must be off in auto-optimize");
+        vb.perf_hud = PerfHudMode::Off;
         vb.apply_volt_preset(VoltBoostPreset::UltraFps);
+        assert!(!vb.distant_lod_boost);
         assert!(vb.active_volt_optimizations() >= 15);
         assert_eq!(Extras::parse(&vb.serialize()), vb);
         vb.apply_volt_preset(VoltBoostPreset::Off);

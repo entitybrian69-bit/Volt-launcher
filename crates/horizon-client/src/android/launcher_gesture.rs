@@ -12,6 +12,7 @@ pub(super) fn reveal(scroll: f32, row: [f32; 4], view: [f32; 3]) -> f32 {
     (scroll + adjustment).clamp(0.0, maximum.max(0.0))
 }
 pub(crate) struct Drag {
+    pub(crate) pointer_id: Option<u64>,
     origin: [f64; 2],
     previous_x: f64,
     previous_y: f64,
@@ -21,6 +22,17 @@ pub(crate) struct Drag {
 impl Drag {
     pub(crate) fn new(x: f64, y: f64) -> Self {
         Self {
+            pointer_id: None,
+            origin: [x, y],
+            previous_x: x,
+            previous_y: y,
+            moved: false,
+        }
+    }
+
+    pub(crate) fn with_id(id: u64, x: f64, y: f64) -> Self {
+        Self {
+            pointer_id: Some(id),
             origin: [x, y],
             previous_x: x,
             previous_y: y,

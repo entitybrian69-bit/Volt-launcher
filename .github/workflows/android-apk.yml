@@ -995,10 +995,11 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.9.2
-          - **First-Time Launch Fix**: Prevented Android PackageInstaller / Game Mode `HorizonActivity` recreation kills (`singleTask` + full `configChanges` + `sensorLandscape` alias + `winit` `MainEvent::Destroy` & `EventLoop` recreation support + live `native_ime` Activity rebinding + generation-guarded `android_main`), restored `Vulkan / compatibility (auto)` default on fresh installs, unified `VulkanSupporter` `1.1` instance/device API version & extension filtering without `hal_usage_error` panics, preserved `OPEN_GL` texture array split across `PLAY` handoff, and queried GPU `ATLAS_LIMIT` before building `HudAtlas`
-          - **Streamlined Minecraft `26.3` Core**: Focused purely on official Minecraft Java Edition `26.3` (ready for `26.4`), removing legacy pre-`26.3` multi-version overhead and post-install 400 MB JSON prewarm spike
-          - **Cleaned Volt Settings**: Removed Accurate Block Placement completely while keeping **Volt Boost**, **Volt Waypoints**, and **Volt Minimap** (all off by default)
+          ### What's New in Volt Launcher 0.9.3
+          - **Controls Studio & Built-In Presets**: Added a full interactive visual Controls Studio directly inside Volt Launcher (and in-game Touch Options) with 5 ready-to-use layouts (**Volt Default**, **Pojav Classic**, **Zalith Layout**, **Fold Craft (FCL)**, and **PvP 4-Finger Claw**), live 16:9 drag/snap canvas, custom button creator, size/opacity/corner-radius/label/toggle/keybind inspector, preset saving, and `.json`/`.zip` import & export
+          - **Home Dashboard & Crash Recovery Fixes**: Fixed the rapid-tap crash on the Home Dashboard (`ALooper` JNI recovery, pointer-index bounds & pointer-ID tracking, deferred Play/Audio initialization, cached IME insets, and redraw pacing) and disabled automatic OpenGL fallback after Vulkan game crashes
+          - **Volt Boost Updates**: Disabled auto-enabled Distant LOD across **all** Volt Boost profiles (`Ultra FPS`, `Competitive`, `Balanced`, `Battery Saver`, `Low RAM`, and `Auto-Optimize`) and added a live **Resolution Scaler (`25%–200%`)** directly inside in-game **Volt Boost** settings
+          - **10 Pure-Rust Engine Optimizations**: Flat-stride 6-face cave connectivity flood-fill, zero-fill `Padded` neighbor row copies, flat-stride chunk neighbor meshing, refcounted active animated-sprite uploads, adaptive camera-delta translucency sorting, particle distance/frustum culling, O(N) quickselect dynamic light selection, uniform-air minimap section skipping, unloaded-neighbor dirty-remesh guard, and velocity/look-vector chunk streaming lookahead
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

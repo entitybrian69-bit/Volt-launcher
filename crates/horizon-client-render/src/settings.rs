@@ -857,6 +857,10 @@ pub enum Opt {
     TextureFiltering,
     /// `Options.maxAnisotropyBit`.
     MaxAnisotropy,
+    /// Volt Boost internal 3D resolution scaler (`25%..=200%`).
+    VoltResolutionScale,
+    /// Built-in Controls Studio touch layout preset switcher.
+    TouchPreset,
 }
 
 #[cfg(test)]

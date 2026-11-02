@@ -380,6 +380,8 @@ pub struct Streaming {
     pub smooth_lighting: bool,
     pub cutout_leaves: bool,
     pub cull_leaves: bool,
+    /// Optional normalized XZ movement/camera lookahead vector for streaming priority.
+    pub lookahead_dir: Option<[f32; 2]>,
     /// Incremental relighting of block edits on lit chunks (see `light::relight`).
     light_tables: Arc<LightTables>,
     /// Applied edits by sequence, replayed onto light jobs snapshotted before them.
@@ -781,6 +783,7 @@ impl Streaming {
             smooth_lighting: true,
             cutout_leaves: true,
             cull_leaves: false,
+            lookahead_dir: None,
             light_tables,
             light_log: Vec::new(),
             light_edit_sequence: 0,
@@ -826,8 +829,12 @@ impl Streaming {
         self.generated_total += 1;
         for dz in -1..=1 {
             for dx in -1..=1 {
+                let target = (key.0 + dx, key.1 + dz);
+                if !world.chunks.contains_key(&target) {
+                    continue;
+                }
                 for sy in 0..world.layout().sections() as i32 {
-                    world.dirty_sections.insert((key.0 + dx, sy, key.1 + dz));
+                    world.dirty_sections.insert((target.0, sy, target.1));
                 }
             }
         }
@@ -1001,7 +1008,21 @@ impl Streaming {
     }
     /// The order jobs around the player run in, lowest first.
     fn distance(&self, x: i32, z: i32) -> i64 {
-        self.ranges().priority(x, z, self.loading)
+        let base = self.ranges().priority(x, z, self.loading);
+        if !self.loading
+            && let Some([fx, fz]) = self.lookahead_dir
+        {
+            let dx = (x - self.center.0) as f32;
+            let dz = (z - self.center.1) as f32;
+            let len = (dx * dx + dz * dz).sqrt();
+            if len > 1.5 {
+                let dot = (dx * fx + dz * fz) / len;
+                if dot < -0.15 {
+                    return base.saturating_add(((base as f32) * (-dot) * 1.5) as i64);
+                }
+            }
+        }
+        base
     }
     /// The 3x3 a light job reads: the finished columns, and for a neighbour
     /// that will not finish (past the area), its decorated proto chunk, as
@@ -1204,8 +1225,12 @@ impl Streaming {
                         if first {
                             for dz in -1..=1 {
                                 for dx in -1..=1 {
+                                    let target = (x + dx, z + dz);
+                                    if !world.chunks.contains_key(&target) {
+                                        continue;
+                                    }
                                     for sy in 0..world.layout().sections() as i32 {
-                                        world.dirty_sections.insert((x + dx, sy, z + dz));
+                                        world.dirty_sections.insert((target.0, sy, target.1));
                                     }
                                 }
                             }

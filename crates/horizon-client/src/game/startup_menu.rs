@@ -783,13 +783,15 @@ impl Loading {
             }
             crate::platform::hide();
             if self.menu.options_open {
-                let e = self.menu.options.key(
-                    &mut self.settings,
-                    &self.gui.as_ref().unwrap().atlas,
-                    KeyCode::Escape,
-                    None,
-                );
-                self.menu_option_events(e);
+                if let Some(gui) = self.gui.as_ref() {
+                    let e = self.menu.options.key(
+                        &mut self.settings,
+                        &gui.atlas,
+                        KeyCode::Escape,
+                        None,
+                    );
+                    self.menu_option_events(e);
+                }
             } else if let Some(t) = &mut self.menu.title {
                 t.escape();
             }
@@ -856,13 +858,15 @@ impl Loading {
                         Action::Key(KeyCode::Escape) => {
                             crate::platform::hide();
                             if self.menu.options_open {
-                                let events = self.menu.options.key(
-                                    &mut self.settings,
-                                    &self.gui.as_ref().unwrap().atlas,
-                                    KeyCode::Escape,
-                                    None,
-                                );
-                                self.menu_option_events(events);
+                                if let Some(gui) = self.gui.as_ref() {
+                                    let events = self.menu.options.key(
+                                        &mut self.settings,
+                                        &gui.atlas,
+                                        KeyCode::Escape,
+                                        None,
+                                    );
+                                    self.menu_option_events(events);
+                                }
                             } else if let Some(t) = &mut self.menu.title {
                                 t.escape();
                             }

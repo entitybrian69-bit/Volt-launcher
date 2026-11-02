@@ -275,6 +275,9 @@ struct SectionGpu {
     /// When it began to fade out, its column gone over far terrain that
     /// stays behind it (`Renderer::leave_section`); released once it has.
     leaving: Option<std::time::Instant>,
+    /// Animated block sprite layers present in this section, for refcounted
+    /// active-only sprite animation culling.
+    animated_layers: Box<[u16]>,
 }
 impl SectionGpu {
     /// Its fade code this frame (`lod::fade_code`), 0 once whole. `retiring`:
@@ -739,6 +742,11 @@ pub struct Renderer {
     pub animated_textures: bool,
     /// Tick stride for animated sprite uploads (1 = vanilla 20 Hz, 2 = Volt Boost 10 Hz throttle).
     pub animation_step_ticks: u64,
+    /// Skip animated block sprite blending/uploads when no resident section uses that layer.
+    pub active_anim_cull: bool,
+    /// Distance-adaptive hysteresis for translucent water/glass re-sorting.
+    pub fast_translucency: bool,
+    active_layer_counts: Vec<u32>,
     last_animated_tick: Option<u64>,
     present_modes: Vec<wgpu::PresentMode>,
 }
@@ -1112,8 +1120,11 @@ fn backend_attempts(api: GraphicsApi, os: &str, wgpu_backend: bool) -> Vec<(wgpu
     if os == "android" {
         return match api {
             GraphicsApi::OpenGl => vec![(Backends::GL, false)],
-            GraphicsApi::VulkanSupporter => vec![(Backends::VULKAN, true), (Backends::GL, false)],
-            GraphicsApi::Auto | GraphicsApi::Vulkan | GraphicsApi::Dx12 => vec![
+            GraphicsApi::VulkanSupporter => {
+                vec![(Backends::VULKAN, true), (Backends::VULKAN, false)]
+            }
+            GraphicsApi::Vulkan => vec![(Backends::VULKAN, false), (Backends::VULKAN, true)],
+            GraphicsApi::Auto | GraphicsApi::Dx12 => vec![
                 (Backends::VULKAN, false),
                 (Backends::VULKAN, true),
                 (Backends::GL, false),
@@ -3294,6 +3305,9 @@ impl Renderer {
             fullbright: false,
             animated_textures: true,
             animation_step_ticks: 1,
+            active_anim_cull: false,
+            fast_translucency: false,
+            active_layer_counts: Vec::new(),
             last_animated_tick: None,
             present_modes,
         })
@@ -3750,6 +3764,9 @@ impl Renderer {
                 },
             ],
         });
+        if self.sections.is_empty() {
+            self.active_layer_counts.clear();
+        }
         Ok(())
     }
     /// Set the live surface aside for a replacement on the same device.
@@ -4077,6 +4094,22 @@ impl Renderer {
         {
             crate::spans::time("upload_submit", || self.queue.submit([copies]));
         }
+        let mut animated_layers = Vec::new();
+        for part in [&mesh.solid, &mesh.translucent] {
+            for v in part.iter().step_by(4) {
+                let layer = v.layer & !crate::mesher::OPAQUE_LAYER;
+                if self.animations.is_animated(layer) && !animated_layers.contains(&layer) {
+                    animated_layers.push(layer);
+                }
+            }
+        }
+        for &layer in &animated_layers {
+            let idx = usize::from(layer);
+            if idx >= self.active_layer_counts.len() {
+                self.active_layer_counts.resize(idx + 1, 0);
+            }
+            self.active_layer_counts[idx] = self.active_layer_counts[idx].saturating_add(1);
+        }
         Some(SectionGpu {
             page,
             start,
@@ -4099,6 +4132,7 @@ impl Renderer {
             flat_id,
             fading: None,
             leaving: None,
+            animated_layers: animated_layers.into_boxed_slice(),
         })
     }
     /// The section copies recorded since the last submission, closed.
@@ -4157,6 +4191,11 @@ impl Renderer {
         }
     }
     fn release_mesh(&mut self, s: SectionGpu) {
+        for &layer in &s.animated_layers {
+            if let Some(c) = self.active_layer_counts.get_mut(usize::from(layer)) {
+                *c = c.saturating_sub(1);
+            }
+        }
         if let (Some(flat), Some(id)) = (&mut self.flat, s.flat_id) {
             flat.remove(id);
         }
@@ -4203,6 +4242,7 @@ impl Renderer {
         self.section_uploaded.clear();
         self.block_entity_revision = next_block_entity_revision();
         self.sections.clear();
+        self.active_layer_counts.clear();
         self.lods.clear();
         self.lod_cutout.clear();
         self.lod_retiring.clear();
@@ -4325,6 +4365,13 @@ impl Renderer {
         }
         if block_entities {
             self.block_entity_revision = next_block_entity_revision();
+        }
+        for s in &released {
+            for &layer in &s.animated_layers {
+                if let Some(c) = self.active_layer_counts.get_mut(usize::from(layer)) {
+                    *c = c.saturating_sub(1);
+                }
+            }
         }
         if let Some(flat) = &mut self.flat {
             for id in released.iter().filter_map(|s| s.flat_id) {
@@ -4822,7 +4869,10 @@ impl Renderer {
         self.lightmap_uploaded = true;
     }
     fn animate(&mut self, encoder: &mut wgpu::CommandEncoder, tick: u64) {
-        self.animations.animate(encoder, &mut self.uploads, tick);
+        let active = (self.active_anim_cull && self.sections.len() > 0)
+            .then_some(self.active_layer_counts.as_slice());
+        self.animations
+            .animate_active(encoder, &mut self.uploads, tick, active);
         if let Some(atlas) = &self.pack_atlas {
             atlas.copy(
                 encoder,
@@ -5365,14 +5415,20 @@ impl Renderer {
         // (at least 15) of the visible list. Cached views avoid needless sorts.
         self.translucent_draws.clear();
         let count = visible.len() + visible_lods.len();
-        let budget = (count / 8).max(15).min(count);
+        let fast_trans = self.fast_translucency;
+        let budget = if fast_trans {
+            (count / 16).max(6).min(count)
+        } else {
+            (count / 8).max(15).min(count)
+        };
+        let near_radius = if fast_trans { 1 } else { 2 };
         self.translucency_cursor %= count.max(1);
         for (i, v) in visible.iter().enumerate().rev() {
             let s = self.sections.get_mut(v.slot);
             if let Some((index_page, index_start)) = s.sorted_indices {
-                let nearby = (v.key.0 - camera_section.0).abs() <= 2
-                    && (v.key.1 - camera_section.1).abs() <= 2
-                    && (v.key.2 - camera_section.2).abs() <= 2;
+                let nearby = (v.key.0 - camera_section.0).abs() <= near_radius
+                    && (v.key.1 - camera_section.1).abs() <= near_radius
+                    && (v.key.2 - camera_section.2).abs() <= near_radius;
                 let scheduled = (i + count - self.translucency_cursor) % count < budget;
                 let origin = [
                     v.key.0 * 16,
@@ -5380,9 +5436,12 @@ impl Renderer {
                     v.key.2 * 16,
                 ];
                 if (!s.sort.is_sorted() || nearby || scheduled)
-                    && let Some(indices) =
-                        s.sort
-                            .update(camera.to_array(), origin, &mut self.translucent_sorter)
+                    && let Some(indices) = s.sort.update_adaptive(
+                        camera.to_array(),
+                        origin,
+                        &mut self.translucent_sorter,
+                        fast_trans && !nearby,
+                    )
                 {
                     self.uploads.buffer(
                         &mut encoder,

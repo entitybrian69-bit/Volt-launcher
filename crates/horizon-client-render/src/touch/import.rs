@@ -589,6 +589,7 @@ fn parse_pojav_button(
         in_menu,
         bg_color,
         stroke_color,
+        corner_radius: None,
         drawer_parent: None,
     })
 }
@@ -835,6 +836,7 @@ fn parse_fcl_button(
         in_menu,
         bg_color,
         stroke_color,
+        corner_radius: None,
         drawer_parent: None,
     })
 }
@@ -1066,6 +1068,7 @@ fn parse_zalith_button(btn: &Value) -> Option<CustomButton> {
         in_menu,
         bg_color: Some([0, 0, 0, 115]),
         stroke_color: None,
+        corner_radius: Some(8.0),
         drawer_parent: None,
     })
 }

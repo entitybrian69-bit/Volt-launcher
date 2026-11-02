@@ -321,23 +321,29 @@ fn visibility_reusing(pad: &Padded, info: &[Info], stack: &mut Vec<usize>) -> u6
             if faces == 0b11_1111 {
                 return ALL_VISIBLE;
             }
-            for (dx, dy, dz) in [
-                (1, 0, 0),
-                (-1, 0, 0),
-                (0, 1, 0),
-                (0, -1, 0),
-                (0, 0, 1),
-                (0, 0, -1),
-            ] {
-                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
-                if !(0..16).contains(&nx) || !(0..16).contains(&ny) || !(0..16).contains(&nz) {
-                    continue;
-                }
-                let n = (ny << 8 | nz << 4 | nx) as usize;
-                if !seen[n] {
-                    seen[n] = true;
-                    stack.push(n);
-                }
+            if x > 0 && !seen[c - 1] {
+                seen[c - 1] = true;
+                stack.push(c - 1);
+            }
+            if x < 15 && !seen[c + 1] {
+                seen[c + 1] = true;
+                stack.push(c + 1);
+            }
+            if z > 0 && !seen[c - 16] {
+                seen[c - 16] = true;
+                stack.push(c - 16);
+            }
+            if z < 15 && !seen[c + 16] {
+                seen[c + 16] = true;
+                stack.push(c + 16);
+            }
+            if y > 0 && !seen[c - 256] {
+                seen[c - 256] = true;
+                stack.push(c - 256);
+            }
+            if y < 15 && !seen[c + 256] {
+                seen[c + 256] = true;
+                stack.push(c + 256);
             }
         }
         for a in 0..6 {
@@ -732,43 +738,73 @@ impl Padded {
     }
     fn fill(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32, own: &mut [u32; 4096]) {
         self.blocks.resize(P * P * P, 0);
-        self.blocks.fill(0);
         self.light.resize(P * P * P, 0);
         let (blocks, light) = (&mut self.blocks, &mut self.light);
-        let base_y = region[1][1].map_or(MIN_Y, Chunk::min_y) + sy * 16;
-        // The section itself is unpacked in one pass; the border cells of the
-        // neighbouring sections are read one by one.
+        let Some(center_chunk) = region[1][1] else {
+            blocks.fill(0);
+            let base_y = MIN_Y + sy * 16;
+            for y in -B..16 + B {
+                let wy = base_y + y;
+                for z in -B..16 + B {
+                    for x in -B..16 + B {
+                        let i = pi(x, y, z);
+                        if let Some(c) = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize]
+                        {
+                            blocks[i] = c.get(x & 15, wy, z & 15);
+                            light[i] = c.light(x & 15, wy, z & 15);
+                        } else {
+                            light[i] = 0xF0;
+                        }
+                    }
+                }
+            }
+            return;
+        };
+        let base_y = center_chunk.min_y() + sy * 16;
+        // Unpack the 16³ interior once and copy 16-block X-rows directly.
         own.fill(0);
-        let center = region[1][1].map(|c| &c.sections[sy as usize]);
-        if let Some(section) = center {
-            section.unpack(own);
+        center_chunk.sections[sy as usize].unpack(own);
+        for y in 0..16 {
+            let wy = base_y + y;
+            for z in 0..16 {
+                let dst = pi(0, y, z);
+                let src = (y as usize) << 8 | (z as usize) << 4;
+                blocks[dst..dst + 16].copy_from_slice(&own[src..src + 16]);
+                for x in 0..16 {
+                    light[dst + x as usize] = center_chunk.light(x, wy, z);
+                }
+            }
         }
+        // Populate only the 2-block border shell around the 16³ interior.
         for y in -B..16 + B {
             let wy = base_y + y;
+            let y_border = !(0..16).contains(&y);
             for z in -B..16 + B {
-                for x in -B..16 + B {
-                    let chunk = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize];
-                    let i = pi(x, y, z);
-                    if let Some(c) = chunk {
-                        blocks[i] =
-                            if (0..16).contains(&x) && (0..16).contains(&y) && (0..16).contains(&z)
-                            {
-                                own[(y << 8 | z << 4 | x) as usize]
-                            } else {
-                                c.get(x & 15, wy, z & 15)
-                            };
-                        light[i] = c.light(x & 15, wy, z & 15);
-                    } else if let Some(c) = region[1][1] {
-                        // A neighbour not loaded continues this chunk's edge
-                        // column. As lit air, the outermost chunks' water drew
-                        // a wall toward it (fluids show both sides), a light
-                        // sheet in the water where far terrain carries on.
-                        // Vanilla draws no chunk without its neighbours.
-                        let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
-                        blocks[i] = c.get(ex, wy, ez);
-                        light[i] = c.light(ex, wy, ez);
-                    } else {
-                        light[i] = 0xF0;
+                let z_border = y_border || !(0..16).contains(&z);
+                let row_z = ((z + 16) >> 4) as usize;
+                if z_border {
+                    for x in -B..16 + B {
+                        let i = pi(x, y, z);
+                        if let Some(c) = region[row_z][((x + 16) >> 4) as usize] {
+                            blocks[i] = c.get(x & 15, wy, z & 15);
+                            light[i] = c.light(x & 15, wy, z & 15);
+                        } else {
+                            let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
+                            blocks[i] = center_chunk.get(ex, wy, ez);
+                            light[i] = center_chunk.light(ex, wy, ez);
+                        }
+                    }
+                } else {
+                    for x in (-B..0).chain(16..16 + B) {
+                        let i = pi(x, y, z);
+                        if let Some(c) = region[row_z][((x + 16) >> 4) as usize] {
+                            blocks[i] = c.get(x & 15, wy, z & 15);
+                            light[i] = c.light(x & 15, wy, z & 15);
+                        } else {
+                            let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
+                            blocks[i] = center_chunk.get(ex, wy, ez);
+                            light[i] = center_chunk.light(ex, wy, ez);
+                        }
                     }
                 }
             }
@@ -1010,11 +1046,13 @@ impl Mesher<'_> {
         );
         let info = &self.tables.info;
         let catalog = &self.render.model_catalog;
-        let mut models = Vec::new();
+        let mut models = Vec::with_capacity(8);
         for y in 0..16 {
             for z in 0..16 {
+                let row = pi(0, y, z);
                 for x in 0..16 {
-                    let id = pad.blocks[pi(x, y, z)];
+                    let idx = row + x as usize;
+                    let id = pad.blocks[idx];
                     if id == 0 {
                         continue;
                     }
@@ -1023,12 +1061,15 @@ impl Mesher<'_> {
                         out.block_entities
                             .push(([center.x * 16 + x, base_y + y, center.z * 16 + z], id));
                     }
-                    if state.solid
-                        && Direction::ALL.iter().all(|d| {
-                            let [dx, dy, dz] = d.normal();
-                            info[pad.blocks[pi(x + dx, y + dy, z + dz)] as usize].solid
-                        })
-                    {
+                    let neighbors = [
+                        pad.blocks[idx - P * P],
+                        pad.blocks[idx + P * P],
+                        pad.blocks[idx - P],
+                        pad.blocks[idx + P],
+                        pad.blocks[idx - 1],
+                        pad.blocks[idx + 1],
+                    ];
+                    if state.solid && neighbors.iter().all(|&nb| info[nb as usize].solid) {
                         continue;
                     }
                     if state.fluid.kind() != FluidKind::Empty {
@@ -1062,8 +1103,7 @@ impl Mesher<'_> {
                     };
                     let mut visible = [false; 6];
                     for d in Direction::ALL {
-                        let [dx, dy, dz] = d.normal();
-                        let neighbor = pad.blocks[pi(x + dx, y + dy, z + dz)];
+                        let neighbor = neighbors[d as usize];
                         let other = &info[neighbor as usize];
                         // LeavesBlock.skipRendering with opaque leaves, or Volt Boost Smart Leaf Culling
                         // (skips hidden interior leaf-to-leaf faces while keeping outer canopy cutout).

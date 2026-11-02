@@ -116,6 +116,7 @@ pub(super) enum Action {
     CloseVoltBoost,
     VoltExtra(horizon_client::extras::Item),
     VoltPreset(horizon_client::volt_features::VoltBoostPreset),
+    Studio(super::controls_studio::StudioAction),
 }
 
 #[derive(Clone, Copy)]
@@ -2410,19 +2411,19 @@ impl DrawCtx<'_> {
                 cx + 20.0,
                 cy + 11.0,
                 theme::TEXT,
-                "Import Control",
+                "Controls Studio",
             );
             if text_max >= 260.0 {
                 let badge_x = cx + 162.0;
-                ui.rounded(badge_x, cy + 12.0, 108.0, 22.0, 6.0, theme::CRIMSON_BADGE);
-                ui.border(badge_x, cy + 12.0, 108.0, 22.0, 6.0, theme::BORDER_CRIMSON);
+                ui.rounded(badge_x, cy + 12.0, 128.0, 22.0, 6.0, theme::CRIMSON_BADGE);
+                ui.border(badge_x, cy + 12.0, 128.0, 22.0, 6.0, theme::BORDER_CRIMSON);
                 draw_centered_text(
                     ui,
                     Face::Medium,
-                    11.5,
-                    [badge_x, cy + 12.0, 108.0, 22.0],
+                    11.0,
+                    [badge_x, cy + 12.0, 128.0, 22.0],
                     theme::CRIMSON_BRIGHT,
-                    "Java Controls",
+                    "Pojav • Zalith • FCL",
                 );
             }
 
@@ -2440,7 +2441,7 @@ impl DrawCtx<'_> {
                 &active_fit,
             );
             let sub_hint =
-                "Import .json / .zip from PojavLauncher, Amethyst, Mojo, Zalith or FCL";
+                "Built-in Pojav, Zalith, FCL & Claw presets + visual button editor & .json/.zip import";
             let sub_fit = ui.fit_text(Face::Regular, 12.5, sub_hint, text_max);
             ui.text(
                 Face::Regular,
@@ -2451,12 +2452,13 @@ impl DrawCtx<'_> {
                 &sub_fit,
             );
 
+            let third_btn_w = (btn_grid_w - 12.0) / 3.0;
             styled_button(
                 ui,
                 self.targets,
                 [btn_x, cy + 13.0, half_btn_w, 34.0],
-                "Import Control",
-                Action::ImportControl,
+                "Controls Studio",
+                Action::Studio(super::controls_studio::StudioAction::Open),
                 BtnStyle::Primary,
                 true,
             );
@@ -2464,16 +2466,25 @@ impl DrawCtx<'_> {
                 ui,
                 self.targets,
                 [btn_x + half_btn_w + 8.0, cy + 13.0, half_btn_w, 34.0],
-                &saved_label,
-                Action::ControlLayouts,
+                "Import File",
+                Action::ImportControl,
                 BtnStyle::CrimsonOutline,
                 true,
             );
             styled_button(
                 ui,
                 self.targets,
-                [btn_x, cy + 53.0, half_btn_w, 31.0],
-                "Apply All Profiles",
+                [btn_x, cy + 53.0, third_btn_w, 31.0],
+                &saved_label,
+                Action::ControlLayouts,
+                BtnStyle::Secondary,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [btn_x + third_btn_w + 6.0, cy + 53.0, third_btn_w, 31.0],
+                "Apply All",
                 Action::ApplyControlsAllProfiles,
                 BtnStyle::Secondary,
                 true,
@@ -2481,8 +2492,8 @@ impl DrawCtx<'_> {
             styled_button(
                 ui,
                 self.targets,
-                [btn_x + half_btn_w + 8.0, cy + 53.0, half_btn_w, 31.0],
-                "Reset Default",
+                [btn_x + (third_btn_w + 6.0) * 2.0, cy + 53.0, third_btn_w, 31.0],
+                "Reset",
                 Action::ResetControls,
                 BtnStyle::Secondary,
                 true,
@@ -2641,10 +2652,16 @@ impl DrawCtx<'_> {
 
             let iy = top - self.catalog.scroll;
             let half_btn = (cw - 32.0 - 8.0) * 0.5;
-            let imp_btn_r = [cx + 16.0, iy + 68.0, half_btn, 36.0];
-            let sav_btn_r = [cx + 16.0 + half_btn + 8.0, iy + 68.0, half_btn, 36.0];
-            let all_btn_r = [cx + 16.0, iy + 110.0, half_btn, 32.0];
-            let rst_btn_r = [cx + 16.0 + half_btn + 8.0, iy + 110.0, half_btn, 32.0];
+            let third_btn = (cw - 32.0 - 12.0) / 3.0;
+            let stu_btn_r = [cx + 16.0, iy + 68.0, half_btn, 36.0];
+            let imp_btn_r = [cx + 16.0 + half_btn + 8.0, iy + 68.0, half_btn, 36.0];
+            let sav_btn_r = [cx + 16.0, iy + 110.0, third_btn, 32.0];
+            let all_btn_r = [cx + 16.0 + third_btn + 6.0, iy + 110.0, third_btn, 32.0];
+            let rst_btn_r = [cx + 16.0 + (third_btn + 6.0) * 2.0, iy + 110.0, third_btn, 32.0];
+            self.list_targets.push((
+                stu_btn_r,
+                Action::Studio(super::controls_studio::StudioAction::Open),
+            ));
             self.list_targets.push((imp_btn_r, Action::ImportControl));
             self.list_targets.push((sav_btn_r, Action::ControlLayouts));
             self.list_targets
@@ -2660,7 +2677,7 @@ impl DrawCtx<'_> {
                     cx + 16.0,
                     iy + 10.0,
                     theme::TEXT,
-                    "Import Control",
+                    "Controls Studio",
                 );
                 let act_fit =
                     ui.fit_text(Face::Regular, 12.5, &active_ctrl_summary, cw - 32.0);
@@ -2679,10 +2696,19 @@ impl DrawCtx<'_> {
                 styled_button(
                     ui,
                     self.targets,
-                    imp_btn_r,
-                    "Import Control",
-                    Action::ImportControl,
+                    stu_btn_r,
+                    "Controls Studio",
+                    Action::Studio(super::controls_studio::StudioAction::Open),
                     BtnStyle::Primary,
+                    true,
+                );
+                styled_button(
+                    ui,
+                    self.targets,
+                    imp_btn_r,
+                    "Import File",
+                    Action::ImportControl,
+                    BtnStyle::CrimsonOutline,
                     true,
                 );
                 styled_button(
@@ -2691,7 +2717,7 @@ impl DrawCtx<'_> {
                     sav_btn_r,
                     &saved_label,
                     Action::ControlLayouts,
-                    BtnStyle::CrimsonOutline,
+                    BtnStyle::Secondary,
                     true,
                 );
                 styled_button(
@@ -2707,7 +2733,7 @@ impl DrawCtx<'_> {
                     ui,
                     self.targets,
                     rst_btn_r,
-                    "Reset Default",
+                    "Reset",
                     Action::ResetControls,
                     BtnStyle::Secondary,
                     true,
@@ -2917,6 +2943,20 @@ impl DrawCtx<'_> {
                 String::new(),
                 Action::VoltExtra(Item::VoltFrustumMesh),
                 Some(ex.frustum_priority_mesh),
+                false,
+            ),
+            (
+                "Velocity lookahead stream",
+                String::new(),
+                Action::VoltExtra(Item::VoltLookaheadStream),
+                Some(ex.lookahead_stream),
+                false,
+            ),
+            (
+                "Adaptive water sort",
+                String::new(),
+                Action::VoltExtra(Item::VoltFastTranslucency),
+                Some(ex.fast_translucency),
                 false,
             ),
             (
@@ -4075,7 +4115,8 @@ impl Launcher {
         let modal_open = self.chooser.is_some()
             || self.login.visible
             || self.update_prompt.is_some()
-            || self.catalog.volt_boost_modal;
+            || self.catalog.volt_boost_modal
+            || self.controls_studio.open;
         if modal_open && !self.modal_was_open {
             self.modal_anim = Some(now);
         }
@@ -4277,6 +4318,11 @@ impl Launcher {
             self.list_targets.clear();
             self.list_view = None;
             draw_update_prompt(&mut ui, &mut self.targets, prompt);
+        } else if !self.login.visible && self.controls_studio.open {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = None;
+            self.controls_studio.draw(&mut ui, &mut self.targets);
         } else if !self.login.visible && self.catalog.volt_boost_modal {
             self.targets.clear();
             self.list_targets.clear();
@@ -4290,7 +4336,8 @@ impl Launcher {
         if (self.login.visible
             || self.chooser.is_some()
             || self.update_prompt.is_some()
-            || self.catalog.volt_boost_modal)
+            || self.catalog.volt_boost_modal
+            || self.controls_studio.open)
             && let Some(anim_start) = self.modal_anim
         {
             let el = anim_start.elapsed().as_secs_f32();
@@ -4439,15 +4486,18 @@ impl Launcher {
         Ok(())
     }
 
-    pub(super) fn activate(&mut self, events: &ActiveEventLoop) -> Result<()> {
-        if self.session_worker.is_some() {
+    pub(super) fn activate(&mut self, _events: &ActiveEventLoop) -> Result<()> {
+        if self.session_worker.is_some() || self.pending_play {
             return Ok(());
         }
         let Some(r) = &self.renderer else {
             return Ok(());
         };
+        let Some(gui) = &self.gui else {
+            return Ok(());
+        };
         let mut b = HudBatch::new([r.config.width, r.config.height]);
-        let ui = Ui::mobile(&self.gui.as_ref().unwrap().atlas, &mut b, (0.0, 0.0));
+        let ui = Ui::mobile(&gui.atlas, &mut b, (0.0, 0.0));
         let p = self.focus.and_then(|index| self.targets.get(index)).map_or(
             [
                 self.cursor.0 as f32 / ui.density,
@@ -4465,26 +4515,16 @@ impl Launcher {
         if self.catalog.busy() || crate::documents::busy() {
             return Ok(());
         }
-        self.feedback = action.map(|action| (action, std::time::Instant::now()));
+        let now = std::time::Instant::now();
+        self.feedback = action.map(|action| (action, now));
         self.focus = None;
-        if action.is_some() && horizon_client::official_install::ready(&self.home) {
-            let audio = self.audio.get_or_insert_with(|| {
-                let mut audio = horizon_client::audio::Audio::new(
-                    &self.home.join(".local/horizon-client/26.3"),
-                );
-                let settings = horizon_client::settings::Settings::load(
-                    &self
-                        .catalog
-                        .config
-                        .game_home(&self.home)
-                        .join("options.txt"),
-                );
-                audio.master = settings.volumes[0];
-                let mut volumes = settings.volumes;
-                volumes[0] = 1.0;
-                horizon_client::settings::set_source_volumes(volumes);
-                audio
-            });
+        if action.is_some()
+            && self
+                .last_click_sound
+                .is_none_or(|t| now.duration_since(t) >= std::time::Duration::from_millis(75))
+            && let Some(audio) = &mut self.audio
+        {
+            self.last_click_sound = Some(now);
             audio.play_button_click();
         }
         match action {
@@ -4845,6 +4885,7 @@ impl Launcher {
             Some(Action::LoginLink) => self.login.open_link(),
             Some(Action::Page(page)) => {
                 self.catalog.volt_boost_modal = false;
+                self.controls_studio.open = false;
                 self.catalog.editing = None;
                 if crate::platform::active() {
                     crate::platform::hide();
@@ -4855,7 +4896,10 @@ impl Launcher {
                 self.catalog.offset = 0;
                 self.catalog.browse(&self.home);
             }
-            Some(Action::Play) => self.action(events)?,
+            Some(Action::Play) => {
+                self.pending_play = true;
+                self.needs_redraw = true;
+            }
             Some(Action::Search) => {
                 crate::platform::hide();
                 self.catalog.offset = 0;
@@ -5027,11 +5071,17 @@ impl Launcher {
             }
             Some(Action::VoltPreset(preset)) => {
                 self.catalog.extras.apply_volt_preset(preset);
+                self.catalog.extras.distant_lod_boost = false;
                 horizon_threads::set_thread_boost(self.catalog.extras.thread_boost);
                 self.configure_screen();
                 let game_dir = self.catalog.config.game_home(&self.home);
                 let _ = std::fs::create_dir_all(&game_dir);
                 self.catalog.extras.save(&game_dir);
+                let mut gfx = horizon_client::graphics::Graphics::load(&game_dir);
+                if gfx.lod_distance != 0 {
+                    gfx.lod_distance = 0;
+                    gfx.save(&game_dir);
+                }
                 self.catalog.status = format!(
                     "Volt Boost profile set to {} ({} optimizations active).",
                     preset.label(),
@@ -5046,6 +5096,17 @@ impl Launcher {
                 let game_dir = self.catalog.config.game_home(&self.home);
                 let _ = std::fs::create_dir_all(&game_dir);
                 self.catalog.extras.save(&game_dir);
+                if matches!(
+                    item,
+                    horizon_client::extras::Item::VoltPreset
+                        | horizon_client::extras::Item::VoltAutoOptimize
+                ) {
+                    let mut gfx = horizon_client::graphics::Graphics::load(&game_dir);
+                    if gfx.lod_distance != 0 {
+                        gfx.lod_distance = 0;
+                        gfx.save(&game_dir);
+                    }
+                }
                 if item == horizon_client::extras::Item::VoltPurgeRam {
                     let rss = horizon_threads::resident_ram_mib().unwrap_or(0);
                     self.catalog.status =
@@ -5056,6 +5117,27 @@ impl Launcher {
                         self.catalog.extras.volt_preset.label(),
                         self.catalog.extras.active_volt_optimizations()
                     );
+                }
+            }
+            Some(Action::Studio(sact)) => {
+                let profile_home = self.catalog.config.game_home(&self.home);
+                if let Some(msg) =
+                    self.controls_studio
+                        .handle_action(sact, &self.home, &profile_home)
+                {
+                    if matches!(
+                        self.catalog.config.input_host,
+                        crate::catalog::InputHost::KeyboardMouse
+                            | crate::catalog::InputHost::Controller
+                    ) {
+                        self.catalog.config.input_host = crate::catalog::InputHost::Auto;
+                        let _ = self.catalog.config.save(&self.home);
+                        crate::configure_input_mode(self.catalog.config.input_host);
+                    }
+                    self.catalog.refresh_controls(&self.home);
+                    self.catalog.status = msg;
+                } else if matches!(sact, super::controls_studio::StudioAction::SavePreset) {
+                    self.catalog.refresh_controls(&self.home);
                 }
             }
             None => {}
@@ -5074,16 +5156,46 @@ impl Launcher {
     pub(super) fn touch_event(&mut self, events: &ActiveEventLoop, t: Touch) -> Result<()> {
         self.focus = None;
         self.pending_focus = None;
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
-        self.cursor = (t.location.x, t.location.y);
+        self.needs_redraw = true;
         match t.phase {
             TouchPhase::Started => {
-                self.drag = Some(super::gesture::Drag::new(t.location.x, t.location.y));
+                if self.drag.is_none() {
+                    self.cursor = (t.location.x, t.location.y);
+                    if self.controls_studio.open {
+                        let density = self.ui_density() as f64;
+                        let _ = self.controls_studio.pointer_down(
+                            (t.location.x / density) as f32,
+                            (t.location.y / density) as f32,
+                        );
+                    }
+                    self.drag = Some(super::gesture::Drag::with_id(
+                        t.id,
+                        t.location.x,
+                        t.location.y,
+                    ));
+                }
             }
             TouchPhase::Moved => {
+                if self
+                    .drag
+                    .as_ref()
+                    .is_none_or(|d| d.pointer_id != Some(t.id))
+                {
+                    return Ok(());
+                }
+                self.cursor = (t.location.x, t.location.y);
                 let density = self.ui_density() as f64;
+                if self.controls_studio.open
+                    && self.controls_studio.pointer_move(
+                        (t.location.x / density) as f32,
+                        (t.location.y / density) as f32,
+                    )
+                {
+                    if let Some(drag) = &mut self.drag {
+                        let _ = drag.update_xy(t.location.x, t.location.y, density);
+                    }
+                    return Ok(());
+                }
                 if let Some(drag) = &mut self.drag {
                     let (dx, dy) = drag.update_xy(t.location.x, t.location.y, density);
                     if drag.moved {
@@ -5094,6 +5206,7 @@ impl Launcher {
                             && self.chooser.is_none()
                             && self.update_prompt.is_none()
                             && !self.catalog.volt_boost_modal
+                            && !self.controls_studio.open
                             && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
                                 ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
                             });
@@ -5111,9 +5224,10 @@ impl Launcher {
                                 (self.catalog.volt_modal_scroll + dy).max(0.0);
                         } else if let Some(chooser) = &mut self.chooser {
                             chooser.scroll = (chooser.scroll + dy).max(0.0);
-                        } else if self
-                            .list_view
-                            .is_some_and(|view| oy / density >= view[0] as f64)
+                        } else if !self.controls_studio.open
+                            && self
+                                .list_view
+                                .is_some_and(|view| oy / density >= view[0] as f64)
                         {
                             self.catalog.scroll = (self.catalog.scroll + dy).max(0.0);
                         }
@@ -5121,12 +5235,30 @@ impl Launcher {
                 }
             }
             TouchPhase::Ended => {
-                if self.drag.take().is_some_and(|drag| !drag.moved) {
-                    self.activate(events)?;
+                if self
+                    .drag
+                    .as_ref()
+                    .is_some_and(|d| d.pointer_id == Some(t.id))
+                {
+                    let studio_dragged = self.controls_studio.pointer_up();
+                    self.cursor = (t.location.x, t.location.y);
+                    if let Some(drag) = self.drag.take()
+                        && !drag.moved
+                        && !studio_dragged
+                    {
+                        self.activate(events)?;
+                    }
                 }
             }
             TouchPhase::Cancelled => {
-                self.drag = None;
+                if self
+                    .drag
+                    .as_ref()
+                    .is_some_and(|d| d.pointer_id == Some(t.id) || d.pointer_id.is_none())
+                {
+                    let _ = self.controls_studio.pointer_up();
+                    self.drag = None;
+                }
             }
         }
         Ok(())
@@ -5499,11 +5631,13 @@ fn draw_volt_boost_modal(
         );
     }
 
-    let items: [Item; 24] = [
+    let items: [Item; 28] = [
         Item::VoltPerfHud,
         Item::VoltAutoDrs,
         Item::VoltCullLeaves,
         Item::VoltFrustumMesh,
+        Item::VoltLookaheadStream,
+        Item::VoltFastTranslucency,
         Item::VoltCaveSkyCull,
         Item::VoltChunkUploadCap,
         Item::VoltFastWeather,
@@ -5516,8 +5650,10 @@ fn draw_volt_boost_modal(
         Item::VoltDistantMobThrottle,
         Item::VoltHubLagShield,
         Item::VoltParticleBudget,
+        Item::VoltParticleFrustum,
         Item::VoltChaosShield,
         Item::VoltAnimThrottle,
+        Item::VoltActiveAnimCull,
         Item::VoltGlintMode,
         Item::VoltDynamicFps,
         Item::VoltMenuBg,

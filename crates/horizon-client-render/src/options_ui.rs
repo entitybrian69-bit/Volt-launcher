@@ -334,6 +334,8 @@ impl Opt {
             Opt::SharePresence => "options.sharePresence",
             Opt::DirectionalAudio => "options.directionalAudio",
             Opt::MusicToast => "options.musicToast",
+            Opt::VoltResolutionScale => "volt.options.resolution_scale",
+            Opt::TouchPreset => "volt.options.touch_preset",
         }
     }
     pub(crate) fn kind(self, s: &Settings) -> Kind {
@@ -402,6 +404,9 @@ impl Opt {
             Opt::PadMoveDeadzone => unit(s.controller.move_deadzone, 0.0, 0.5),
             Opt::PadLookDeadzone => unit(s.controller.look_deadzone, 0.0, 0.5),
             Opt::SprintWindow => unit(s.sprint_window as f32, 0.0, 10.0),
+            Opt::VoltResolutionScale => {
+                unit(s.horizon.resolution_scale.clamp(25, 200) as f32, 25.0, 200.0)
+            }
             _ => Kind::Cycle,
         }
     }
@@ -448,6 +453,15 @@ impl Opt {
     pub fn label(self, s: &Settings) -> Text {
         let c = self.caption();
         let touch_value = match self {
+            Opt::TouchPreset => Some(
+                if let Some(p) = crate::touch::BuiltInPreset::detect(&s.touch) {
+                    p.label().to_owned()
+                } else if let Some(meta) = &s.touch.imported_from {
+                    meta.name.clone()
+                } else {
+                    "Custom Layout".to_owned()
+                },
+            ),
             Opt::TouchMode => Some(
                 crate::touch::Mode::SCHEMES
                     .iter()
@@ -890,6 +904,10 @@ impl Opt {
                 gamepad::TextKeyboard::Horizon => "horizon.options.keyboard.horizon",
                 gamepad::TextKeyboard::Steam => "horizon.options.keyboard.steam",
             }),
+            Opt::VoltResolutionScale => generic(
+                c,
+                Text::literal(format!("{}%", s.horizon.resolution_scale.clamp(25, 200))),
+            ),
             _ => Text::empty(),
         }
     }
@@ -972,6 +990,9 @@ impl Opt {
             Opt::PadMoveDeadzone => s.controller.move_deadzone = step(0.0, 50.0) / 100.0,
             Opt::PadLookDeadzone => s.controller.look_deadzone = step(0.0, 50.0) / 100.0,
             Opt::SprintWindow => s.sprint_window = step(0.0, 10.0) as i32,
+            Opt::VoltResolutionScale => {
+                s.horizon.resolution_scale = (25.0 + step(0.0, 35.0) * 5.0) as u32;
+            }
             _ => {}
         }
         if self.affects_preset() {
@@ -1013,6 +1034,21 @@ impl Opt {
             }
         };
         match self {
+            Opt::TouchPreset => {
+                let all = crate::touch::BuiltInPreset::ALL;
+                let cur = crate::touch::BuiltInPreset::detect(&s.touch)
+                    .and_then(|p| all.iter().position(|x| *x == p))
+                    .unwrap_or(0);
+                let chosen = all[usize::from(next(cur as u8, all.len() as u8))];
+                let mut built = chosen.build();
+                built.sensitivity = s.touch.sensitivity;
+                built.sensitivity_horizontal = s.touch.sensitivity_horizontal;
+                built.sensitivity_vertical = s.touch.sensitivity_vertical;
+                built.virtual_mouse_sensitivity = s.touch.virtual_mouse_sensitivity;
+                built.gyroscope = s.touch.gyroscope;
+                built.gyro_sensitivity = s.touch.gyro_sensitivity;
+                s.touch = built;
+            }
             Opt::TouchMode => {
                 let i = crate::touch::Mode::SCHEMES
                     .iter()
@@ -2037,7 +2073,11 @@ impl OptionsUi {
         match self.page() {
             Page::Extras => self.extra_section_rows(s, crate::extras::rows()),
             Page::Minimap => self.extra_section_rows(s, crate::extras::minimap_rows()),
-            Page::VoltBoost => self.extra_section_rows(s, crate::extras::volt_boost_rows()),
+            Page::VoltBoost => {
+                let mut rows = vec![Row::Big(Opt::VoltResolutionScale)];
+                rows.extend(self.extra_section_rows(s, crate::extras::volt_boost_rows()));
+                rows
+            }
             Page::Waypoints => {
                 let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
                 rows.push(Row::Header("Saved Waypoints"));
@@ -2346,7 +2386,7 @@ impl OptionsUi {
                 self.filter_option_rows(rows)
             }
             Page::Touch => {
-                let mut rows = vec![Row::Big(Opt::TouchMode)];
+                let mut rows = vec![Row::Big(Opt::TouchPreset), Row::Big(Opt::TouchMode)];
                 rows.extend(pairs(&[
                     Opt::TouchCrosshairGestures,
                     Opt::TouchSensitivity,
@@ -3615,6 +3655,14 @@ impl OptionsUi {
                                 self.selected_key = Some(name);
                             } else {
                                 item.cycle(&mut s.extras, right);
+                                if matches!(
+                                    item,
+                                    crate::extras::Item::VoltPreset
+                                        | crate::extras::Item::VoltAutoOptimize
+                                ) {
+                                    s.extras.distant_lod_boost = false;
+                                    s.horizon.lod_distance = 0;
+                                }
                                 events.push(Event::Changed);
                             }
                         }
@@ -5863,6 +5911,13 @@ mod tests {
         let (vb_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
         assert!(vb_widgets.iter().any(|w| matches!(
             &w.kind,
+            WKind::Slider {
+                opt: Opt::VoltResolutionScale,
+                ..
+            }
+        )));
+        assert!(vb_widgets.iter().any(|w| matches!(
+            &w.kind,
             WKind::Button {
                 act: Act::Extra(crate::extras::Item::VoltPreset),
                 active: true,
@@ -5939,6 +5994,19 @@ mod tests {
                 ..
             }
         )));
+        for expected in [
+            crate::touch::BuiltInPreset::PojavClassic,
+            crate::touch::BuiltInPreset::Zalith,
+            crate::touch::BuiltInPreset::FoldCraft,
+            crate::touch::BuiltInPreset::PvpClaw,
+            crate::touch::BuiltInPreset::VoltDefault,
+        ] {
+            Opt::TouchPreset.cycle(&mut settings, false, [1280, 720]);
+            assert_eq!(
+                crate::touch::BuiltInPreset::detect(&settings.touch),
+                Some(expected)
+            );
+        }
     }
 
     #[test]

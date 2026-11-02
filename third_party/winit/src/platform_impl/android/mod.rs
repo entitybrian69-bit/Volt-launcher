@@ -602,9 +602,17 @@ impl<T: 'static> EventLoop<T> {
                     let pointers: Box<dyn Iterator<Item = android_activity::input::Pointer<'_>>> =
                         match phase {
                             event::TouchPhase::Started | event::TouchPhase::Ended => {
-                                Box::new(std::iter::once(
-                                    motion_event.pointer_at_index(motion_event.pointer_index()),
-                                ))
+                                let idx = motion_event.pointer_index();
+                                if idx >= motion_event.pointer_count() {
+                                    warn!(
+                                        "Dropping Android MotionEvent with out-of-bounds pointer_index={} (count={})",
+                                        idx,
+                                        motion_event.pointer_count()
+                                    );
+                                    Box::new(std::iter::empty())
+                                } else {
+                                    Box::new(std::iter::once(motion_event.pointer_at_index(idx)))
+                                }
                             }
                             event::TouchPhase::Moved | event::TouchPhase::Cancelled => {
                                 Box::new(motion_event.pointers())

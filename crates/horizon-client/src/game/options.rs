@@ -398,13 +398,15 @@ impl Game<'_> {
             r.set_present_mode(s.vsync, s.horizon.present_mode);
             r.animated_textures = s.horizon.animated_textures;
             r.animation_step_ticks = if s.extras.anim_throttle { 2 } else { 1 };
+            r.active_anim_cull = s.extras.active_anim_cull;
+            r.fast_translucency = s.extras.fast_translucency;
             r.set_mipmap_levels(s.mipmap_levels.max(0) as u32);
             r.set_texture_filtering(
                 s.file.int("textureFiltering"),
                 s.file.int("maxAnisotropyBit"),
             );
             r.set_world_post(
-                (s.horizon.resolution_scale as f32 / 100.0 * effective_drs).clamp(0.45, 1.0),
+                (s.horizon.resolution_scale as f32 / 100.0 * effective_drs).clamp(0.25, 2.0),
                 s.horizon.fxaa,
                 s.horizon.taa,
                 s.horizon.upscaling.ratio(),
@@ -421,6 +423,7 @@ impl Game<'_> {
         self.particles.max_particles = s.extras.particle_budget.max_particles();
         self.particles.max_render_distance_sq = s.extras.particle_budget.max_distance_sq();
         self.particles.burst_shield = s.extras.chaos_particle_shield;
+        self.particles.frustum_cull = s.extras.particle_frustum_cull;
         horizon_threads::set_thread_boost(s.extras.thread_boost);
         #[cfg(target_os = "android")]
         crate::native_ime::set_keep_screen_awake(s.extras.keep_screen_awake);
