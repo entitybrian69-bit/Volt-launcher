@@ -548,7 +548,15 @@ impl Game<'_> {
         self.particles.tick(&level);
         self.tick_pickups();
         let camera = self.particles.camera;
-        for (name, at, volume, pitch, delayed) in std::mem::take(&mut self.particles.sounds) {
+        let max_voices = self.settings.extras.audio_voice_cap.max_voices();
+        for (idx, (name, at, volume, pitch, delayed)) in
+            std::mem::take(&mut self.particles.sounds)
+                .into_iter()
+                .enumerate()
+        {
+            if idx >= max_voices {
+                break;
+            }
             if delayed {
                 self.audio
                     .play_distance_delayed(name, at, volume, pitch, camera);

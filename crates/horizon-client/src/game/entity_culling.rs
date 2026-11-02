@@ -20,13 +20,53 @@ impl Game<'_> {
             _ => (false, false),
         };
         let at = camera.to_array().map(|v| v.floor() as i32);
-        self.entity_culler = (self.settings.horizon.entity_culling
+        let volt_cull_active = self.settings.extras.entity_cap
+            != horizon_client::volt_features::EntityCap::Unlimited
+            || self.settings.extras.block_entity_cap
+                != horizon_client::volt_features::BlockEntityCap::Unlimited;
+        let budget = if volt_cull_active { 16_384 } else { 8_192 };
+        self.entity_culler = ((self.settings.horizon.entity_culling || volt_cull_active)
             // Packs can replace an opaque block's model or texture.
-            && self.settings.resource_packs.iter().all(|id| id == "vanilla")
+            && (volt_cull_active
+                || self.settings.resource_packs.iter().all(|id| id == "vanilla"))
             && self.player.is_some()
             && !self.spectator()
             && !opaque(self.res.facts().get(self.world.block(at[0], at[1], at[2]))))
-        .then(|| Culler::new(camera.to_array(), 8_192));
+        .then(|| Culler::new(camera.to_array(), budget));
+    }
+
+    fn occluder_at(&self, culler: &Culler, pos: [i32; 3]) -> bool {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        if !opaque(self.res.facts().get(state)) {
+            return false;
+        }
+        let Some(y) = pos[1].checked_sub(self.world.bottom_y()) else {
+            return false;
+        };
+        let section = (pos[0] >> 4, y.div_euclid(16), pos[2] >> 4);
+        culler.cached_section(section, || {
+            self.renderer
+                .as_ref()
+                .is_some_and(|r| r.has_section(section))
+                && !self.world.dirty_sections.contains(&section)
+                && !self.streaming.is_meshing(section)
+                && !self.pending_uploads.iter().any(|(key, _)| *key == section)
+        })
+    }
+
+    /// Pre-mesh conservative 3D wall occlusion test for entities and block entities.
+    pub(super) fn is_aabb_occluded(&self, min: [f64; 3], max: [f64; 3]) -> bool {
+        let Some(culler) = &self.entity_culler else {
+            return false;
+        };
+        if self.pack_shadow_casters.0 {
+            return false;
+        }
+        culler.occluded(
+            min.map(|v| v - 0.05),
+            max.map(|v| v + 0.05),
+            |pos| self.occluder_at(culler, pos),
+        )
     }
 
     /// Use complete generated geometry so equipment, animation and custom
@@ -35,23 +75,7 @@ impl Game<'_> {
         let Some(culler) = &self.entity_culler else {
             return;
         };
-        let hidden = culler.hidden(vertices, start, |pos| {
-            let state = self.world.block(pos[0], pos[1], pos[2]);
-            if !opaque(self.res.facts().get(state)) {
-                return false;
-            }
-            let Some(y) = pos[1].checked_sub(self.world.bottom_y()) else {
-                return false;
-            };
-            let section = (pos[0] >> 4, y.div_euclid(16), pos[2] >> 4);
-            // Newly edited or not-yet-uploaded terrain is not an occluder.
-            self.renderer
-                .as_ref()
-                .is_some_and(|r| r.has_section(section))
-                && !self.world.dirty_sections.contains(&section)
-                && !self.streaming.is_meshing(section)
-                && !self.pending_uploads.iter().any(|(key, _)| *key == section)
-        });
+        let hidden = culler.hidden(vertices, start, |pos| self.occluder_at(culler, pos));
         // A shader pack's shadow pass still draws what the camera cannot see.
         if hidden && !(self.pack_shadow_casters.0 && self.hide_spans_from(start, vertices.len())) {
             vertices.truncate(start);

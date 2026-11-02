@@ -3,8 +3,10 @@
 //! next to `options.txt` so that file stays exactly vanilla's, and the logic
 //! behind them. Every gameplay extra is off by default.
 use crate::volt_features::{
-    MinimapEntities, MinimapFrame, MinimapTerrainMode, PlacementLock, PlacementProtocol, PlaneLock,
-    WaypointColor,
+    AutoDrsMode, AudioVoiceCap, BlockEntityCap, ChunkUploadCap, DynamicIdleFps, EntityCap,
+    FastShadowMode, GlintTrimMode, ItemRenderCap, MenuBgMode, MinimapEntities, MinimapFrame,
+    MinimapTerrainMode, ParticleBudget, PerfHudMode, PlacementLock, PlacementProtocol, PlaneLock,
+    VoltBoostPreset, WaypointColor,
 };
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -161,6 +163,39 @@ pub struct Extras {
     pub no_ai: bool,
     pub agent_control: bool,
     pub discord_presence: bool,
+    // --- Volt Boost (Tiers 1, 2 & 3 — all OFF / Vanilla by default) ---
+    pub volt_preset: VoltBoostPreset,
+    pub perf_hud: PerfHudMode,
+    pub perf_hud_corner: Corner,
+    pub cull_leaves: bool,
+    pub frustum_priority_mesh: bool,
+    pub cave_sky_cull: bool,
+    pub chunk_upload_cap: ChunkUploadCap,
+    pub fast_weather: bool,
+    pub distant_lod_boost: bool,
+    pub entity_cap: EntityCap,
+    pub item_render_cap: ItemRenderCap,
+    pub block_entity_cap: BlockEntityCap,
+    pub cull_sign_text: bool,
+    pub fast_shadows: FastShadowMode,
+    pub distant_mob_throttle: bool,
+    pub hub_lag_shield: bool,
+    pub particle_budget: ParticleBudget,
+    pub chaos_particle_shield: bool,
+    pub anim_throttle: bool,
+    pub glint_mode: GlintTrimMode,
+    pub auto_drs: AutoDrsMode,
+    pub dynamic_fps: DynamicIdleFps,
+    pub menu_bg_mode: MenuBgMode,
+    pub thermal_guard: bool,
+    pub volt_reflex: bool,
+    pub thread_boost: bool,
+    pub prewarm_pipelines: bool,
+    pub audio_voice_cap: AudioVoiceCap,
+    pub memory_saver: bool,
+    pub keep_screen_awake: bool,
+    /// Transient one-shot flag triggered when the user taps "Purge Unused RAM Now".
+    pub purge_ram_requested: bool,
 }
 
 impl Default for Extras {
@@ -231,6 +266,37 @@ impl Default for Extras {
             no_ai: false,
             agent_control: false,
             discord_presence: true,
+            volt_preset: VoltBoostPreset::Off,
+            perf_hud: PerfHudMode::Off,
+            perf_hud_corner: Corner::TopLeft,
+            cull_leaves: false,
+            frustum_priority_mesh: false,
+            cave_sky_cull: false,
+            chunk_upload_cap: ChunkUploadCap::Auto,
+            fast_weather: false,
+            distant_lod_boost: false,
+            entity_cap: EntityCap::Unlimited,
+            item_render_cap: ItemRenderCap::Unlimited,
+            block_entity_cap: BlockEntityCap::Unlimited,
+            cull_sign_text: false,
+            fast_shadows: FastShadowMode::Vanilla,
+            distant_mob_throttle: false,
+            hub_lag_shield: false,
+            particle_budget: ParticleBudget::Vanilla16k,
+            chaos_particle_shield: false,
+            anim_throttle: false,
+            glint_mode: GlintTrimMode::Full,
+            auto_drs: AutoDrsMode::Off,
+            dynamic_fps: DynamicIdleFps::Off,
+            menu_bg_mode: MenuBgMode::PanoramaBlur,
+            thermal_guard: false,
+            volt_reflex: false,
+            thread_boost: false,
+            prewarm_pipelines: false,
+            audio_voice_cap: AudioVoiceCap::Vanilla,
+            memory_saver: false,
+            keep_screen_awake: false,
+            purge_ram_requested: false,
         }
     }
 }
@@ -380,13 +446,100 @@ impl Extras {
                 horizon_core::no_ai::KEY => e.no_ai = flag(e.no_ai),
                 "agentControl" => e.agent_control = flag(e.agent_control),
                 "discordPresence" => e.discord_presence = flag(e.discord_presence),
+                // Volt Boost:
+                "voltPreset" => {
+                    if let Some(v) = VoltBoostPreset::parse(value) {
+                        e.volt_preset = v;
+                    }
+                }
+                "voltPerfHud" => {
+                    if let Some(v) = PerfHudMode::parse(value) {
+                        e.perf_hud = v;
+                    }
+                }
+                "voltPerfHudCorner" => {
+                    e.perf_hud_corner = Corner::parse(value, e.perf_hud_corner)
+                }
+                "voltCullLeaves" => e.cull_leaves = flag(e.cull_leaves),
+                "voltFrustumMesh" => e.frustum_priority_mesh = flag(e.frustum_priority_mesh),
+                "voltCaveSkyCull" => e.cave_sky_cull = flag(e.cave_sky_cull),
+                "voltChunkUploadCap" => {
+                    if let Some(v) = ChunkUploadCap::parse(value) {
+                        e.chunk_upload_cap = v;
+                    }
+                }
+                "voltFastWeather" => e.fast_weather = flag(e.fast_weather),
+                "voltDistantLod" => e.distant_lod_boost = flag(e.distant_lod_boost),
+                "voltEntityCap" => {
+                    if let Some(v) = EntityCap::parse(value) {
+                        e.entity_cap = v;
+                    }
+                }
+                "voltItemCap" => {
+                    if let Some(v) = ItemRenderCap::parse(value) {
+                        e.item_render_cap = v;
+                    }
+                }
+                "voltBlockEntityCap" => {
+                    if let Some(v) = BlockEntityCap::parse(value) {
+                        e.block_entity_cap = v;
+                    }
+                }
+                "voltCullSignText" => e.cull_sign_text = flag(e.cull_sign_text),
+                "voltFastShadows" => {
+                    if let Some(v) = FastShadowMode::parse(value) {
+                        e.fast_shadows = v;
+                    }
+                }
+                "voltDistantMobThrottle" => {
+                    e.distant_mob_throttle = flag(e.distant_mob_throttle)
+                }
+                "voltHubLagShield" => e.hub_lag_shield = flag(e.hub_lag_shield),
+                "voltParticleBudget" => {
+                    if let Some(v) = ParticleBudget::parse(value) {
+                        e.particle_budget = v;
+                    }
+                }
+                "voltChaosShield" => e.chaos_particle_shield = flag(e.chaos_particle_shield),
+                "voltAnimThrottle" => e.anim_throttle = flag(e.anim_throttle),
+                "voltGlintMode" => {
+                    if let Some(v) = GlintTrimMode::parse(value) {
+                        e.glint_mode = v;
+                    }
+                }
+                "voltAutoDrs" => {
+                    if let Some(v) = AutoDrsMode::parse(value) {
+                        e.auto_drs = v;
+                    }
+                }
+                "voltDynamicFps" => {
+                    if let Some(v) = DynamicIdleFps::parse(value) {
+                        e.dynamic_fps = v;
+                    }
+                }
+                "voltMenuBg" => {
+                    if let Some(v) = MenuBgMode::parse(value) {
+                        e.menu_bg_mode = v;
+                    }
+                }
+                "voltThermalGuard" => e.thermal_guard = flag(e.thermal_guard),
+                "voltReflex" => e.volt_reflex = flag(e.volt_reflex),
+                "voltThreadBoost" => e.thread_boost = flag(e.thread_boost),
+                "voltPrewarm" => e.prewarm_pipelines = flag(e.prewarm_pipelines),
+                "voltAudioCap" => {
+                    if let Some(v) = AudioVoiceCap::parse(value) {
+                        e.audio_voice_cap = v;
+                    }
+                }
+                "voltMemorySaver" => e.memory_saver = flag(e.memory_saver),
+                "voltKeepAwake" => e.keep_screen_awake = flag(e.keep_screen_awake),
                 _ => {}
             }
         }
         e
     }
     pub fn serialize(&self) -> String {
-        let mut s = String::with_capacity(1024);
+        let mut s = String::with_capacity(2048);
         let mut push = |k: &str, v: &str| {
             s.push_str(k);
             s.push(':');
@@ -476,7 +629,275 @@ impl Extras {
         push(horizon_core::no_ai::KEY, bool_text(self.no_ai));
         push("agentControl", bool_text(self.agent_control));
         push("discordPresence", bool_text(self.discord_presence));
+        push("voltPreset", self.volt_preset.as_str());
+        push("voltPerfHud", self.perf_hud.as_str());
+        push("voltPerfHudCorner", self.perf_hud_corner.name());
+        push("voltCullLeaves", bool_text(self.cull_leaves));
+        push("voltFrustumMesh", bool_text(self.frustum_priority_mesh));
+        push("voltCaveSkyCull", bool_text(self.cave_sky_cull));
+        push("voltChunkUploadCap", self.chunk_upload_cap.as_str());
+        push("voltFastWeather", bool_text(self.fast_weather));
+        push("voltDistantLod", bool_text(self.distant_lod_boost));
+        push("voltEntityCap", self.entity_cap.as_str());
+        push("voltItemCap", self.item_render_cap.as_str());
+        push("voltBlockEntityCap", self.block_entity_cap.as_str());
+        push("voltCullSignText", bool_text(self.cull_sign_text));
+        push("voltFastShadows", self.fast_shadows.as_str());
+        push(
+            "voltDistantMobThrottle",
+            bool_text(self.distant_mob_throttle),
+        );
+        push("voltHubLagShield", bool_text(self.hub_lag_shield));
+        push("voltParticleBudget", self.particle_budget.as_str());
+        push("voltChaosShield", bool_text(self.chaos_particle_shield));
+        push("voltAnimThrottle", bool_text(self.anim_throttle));
+        push("voltGlintMode", self.glint_mode.as_str());
+        push("voltAutoDrs", self.auto_drs.as_str());
+        push("voltDynamicFps", self.dynamic_fps.as_str());
+        push("voltMenuBg", self.menu_bg_mode.as_str());
+        push("voltThermalGuard", bool_text(self.thermal_guard));
+        push("voltReflex", bool_text(self.volt_reflex));
+        push("voltThreadBoost", bool_text(self.thread_boost));
+        push("voltPrewarm", bool_text(self.prewarm_pipelines));
+        push("voltAudioCap", self.audio_voice_cap.as_str());
+        push("voltMemorySaver", bool_text(self.memory_saver));
+        push("voltKeepAwake", bool_text(self.keep_screen_awake));
         s
+    }
+
+    /// Count of active Volt Boost optimizations currently enabled.
+    pub fn active_volt_optimizations(&self) -> usize {
+        let mut n = 0usize;
+        for b in [
+            self.cull_leaves,
+            self.frustum_priority_mesh,
+            self.cave_sky_cull,
+            self.chunk_upload_cap != ChunkUploadCap::Auto,
+            self.fast_weather,
+            self.distant_lod_boost,
+            self.entity_cap != EntityCap::Unlimited,
+            self.item_render_cap != ItemRenderCap::Unlimited,
+            self.block_entity_cap != BlockEntityCap::Unlimited,
+            self.cull_sign_text,
+            self.fast_shadows != FastShadowMode::Vanilla,
+            self.distant_mob_throttle,
+            self.hub_lag_shield,
+            self.particle_budget != ParticleBudget::Vanilla16k,
+            self.chaos_particle_shield,
+            self.anim_throttle,
+            self.glint_mode != GlintTrimMode::Full,
+            self.auto_drs != AutoDrsMode::Off,
+            self.dynamic_fps != DynamicIdleFps::Off,
+            self.menu_bg_mode != MenuBgMode::PanoramaBlur,
+            self.thermal_guard,
+            self.volt_reflex,
+            self.thread_boost,
+            self.prewarm_pipelines,
+            self.audio_voice_cap != AudioVoiceCap::Vanilla,
+            self.memory_saver,
+        ] {
+            if b {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Applies a full **Volt Boost** profile across Tier 1, Tier 2, and Tier 3 settings.
+    pub fn apply_volt_preset(&mut self, preset: VoltBoostPreset) {
+        self.volt_preset = preset;
+        match preset {
+            VoltBoostPreset::Off => {
+                self.cull_leaves = false;
+                self.frustum_priority_mesh = false;
+                self.cave_sky_cull = false;
+                self.chunk_upload_cap = ChunkUploadCap::Auto;
+                self.fast_weather = false;
+                self.distant_lod_boost = false;
+                self.entity_cap = EntityCap::Unlimited;
+                self.item_render_cap = ItemRenderCap::Unlimited;
+                self.block_entity_cap = BlockEntityCap::Unlimited;
+                self.cull_sign_text = false;
+                self.fast_shadows = FastShadowMode::Vanilla;
+                self.distant_mob_throttle = false;
+                self.hub_lag_shield = false;
+                self.particle_budget = ParticleBudget::Vanilla16k;
+                self.chaos_particle_shield = false;
+                self.anim_throttle = false;
+                self.glint_mode = GlintTrimMode::Full;
+                self.auto_drs = AutoDrsMode::Off;
+                self.dynamic_fps = DynamicIdleFps::Off;
+                self.menu_bg_mode = MenuBgMode::PanoramaBlur;
+                self.thermal_guard = false;
+                self.volt_reflex = false;
+                self.thread_boost = false;
+                self.prewarm_pipelines = false;
+                self.audio_voice_cap = AudioVoiceCap::Vanilla;
+                self.memory_saver = false;
+            }
+            VoltBoostPreset::Balanced => {
+                self.cull_leaves = true;
+                self.frustum_priority_mesh = true;
+                self.cave_sky_cull = true;
+                self.chunk_upload_cap = ChunkUploadCap::Balanced16;
+                self.fast_weather = false;
+                self.distant_lod_boost = true;
+                self.entity_cap = EntityCap::Cap128;
+                self.item_render_cap = ItemRenderCap::Cap128;
+                self.block_entity_cap = BlockEntityCap::Cap64;
+                self.cull_sign_text = true;
+                self.fast_shadows = FastShadowMode::Nearby16;
+                self.distant_mob_throttle = true;
+                self.hub_lag_shield = false;
+                self.particle_budget = ParticleBudget::Cap4096;
+                self.chaos_particle_shield = true;
+                self.anim_throttle = false;
+                self.glint_mode = GlintTrimMode::Full;
+                self.auto_drs = AutoDrsMode::Off;
+                self.dynamic_fps = DynamicIdleFps::Fps30;
+                self.menu_bg_mode = MenuBgMode::FastDark;
+                self.thermal_guard = true;
+                self.volt_reflex = true;
+                self.thread_boost = true;
+                self.prewarm_pipelines = true;
+                self.audio_voice_cap = AudioVoiceCap::Cap32;
+                self.memory_saver = false;
+            }
+            VoltBoostPreset::Competitive => {
+                self.cull_leaves = true;
+                self.frustum_priority_mesh = true;
+                self.cave_sky_cull = true;
+                self.chunk_upload_cap = ChunkUploadCap::Balanced16;
+                self.fast_weather = true;
+                self.distant_lod_boost = false;
+                self.entity_cap = EntityCap::Cap96;
+                self.item_render_cap = ItemRenderCap::Cap64;
+                self.block_entity_cap = BlockEntityCap::Cap32;
+                self.cull_sign_text = true;
+                self.fast_shadows = FastShadowMode::Nearby16;
+                self.distant_mob_throttle = true;
+                self.hub_lag_shield = true;
+                self.particle_budget = ParticleBudget::Cap2048;
+                self.chaos_particle_shield = true;
+                self.anim_throttle = false;
+                self.glint_mode = GlintTrimMode::NearbyOnly;
+                self.auto_drs = AutoDrsMode::Target120;
+                self.dynamic_fps = DynamicIdleFps::Fps30;
+                self.menu_bg_mode = MenuBgMode::FastDark;
+                self.thermal_guard = true;
+                self.volt_reflex = true;
+                self.thread_boost = true;
+                self.prewarm_pipelines = true;
+                self.audio_voice_cap = AudioVoiceCap::Cap32;
+                self.memory_saver = false;
+            }
+            VoltBoostPreset::UltraFps => {
+                self.cull_leaves = true;
+                self.frustum_priority_mesh = true;
+                self.cave_sky_cull = true;
+                self.chunk_upload_cap = ChunkUploadCap::Smooth8;
+                self.fast_weather = true;
+                self.distant_lod_boost = true;
+                self.entity_cap = EntityCap::Cap64;
+                self.item_render_cap = ItemRenderCap::Cap32;
+                self.block_entity_cap = BlockEntityCap::Cap16;
+                self.cull_sign_text = true;
+                self.fast_shadows = FastShadowMode::Off;
+                self.distant_mob_throttle = true;
+                self.hub_lag_shield = true;
+                self.particle_budget = ParticleBudget::Cap512;
+                self.chaos_particle_shield = true;
+                self.anim_throttle = true;
+                self.glint_mode = GlintTrimMode::Off;
+                self.auto_drs = AutoDrsMode::Aggressive50;
+                self.dynamic_fps = DynamicIdleFps::Fps15;
+                self.menu_bg_mode = MenuBgMode::FastDark;
+                self.thermal_guard = true;
+                self.volt_reflex = true;
+                self.thread_boost = true;
+                self.prewarm_pipelines = true;
+                self.audio_voice_cap = AudioVoiceCap::Cap16;
+                self.memory_saver = true;
+            }
+            VoltBoostPreset::BatterySaver => {
+                self.cull_leaves = true;
+                self.frustum_priority_mesh = true;
+                self.cave_sky_cull = true;
+                self.chunk_upload_cap = ChunkUploadCap::Smooth8;
+                self.fast_weather = true;
+                self.distant_lod_boost = true;
+                self.entity_cap = EntityCap::Cap96;
+                self.item_render_cap = ItemRenderCap::Cap64;
+                self.block_entity_cap = BlockEntityCap::Cap32;
+                self.cull_sign_text = true;
+                self.fast_shadows = FastShadowMode::Off;
+                self.distant_mob_throttle = true;
+                self.hub_lag_shield = true;
+                self.particle_budget = ParticleBudget::Cap2048;
+                self.chaos_particle_shield = true;
+                self.anim_throttle = true;
+                self.glint_mode = GlintTrimMode::NearbyOnly;
+                self.auto_drs = AutoDrsMode::Target60;
+                self.dynamic_fps = DynamicIdleFps::Fps15;
+                self.menu_bg_mode = MenuBgMode::FastDark;
+                self.thermal_guard = true;
+                self.volt_reflex = false;
+                self.thread_boost = false;
+                self.prewarm_pipelines = true;
+                self.audio_voice_cap = AudioVoiceCap::Cap16;
+                self.memory_saver = true;
+            }
+            VoltBoostPreset::LowRam => {
+                self.cull_leaves = true;
+                self.frustum_priority_mesh = true;
+                self.cave_sky_cull = true;
+                self.chunk_upload_cap = ChunkUploadCap::Smooth4;
+                self.fast_weather = true;
+                self.distant_lod_boost = false;
+                self.entity_cap = EntityCap::Cap64;
+                self.item_render_cap = ItemRenderCap::Cap32;
+                self.block_entity_cap = BlockEntityCap::Cap16;
+                self.cull_sign_text = true;
+                self.fast_shadows = FastShadowMode::Off;
+                self.distant_mob_throttle = true;
+                self.hub_lag_shield = true;
+                self.particle_budget = ParticleBudget::Cap512;
+                self.chaos_particle_shield = true;
+                self.anim_throttle = true;
+                self.glint_mode = GlintTrimMode::Off;
+                self.auto_drs = AutoDrsMode::Target60;
+                self.dynamic_fps = DynamicIdleFps::Fps15;
+                self.menu_bg_mode = MenuBgMode::FastDark;
+                self.thermal_guard = true;
+                self.volt_reflex = true;
+                self.thread_boost = true;
+                self.prewarm_pipelines = false;
+                self.audio_voice_cap = AudioVoiceCap::Cap16;
+                self.memory_saver = true;
+            }
+        }
+    }
+
+    /// Inspects hardware cores, pointer width, and `/proc/meminfo` total RAM to apply the best
+    /// automatic Volt Boost profile for this device.
+    pub fn auto_optimize_device(&mut self) -> VoltBoostPreset {
+        let total_ram_mib = detect_total_ram_mib();
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let chosen = if cfg!(target_pointer_width = "32") || total_ram_mib.is_some_and(|m| m <= 4200)
+        {
+            VoltBoostPreset::LowRam
+        } else if total_ram_mib.is_some_and(|m| m <= 6400) || cores <= 6 {
+            VoltBoostPreset::UltraFps
+        } else {
+            VoltBoostPreset::Balanced
+        };
+        self.apply_volt_preset(chosen);
+        if self.perf_hud == PerfHudMode::Off {
+            self.perf_hud = PerfHudMode::Compact;
+        }
+        chosen
     }
     /// Binds an extra key (`SORT_KEY`, `WAYPOINT_KEY`, `MINIMAP_ZOOM_KEY`,
     /// `PLACEMENT_LOCK_KEY`, `PLACEMENT_REVERSE_KEY`); false for vanilla keys.
@@ -500,6 +921,17 @@ impl Extras {
         }
         let _ = fs::write(path, self.serialize());
     }
+}
+
+pub fn detect_total_ram_mib() -> Option<u64> {
+    let text = fs::read_to_string("/proc/meminfo").ok()?;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("MemTotal:") {
+            let kib: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kib / 1024);
+        }
+    }
+    None
 }
 
 /// The field-of-view modifier target `Camera.tickFov` eases toward: vanilla's
@@ -653,6 +1085,39 @@ pub enum Item {
     PlacementRotationSync,
     PlacementLockKey,
     PlacementReverseKey,
+    /// Volt Boost page (Tiers 1, 2 & 3):
+    VoltPreset,
+    VoltAutoOptimize,
+    VoltPurgeRam,
+    VoltPerfHud,
+    VoltPerfHudCorner,
+    VoltCullLeaves,
+    VoltFrustumMesh,
+    VoltCaveSkyCull,
+    VoltChunkUploadCap,
+    VoltFastWeather,
+    VoltDistantLod,
+    VoltEntityCap,
+    VoltItemCap,
+    VoltBlockEntityCap,
+    VoltCullSignText,
+    VoltFastShadows,
+    VoltDistantMobThrottle,
+    VoltHubLagShield,
+    VoltParticleBudget,
+    VoltChaosShield,
+    VoltAnimThrottle,
+    VoltGlintMode,
+    VoltAutoDrs,
+    VoltDynamicFps,
+    VoltMenuBg,
+    VoltThermalGuard,
+    VoltReflex,
+    VoltThreadBoost,
+    VoltPrewarm,
+    VoltAudioCap,
+    VoltMemorySaver,
+    VoltKeepAwake,
 }
 
 /// The Volt Extras page: headers and items.
@@ -742,6 +1207,50 @@ pub fn placement_rows() -> Vec<Result<Item, &'static str>> {
     ]
 }
 
+/// The Volt Boost performance & optimization suite rows (Tiers 1, 2 & 3).
+pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
+    use Item::*;
+    vec![
+        Err("Volt Boost Profiles & Live Telemetry"),
+        Ok(VoltPreset),
+        Ok(VoltAutoOptimize),
+        Ok(VoltPerfHud),
+        Ok(VoltPerfHudCorner),
+        Ok(VoltPurgeRam),
+        Err("Tier 1 - Terrain, Chunks & World Culling"),
+        Ok(VoltCullLeaves),
+        Ok(VoltFrustumMesh),
+        Ok(VoltCaveSkyCull),
+        Ok(VoltChunkUploadCap),
+        Ok(VoltFastWeather),
+        Ok(VoltDistantLod),
+        Err("Tier 1 & 3 - Entities, Block Entities & Hub Shield"),
+        Ok(VoltEntityCap),
+        Ok(VoltItemCap),
+        Ok(VoltBlockEntityCap),
+        Ok(VoltCullSignText),
+        Ok(VoltFastShadows),
+        Ok(VoltDistantMobThrottle),
+        Ok(VoltHubLagShield),
+        Err("Tier 1 & 2 - Particles, Animations & Shaders"),
+        Ok(VoltParticleBudget),
+        Ok(VoltChaosShield),
+        Ok(VoltAnimThrottle),
+        Ok(VoltGlintMode),
+        Err("Tier 2 & 3 - Scaling, Pacing, Thermal, CPU & RAM"),
+        Ok(VoltAutoDrs),
+        Ok(VoltDynamicFps),
+        Ok(VoltMenuBg),
+        Ok(VoltThermalGuard),
+        Ok(VoltReflex),
+        Ok(VoltThreadBoost),
+        Ok(VoltPrewarm),
+        Ok(VoltAudioCap),
+        Ok(VoltMemorySaver),
+        Ok(VoltKeepAwake),
+    ]
+}
+
 impl Item {
     pub fn caption(self) -> &'static str {
         match self {
@@ -800,6 +1309,39 @@ impl Item {
             Item::PlacementRotationSync => "MP Look Sync",
             Item::PlacementLockKey => "Lock Key",
             Item::PlacementReverseKey => "Reverse Key",
+            // Volt Boost:
+            Item::VoltPreset => "Boost Profile",
+            Item::VoltAutoOptimize => "Auto-Tune Device",
+            Item::VoltPurgeRam => "Purge Unused RAM",
+            Item::VoltPerfHud => "Live Perf HUD",
+            Item::VoltPerfHudCorner => "Perf HUD Corner",
+            Item::VoltCullLeaves => "Smart Leaf Cull",
+            Item::VoltFrustumMesh => "Frustum-First Mesh",
+            Item::VoltCaveSkyCull => "Cave Sky Cull",
+            Item::VoltChunkUploadCap => "Chunk Upload Cap",
+            Item::VoltFastWeather => "Fast Weather",
+            Item::VoltDistantLod => "Distant LOD Boost",
+            Item::VoltEntityCap => "Max Entities",
+            Item::VoltItemCap => "Dropped Item Cap",
+            Item::VoltBlockEntityCap => "Block-Entity Cap",
+            Item::VoltCullSignText => "Sign Text Cull",
+            Item::VoltFastShadows => "Entity Shadows",
+            Item::VoltDistantMobThrottle => "Mob Pose Throttle",
+            Item::VoltHubLagShield => "Hub Lag Shield",
+            Item::VoltParticleBudget => "Particle Budget",
+            Item::VoltChaosShield => "Burst Lag Shield",
+            Item::VoltAnimThrottle => "Smart 10Hz Atlas",
+            Item::VoltGlintMode => "Glint & Trim Mode",
+            Item::VoltAutoDrs => "Auto-DRS Scale",
+            Item::VoltDynamicFps => "Dynamic Menu FPS",
+            Item::VoltMenuBg => "Menu Backdrop",
+            Item::VoltThermalGuard => "Thermal Guard",
+            Item::VoltReflex => "Volt Reflex",
+            Item::VoltThreadBoost => "big.LITTLE Boost",
+            Item::VoltPrewarm => "Shader Pre-Warm",
+            Item::VoltAudioCap => "Audio Voice Cap",
+            Item::VoltMemorySaver => "RAM Compactor",
+            Item::VoltKeepAwake => "Keep Screen Awake",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -844,9 +1386,52 @@ impl Item {
             | PlacementRotationSync
             | PlacementLockKey
             | PlacementReverseKey => AccuratePlacement,
-            Fullbright | DynamicLights | OwnNameTag | MouseTweaks | Sort | AutoReconnect | NoAi
-            | AgentControl | DiscordPresence | Waypoints | WaypointOnMinimap | WaypointNewColor
-            | Minimap | AccuratePlacement => {
+            Fullbright
+            | DynamicLights
+            | OwnNameTag
+            | MouseTweaks
+            | Sort
+            | AutoReconnect
+            | NoAi
+            | AgentControl
+            | DiscordPresence
+            | Waypoints
+            | WaypointOnMinimap
+            | WaypointNewColor
+            | Minimap
+            | AccuratePlacement
+            | VoltPreset
+            | VoltAutoOptimize
+            | VoltPurgeRam
+            | VoltPerfHud
+            | VoltPerfHudCorner
+            | VoltCullLeaves
+            | VoltFrustumMesh
+            | VoltCaveSkyCull
+            | VoltChunkUploadCap
+            | VoltFastWeather
+            | VoltDistantLod
+            | VoltEntityCap
+            | VoltItemCap
+            | VoltBlockEntityCap
+            | VoltCullSignText
+            | VoltFastShadows
+            | VoltDistantMobThrottle
+            | VoltHubLagShield
+            | VoltParticleBudget
+            | VoltChaosShield
+            | VoltAnimThrottle
+            | VoltGlintMode
+            | VoltAutoDrs
+            | VoltDynamicFps
+            | VoltMenuBg
+            | VoltThermalGuard
+            | VoltReflex
+            | VoltThreadBoost
+            | VoltPrewarm
+            | VoltAudioCap
+            | VoltMemorySaver
+            | VoltKeepAwake => {
                 return None;
             }
         })
@@ -997,6 +1582,103 @@ impl Item {
             Item::PlacementReverseKey => {
                 "Press in-game to toggle Reverse Facing on or off. Escape unbinds."
             }
+            // Volt Boost:
+            Item::VoltPreset => {
+                "Applies a curated one-tap Volt Boost profile (OFF, Balanced, Competitive PvP, Ultra FPS, Battery Saver or Low-RAM Rescue)."
+            }
+            Item::VoltAutoOptimize => {
+                "Inspects your device's CPU core count, 32/64-bit ABI and system RAM to automatically configure the optimal Volt Boost profile."
+            }
+            Item::VoltPurgeRam => {
+                "Immediately compacts transient caches, particle buffers and unused OS heap pages to reclaim resident RAM."
+            }
+            Item::VoltPerfHud => {
+                "Shows a sleek crimson telemetry overlay with live FPS, 1% lows, frame pacing, active entities, chunks and resident RAM."
+            }
+            Item::VoltPerfHudCorner => {
+                "Screen corner where the live Volt Boost performance HUD docks."
+            }
+            Item::VoltCullLeaves => {
+                "Skips hidden interior leaf-to-leaf faces inside dense jungles and forests while keeping outer tree canopies crisp."
+            }
+            Item::VoltFrustumMesh => {
+                "Prioritizes chunk GPU uploads and meshing inside your camera view cone first so turning never reveals blank terrain."
+            }
+            Item::VoltCaveSkyCull => {
+                "Skips sky dome, celestial bodies and cloud rendering passes when enclosed deep underground with zero sky light."
+            }
+            Item::VoltChunkUploadCap => {
+                "Caps chunk mesh GPU uploads per frame (Auto, 4, 8, 16 or 32) to eliminate camera-turn frame spikes on mobile GPUs."
+            }
+            Item::VoltFastWeather => {
+                "Reduces rain and snow column overdraw radius so heavy storms stay smooth on tile-based mobile GPUs."
+            }
+            Item::VoltDistantLod => {
+                "Shifts outer render-distance rings into Volt's low-cost distant LOD band so wide horizons use a fraction of RAM and triangles."
+            }
+            Item::VoltEntityCap => {
+                "Renders nearest entities first and caps distant crowd rendering so mob farms and busy hubs never tank FPS."
+            }
+            Item::VoltItemCap => {
+                "Caps rendered ground item stacks and trims distant item drops after big explosions or farm harvests."
+            }
+            Item::VoltBlockEntityCap => {
+                "Occludes chests, signs, skulls, banners and shulkers behind solid walls and caps simultaneous block-entity draws."
+            }
+            Item::VoltCullSignText => {
+                "Skips expensive glyph layout on signs and floating holograms beyond 16 blocks while keeping the sign model visible."
+            }
+            Item::VoltFastShadows => {
+                "Limits entity contact shadows to nearby 16m targets or turns them off completely."
+            }
+            Item::VoltDistantMobThrottle => {
+                "Simplifies distant entity feature overlays and pose work beyond 24 blocks."
+            }
+            Item::VoltHubLagShield => {
+                "Automatically trims distant crowd armor stands, pets and players beyond 16m whenever more than 24 entities pack into one area."
+            }
+            Item::VoltParticleBudget => {
+                "Caps active particles (16K Vanilla, 4,096, 2,048, 512 or OFF) and culls tiny distant particles."
+            }
+            Item::VoltChaosShield => {
+                "Clamps TNT/crystal explosion debris, rapid Efficiency V block-break spray and crowded firework bursts."
+            }
+            Item::VoltAnimThrottle => {
+                "Steps animated lava, water, fire and portal atlas uploads at 10 Hz instead of 20 Hz to halve GPU texture-copy bandwidth."
+            }
+            Item::VoltGlintMode => {
+                "Simplifies enchantment glint shaders to held/nearby items only or disables glint overdraw completely."
+            }
+            Item::VoltAutoDrs => {
+                "Dynamically adjusts 3D render scale to hold 60 or 120 FPS during heavy scenes while keeping UI and crosshair 100% native sharp."
+            }
+            Item::VoltDynamicFps => {
+                "Automatically drops frame rate to 30 or 15 FPS while paused, in menus or AFK to save battery and cool down the SoC."
+            }
+            Item::VoltMenuBg => {
+                "Replaces multi-pass menu Kawase blur with an instant zero-GPU crimson-dark backdrop."
+            }
+            Item::VoltThermalGuard => {
+                "Detects sustained mobile thermal frame-time spikes and smoothly steps down render scale and particle load before stutter hits."
+            }
+            Item::VoltReflex => {
+                "Minimizes render-ahead queue latency and paces touch camera sampling right before frame submission."
+            }
+            Item::VoltThreadBoost => {
+                "Boosts render/audio threads onto prime big.LITTLE cores with 50us timer slack and coalesces background chunk workers."
+            }
+            Item::VoltPrewarm => {
+                "Pre-warms gameplay caches and graphics pipelines during startup so entering a world has zero first-frame shader hitches."
+            }
+            Item::VoltAudioCap => {
+                "Caps simultaneous sound mixer bursts per tick so mob farms, redstone machines and TNT chains never crackle or stall."
+            }
+            Item::VoltMemorySaver => {
+                "Aggressively shrinks transient buffers, recycles unloaded chunk capacity and returns freed pages to Android immediately."
+            }
+            Item::VoltKeepAwake => {
+                "Keeps the mobile display awake during asset downloads, world generation and active sessions."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -1052,6 +1734,23 @@ impl Item {
             Item::PlacementReachAround => e.placement_reach_around,
             Item::PlacementHudPreview => e.placement_hud_preview,
             Item::PlacementRotationSync => e.placement_rotation_sync,
+            // Volt Boost switches:
+            Item::VoltCullLeaves => e.cull_leaves,
+            Item::VoltFrustumMesh => e.frustum_priority_mesh,
+            Item::VoltCaveSkyCull => e.cave_sky_cull,
+            Item::VoltFastWeather => e.fast_weather,
+            Item::VoltDistantLod => e.distant_lod_boost,
+            Item::VoltCullSignText => e.cull_sign_text,
+            Item::VoltDistantMobThrottle => e.distant_mob_throttle,
+            Item::VoltHubLagShield => e.hub_lag_shield,
+            Item::VoltChaosShield => e.chaos_particle_shield,
+            Item::VoltAnimThrottle => e.anim_throttle,
+            Item::VoltThermalGuard => e.thermal_guard,
+            Item::VoltReflex => e.volt_reflex,
+            Item::VoltThreadBoost => e.thread_boost,
+            Item::VoltPrewarm => e.prewarm_pipelines,
+            Item::VoltMemorySaver => e.memory_saver,
+            Item::VoltKeepAwake => e.keep_screen_awake,
             _ => return None,
         })
     }
@@ -1101,6 +1800,51 @@ impl Item {
                 _ => "Vanilla (4t)".into(),
             },
             Item::PlacementServerProtocol => e.placement_protocol.label().into(),
+            // Volt Boost values:
+            Item::VoltPreset => e.volt_preset.label().into(),
+            Item::VoltAutoOptimize => {
+                let n = e.active_volt_optimizations();
+                if n == 0 {
+                    "Tap to Tune".into()
+                } else {
+                    format!("{n} Active")
+                }
+            }
+            Item::VoltPurgeRam => {
+                if let Some(mib) = horizon_threads::resident_ram_mib() {
+                    format!("{mib} MiB -> Purge")
+                } else {
+                    "Purge Now".into()
+                }
+            }
+            Item::VoltPerfHud => match e.perf_hud {
+                PerfHudMode::Off => "Off".into(),
+                PerfHudMode::Compact => "Compact".into(),
+                PerfHudMode::Full => "Full Graph".into(),
+            },
+            Item::VoltPerfHudCorner => e.perf_hud_corner.label().into(),
+            Item::VoltChunkUploadCap => e.chunk_upload_cap.label().into(),
+            Item::VoltEntityCap => e.entity_cap.label().into(),
+            Item::VoltItemCap => e.item_render_cap.label().into(),
+            Item::VoltBlockEntityCap => e.block_entity_cap.label().into(),
+            Item::VoltFastShadows => match e.fast_shadows {
+                FastShadowMode::Vanilla => "Vanilla".into(),
+                FastShadowMode::Nearby16 => "Nearby 16m".into(),
+                FastShadowMode::Off => "Off".into(),
+            },
+            Item::VoltParticleBudget => e.particle_budget.label().into(),
+            Item::VoltGlintMode => match e.glint_mode {
+                GlintTrimMode::Full => "Full".into(),
+                GlintTrimMode::NearbyOnly => "Nearby Only".into(),
+                GlintTrimMode::Off => "Off".into(),
+            },
+            Item::VoltAutoDrs => e.auto_drs.label().into(),
+            Item::VoltDynamicFps => e.dynamic_fps.label().into(),
+            Item::VoltMenuBg => match e.menu_bg_mode {
+                MenuBgMode::PanoramaBlur => "Blur".into(),
+                MenuBgMode::FastDark => "Fast Dark".into(),
+            },
+            Item::VoltAudioCap => e.audio_voice_cap.label().into(),
             other => match other.switch(e) {
                 Some(true) => "On".into(),
                 _ => "Off".into(),
@@ -1179,6 +1923,62 @@ impl Item {
                 e.placement_protocol = e.placement_protocol.cycle(back)
             }
             Item::PlacementRotationSync => e.placement_rotation_sync = !e.placement_rotation_sync,
+            // Volt Boost cycles:
+            Item::VoltPreset => {
+                let next = step(&VoltBoostPreset::ALL, e.volt_preset, back);
+                e.apply_volt_preset(next);
+            }
+            Item::VoltAutoOptimize => {
+                e.auto_optimize_device();
+            }
+            Item::VoltPurgeRam => {
+                e.purge_ram_requested = true;
+                horizon_threads::release_free_memory();
+            }
+            Item::VoltPerfHud => e.perf_hud = step(&PerfHudMode::ALL, e.perf_hud, back),
+            Item::VoltPerfHudCorner => e.perf_hud_corner = e.perf_hud_corner.cycle(back),
+            Item::VoltCullLeaves => e.cull_leaves = !e.cull_leaves,
+            Item::VoltFrustumMesh => e.frustum_priority_mesh = !e.frustum_priority_mesh,
+            Item::VoltCaveSkyCull => e.cave_sky_cull = !e.cave_sky_cull,
+            Item::VoltChunkUploadCap => {
+                e.chunk_upload_cap = step(&ChunkUploadCap::ALL, e.chunk_upload_cap, back)
+            }
+            Item::VoltFastWeather => e.fast_weather = !e.fast_weather,
+            Item::VoltDistantLod => e.distant_lod_boost = !e.distant_lod_boost,
+            Item::VoltEntityCap => e.entity_cap = step(&EntityCap::ALL, e.entity_cap, back),
+            Item::VoltItemCap => {
+                e.item_render_cap = step(&ItemRenderCap::ALL, e.item_render_cap, back)
+            }
+            Item::VoltBlockEntityCap => {
+                e.block_entity_cap = step(&BlockEntityCap::ALL, e.block_entity_cap, back)
+            }
+            Item::VoltCullSignText => e.cull_sign_text = !e.cull_sign_text,
+            Item::VoltFastShadows => {
+                e.fast_shadows = step(&FastShadowMode::ALL, e.fast_shadows, back)
+            }
+            Item::VoltDistantMobThrottle => e.distant_mob_throttle = !e.distant_mob_throttle,
+            Item::VoltHubLagShield => e.hub_lag_shield = !e.hub_lag_shield,
+            Item::VoltParticleBudget => {
+                e.particle_budget = step(&ParticleBudget::ALL, e.particle_budget, back)
+            }
+            Item::VoltChaosShield => e.chaos_particle_shield = !e.chaos_particle_shield,
+            Item::VoltAnimThrottle => e.anim_throttle = !e.anim_throttle,
+            Item::VoltGlintMode => e.glint_mode = step(&GlintTrimMode::ALL, e.glint_mode, back),
+            Item::VoltAutoDrs => e.auto_drs = step(&AutoDrsMode::ALL, e.auto_drs, back),
+            Item::VoltDynamicFps => e.dynamic_fps = step(&DynamicIdleFps::ALL, e.dynamic_fps, back),
+            Item::VoltMenuBg => e.menu_bg_mode = step(&MenuBgMode::ALL, e.menu_bg_mode, back),
+            Item::VoltThermalGuard => e.thermal_guard = !e.thermal_guard,
+            Item::VoltReflex => e.volt_reflex = !e.volt_reflex,
+            Item::VoltThreadBoost => {
+                e.thread_boost = !e.thread_boost;
+                horizon_threads::set_thread_boost(e.thread_boost);
+            }
+            Item::VoltPrewarm => e.prewarm_pipelines = !e.prewarm_pipelines,
+            Item::VoltAudioCap => {
+                e.audio_voice_cap = step(&AudioVoiceCap::ALL, e.audio_voice_cap, back)
+            }
+            Item::VoltMemorySaver => e.memory_saver = !e.memory_saver,
+            Item::VoltKeepAwake => e.keep_screen_awake = !e.keep_screen_awake,
             Item::SortKey
             | Item::WaypointKey
             | Item::MinimapZoomKey
@@ -1327,10 +2127,23 @@ mod tests {
             Extras::parse("minimapSize:7\nminimapZoom:3").minimap_zoom,
             1.0
         );
-        for rows_fn in [rows, waypoint_rows, minimap_rows, placement_rows] {
+        for rows_fn in [
+            rows,
+            waypoint_rows,
+            minimap_rows,
+            placement_rows,
+            volt_boost_rows,
+        ] {
             for item in rows_fn().into_iter().flatten() {
                 assert!(!item.caption().is_empty() && !item.description().is_empty());
             }
         }
+        let mut vb = Extras::default();
+        assert_eq!(vb.active_volt_optimizations(), 0);
+        vb.apply_volt_preset(VoltBoostPreset::UltraFps);
+        assert!(vb.active_volt_optimizations() >= 15);
+        assert_eq!(Extras::parse(&vb.serialize()), vb);
+        vb.apply_volt_preset(VoltBoostPreset::Off);
+        assert_eq!(vb, Extras::default());
     }
 }

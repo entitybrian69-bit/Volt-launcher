@@ -174,6 +174,7 @@ struct MeshSettings {
     blend_radius: i32,
     smooth_lighting: bool,
     cutout_leaves: bool,
+    cull_leaves: bool,
 }
 enum Job {
     Generate(i32, i32),
@@ -375,9 +376,10 @@ pub struct Streaming {
     /// `BiomeManager`'s zoom seed (the hashed world seed) and `biomeBlendRadius`.
     pub biome_zoom: BiomeZoom,
     pub biome_blend: i32,
-    /// The `ao` and `cutoutLeaves` options.
+    /// The `ao` and `cutoutLeaves` options, plus Volt Boost Smart Leaf Culling.
     pub smooth_lighting: bool,
     pub cutout_leaves: bool,
+    pub cull_leaves: bool,
     /// Incremental relighting of block edits on lit chunks (see `light::relight`).
     light_tables: Arc<LightTables>,
     /// Applied edits by sequence, replayed onto light jobs snapshotted before them.
@@ -710,11 +712,12 @@ impl Streaming {
                                         visibility,
                                     };
                                     let recycled = shared.meshes.lock().unwrap().take();
-                                    let mut mesh = mesher.mesh_reusing(
+                                    let mut mesh = mesher.mesh_reusing_with_leaf_cull(
                                         &borrow(&region),
                                         sy,
                                         recycled,
                                         &mut mesh_scratch,
+                                        settings.cull_leaves,
                                     );
                                     mesh.sort_solid();
                                     faces = Some((context.tables.clone(), mesher.visibility));
@@ -777,6 +780,7 @@ impl Streaming {
             biome_blend: 2,
             smooth_lighting: true,
             cutout_leaves: true,
+            cull_leaves: false,
             light_tables,
             light_log: Vec::new(),
             light_edit_sequence: 0,
@@ -1571,6 +1575,7 @@ impl Streaming {
                             blend_radius: self.biome_blend,
                             smooth_lighting: self.smooth_lighting,
                             cutout_leaves: self.cutout_leaves,
+                            cull_leaves: self.cull_leaves,
                         },
                     ),
                 );

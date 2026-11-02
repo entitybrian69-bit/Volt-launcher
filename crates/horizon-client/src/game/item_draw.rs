@@ -317,10 +317,17 @@ impl Game<'_> {
     /// The glint clock, options and sprite for this frame: read once per
     /// frame, not per item (`GameRenderer.extractOptions`).
     pub(super) fn capture_glint_frame(&self) -> item_render::GlintFrame {
+        let alpha = if self.settings.extras.glint_mode
+            == horizon_client::volt_features::GlintMode::Off
+        {
+            0.0
+        } else {
+            self.settings.file.double("glintStrength") as f32
+        };
         item_render::GlintFrame {
             millis: self.started.elapsed().as_secs_f32() * 1000.0,
             speed: self.settings.file.double("glintSpeed") as f32,
-            alpha: self.settings.file.double("glintStrength") as f32,
+            alpha,
             sprite: self
                 .gui
                 .atlas
@@ -354,11 +361,19 @@ impl Game<'_> {
         lights: (glam::Vec3, glam::Vec3),
         out: &mut Vec<Vertex>,
     ) {
+        let glint = if self.settings.extras.glint_mode
+            == horizon_client::volt_features::GlintMode::NearbyOnly12m
+            && pose.w_axis.truncate().length_squared() > 144.0
+        {
+            None
+        } else {
+            self.glint()
+        };
         let mut sink = WorldSink {
             out,
             light,
             lights: Some(lights),
-            glint: self.glint(),
+            glint,
         };
         state.submit(
             &self.pack.item_renderer,
@@ -397,15 +412,44 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
-        let live = self.dropped.iter().map(|item| {
-            let (p, q) = (item.previous, item.position);
-            let at = [
-                p.x + (q.x - p.x) * alpha,
-                p.y + (q.y - p.y) * alpha,
-                p.z + (q.z - p.z) * alpha,
-            ];
-            (item, at, alpha as f32)
-        });
+        let max_items = self.settings.extras.item_render_cap.max_items();
+        let mut ordered_live: Vec<(usize, [f64; 3], f64)> = Vec::new();
+        if max_items < usize::MAX && self.dropped.len() > max_items {
+            ordered_live.reserve(self.dropped.len());
+            for (idx, item) in self.dropped.iter().enumerate() {
+                let (p, q) = (item.previous, item.position);
+                let at = [
+                    p.x + (q.x - p.x) * alpha,
+                    p.y + (q.y - p.y) * alpha,
+                    p.z + (q.z - p.z) * alpha,
+                ];
+                let d_sq = (glam::DVec3::from_array(at) - camera).length_squared();
+                if d_sq <= 64.0 * 64.0 {
+                    ordered_live.push((idx, at, d_sq));
+                }
+            }
+            ordered_live.sort_unstable_by(|a, b| a.2.total_cmp(&b.2));
+            ordered_live.truncate(max_items);
+        }
+        let use_sorted = max_items < usize::MAX && self.dropped.len() > max_items;
+        let live_iter: Box<dyn Iterator<Item = (&horizon_client::DroppedItem, [f64; 3], f32)>> =
+            if use_sorted {
+                Box::new(
+                    ordered_live
+                        .iter()
+                        .map(|&(idx, at, _)| (&self.dropped[idx], at, alpha as f32)),
+                )
+            } else {
+                Box::new(self.dropped.iter().map(|item| {
+                    let (p, q) = (item.previous, item.position);
+                    let at = [
+                        p.x + (q.x - p.x) * alpha,
+                        p.y + (q.y - p.y) * alpha,
+                        p.z + (q.z - p.z) * alpha,
+                    ];
+                    (item, at, alpha as f32)
+                }))
+            };
         // ItemPickupParticle: the render state extracted at partial tick 1.
         let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
             super::pickups::Taken::Item(item) => {
@@ -413,11 +457,22 @@ impl Game<'_> {
             }
             _ => None,
         });
-        for (item, at, partial) in live.chain(taken) {
+        let mut rendered = 0usize;
+        for (item, at, partial) in live_iter.chain(taken) {
+            if rendered >= max_items {
+                break;
+            }
             let entity_start = out.len();
             let q = item.position;
             let pos = glam::DVec3::from_array(at) - camera;
-            if pos.length_squared() > 64.0 * 64.0 {
+            let dist_sq = pos.length_squared();
+            if dist_sq > 64.0 * 64.0 {
+                continue;
+            }
+            if self.is_aabb_occluded(
+                [at[0] - 0.2, at[1], at[2] - 0.2],
+                [at[0] + 0.2, at[1] + 0.45, at[2] + 0.2],
+            ) {
                 continue;
             }
             // `extractItemGroupRenderState`: GROUND, seeded by the entity id.
@@ -431,11 +486,21 @@ impl Game<'_> {
             if state.is_empty() {
                 continue;
             }
+            rendered += 1;
             let age = item.age as f32 + partial;
             let (lo, _) = state.bounding_box();
             let min_offset_y = -lo.y + 0.0625;
-            let bob = (age / 10.0 + item.bob_offset).sin() * 0.1 + 0.1;
-            let spin = item_render::item_spin(age, item.bob_offset);
+            let far_static = max_items < usize::MAX && dist_sq > 144.0;
+            let bob = if far_static {
+                0.05
+            } else {
+                (age / 10.0 + item.bob_offset).sin() * 0.1 + 0.1
+            };
+            let spin = if far_static {
+                item.bob_offset
+            } else {
+                item_render::item_spin(age, item.bob_offset)
+            };
             let pose = glam::Mat4::from_translation(pos.as_vec3())
                 * glam::Mat4::from_translation(glam::Vec3::new(0.0, bob + min_offset_y, 0.0))
                 * glam::Mat4::from_rotation_y(spin);

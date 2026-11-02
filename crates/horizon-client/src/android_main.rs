@@ -70,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.8.2"
+        "0.8.3"
     } else {
-        "0.8.2-dev"
+        "0.8.3-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -267,6 +267,43 @@ fn apk_engine_stamp() -> Option<String> {
     None
 }
 
+static ENGINE_DATA_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn ensure_engine_data(app: &AndroidApp, home: &std::path::Path) {
+    let _guard = ENGINE_DATA_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let zip_path = home.join("engine-data.zip");
+    let stamp_path = home.join("engine-data.stamp");
+    let stamp = apk_engine_stamp();
+    let up_to_date = stamp.as_deref().is_some_and(|expected| {
+        zip_path.metadata().is_ok_and(|m| m.len() > 1024)
+            && std::fs::read_to_string(&stamp_path).ok().as_deref() == Some(expected)
+    });
+    if up_to_date {
+        return;
+    }
+    let Some(mut data) = app.asset_manager().open(c"engine-data.zip") else {
+        return;
+    };
+    let copied = (|| -> std::io::Result<()> {
+        let partial = home.join("engine-data.partial");
+        let mut file = std::fs::File::create(&partial)?;
+        std::io::copy(&mut data, &mut file)?;
+        drop(file);
+        std::fs::rename(&partial, &zip_path)?;
+        if let Some(stamp) = &stamp {
+            let _ = std::fs::write(&stamp_path, stamp);
+        }
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        log::error!("Cannot unpack engine data: {error}");
+    }
+}
+
+pub(crate) fn wait_for_engine_data() {
+    let _guard = ENGINE_DATA_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+}
+
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     use winit::platform::android::activity::input::Axis;
@@ -290,7 +327,7 @@ fn android_main(app: AndroidApp) {
     if let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
         secure_store::initialize(vm);
     }
-    let engine_data = app.asset_manager().open(c"engine-data.zip");
+    let app_for_engine = app.clone();
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     let Some(cache) = platform::cache_dir() else {
         log::error!("Android supplied no application cache directory");
@@ -317,29 +354,14 @@ fn android_main(app: AndroidApp) {
     horizon_client::crash::install(home.clone(), "client");
     exit_reports::install(&home);
     let _ = std::fs::remove_file(home.join("android-error.txt"));
-    if let Some(mut data) = engine_data {
-        let zip_path = home.join("engine-data.zip");
-        let stamp_path = home.join("engine-data.stamp");
-        let stamp = apk_engine_stamp();
-        let up_to_date = stamp.as_deref().is_some_and(|expected| {
-            zip_path.metadata().is_ok_and(|m| m.len() > 1024)
-                && std::fs::read_to_string(&stamp_path).ok().as_deref() == Some(expected)
-        });
-        if !up_to_date {
-            let copied = (|| -> std::io::Result<()> {
-                let mut file = std::fs::File::create(home.join("engine-data.partial"))?;
-                std::io::copy(&mut data, &mut file)?;
-                drop(file);
-                std::fs::rename(home.join("engine-data.partial"), &zip_path)?;
-                if let Some(stamp) = &stamp {
-                    let _ = std::fs::write(&stamp_path, stamp);
-                }
-                Ok(())
-            })();
-            if let Err(error) = copied {
-                log::error!("Cannot unpack engine data: {error}");
-            }
-        }
+    // Unpack `engine-data.zip` (~38 MB) on a background thread so `android_event_loop()`
+    // starts draining NativeActivity lifecycle/input commands immediately on first launch.
+    {
+        let home_bg = home.clone();
+        let _ = std::thread::Builder::new()
+            .name("volt-engine-unpack".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || ensure_engine_data(&app_for_engine, &home_bg));
     }
     let mut launcher = launcher::Launcher::new(home.clone());
     let result = android_event_loop()

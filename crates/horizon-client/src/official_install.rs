@@ -390,25 +390,28 @@ pub fn install_with_progress(home: &Path, progress: impl Fn(InstallProgress) + S
     let done = AtomicU64::new(0);
     let error = Mutex::new(None);
     std::thread::scope(|scope| {
-        for _ in 0..8 {
-            scope.spawn(|| {
-                loop {
-                    if error.lock().unwrap().is_some() {
-                        break;
+        for idx in 0..8 {
+            let _ = std::thread::Builder::new()
+                .name(format!("volt-dl-{idx}"))
+                .stack_size(4 * 1024 * 1024)
+                .spawn_scoped(scope, || {
+                    loop {
+                        if error.lock().unwrap().is_some() {
+                            break;
+                        }
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(file) = files.get(i) else { break };
+                        if let Err(e) = file.get() {
+                            *error.lock().unwrap() = Some(e.to_string());
+                            break;
+                        }
+                        report(
+                            InstallStage::Download,
+                            done.fetch_add(file.size, Ordering::Relaxed) + file.size,
+                            total,
+                        );
                     }
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(file) = files.get(i) else { break };
-                    if let Err(e) = file.get() {
-                        *error.lock().unwrap() = Some(e.to_string());
-                        break;
-                    }
-                    report(
-                        InstallStage::Download,
-                        done.fetch_add(file.size, Ordering::Relaxed) + file.size,
-                        total,
-                    );
-                }
-            });
+                });
         }
     });
     if let Some(error) = error.into_inner().unwrap() {
@@ -488,6 +491,13 @@ pub fn install_with_progress(home: &Path, progress: impl Fn(InstallProgress) + S
     if stage.exists() {
         let _ = fs::remove_dir_all(stage);
     }
+    if result.is_ok() {
+        drop(index);
+        drop(files);
+        horizon_threads::release_free_memory();
+        let destination = versions.join(version);
+        prewarm_first_launch_caches(home, &destination);
+    }
     // `install_with_progress` holds INSTALLATION for the entire transaction,
     // so use the inner helper here rather than reacquiring the non-reentrant
     // mutex through `cleanup_completed_downloads`.
@@ -500,6 +510,33 @@ pub fn install_with_progress(home: &Path, progress: impl Fn(InstallProgress) + S
         log::warn!("Could not clean completed Minecraft downloads: {error}");
     }
     result
+}
+
+/// Pre-builds `behaviours-v2.bin` right after installation while 0 MB of GPU/world
+/// textures are resident, eliminating ~400 MB of cold-start peak RSS on the very first PLAY tap.
+pub fn prewarm_first_launch_caches(home: &Path, root: &Path) {
+    horizon_world::level::Behaviours::set_cache_dir(home.join(".horizon-cache"));
+    let home_root = root.to_path_buf();
+    let _ = std::thread::Builder::new()
+        .name("volt-prewarm".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            if let Ok(registry) = horizon_world::level::data::load_registry(&home_root)
+                && horizon_world::level::Behaviours::load_cached(&registry, &home_root).is_none()
+                && let Ok(file) = fs::File::open(home_root.join("block-behaviours.json"))
+                && let Ok(behaviour_json) =
+                    serde_json::from_reader::<_, Value>(std::io::BufReader::new(file))
+            {
+                let _ = horizon_items::blocks::BlockFacts::load_with_behaviours(
+                    &home_root,
+                    &registry,
+                    &behaviour_json,
+                );
+            }
+            horizon_threads::release_free_memory();
+        })
+        .and_then(|h| h.join().map_err(|_| std::io::Error::other("prewarm panic")));
+    horizon_threads::release_free_memory();
 }
 
 #[cfg(test)]

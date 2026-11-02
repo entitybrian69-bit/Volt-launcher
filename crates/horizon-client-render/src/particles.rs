@@ -1072,6 +1072,12 @@ pub struct ParticleEngine {
     /// The item particles' sprites (`BreakingItemParticle`'s slime ball, snowball
     /// and cobweb models, resolved for the ground), one per model layer.
     pub item_sprites: HashMap<ParticleType, Vec<String>>,
+    /// Dynamic active particle budget (`16_384` = vanilla; `0` = completely disabled).
+    pub max_particles: usize,
+    /// Optional squared render distance cutoff (`None` = vanilla full distance).
+    pub max_render_distance_sq: Option<f64>,
+    /// Caps explosion debris, hub firework bursts, and block-break spray spikes.
+    pub burst_shield: bool,
 }
 /// `ParticleGroup.MAX_PARTICLES` (per render group; one group here).
 const MAX_PARTICLES: usize = 16384;
@@ -1098,6 +1104,9 @@ impl ParticleEngine {
             sounds: Vec::new(),
             made: Default::default(),
             item_sprites: HashMap::new(),
+            max_particles: MAX_PARTICLES,
+            max_render_distance_sq: None,
+            burst_shield: false,
         };
         engine.reload(root, atlas, translucent);
         engine
@@ -1355,10 +1364,11 @@ impl ParticleEngine {
         is_air: &dyn Fn([i32; 3]) -> bool,
     ) {
         // ClientExplosionTracker.tick: only the All option throws the debris.
-        if self.particle_level != 0 {
+        if self.particle_level != 0 || self.max_particles == 0 {
             return;
         }
-        for _ in 0..block_count.min(512) {
+        let debris_cap = if self.burst_shield { 24 } else { 512 };
+        for _ in 0..block_count.min(debris_cap) {
             let r = &mut self.random;
             let d = Vec3::new(
                 f64::from(r.next_float() * 2.0 - 1.0),
@@ -3036,6 +3046,9 @@ impl ParticleEngine {
         let twinkle = explosions.iter().any(|e| e.twinkle);
         let lifetime = explosions.len() as i32 * 2 - 1 + if twinkle { 15 } else { 0 };
         let far = (0..3).map(|i| (at[i] - camera[i]).powi(2)).sum::<f64>() >= 256.0;
+        if self.burst_shield && (far || self.starters.len() >= 4) {
+            return;
+        }
         self.starters.push(Starter {
             at,
             v,
@@ -3195,22 +3208,55 @@ impl ParticleEngine {
             }
         }
     }
+    pub fn active_count(&self) -> usize {
+        self.particles.len()
+    }
+    pub fn trim_memory(&mut self) {
+        self.particles.shrink_to_fit();
+        self.pending.shrink_to_fit();
+        self.emitters.shrink_to_fit();
+        self.starters.shrink_to_fit();
+        self.sounds.shrink_to_fit();
+    }
     pub fn tick(&mut self, level: &ParticleLevel) {
+        let cap = self.max_particles.min(MAX_PARTICLES);
+        if cap == 0 {
+            self.starters.clear();
+            self.emitters.clear();
+            self.particles.clear();
+            self.pending.clear();
+            return;
+        }
         self.tick_starters();
-        for (options, feet, width, height, life) in std::mem::take(&mut self.emitters) {
+        let mut emitters = std::mem::take(&mut self.emitters);
+        let emit_len = emitters.len();
+        for i in 0..emit_len {
+            let (options, feet, width, height, life) = emitters[i].clone();
             self.emit(&options, feet, width, height);
             if life > 1 {
                 self.emitters.push((options, feet, width, height, life - 1));
             }
         }
+        emitters.clear();
+        std::mem::swap(&mut self.emitters, &mut emitters);
+        for item in emitters {
+            self.emitters.push(item);
+        }
+
         let mut particles = std::mem::take(&mut self.particles);
         for p in &mut particles {
             self.tick_particle(p, level);
         }
         particles.retain(|p| !p.removed);
+        if particles.len() > cap {
+            particles.truncate(cap);
+        }
         self.particles = particles;
-        let pending = std::mem::take(&mut self.pending);
-        for mut p in pending {
+
+        let soft_cap = (cap * 3) / 4;
+        let tail_span = (cap - soft_cap).max(1) as f32;
+        let mut pending = std::mem::take(&mut self.pending);
+        for mut p in pending.drain(..) {
             if p.pre_tick {
                 p.pre_tick = false;
                 self.tick_particle(&mut p, level);
@@ -3218,16 +3264,19 @@ impl ParticleEngine {
             }
             // ParticleGroup.add: the last quarter fills with decreasing probability.
             let size = self.particles.len();
-            if size >= MAX_PARTICLES {
+            if size >= cap {
                 continue;
             }
-            if size >= 12288 {
-                let free = (MAX_PARTICLES - size) as f32 / 4096.0;
+            if size >= soft_cap {
+                let free = (cap - size) as f32 / tail_span;
                 if self.random.next_float() >= free * free {
                     continue;
                 }
             }
             self.particles.push(p);
+        }
+        if self.pending.capacity() < pending.capacity() {
+            self.pending = pending;
         }
     }
     #[allow(clippy::too_many_lines)]
@@ -3994,6 +4043,8 @@ impl ParticleEngine {
         // Camera.setRotation: rotationYXZ(PI - yRot, -xRot, 0).
         let base = Quat::from_rotation_y(std::f32::consts::PI - yaw.to_radians())
             * Quat::from_rotation_x(-pitch.to_radians());
+        let max_dist_sq = self.max_render_distance_sq;
+        let mut last_light: Option<([i32; 3], u8)> = None;
         for p in &self.particles {
             if p.no_render {
                 continue;
@@ -4025,6 +4076,11 @@ impl ParticleEngine {
                 p.previous[1] + (p.position[1] - p.previous[1]) * a,
                 p.previous[2] + (p.position[2] - p.previous[2]) * a,
             ) - camera;
+            if let Some(limit_sq) = max_dist_sq
+                && pos.length_squared() > limit_sq
+            {
+                continue;
+            }
             let center = pos.as_vec3();
             let rotation = if p.roll != 0.0 {
                 base * Quat::from_rotation_z(p.o_roll + (p.roll - p.o_roll) * partial)
@@ -4093,7 +4149,14 @@ impl ParticleEngine {
                 _ => {}
             }
             let block = ParticleLevel::block_at(p.position);
-            let packed = light_at(block);
+            let packed = match last_light {
+                Some((cached_block, cached_packed)) if cached_block == block => cached_packed,
+                _ => {
+                    let v = light_at(block);
+                    last_light = Some((block, v));
+                    v
+                }
+            };
             let (sky_light, block_light) = p.light_coords(
                 partial,
                 u32::from(packed >> 4) * 16,

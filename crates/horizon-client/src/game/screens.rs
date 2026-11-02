@@ -86,6 +86,7 @@ fn pause_buttons(
             2,
             true,
         ),
+        (x0 + 4.0, y0 + 170.0 + down, 204.0, "volt.boost.button", 14, true),
     ]);
     v
 }
@@ -275,6 +276,9 @@ impl Game<'_> {
                 self.capture(true);
             }
             Some(1) => self.open_options(false),
+            Some(14) => {
+                self.open_options_at(false, horizon_client::options_ui::Page::VoltBoost)
+            }
             Some(3) => self.open_stats(),
             Some(4) => self.open_advancements(true),
             Some(9) => self.open_world_options(),

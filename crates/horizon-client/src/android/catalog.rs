@@ -15,13 +15,15 @@ pub fn source_only_mod(project: &Project) -> bool {
 pub const MICROSOFT_CLIENT_ID: &str = "00000000441cc96b";
 
 /// Vulkan, Volt Vulkan Supporter, and OpenGL ES rendering paths.
+/// Defaults to `VulkanSupporter` on fresh Android installs so legacy/strict
+/// Mali, Adreno, and PowerVR Vulkan 1.0/1.1 drivers never crash on Launch #1.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RendererMode {
     Vulkan,
+    #[default]
     VulkanSupporter,
     OpenGl,
-    #[default]
     VulkanCompatibility,
 }
 impl RendererMode {
@@ -124,7 +126,7 @@ impl Config {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
         let mut config: Self = serde_json::from_value(value.clone()).unwrap_or_default();
-        if cfg!(target_pointer_width = "32") && value.get("renderer").is_none() {
+        if value.get("renderer").is_none() {
             config.renderer = RendererMode::VulkanSupporter;
         }
         // Ignore saved app registrations while this dev build uses the fixed ID.
@@ -173,16 +175,18 @@ pub enum Page {
     Packs,
     Shaders,
     Installed,
+    VoltSettings,
     Settings,
 }
 impl Page {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Play,
         Self::Account,
         Self::Mods,
         Self::Packs,
         Self::Shaders,
         Self::Installed,
+        Self::VoltSettings,
         Self::Settings,
     ];
     pub fn name(self) -> &'static str {
@@ -193,6 +197,7 @@ impl Page {
             Self::Packs => "Packs",
             Self::Shaders => "Shaders",
             Self::Installed => "Installed",
+            Self::VoltSettings => "Volt Settings",
             Self::Settings => "Settings",
         }
     }
@@ -225,6 +230,9 @@ pub struct Catalog {
     pub status: String,
     pub offset: usize,
     pub scroll: f32,
+    pub volt_boost_modal: bool,
+    pub volt_modal_scroll: f32,
+    pub extras: horizon_client::extras::Extras,
     pub config: Config,
     pub active_controls: Option<horizon_client::touch::layout::ImportedMeta>,
     pub control_presets: Vec<horizon_client::touch::import::PresetEntry>,
@@ -273,6 +281,9 @@ impl Catalog {
             status: String::new(),
             offset: 0,
             scroll: 0.0,
+            volt_boost_modal: false,
+            volt_modal_scroll: 0.0,
+            extras: horizon_client::extras::Extras::default(),
             config,
             active_controls: None,
             control_presets: vec![],
@@ -319,6 +330,8 @@ impl Catalog {
             .collect();
         let on = horizon_client::mod_list::ModList::load(&game);
         let settings = horizon_client::settings::Settings::load(&game.join("options.txt"));
+        self.extras = settings.extras.clone();
+        horizon_threads::set_thread_boost(self.extras.thread_boost);
         self.local.clear();
         for kind in horizon_client::content_files::Kind::ALL {
             let dir = game.join(kind.folder());

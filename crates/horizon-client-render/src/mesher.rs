@@ -976,8 +976,19 @@ impl Mesher<'_> {
         &mut self,
         region: &[[Option<&Chunk>; 3]; 3],
         sy: i32,
+        out: SectionMesh,
+        scratch: &mut MeshScratch,
+    ) -> SectionMesh {
+        self.mesh_reusing_with_leaf_cull(region, sy, out, scratch, false)
+    }
+
+    pub(crate) fn mesh_reusing_with_leaf_cull(
+        &mut self,
+        region: &[[Option<&Chunk>; 3]; 3],
+        sy: i32,
         mut out: SectionMesh,
         scratch: &mut MeshScratch,
+        cull_leaves: bool,
     ) -> SectionMesh {
         out.clear();
         let center = region[1][1].expect("centre chunk");
@@ -1054,8 +1065,10 @@ impl Mesher<'_> {
                         let [dx, dy, dz] = d.normal();
                         let neighbor = pad.blocks[pi(x + dx, y + dy, z + dz)];
                         let other = &info[neighbor as usize];
-                        // LeavesBlock.skipRendering with opaque leaves.
-                        let opaque_leaves = !self.cutout_leaves && state.leaves && other.leaves;
+                        // LeavesBlock.skipRendering with opaque leaves, or Volt Boost Smart Leaf Culling
+                        // (skips hidden interior leaf-to-leaf faces while keeping outer canopy cutout).
+                        let opaque_leaves =
+                            (!self.cutout_leaves || cull_leaves) && state.leaves && other.leaves;
                         visible[d as usize] = !opaque_leaves
                             && self
                                 .visibility

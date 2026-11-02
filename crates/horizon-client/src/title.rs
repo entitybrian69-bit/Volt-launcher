@@ -350,6 +350,7 @@ pub enum Action {
     None,
     Quit,
     Options,
+    VoltBoost,
     Accessibility,
     Language,
     /// AccessibilityOnboardingScreen's Music & Sounds button.
@@ -1435,6 +1436,14 @@ impl Title {
                         &lang::get_or("menu.quit", "Quit Game"),
                         true,
                         2,
+                    ),
+                    b(
+                        cx - 100.0,
+                        y + 120.0,
+                        200.0,
+                        &lang::get_or("volt.boost.button", "Volt Boost"),
+                        true,
+                        8,
                     ),
                 ];
                 // CommonButtons' icon buttons; Horizon's Join a Friend (an
@@ -2747,6 +2756,7 @@ impl Title {
                 Action::None
             }
             (Mode::Main, Some(3)) => Action::Options,
+            (Mode::Main, Some(8)) => Action::VoltBoost,
             (Mode::Main, Some(7)) => Action::Accessibility,
             (Mode::Main, Some(6)) => Action::Language,
             (Mode::Select { worlds, selected }, Some(10)) => {
@@ -3551,6 +3561,10 @@ mod classic_tests {
             assert_eq!(
                 title.click(cx + 24.0, y + 92.0, (w, h)),
                 (Action::None, false)
+            );
+            assert_eq!(
+                title.click(cx, y + 130.0, (w, h)),
+                (Action::VoltBoost, true)
             );
         }
     }

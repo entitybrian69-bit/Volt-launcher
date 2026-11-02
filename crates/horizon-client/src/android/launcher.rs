@@ -254,6 +254,9 @@ impl Launcher {
             self.catalog.config.screen.immersive,
             self.catalog.config.screen.avoid_cutout,
         );
+        crate::native_ime::set_keep_screen_awake(
+            self.catalog.extras.keep_screen_awake || self.worker.is_some(),
+        );
         winit::platform::android::set_native_content_aspect(
             self.catalog.config.screen.aspect.ratio(),
         );
@@ -487,17 +490,6 @@ impl Launcher {
             let handoff = if self.renderer_signature == Some(desired_sig.clone()) {
                 match (self.window.take(), self.renderer.take()) {
                     (Some(window), Some(mut renderer)) => {
-                        let white = [255u8; 4];
-                        let blank_pano = horizon_client::gfx::panorama::Faces {
-                            size: 1,
-                            pixels: [0u8; 4].repeat(6),
-                        };
-                        let _ = renderer.replace_ui_textures(
-                            (&white, 1, 1),
-                            (&white, 1, 1),
-                            (&white, 1, 1),
-                            &blank_pano,
-                        );
                         renderer.hud.sprite_animations.clear();
                         crate::performance::mark("handoff_reuse_renderer");
                         Some((window, renderer))
@@ -526,32 +518,38 @@ impl Launcher {
             self.game = Some(game);
             self.game.as_mut().unwrap().resumed(events);
         } else {
-            if !self.home.join("engine-data.zip").is_file() {
-                return Err(
-                    "This APK is missing its engine data. Install a complete build.".into(),
-                );
-            }
             self.error = None;
             *self.install.lock().unwrap() = Default::default();
             let home = self.home.clone();
             let install = self.install.clone();
             let (sender, receiver) = mpsc::channel();
             self.worker = Some(receiver);
-            std::thread::spawn(move || {
-                let result =
-                    horizon_client::official_install::install_with_progress(&home, |update| {
-                        let mut current = install.lock().unwrap();
-                        let done = if current.stage == update.stage {
-                            current.done.max(update.done)
-                        } else {
-                            update.done
-                        };
-                        *current =
-                            horizon_client::official_install::InstallProgress { done, ..update };
-                    });
-                horizon_threads::release_free_memory();
-                let _ = sender.send(result.map_err(|e| e.to_string()));
-            });
+            crate::native_ime::set_keep_screen_awake(true);
+            let _ = std::thread::Builder::new()
+                .name("volt-installer".into())
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || {
+                    crate::wait_for_engine_data();
+                    if !home.join("engine-data.zip").is_file() {
+                        let _ = sender.send(Err(
+                            "This APK is missing its engine data. Install a complete build.".into(),
+                        ));
+                        return;
+                    }
+                    let result =
+                        horizon_client::official_install::install_with_progress(&home, |update| {
+                            let mut current = install.lock().unwrap();
+                            let done = if current.stage == update.stage {
+                                current.done.max(update.done)
+                            } else {
+                                update.done
+                            };
+                            *current =
+                                horizon_client::official_install::InstallProgress { done, ..update };
+                        });
+                    horizon_threads::release_free_memory();
+                    let _ = sender.send(result.map_err(|e| e.to_string()));
+                });
         }
         Ok(())
     }

@@ -292,6 +292,7 @@ pub(super) fn spawn_loader(
     let progress = progress.clone();
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
+        .stack_size(8 * 1024 * 1024)
         .spawn(move || {
             horizon_threads::behind_server();
             let mut pack_error = None;
@@ -553,6 +554,7 @@ impl Loading {
         match action {
             Action::Quit => crate::game::exit_app(event_loop),
             Action::Options => self.open_menu_options(Page::Main),
+            Action::VoltBoost => self.open_menu_options(Page::VoltBoost),
             Action::Accessibility => self.open_menu_options(Page::Accessibility),
             Action::Language => self.open_menu_options(Page::Language),
             Action::Sounds => self.open_menu_options(Page::Sound),

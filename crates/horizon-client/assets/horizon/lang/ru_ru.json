@@ -205,5 +205,9 @@
   "Threads that generate, light and mesh chunks. Next start.": "Потоки, которые генерируют, освещают и строят чанки. Со следующего запуска.",
   "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.": "Vulkan, при сбое — DirectX 12 (Windows) или OpenGL (Linux). Со следующего запуска.",
   "Mesh data sent to the GPU per frame. Lower is smoother while loading.": "Данных меша в видеокарту за кадр. Меньше — плавнее во время загрузки.",
-  "Frame rate and frame times over the game, with a graph.": "Частота кадров и их время поверх игры, с графиком."
+  "Frame rate and frame times over the game, with a graph.": "Частота кадров и их время поверх игры, с графиком.",
+  "volt.boost.button": "Volt Boost",
+  "volt.boost.button.short": "Volt",
+  "volt.boost.title": "Volt Boost — Производительность и оптимизация",
+  "volt.boost.tooltip": "Volt Boost: оптимизации FPS, GPU, CPU, ОЗУ, сущностей, чанков и частиц уровней 1–3 (выключены по умолчанию)."
 }

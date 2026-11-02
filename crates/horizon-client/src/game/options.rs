@@ -384,6 +384,12 @@ impl Game<'_> {
     /// Settings that Horizon applies beyond render distance, volume and GUI scale.
     pub(super) fn apply_ui_settings(&mut self) {
         self.apply_fullscreen();
+        if self.settings.extras.auto_drs == horizon_client::volt_features::AutoDrsMode::Off
+            && !self.settings.extras.thermal_guard
+        {
+            self.extras.drs_scale = 1.0;
+        }
+        let effective_drs = self.extras.effective_drs_scale();
         let s = &self.settings;
         if let Some(r) = self.renderer.as_mut() {
             r.gamma = s.gamma;
@@ -391,13 +397,14 @@ impl Game<'_> {
             r.improved_transparency = s.improved_transparency;
             r.set_present_mode(s.vsync, s.horizon.present_mode);
             r.animated_textures = s.horizon.animated_textures;
+            r.animation_step_ticks = s.extras.smart_animations.step_ticks();
             r.set_mipmap_levels(s.mipmap_levels.max(0) as u32);
             r.set_texture_filtering(
                 s.file.int("textureFiltering"),
                 s.file.int("maxAnisotropyBit"),
             );
             r.set_world_post(
-                s.horizon.resolution_scale as f32 / 100.0,
+                (s.horizon.resolution_scale as f32 / 100.0 * effective_drs).clamp(0.45, 1.0),
                 s.horizon.fxaa,
                 s.horizon.taa,
                 s.horizon.upscaling.ratio(),
@@ -411,6 +418,12 @@ impl Game<'_> {
                 &Self::options_path().with_file_name(horizon_client::graphics::HDR_MARKER),
             );
         }
+        self.particles.max_particles = s.extras.particle_budget.max_particles();
+        self.particles.max_render_distance_sq = s.extras.particle_distance.max_dist_sq();
+        self.particles.burst_shield = s.extras.chaos_particle_shield;
+        horizon_threads::set_thread_boost(s.extras.thread_boost);
+        #[cfg(target_os = "android")]
+        crate::native_ime::set_keep_screen_awake(s.extras.keep_screen_awake);
         let mut volumes = s.volumes;
         volumes[0] = 1.0;
         horizon_client::settings::set_source_volumes(volumes);
@@ -474,9 +487,25 @@ impl Game<'_> {
             has_overlay: false,
         };
         let limit = framerate_limit(self.settings.max_fps as i32, context);
-        self.settings
+        let mut limit = self
+            .settings
             .horizon
-            .battery_limit(limit, self.title.is_none(), self.focused)
+            .battery_limit(limit, self.title.is_none(), self.focused);
+        let dyn_fps = self.settings.extras.dynamic_fps;
+        if dyn_fps != horizon_client::volt_features::DynamicFpsMode::Off {
+            let eco = dyn_fps == horizon_client::volt_features::DynamicFpsMode::Eco;
+            let now_ms = self.started.elapsed().as_millis() as i64;
+            let latest_input_ms =
+                self.last_input.duration_since(self.started).as_millis() as i64;
+            if !self.focused {
+                limit = limit.min(if eco { 10 } else { 15 });
+            } else if self.title.is_some() || self.screen != super::Screen::Playing {
+                limit = limit.min(if eco { 30 } else { 60 });
+            } else if now_ms.saturating_sub(latest_input_ms) > 45_000 {
+                limit = limit.min(if eco { 20 } else { 30 });
+            }
+        }
+        limit
     }
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the
@@ -485,8 +514,18 @@ impl Game<'_> {
         if self.options.frames.is_some() {
             return;
         }
+        if self.settings.extras.volt_reflex
+            && let Some(r) = self.renderer.as_ref()
+        {
+            r.poll_gpu();
+        }
         let limit = self.framerate_limit();
-        match self.settings.horizon.pacing {
+        let pacing = if self.settings.extras.volt_reflex {
+            horizon_client::graphics::Pacing::Precise
+        } else {
+            self.settings.horizon.pacing
+        };
+        match pacing {
             horizon_client::graphics::Pacing::Precise => {
                 horizon_client::window::end_frame(&mut self.limiter, limit, &mut self.frame_clock)
             }

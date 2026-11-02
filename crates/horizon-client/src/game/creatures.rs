@@ -5214,7 +5214,42 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
-        for mob in &self.mobs {
+        let max_entities = self.settings.extras.entity_cap.max_entities();
+        let hub_shield = self.settings.extras.hub_lag_shield && self.mobs.len() > 24;
+        let throttle_distant = self.settings.extras.distant_mob_throttle;
+        let mut sorted: Vec<(usize, f64)> = Vec::new();
+        if max_entities < usize::MAX && self.mobs.len() > max_entities {
+            sorted.reserve(self.mobs.len());
+            for (idx, mob) in self.mobs.iter().enumerate() {
+                if self.hides_as_camera(mob.id) {
+                    continue;
+                }
+                let d_sq = (glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z)
+                    - camera)
+                    .length_squared();
+                if hub_shield && d_sq > 18.0 * 18.0 && &*mob.kind.id == "minecraft:player" {
+                    continue;
+                }
+                sorted.push((idx, d_sq));
+            }
+            sorted.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+        }
+        let use_sorted = max_entities < usize::MAX && self.mobs.len() > max_entities;
+        let total_steps = if use_sorted {
+            sorted.len()
+        } else {
+            self.mobs.len()
+        };
+        let mut drawn_count = 0usize;
+        for step in 0..total_steps {
+            if drawn_count >= max_entities {
+                break;
+            }
+            let mob = if use_sorted {
+                &self.mobs[sorted[step].0]
+            } else {
+                &self.mobs[step]
+            };
             let entity_start = out.len();
             let outline = self.mob_outline(mob);
             // Entity.DATA_SHARED_FLAGS_ID invisible: only the name tag draws (and
@@ -5232,6 +5267,10 @@ impl Game<'_> {
                 continue;
             }
             let d = glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z) - camera;
+            let d_sq = d.length_squared();
+            if hub_shield && is_player && d_sq > 18.0 * 18.0 {
+                continue;
+            }
             // Entity.shouldRenderAtSqrDistance: 64 times the bounding box's
             // mean edge, scaled by the view scale. RemotePlayer's box counts
             // ten times.
@@ -5243,13 +5282,14 @@ impl Game<'_> {
                     1.0
                 };
             let range = edge * 64.0 * scale;
-            if d.length_squared() >= range * range {
+            if d_sq >= range * range {
                 continue;
             }
+            let has_beam = horizon_client::mobs::guardian::beam(mob, alpha as f32).is_some();
             // EntityRenderer.shouldRender: the culling box, grown by 0.5
             // (GuardianRenderer also draws while its beam is out).
             if let Some(view) = &self.view_frustum
-                && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
+                && !has_beam
             {
                 let lo =
                     d.as_vec3() - glam::Vec3::new(w as f32 / 2.0 + 0.5, 0.5, w as f32 / 2.0 + 0.5);
@@ -5259,6 +5299,29 @@ impl Game<'_> {
                     continue;
                 }
             }
+            if outline.is_none()
+                && !has_beam
+                && self.is_aabb_occluded(
+                    [
+                        mob.position.x - w * 0.5,
+                        mob.position.y,
+                        mob.position.z - w * 0.5,
+                    ],
+                    [
+                        mob.position.x + w * 0.5,
+                        mob.position.y + h,
+                        mob.position.z + w * 0.5,
+                    ],
+                )
+            {
+                continue;
+            }
+            drawn_count += 1;
+            let mob_alpha = if throttle_distant && d_sq > 24.0 * 24.0 {
+                0.0
+            } else {
+                alpha
+            };
             self.mark_entity(entity_start, &mob.kind.id);
             let light = self.world.light(
                 mob.position.x.floor() as i32,
@@ -5300,7 +5363,7 @@ impl Game<'_> {
             };
             render(
                 mob,
-                alpha as f32,
+                mob_alpha as f32,
                 camera,
                 &lookup,
                 packed,
@@ -5313,22 +5376,33 @@ impl Game<'_> {
                 // Only the cape hides with the body; WingsLayer and
                 // SpinAttackEffectLayer have no `isInvisible` check.
                 let chest = mob.extra.chest.as_deref();
-                if !layers_only {
-                    self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
+                let skip_distant_cosmetics = throttle_distant && d_sq > 24.0 * 24.0;
+                if !layers_only && !skip_distant_cosmetics {
+                    self.player_cape_geometry(mob, chest, camera, mob_alpha as f32, packed, out);
                 }
-                if let Some((_, name)) = self
-                    .remote_player_names()
-                    .into_iter()
-                    .find(|(id, _)| *id == mob.id)
+                if !skip_distant_cosmetics
+                    && let Some((_, name)) = self
+                        .remote_player_names()
+                        .into_iter()
+                        .find(|(id, _)| *id == mob.id)
                 {
-                    self.player_ears_geometry(mob, &name, camera, alpha as f32, packed, out);
+                    self.player_ears_geometry(mob, &name, camera, mob_alpha as f32, packed, out);
                 }
-                self.player_elytra_geometry(mob, chest, camera, alpha as f32, packed, out);
-                self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
-                self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
+                self.player_elytra_geometry(mob, chest, camera, mob_alpha as f32, packed, out);
+                self.spin_attack_geometry(mob, camera, mob_alpha as f32, packed, out);
+                if !skip_distant_cosmetics {
+                    self.stuck_in_body_geometry(
+                        mob,
+                        mob.id as i32,
+                        camera,
+                        mob_alpha as f32,
+                        packed,
+                        out,
+                    );
+                }
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
-            self.mob_block_geometry(mob, camera, alpha, packed, out);
+            self.mob_block_geometry(mob, camera, mob_alpha, packed, out);
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if mob.invisible {
@@ -5364,6 +5438,9 @@ impl Game<'_> {
                 );
             }
         }
+        self.extras
+            .drawn_entities
+            .store(drawn_count as u32, std::sync::atomic::Ordering::Relaxed);
         self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);
         // Projectiles: the baked vanilla arrow model, the rest as item billboards.

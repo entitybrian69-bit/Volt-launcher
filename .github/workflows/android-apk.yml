@@ -994,11 +994,11 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.8.2
-          - Fixed **first-launch crash** via zero-destruction Vulkan/GL surface handoff between Volt Launcher and the game, Vulkan Supporter GPU timestamp/compute safety guards, and streaming cold-start cache writes (~900 MB lower peak RAM)
-          - Overhauled **Accurate Block Placement** across Touch Tap/D-Pad, Split Controls, imported custom controls, Singleplayer, LAN, and Multiplayer (3D sub-face quadrant guide, 3D reach-around bridging cube, tappable REV/LOCK HUD pills, and exact chest/furnace/stairs/piston/log orientation)
-          - Built-in **Vulkan Supporter** & custom Vulkan driver loader (.zip / .adpkg / .so) for Vulkan 1.0, Mali, PowerVR, Adreno, and 32-bit GPUs
-          - Native **64-bit (arm64-v8a)** and **32-bit (armeabi-v7a)** Android APK builds with automatic ABI-matched one-time in-app update reminders
+          ### What's New in Volt Launcher 0.8.3
+          - Permanently resolved **First-Launch Crash**: Vulkan Supporter default on fresh installs, async background engine-data unpacking, post-install `behaviours-v2.bin` cache pre-warming, zero-projection cold-start loader (~730 MB lower peak RAM), and `device.poll` texture swap fences
+          - New **Volt Settings** tab in the Volt Launcher left sidebar with full Tier 1–3 performance, Vulkan driver, resolution/Auto-DRS, big.LITTLE thread affinity, Volt Reflex, RAM compactor, and hardware tuning
+          - New **Volt Boost** Performance Hub on the **Pause Screen**, **Title Screen**, **Launcher Home Dashboard**, and **Volt Settings**: 1-click profiles (Balanced, Competitive PvP, Ultra FPS, Battery Saver, Low-RAM) + Auto-Tune My Device + Purge RAM Now
+          - Genuine native Rust engine optimizations across all 3 tiers: Auto-DRS, Live FPS/1% Low/Frame-Time Sparkline HUD, Smart Leaf Culling, Frustum-First Meshing, Cave Sky Culling, Entity/Item/Block-Entity Caps + 3D Wall Occlusion, Hub Lag Shield, Particle Burst Shield, Smart Texture Tick Throttling, Dynamic Menu/Idle FPS, Fast Dark Menu Backdrop, and Thermal Guard
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

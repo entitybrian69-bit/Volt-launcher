@@ -1379,6 +1379,7 @@ pub enum Page {
     Waypoints,
     Minimap,
     Placement,
+    VoltBoost,
     /// CreditsAndAttributionScreen.
     Credits,
     /// Volt Settings: every page Volt adds, as a mod's settings
@@ -1675,6 +1676,7 @@ fn option_widget(s: &Settings, opt: Opt, x: f32, y: f32, w: f32) -> Widget {
 fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
         Page::Horizon => "horizon.pages.settings.tooltip",
+        Page::VoltBoost => "volt.boost.tooltip",
         Page::Waypoints => "horizon.pages.waypoints.tooltip",
         Page::Minimap => "horizon.pages.minimap.tooltip",
         Page::Placement => "horizon.pages.placement.tooltip",
@@ -1711,7 +1713,10 @@ impl OptionsUi {
     }
     fn settings_search_active(&self) -> bool {
         self.settings_search.focused
-            && matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds)
+            && matches!(
+                self.page(),
+                Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+            )
     }
     fn waypoint_name_active(&self) -> bool {
         self.waypoint_name.focused && self.page() == Page::Waypoints
@@ -1721,6 +1726,11 @@ impl OptionsUi {
         s: &Settings,
         defs: Vec<Result<crate::extras::Item, &'static str>>,
     ) -> Vec<Row> {
+        let query = if self.page() == Page::VoltBoost {
+            self.settings_search.value.trim().to_lowercase()
+        } else {
+            String::new()
+        };
         let extra = |item: crate::extras::Item| {
             let value = format!("{}: {}", item.caption(), item.value(&s.extras));
             let label = if item.key_name().is_some() && self.selected_key == item.key_name() {
@@ -1740,24 +1750,43 @@ impl OptionsUi {
         };
         let mut rows = Vec::new();
         let mut section = Vec::new();
-        let flush = |rows: &mut Vec<Row>, section: &mut Vec<crate::extras::Item>| {
-            rows.extend(
-                section
-                    .chunks(2)
-                    .map(|c| Row::Buttons(extra(c[0]), c.get(1).map(|&b| extra(b)))),
-            );
-            section.clear();
+        let mut pending_header: Option<&'static str> = None;
+        let flush = |rows: &mut Vec<Row>,
+                     section: &mut Vec<crate::extras::Item>,
+                     pending_header: &mut Option<&'static str>| {
+            if !section.is_empty() {
+                if let Some(h) = pending_header.take() {
+                    rows.push(Row::Header(h));
+                }
+                rows.extend(
+                    section
+                        .chunks(2)
+                        .map(|c| Row::Buttons(extra(c[0]), c.get(1).map(|&b| extra(b)))),
+                );
+                section.clear();
+            }
         };
         for row in defs {
             match row {
                 Err(header) => {
-                    flush(&mut rows, &mut section);
-                    rows.push(Row::Header(header));
+                    flush(&mut rows, &mut section, &mut pending_header);
+                    if query.is_empty() {
+                        rows.push(Row::Header(header));
+                    } else {
+                        pending_header = Some(header);
+                    }
                 }
-                Ok(item) => section.push(item),
+                Ok(item) => {
+                    if query.is_empty()
+                        || item.caption().to_lowercase().contains(&query)
+                        || item.description().to_lowercase().contains(&query)
+                    {
+                        section.push(item);
+                    }
+                }
             }
         }
-        flush(&mut rows, &mut section);
+        flush(&mut rows, &mut section, &mut pending_header);
         rows
     }
     #[cfg(target_os = "android")]
@@ -1856,7 +1885,10 @@ impl OptionsUi {
         self.stack.push(page);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
-        if matches!(page, Page::Video | Page::Controls | Page::KeyBinds) {
+        if matches!(
+            page,
+            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+        ) {
             self.settings_search.set_value("");
             self.settings_search.focused = false;
         }
@@ -1912,6 +1944,7 @@ impl OptionsUi {
             Page::Waypoints => "horizon.pages.waypoints",
             Page::Minimap => "horizon.pages.minimap",
             Page::Placement => "horizon.pages.placement",
+            Page::VoltBoost => "volt.boost.title",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "horizon.pages.settings",
@@ -2008,6 +2041,7 @@ impl OptionsUi {
             Page::Extras => self.extra_section_rows(s, crate::extras::rows()),
             Page::Minimap => self.extra_section_rows(s, crate::extras::minimap_rows()),
             Page::Placement => self.extra_section_rows(s, crate::extras::placement_rows()),
+            Page::VoltBoost => self.extra_section_rows(s, crate::extras::volt_boost_rows()),
             Page::Waypoints => {
                 let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
                 rows.push(Row::Header("Saved Waypoints"));
@@ -2112,6 +2146,10 @@ impl OptionsUi {
                 let open =
                     |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
                 vec![
+                    Row::Buttons(
+                        button(0.0, 0.0, 310.0, tr("volt.boost.button"), Act::Push(Page::VoltBoost)),
+                        None,
+                    ),
                     Row::Buttons(
                         open("horizon.pages.open.graphics", Page::Graphics),
                         Some(open(
@@ -2477,7 +2515,10 @@ impl OptionsUi {
         let mut out = Vec::new();
         let page = self.page();
         let cx = (w / 2.0).floor();
-        if matches!(page, Page::Video | Page::Controls | Page::KeyBinds) {
+        if matches!(
+            page,
+            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+        ) {
             self.settings_search.x = cx - 100.0;
             self.settings_search.y = 17.0;
         }
@@ -2942,12 +2983,18 @@ impl OptionsUi {
             // Drawn by `pack_screen`.
             Page::Packs => {}
             _ => {
-                if matches!(page, Page::Video | Page::Controls | Page::Waypoints) {
+                if matches!(
+                    page,
+                    Page::Video | Page::Controls | Page::Waypoints | Page::VoltBoost
+                ) {
                     top = 38.0;
                 }
                 out.push(Widget {
                     x: 0.0,
-                    y: if matches!(page, Page::Video | Page::Controls | Page::Waypoints) {
+                    y: if matches!(
+                        page,
+                        Page::Video | Page::Controls | Page::Waypoints | Page::VoltBoost
+                    ) {
                         4.0
                     } else {
                         12.0
@@ -3331,7 +3378,10 @@ impl OptionsUi {
             }
             self.language_search = search;
         }
-        if matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds) {
+        if matches!(
+            self.page(),
+            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+        ) {
             let mut search = self.settings_search.clone();
             search.draw(batch, atlas, None);
             if search.value.is_empty() && !search.focused {
@@ -3458,7 +3508,12 @@ impl OptionsUi {
         }
         let (widgets, top, bottom, content) = self.layout(s, size.0, size.1);
         let mut events = Vec::new();
-        if !drag && matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds) {
+        if !drag
+            && matches!(
+                self.page(),
+                Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+            )
+        {
             let search = &mut self.settings_search;
             search.focused = ui::hovered((x, y), search.x, search.y, search.width, search.height);
             if search.focused {
@@ -5771,6 +5826,7 @@ mod tests {
         assert_eq!(
             pushes(&mut ui),
             [
+                Page::VoltBoost,
                 Page::Graphics,
                 Page::GraphicsAdvanced,
                 Page::Waypoints,
@@ -5803,6 +5859,18 @@ mod tests {
             )));
             let _ = ui.stack.pop();
         }
+        assert_eq!(s.extras.active_volt_optimizations(), 0);
+        ui.push(Page::VoltBoost);
+        let (vb_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        assert!(vb_widgets.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Button {
+                act: Act::Extra(crate::extras::Item::VoltPresetCompetitive),
+                active: true,
+                ..
+            }
+        )));
+        let _ = ui.stack.pop();
         // No AI hides the AI Agent page.
         let mut no_ai = Settings::default();
         no_ai.extras.no_ai = true;

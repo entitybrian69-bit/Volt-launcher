@@ -35,6 +35,7 @@ enum Command {
     ImportDocument,
     InstallUpdateApk(String),
     Screen(bool, bool),
+    KeepAwake(bool),
 }
 struct Ui {
     vm: JavaVM,
@@ -618,6 +619,15 @@ impl Ui {
                     &[],
                 )?;
             }
+            Command::KeepAwake(awake) => {
+                let _ = env.call_method(
+                    &self.native,
+                    "setKeepScreenOn",
+                    "(Z)V",
+                    &[JValue::Bool(u8::from(awake))],
+                );
+                let _ = env.exception_clear();
+            }
         }
         Ok(())
     }
@@ -801,7 +811,13 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.8.2".into()
+    "0.8.3".into()
+}
+
+pub fn set_keep_screen_awake(awake: bool) {
+    if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        ui.enqueue(Command::KeepAwake(awake));
+    }
 }
 
 pub fn configure_screen(immersive: bool, avoid_cutout: bool) {

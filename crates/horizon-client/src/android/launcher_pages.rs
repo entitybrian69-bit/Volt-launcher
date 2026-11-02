@@ -112,6 +112,10 @@ pub(super) enum Action {
     ResetVulkanDriver,
     InstallUpdate,
     CancelUpdate,
+    OpenVoltBoost,
+    CloseVoltBoost,
+    VoltExtra(horizon_client::extras::Item),
+    VoltPreset(horizon_client::volt_features::VoltBoostPreset),
 }
 
 #[derive(Clone, Copy)]
@@ -170,6 +174,7 @@ fn toggle_key(action: Action) -> u32 {
         Action::ToggleSlimModel => 7,
         Action::ToggleLocal(i) => 1000 + i as u32,
         Action::ToggleSection(i) => 2000 + i as u32,
+        Action::VoltExtra(item) => 3000 + item as u32,
         _ => 9999,
     }
 }
@@ -348,6 +353,13 @@ fn draw_page_icon(ui: &mut Ui, page: Page, cx: f32, cy: f32, col: u32) {
             ui.rounded(cx - 1.0, cy - 7.5, 2.0, 9.0, 1.0, col);
             ui.rounded(cx - 4.0, cy - 1.0, 8.0, 2.0, 1.0, col);
             ui.border(cx - 7.5, cy + 2.5, 15.0, 5.0, 2.0, col);
+        }
+        Page::VoltSettings => {
+            // Crisp Volt lightning-bolt / boost gauge icon
+            ui.border(cx - 8.0, cy - 8.0, 16.0, 16.0, 5.0, col);
+            ui.rounded(cx - 1.5, cy - 6.0, 4.5, 5.0, 1.0, col);
+            ui.rounded(cx - 4.0, cy - 1.5, 8.0, 2.5, 1.0, col);
+            ui.rounded(cx - 3.0, cy + 1.0, 4.5, 5.0, 1.0, col);
         }
         Page::Settings => {
             ui.rounded(cx - 7.5, cy - 5.5, 15.0, 2.0, 1.0, col);
@@ -687,6 +699,7 @@ impl DrawCtx<'_> {
             let prox = (1.0 - (self.sidebar_anim - i as f32).abs()).clamp(0.0, 1.0);
             let label = match page {
                 Page::Installed => "Files",
+                Page::VoltSettings => "Volt",
                 Page::Settings => "Setup",
                 _ => page.name(),
             };
@@ -797,16 +810,42 @@ impl DrawCtx<'_> {
             "Minecraft Java 26.3",
         );
 
-        // Profile selector pill
+        // Profile selector pill + Interactive Home Dashboard "Volt Boost" button!
         let prof_y = badge_y + if compact { 44.0 } else { 48.0 };
+        let prof_w = if hw >= 380.0 { 164.0 } else { (hw - 60.0) * 0.48 };
         styled_button(
             ui,
             self.targets,
-            [hx + 26.0, prof_y, 172.0, 40.0],
+            [hx + 26.0, prof_y, prof_w, 40.0],
             &format!("Profile {}   v", self.catalog.config.profile),
             Action::Profile,
             BtnStyle::CrimsonOutline,
             false,
+        );
+        let vb_x = hx + 26.0 + prof_w + 8.0;
+        let vb_w = (hw - 52.0 - prof_w - 8.0).max(118.0);
+        let active_cnt = self.catalog.extras.active_volt_optimizations();
+        let vb_label = if self.catalog.extras.volt_preset
+            != horizon_client::volt_features::VoltBoostPreset::Off
+        {
+            format!("Volt Boost: {}", self.catalog.extras.volt_preset.label())
+        } else if active_cnt > 0 {
+            format!("Volt Boost ({active_cnt} ON)")
+        } else {
+            "Volt Boost".to_owned()
+        };
+        styled_button(
+            ui,
+            self.targets,
+            [vb_x, prof_y, vb_w, 40.0],
+            &vb_label,
+            Action::OpenVoltBoost,
+            if active_cnt > 0 {
+                BtnStyle::Primary
+            } else {
+                BtnStyle::CrimsonOutline
+            },
+            true,
         );
 
         if installing {
@@ -2724,6 +2763,520 @@ impl DrawCtx<'_> {
         }
     }
 
+    fn draw_volt_settings_page(&mut self, ui: &mut Ui, area: [f32; 4], compact: bool) {
+        use horizon_client::extras::Item;
+        use horizon_client::volt_features::VoltBoostPreset;
+
+        let [cx, cy, cw, ch] = area;
+        let c = &self.catalog.config;
+        let ex = &self.catalog.extras;
+
+        let render_scale_val = if self.catalog.editing == Some("render_scale") {
+            self.catalog.render_scale_text.clone()
+        } else {
+            format!("{}%", c.render_scale.percent())
+        };
+        let vulkan_driver_val = match &c.custom_vulkan_driver_name {
+            Some(name) if !name.trim().is_empty() => format!("Custom: {name}"),
+            _ if c.custom_vulkan_driver.is_some() => "Custom .so active".to_owned(),
+            _ => "Built-in Supporter".to_owned(),
+        };
+
+        let left_items: Vec<(&str, String, Action, Option<bool>, bool)> = vec![
+            (
+                "Rendering engine",
+                c.renderer.label().to_owned(),
+                Action::Renderer,
+                None,
+                true,
+            ),
+            (
+                "Vulkan driver",
+                vulkan_driver_val,
+                Action::ImportVulkanDriver,
+                None,
+                false,
+            ),
+            (
+                "Client resolution",
+                render_scale_val,
+                Action::RenderScale,
+                None,
+                true,
+            ),
+            (
+                "Auto-DRS dynamic scale",
+                Item::VoltAutoDrs.value(ex),
+                Action::VoltExtra(Item::VoltAutoDrs),
+                None,
+                false,
+            ),
+            (
+                "Display refresh rate",
+                c.device.display_label(),
+                Action::DisplayHz,
+                None,
+                true,
+            ),
+            (
+                "ADPF CPU/GPU boost",
+                String::new(),
+                Action::PerformanceHints,
+                Some(c.device.performance_hints),
+                false,
+            ),
+            (
+                "big.LITTLE prime affinity",
+                String::new(),
+                Action::VoltExtra(Item::VoltThreadBoost),
+                Some(ex.thread_boost),
+                false,
+            ),
+            (
+                "Volt Reflex low-latency",
+                String::new(),
+                Action::VoltExtra(Item::VoltReflex),
+                Some(ex.volt_reflex),
+                false,
+            ),
+            (
+                "Shader & cache warmup",
+                String::new(),
+                Action::VoltExtra(Item::VoltPrewarm),
+                Some(ex.prewarm_pipelines),
+                false,
+            ),
+            (
+                "Dynamic menu / idle FPS",
+                Item::VoltDynamicFps.value(ex),
+                Action::VoltExtra(Item::VoltDynamicFps),
+                None,
+                false,
+            ),
+            (
+                "Menu backdrop saver",
+                Item::VoltMenuBg.value(ex),
+                Action::VoltExtra(Item::VoltMenuBg),
+                None,
+                false,
+            ),
+            (
+                "Mobile thermal guard",
+                String::new(),
+                Action::VoltExtra(Item::VoltThermalGuard),
+                Some(ex.thermal_guard),
+                false,
+            ),
+            (
+                "Audio mixer voice cap",
+                Item::VoltAudioCap.value(ex),
+                Action::VoltExtra(Item::VoltAudioCap),
+                None,
+                false,
+            ),
+            (
+                "Aggressive RAM compactor",
+                String::new(),
+                Action::VoltExtra(Item::VoltMemorySaver),
+                Some(ex.memory_saver),
+                false,
+            ),
+            (
+                "Keep screen awake",
+                String::new(),
+                Action::VoltExtra(Item::VoltKeepAwake),
+                Some(ex.keep_screen_awake),
+                false,
+            ),
+            (
+                "Live performance HUD",
+                Item::VoltPerfHud.value(ex),
+                Action::VoltExtra(Item::VoltPerfHud),
+                None,
+                false,
+            ),
+            (
+                "Perf HUD corner",
+                Item::VoltPerfHudCorner.value(ex),
+                Action::VoltExtra(Item::VoltPerfHudCorner),
+                None,
+                false,
+            ),
+        ];
+
+        let right_items: Vec<(&str, String, Action, Option<bool>, bool)> = vec![
+            (
+                "Smart leaf & canopy cull",
+                String::new(),
+                Action::VoltExtra(Item::VoltCullLeaves),
+                Some(ex.cull_leaves),
+                false,
+            ),
+            (
+                "Frustum-first chunk mesh",
+                String::new(),
+                Action::VoltExtra(Item::VoltFrustumMesh),
+                Some(ex.frustum_priority_mesh),
+                false,
+            ),
+            (
+                "Cave sky & cloud cull",
+                String::new(),
+                Action::VoltExtra(Item::VoltCaveSkyCull),
+                Some(ex.cave_sky_cull),
+                false,
+            ),
+            (
+                "Chunk GPU upload cap",
+                Item::VoltChunkUploadCap.value(ex),
+                Action::VoltExtra(Item::VoltChunkUploadCap),
+                None,
+                false,
+            ),
+            (
+                "Fast weather columns",
+                String::new(),
+                Action::VoltExtra(Item::VoltFastWeather),
+                Some(ex.fast_weather),
+                false,
+            ),
+            (
+                "Distant horizon LOD boost",
+                String::new(),
+                Action::VoltExtra(Item::VoltDistantLod),
+                Some(ex.distant_lod_boost),
+                false,
+            ),
+            (
+                "Max rendered entities",
+                Item::VoltEntityCap.value(ex),
+                Action::VoltExtra(Item::VoltEntityCap),
+                None,
+                false,
+            ),
+            (
+                "Dropped item cap",
+                Item::VoltItemCap.value(ex),
+                Action::VoltExtra(Item::VoltItemCap),
+                None,
+                false,
+            ),
+            (
+                "Block-entity cap + occlude",
+                Item::VoltBlockEntityCap.value(ex),
+                Action::VoltExtra(Item::VoltBlockEntityCap),
+                None,
+                false,
+            ),
+            (
+                "Sign & hologram text cull",
+                String::new(),
+                Action::VoltExtra(Item::VoltCullSignText),
+                Some(ex.cull_sign_text),
+                false,
+            ),
+            (
+                "Entity contact shadows",
+                Item::VoltFastShadows.value(ex),
+                Action::VoltExtra(Item::VoltFastShadows),
+                None,
+                false,
+            ),
+            (
+                "Distant mob pose throttle",
+                String::new(),
+                Action::VoltExtra(Item::VoltDistantMobThrottle),
+                Some(ex.distant_mob_throttle),
+                false,
+            ),
+            (
+                "Multiplayer hub lag shield",
+                String::new(),
+                Action::VoltExtra(Item::VoltHubLagShield),
+                Some(ex.hub_lag_shield),
+                false,
+            ),
+            (
+                "Particle budget & cutoff",
+                Item::VoltParticleBudget.value(ex),
+                Action::VoltExtra(Item::VoltParticleBudget),
+                None,
+                false,
+            ),
+            (
+                "TNT / firework / break shield",
+                String::new(),
+                Action::VoltExtra(Item::VoltChaosShield),
+                Some(ex.chaos_particle_shield),
+                false,
+            ),
+            (
+                "Smart 10 Hz animated atlas",
+                String::new(),
+                Action::VoltExtra(Item::VoltAnimThrottle),
+                Some(ex.anim_throttle),
+                false,
+            ),
+            (
+                "Glint & armor-trim saver",
+                Item::VoltGlintMode.value(ex),
+                Action::VoltExtra(Item::VoltGlintMode),
+                None,
+                false,
+            ),
+        ];
+
+        let rss_mib = horizon_threads::resident_ram_mib().unwrap_or(0);
+        let total_mib = horizon_client::extras::detect_total_ram_mib().unwrap_or(0);
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let abi = if cfg!(target_arch = "aarch64") {
+            "arm64-v8a"
+        } else {
+            "armeabi-v7a"
+        };
+        let active_n = ex.active_volt_optimizations();
+        let hw_summary = format!(
+            "RAM: {rss_mib} / {total_mib} MiB  •  {cores} Cores ({abi})  •  {active_n} Boosts Active"
+        );
+
+        let presets = [
+            (VoltBoostPreset::Off, "OFF"),
+            (VoltBoostPreset::Balanced, "Balanced"),
+            (VoltBoostPreset::Competitive, "PvP"),
+            (VoltBoostPreset::UltraFps, "Ultra FPS"),
+            (VoltBoostPreset::BatterySaver, "Battery"),
+            (VoltBoostPreset::LowRam, "Low-RAM"),
+        ];
+
+        if !compact {
+            let hero_h = 104.0;
+            ui.rounded(cx, cy, cw, hero_h, 14.0, theme::HERO_BG);
+            ui.rounded(
+                cx + 8.0,
+                cy + 8.0,
+                cw * 0.48,
+                hero_h - 16.0,
+                12.0,
+                theme::HERO_GLOW_SOFT,
+            );
+            ui.border(cx, cy, cw, hero_h, 14.0, theme::BORDER_CRIMSON);
+
+            ui.text(
+                Face::Medium,
+                18.5,
+                cx + 20.0,
+                cy + 11.0,
+                theme::TEXT,
+                "Volt Performance & Optimization Suite",
+            );
+            let hw_fit = ui.fit_text(Face::Regular, 13.0, &hw_summary, (cw - 320.0).max(160.0));
+            ui.text(
+                Face::Regular,
+                13.0,
+                cx + 20.0,
+                cy + 36.0,
+                theme::MUTED,
+                &hw_fit,
+            );
+
+            let act_w = 132.0;
+            styled_button(
+                ui,
+                self.targets,
+                [cx + cw - act_w * 2.0 - 24.0, cy + 12.0, act_w, 34.0],
+                "Auto-Tune",
+                Action::VoltExtra(Item::VoltAutoOptimize),
+                BtnStyle::Primary,
+                true,
+            );
+            styled_button(
+                ui,
+                self.targets,
+                [cx + cw - act_w - 16.0, cy + 12.0, act_w, 34.0],
+                "Purge RAM",
+                Action::VoltExtra(Item::VoltPurgeRam),
+                BtnStyle::CrimsonOutline,
+                true,
+            );
+
+            let pill_gap = 8.0;
+            let pill_w = ((cw - 32.0 - pill_gap * 5.0) / 6.0).max(64.0);
+            for (pi, (preset, name)) in presets.iter().enumerate() {
+                let px = cx + 16.0 + pi as f32 * (pill_w + pill_gap);
+                let selected = ex.volt_preset == *preset;
+                styled_button(
+                    ui,
+                    self.targets,
+                    [px, cy + 60.0, pill_w, 33.0],
+                    name,
+                    Action::VoltPreset(*preset),
+                    if selected {
+                        BtnStyle::Primary
+                    } else {
+                        BtnStyle::Secondary
+                    },
+                    true,
+                );
+            }
+
+            let gap = 16.0;
+            let col_w = (cw - gap) * 0.5;
+            let cards_y = cy + hero_h + 10.0;
+            let cards_h = (ch - hero_h - 12.0).max(150.0);
+
+            ui.rounded(cx, cards_y, col_w, cards_h, 14.0, theme::CARD);
+            ui.border(cx, cards_y, col_w, cards_h, 14.0, theme::BORDER);
+            ui.text(
+                Face::Medium,
+                16.5,
+                cx + 20.0,
+                cards_y + 12.0,
+                theme::TEXT,
+                "Launcher, Hardware, CPU & RAM",
+            );
+
+            let rx = cx + col_w + gap;
+            ui.rounded(rx, cards_y, col_w, cards_h, 14.0, theme::CARD);
+            ui.border(rx, cards_y, col_w, cards_h, 14.0, theme::BORDER);
+            ui.text(
+                Face::Medium,
+                16.5,
+                rx + 20.0,
+                cards_y + 12.0,
+                theme::TEXT,
+                "In-World Terrain, Entities & Particles",
+            );
+
+            let list_top = cards_y + 46.0;
+            let list_bottom = cards_y + cards_h - 8.0;
+            let row_h = 46.0;
+            let max_rows = left_items.len().max(right_items.len());
+            let max_scroll = (max_rows as f32 * row_h - (list_bottom - list_top)).max(0.0);
+            self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+            *self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+            for (slice, base_x) in [(&left_items[..], cx), (&right_items[..], rx)] {
+                for (i, (label, val, act, sw, dropdown)) in slice.iter().enumerate() {
+                    let y = list_top + i as f32 * row_h - self.catalog.scroll;
+                    let ctrl_w = (col_w * 0.46).clamp(124.0, 214.0);
+                    let ctrl_rect = [base_x + col_w - ctrl_w - 16.0, y + 5.0, ctrl_w, 34.0];
+                    self.list_targets.push((ctrl_rect, *act));
+                    if y < list_top - 4.0 || y + row_h - 4.0 > list_bottom {
+                        continue;
+                    }
+                    let lbl_fit =
+                        ui.fit_text(Face::Regular, 13.5, label, col_w - ctrl_w - 36.0);
+                    ui.text(
+                        Face::Regular,
+                        13.5,
+                        base_x + 18.0,
+                        text_vcenter(y, row_h - 4.0, 13.5),
+                        theme::MUTED,
+                        &lbl_fit,
+                    );
+                    if let Some(on) = sw {
+                        toggle(ui, self.targets, ctrl_rect, *on, *act);
+                    } else {
+                        let text = if *dropdown {
+                            format!("{val}   v")
+                        } else {
+                            val.clone()
+                        };
+                        styled_button(
+                            ui,
+                            self.targets,
+                            ctrl_rect,
+                            &text,
+                            *act,
+                            BtnStyle::Secondary,
+                            false,
+                        );
+                    }
+                    if i + 1 < slice.len() {
+                        ui.rounded(
+                            base_x + 18.0,
+                            y + row_h - 2.0,
+                            col_w - 34.0,
+                            1.0,
+                            0.0,
+                            theme::BORDER,
+                        );
+                    }
+                }
+            }
+        } else {
+            let top = cy;
+            let bottom = cy + ch;
+            let all_items: Vec<_> = left_items.into_iter().chain(right_items).collect();
+            let hero_h = 152.0;
+            let row_h = 66.0;
+            let total_h = hero_h + 12.0 + all_items.len() as f32 * row_h;
+            let max_scroll = (total_h - (bottom - top)).max(0.0);
+            self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+            *self.list_view = Some([top, bottom, max_scroll]);
+
+            let iy = top - self.catalog.scroll;
+            let half_btn = (cw - 32.0 - 8.0) * 0.5;
+            let auto_r = [cx + 16.0, iy + 58.0, half_btn, 36.0];
+            let purge_r = [cx + 16.0 + half_btn + 8.0, iy + 58.0, half_btn, 36.0];
+            let next_preset_r = [cx + 16.0, iy + 102.0, cw - 32.0, 36.0];
+            self.list_targets
+                .push((auto_r, Action::VoltExtra(Item::VoltAutoOptimize)));
+            self.list_targets
+                .push((purge_r, Action::VoltExtra(Item::VoltPurgeRam)));
+            self.list_targets
+                .push((next_preset_r, Action::VoltExtra(Item::VoltPreset)));
+
+            if iy >= top - 4.0 && iy + hero_h <= bottom + 4.0 {
+                ui.rounded(cx, iy, cw, hero_h, 12.0, theme::HERO_BG);
+                ui.border(cx, iy, cw, hero_h, 12.0, theme::BORDER_CRIMSON);
+                ui.text(
+                    Face::Medium,
+                    16.5,
+                    cx + 16.0,
+                    iy + 10.0,
+                    theme::TEXT,
+                    "Volt Settings & Boost",
+                );
+                let hw_fit = ui.fit_text(Face::Regular, 12.0, &hw_summary, cw - 32.0);
+                ui.text(Face::Regular, 12.0, cx + 16.0, iy + 34.0, theme::MUTED, &hw_fit);
+                styled_button(ui, self.targets, auto_r, "Auto-Tune", Action::VoltExtra(Item::VoltAutoOptimize), BtnStyle::Primary, true);
+                styled_button(ui, self.targets, purge_r, "Purge RAM", Action::VoltExtra(Item::VoltPurgeRam), BtnStyle::CrimsonOutline, true);
+                styled_button(
+                    ui,
+                    self.targets,
+                    next_preset_r,
+                    &format!("Profile: {} (Tap to Cycle)", ex.volt_preset.label()),
+                    Action::VoltExtra(Item::VoltPreset),
+                    BtnStyle::Secondary,
+                    true,
+                );
+            }
+
+            for (i, (label, val, act, sw, dropdown)) in all_items.iter().enumerate() {
+                let y = top + hero_h + 12.0 + i as f32 * row_h - self.catalog.scroll;
+                let ctrl_rect = [cx, y + 24.0, cw, 36.0];
+                self.list_targets.push((ctrl_rect, *act));
+                if y < top || y + row_h - 4.0 > bottom {
+                    continue;
+                }
+                ui.text(Face::Regular, 13.5, cx + 2.0, y, theme::MUTED, label);
+                if let Some(on) = sw {
+                    toggle(ui, self.targets, ctrl_rect, *on, *act);
+                } else {
+                    let text = if *dropdown {
+                        format!("{val}   v")
+                    } else {
+                        val.clone()
+                    };
+                    styled_button(ui, self.targets, ctrl_rect, &text, *act, BtnStyle::Secondary, false);
+                }
+            }
+        }
+    }
+
     fn draw_input_field(
         &mut self,
         ui: &mut Ui,
@@ -3518,9 +4071,11 @@ impl Launcher {
             self.sidebar_anim = target_idx;
         }
 
-        // Detect modal pop-in transitions (Chooser / Microsoft Login / Update Prompt)
-        let modal_open =
-            self.chooser.is_some() || self.login.visible || self.update_prompt.is_some();
+        // Detect modal pop-in transitions (Chooser / Microsoft Login / Update Prompt / Volt Boost)
+        let modal_open = self.chooser.is_some()
+            || self.login.visible
+            || self.update_prompt.is_some()
+            || self.catalog.volt_boost_modal;
         if modal_open && !self.modal_was_open {
             self.modal_anim = Some(now);
         }
@@ -3648,6 +4203,7 @@ impl Launcher {
                 Page::Installed => {
                     ctx.draw_installed_page(&mut ui, content_area, compact, &account_status)
                 }
+                Page::VoltSettings => ctx.draw_volt_settings_page(&mut ui, content_area, compact),
                 Page::Settings => {
                     ctx.draw_settings_page(&mut ui, content_area, compact, &account_status)
                 }
@@ -3721,8 +4277,20 @@ impl Launcher {
             self.list_targets.clear();
             self.list_view = None;
             draw_update_prompt(&mut ui, &mut self.targets, prompt);
+        } else if !self.login.visible && self.catalog.volt_boost_modal {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = draw_volt_boost_modal(
+                &mut ui,
+                &mut self.targets,
+                &mut self.list_targets,
+                &mut self.catalog,
+            );
         }
-        if (self.login.visible || self.chooser.is_some() || self.update_prompt.is_some())
+        if (self.login.visible
+            || self.chooser.is_some()
+            || self.update_prompt.is_some()
+            || self.catalog.volt_boost_modal)
             && let Some(anim_start) = self.modal_anim
         {
             let el = anim_start.elapsed().as_secs_f32();
@@ -3751,10 +4319,13 @@ impl Launcher {
             && maximum > 0.0
             && bottom > top
         {
-            let scroll = self
-                .chooser
-                .as_ref()
-                .map_or(self.catalog.scroll, |c| c.scroll);
+            let scroll = if self.catalog.volt_boost_modal {
+                self.catalog.volt_modal_scroll
+            } else {
+                self.chooser
+                    .as_ref()
+                    .map_or(self.catalog.scroll, |c| c.scroll)
+            };
             let height = bottom - top;
             let thumb = (height * height / (height + maximum)).max(20.0).min(height);
             let y = top + (height - thumb) * (scroll / maximum).clamp(0.0, 1.0);
@@ -4273,6 +4844,7 @@ impl Launcher {
             }
             Some(Action::LoginLink) => self.login.open_link(),
             Some(Action::Page(page)) => {
+                self.catalog.volt_boost_modal = false;
                 self.catalog.editing = None;
                 if crate::platform::active() {
                     crate::platform::hide();
@@ -4446,6 +5018,46 @@ impl Launcher {
                     Err(e) => e,
                 };
             }
+            Some(Action::OpenVoltBoost) => {
+                self.catalog.volt_boost_modal = true;
+                self.catalog.volt_modal_scroll = 0.0;
+            }
+            Some(Action::CloseVoltBoost) => {
+                self.catalog.volt_boost_modal = false;
+            }
+            Some(Action::VoltPreset(preset)) => {
+                self.catalog.extras.apply_volt_preset(preset);
+                horizon_threads::set_thread_boost(self.catalog.extras.thread_boost);
+                self.configure_screen();
+                let game_dir = self.catalog.config.game_home(&self.home);
+                let _ = std::fs::create_dir_all(&game_dir);
+                self.catalog.extras.save(&game_dir);
+                self.catalog.status = format!(
+                    "Volt Boost profile set to {} ({} optimizations active).",
+                    preset.label(),
+                    self.catalog.extras.active_volt_optimizations()
+                );
+            }
+            Some(Action::VoltExtra(item)) => {
+                item.cycle(&mut self.catalog.extras, false);
+                self.catalog.extras.purge_ram_requested = false;
+                horizon_threads::set_thread_boost(self.catalog.extras.thread_boost);
+                self.configure_screen();
+                let game_dir = self.catalog.config.game_home(&self.home);
+                let _ = std::fs::create_dir_all(&game_dir);
+                self.catalog.extras.save(&game_dir);
+                if item == horizon_client::extras::Item::VoltPurgeRam {
+                    let rss = horizon_threads::resident_ram_mib().unwrap_or(0);
+                    self.catalog.status =
+                        format!("Purged unused allocator pages (Resident RAM: {rss} MiB).");
+                } else if item == horizon_client::extras::Item::VoltAutoOptimize {
+                    self.catalog.status = format!(
+                        "Auto-tuned device to {} ({} optimizations active).",
+                        self.catalog.extras.volt_preset.label(),
+                        self.catalog.extras.active_volt_optimizations()
+                    );
+                }
+            }
             None => {}
         }
         Ok(())
@@ -4481,6 +5093,7 @@ impl Launcher {
                         let in_preview = !self.login.visible
                             && self.chooser.is_none()
                             && self.update_prompt.is_none()
+                            && !self.catalog.volt_boost_modal
                             && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
                                 ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
                             });
@@ -4493,6 +5106,9 @@ impl Launcher {
                                 (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
                         } else if let Some(prompt) = &mut self.update_prompt {
                             prompt.scroll = (prompt.scroll + dy).max(0.0);
+                        } else if self.catalog.volt_boost_modal {
+                            self.catalog.volt_modal_scroll =
+                                (self.catalog.volt_modal_scroll + dy).max(0.0);
                         } else if let Some(chooser) = &mut self.chooser {
                             chooser.scroll = (chooser.scroll + dy).max(0.0);
                         } else if self
@@ -4798,5 +5414,209 @@ fn draw_update_prompt(
             );
         }
     }
+}
+
+fn draw_volt_boost_modal(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    list_targets: &mut Vec<([f32; 4], Action)>,
+    catalog: &mut Catalog,
+) -> Option<[f32; 3]> {
+    use horizon_client::extras::Item;
+    use horizon_client::volt_features::VoltBoostPreset;
+
+    let (w, h) = (ui.w, ui.h);
+    let scale = ui.density / ui.batch.scale;
+    ui.batch
+        .fill(ui.atlas, 0.0, 0.0, w * scale, h * scale, theme::BACKDROP);
+
+    let mw = (w - 32.0).clamp(300.0, 740.0);
+    let mh = (h - 28.0).clamp(240.0, 500.0);
+    let mx = ((w - mw) * 0.5).round();
+    let my = ((h - mh) * 0.5).round();
+
+    ui.rounded(mx, my, mw, mh, 16.0, theme::CARD);
+    ui.rounded(mx + 8.0, my + 8.0, mw * 0.55, 86.0, 12.0, theme::HERO_GLOW_SOFT);
+    ui.border(mx, my, mw, mh, 16.0, theme::BORDER_CRIMSON);
+
+    let active_n = catalog.extras.active_volt_optimizations();
+    let rss_mib = horizon_threads::resident_ram_mib().unwrap_or(0);
+    ui.text(
+        Face::Medium,
+        19.0,
+        mx + 20.0,
+        my + 12.0,
+        theme::TEXT,
+        "Volt Boost — Performance Hub",
+    );
+    let sub = format!("{active_n} Optimizations Active  •  Resident RAM: {rss_mib} MiB");
+    let sub_fit = ui.fit_text(Face::Regular, 12.5, &sub, (mw - 260.0).max(120.0));
+    ui.text(Face::Regular, 12.5, mx + 20.0, my + 37.0, theme::MUTED, &sub_fit);
+
+    styled_button(
+        ui,
+        targets,
+        [mx + mw - 236.0, my + 13.0, 106.0, 32.0],
+        "Auto-Tune",
+        Action::VoltExtra(Item::VoltAutoOptimize),
+        BtnStyle::Primary,
+        true,
+    );
+    styled_button(
+        ui,
+        targets,
+        [mx + mw - 122.0, my + 13.0, 104.0, 32.0],
+        "Purge RAM",
+        Action::VoltExtra(Item::VoltPurgeRam),
+        BtnStyle::CrimsonOutline,
+        true,
+    );
+
+    let presets = [
+        (VoltBoostPreset::Off, "OFF"),
+        (VoltBoostPreset::Balanced, "Balanced"),
+        (VoltBoostPreset::Competitive, "PvP"),
+        (VoltBoostPreset::UltraFps, "Ultra"),
+        (VoltBoostPreset::BatterySaver, "Battery"),
+        (VoltBoostPreset::LowRam, "Low-RAM"),
+    ];
+    let p_gap = 6.0;
+    let p_w = ((mw - 36.0 - p_gap * 5.0) / 6.0).max(42.0);
+    for (pi, (preset, label)) in presets.iter().enumerate() {
+        let px = mx + 18.0 + pi as f32 * (p_w + p_gap);
+        styled_button(
+            ui,
+            targets,
+            [px, my + 58.0, p_w, 30.0],
+            label,
+            Action::VoltPreset(*preset),
+            if catalog.extras.volt_preset == *preset {
+                BtnStyle::Primary
+            } else {
+                BtnStyle::Secondary
+            },
+            true,
+        );
+    }
+
+    let items: [Item; 24] = [
+        Item::VoltPerfHud,
+        Item::VoltAutoDrs,
+        Item::VoltCullLeaves,
+        Item::VoltFrustumMesh,
+        Item::VoltCaveSkyCull,
+        Item::VoltChunkUploadCap,
+        Item::VoltFastWeather,
+        Item::VoltDistantLod,
+        Item::VoltEntityCap,
+        Item::VoltItemCap,
+        Item::VoltBlockEntityCap,
+        Item::VoltCullSignText,
+        Item::VoltFastShadows,
+        Item::VoltDistantMobThrottle,
+        Item::VoltHubLagShield,
+        Item::VoltParticleBudget,
+        Item::VoltChaosShield,
+        Item::VoltAnimThrottle,
+        Item::VoltGlintMode,
+        Item::VoltDynamicFps,
+        Item::VoltMenuBg,
+        Item::VoltThermalGuard,
+        Item::VoltReflex,
+        Item::VoltMemorySaver,
+    ];
+
+    let list_top = my + 96.0;
+    let footer_y = my + mh - 46.0;
+    let list_bottom = footer_y - 8.0;
+    ui.rounded(
+        mx + 14.0,
+        list_top - 2.0,
+        mw - 28.0,
+        (list_bottom - list_top + 4.0).max(40.0),
+        10.0,
+        theme::CARD_INNER,
+    );
+    ui.border(
+        mx + 14.0,
+        list_top - 2.0,
+        mw - 28.0,
+        (list_bottom - list_top + 4.0).max(40.0),
+        10.0,
+        theme::BORDER,
+    );
+
+    let two_cols = mw >= 540.0;
+    let row_h = 40.0;
+    let rows_count = if two_cols {
+        items.len().div_ceil(2)
+    } else {
+        items.len()
+    };
+    let max_scroll = (rows_count as f32 * row_h - (list_bottom - list_top)).max(0.0);
+    catalog.volt_modal_scroll = catalog.volt_modal_scroll.clamp(0.0, max_scroll);
+    let col_w = if two_cols {
+        (mw - 44.0) * 0.5
+    } else {
+        mw - 36.0
+    };
+
+    for (idx, &item) in items.iter().enumerate() {
+        let (r_idx, c_idx) = if two_cols {
+            (idx / 2, idx % 2)
+        } else {
+            (idx, 0)
+        };
+        let rx = mx + 20.0 + c_idx as f32 * (col_w + 8.0);
+        let ry = list_top + 4.0 + r_idx as f32 * row_h - catalog.volt_modal_scroll;
+        let ctrl_w = (col_w * 0.44).clamp(96.0, 148.0);
+        let ctrl_rect = [rx + col_w - ctrl_w - 6.0, ry + 3.0, ctrl_w, 30.0];
+        list_targets.push((ctrl_rect, Action::VoltExtra(item)));
+        if ry < list_top - 2.0 || ry + row_h - 4.0 > list_bottom {
+            continue;
+        }
+        let lbl_fit = ui.fit_text(Face::Regular, 13.0, item.caption(), col_w - ctrl_w - 14.0);
+        ui.text(
+            Face::Regular,
+            13.0,
+            rx + 4.0,
+            text_vcenter(ry, row_h - 4.0, 13.0),
+            theme::TEXT,
+            &lbl_fit,
+        );
+        if let Some(on) = item.switch(&catalog.extras) {
+            toggle(ui, targets, ctrl_rect, on, Action::VoltExtra(item));
+        } else {
+            styled_button(
+                ui,
+                targets,
+                ctrl_rect,
+                &item.value(&catalog.extras),
+                Action::VoltExtra(item),
+                BtnStyle::Secondary,
+                false,
+            );
+        }
+    }
+
+    styled_button(
+        ui,
+        targets,
+        [mx + 18.0, footer_y + 2.0, 174.0, 36.0],
+        "All Volt Settings",
+        Action::Page(Page::VoltSettings),
+        BtnStyle::CrimsonOutline,
+        true,
+    );
+    styled_button(
+        ui,
+        targets,
+        [mx + mw - 122.0, footer_y + 2.0, 104.0, 36.0],
+        "Done",
+        Action::CloseVoltBoost,
+        BtnStyle::Primary,
+        true,
+    );
+    Some([list_top, list_bottom, max_scroll])
 }
 

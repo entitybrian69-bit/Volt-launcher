@@ -737,6 +737,9 @@ pub struct Renderer {
     oit: Option<oit::Oit>,
     /// Advance animated block textures (Horizon setting; vanilla always does).
     pub animated_textures: bool,
+    /// Tick stride for animated sprite uploads (1 = vanilla 20 Hz, 2 = Volt Boost 10 Hz throttle).
+    pub animation_step_ticks: u64,
+    last_animated_tick: Option<u64>,
     present_modes: Vec<wgpu::PresentMode>,
 }
 impl Drop for Renderer {
@@ -3283,6 +3286,8 @@ impl Renderer {
             oit: None,
             fullbright: false,
             animated_textures: true,
+            animation_step_ticks: 1,
+            last_animated_tick: None,
             present_modes,
         })
     }
@@ -3390,10 +3395,13 @@ impl Renderer {
             )
             .into());
         }
-        // Release previous UI textures first so unified mobile memory never holds
-        // two full HUD atlases at once.
+        // Wait for any in-flight GPU frame referencing the previous HUD/panorama
+        // textures before dropping them so mobile Vulkan drivers never fault on
+        // freed descriptors, and unified memory never holds two full HUD atlases.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
         self.hud.atlas_texture = None;
         self.menu_blur = None;
+        self.last_animated_tick = None;
         let atlas = self.device.create_texture_with_data(
             &self.queue,
             &wgpu::TextureDescriptor {
@@ -3584,10 +3592,18 @@ impl Renderer {
         if !self.can_replace_world_textures(layers) {
             return Err("renderer terrain sprite array count changed".into());
         }
+        // Finish any in-flight loading-screen command buffers before replacing the
+        // bound terrain sprite arrays on unified mobile GPUs.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        #[cfg(target_os = "android")]
+        if self.info.backend != wgpu::Backend::Gl && self.surface.is_some() {
+            self.startup = crate::android_runtime::graphics_startup::begin();
+        }
         let split = sprite_split().min(self.device.limits().max_texture_array_layers);
         self.sprite_textures.clear();
         self.pack_atlas = None;
         self.menu_blur = None;
+        self.last_animated_tick = None;
         let prepared = prepared
             .unwrap_or_else(|| {
                 PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
@@ -3747,10 +3763,23 @@ impl Renderer {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
     }
+    /// Poll the GPU device without blocking so completed fences retire early (Volt Reflex).
+    pub fn poll_gpu(&self) {
+        let _ = self.device.poll(wgpu::PollType::Poll);
+    }
+
     /// Reattach a window after surface loss or a failed renderer replacement.
     pub fn recreate_surface(&mut self) -> Result<()> {
         if self.offscreen.is_some() {
             return Ok(());
+        }
+        #[cfg(target_os = "android")]
+        {
+            let size = self.window.inner_size();
+            if size.width == 0 || size.height == 0 {
+                self.suspended = true;
+                return Ok(());
+            }
         }
         // The surface set aside for a replacement that failed, else a new one
         // (Wayland allows only one tearing-control object per window surface,
@@ -4927,9 +4956,14 @@ impl Renderer {
             stages.begin_prepare(&mut encoder);
         }
         if self.animated_textures {
-            self.animate(&mut encoder, frame.ticks);
-            self.hud
-                .animate_sprites(&mut self.uploads, &mut encoder, frame.ticks);
+            let step = self.animation_step_ticks.max(1);
+            let anim_tick = frame.ticks / step * step;
+            if self.last_animated_tick != Some(anim_tick) {
+                self.last_animated_tick = Some(anim_tick);
+                self.animate(&mut encoder, anim_tick);
+                self.hud
+                    .animate_sprites(&mut self.uploads, &mut encoder, anim_tick);
+            }
         }
         self.update_lightmap(
             &mut encoder,

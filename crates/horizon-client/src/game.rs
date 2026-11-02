@@ -3175,7 +3175,13 @@ impl Game<'_> {
             return;
         };
         let boxes = self.particle_shape(pos, state);
+        let shield = self.settings.extras.chaos_particle_shield;
+        let mut idx = 0u32;
         horizon_client::particles::destroy_positions(pos, &boxes, |p, v| {
+            idx = idx.wrapping_add(1);
+            if shield && (idx & 3) != 1 {
+                return;
+            }
             let particle = Particle::terrain(self.particles.random(), p, v, sprite.clone(), tint);
             self.particles.push(particle);
         });
@@ -9601,12 +9607,14 @@ impl Game<'_> {
         self.see_through_vertices = see_through;
         // Entity shadows (EntityRenderer.extractShadow).
         self.mark_translucent_entity(out.len(), "minecraft:entity_shadow");
-        let shadow_sprite = self
-            .settings
-            .entity_shadows
+        let shadow_mode = self.settings.extras.fast_shadows;
+        let shadow_sprite = (self.settings.entity_shadows
+            && shadow_mode != horizon_client::volt_features::FastShadowsMode::Off)
             .then(|| self.gui.atlas.sprites.get("misc/shadow").copied())
             .flatten();
         if let Some(sprite) = shadow_sprite {
+            let nearby_only =
+                shadow_mode == horizon_client::volt_features::FastShadowsMode::Nearby16;
             // DimensionType.ambientLight: the_nether 0.1, the_end 0.25.
             let ambient = match self.dim {
                 Dim::Nether => 0.1,
@@ -9623,20 +9631,24 @@ impl Game<'_> {
                 )
             };
             let mut casters: Vec<(glam::DVec3, &str, f32)> =
-                horizon_client::shadows::mob_casters(&self.mobs, a).collect();
-            let fixed = |id: &'static str| (id, horizon_client::shadows::shadow_params(id).0);
-            let (item, item_radius) = fixed("minecraft:item");
-            casters.extend(
-                self.dropped
-                    .iter()
-                    .map(|i| (lerp(i.previous, i.position), item, item_radius)),
-            );
-            let (orb, orb_radius) = fixed("minecraft:experience_orb");
-            casters.extend(
-                self.orbs
-                    .iter()
-                    .map(|o| (lerp(o.previous, o.position), orb, orb_radius)),
-            );
+                horizon_client::shadows::mob_casters(&self.mobs, a)
+                    .filter(|(pos, _, _)| !nearby_only || (*pos - camera).length_squared() <= 256.0)
+                    .collect();
+            if !nearby_only {
+                let fixed = |id: &'static str| (id, horizon_client::shadows::shadow_params(id).0);
+                let (item, item_radius) = fixed("minecraft:item");
+                casters.extend(
+                    self.dropped
+                        .iter()
+                        .map(|i| (lerp(i.previous, i.position), item, item_radius)),
+                );
+                let (orb, orb_radius) = fixed("minecraft:experience_orb");
+                casters.extend(
+                    self.orbs
+                        .iter()
+                        .map(|o| (lerp(o.previous, o.position), orb, orb_radius)),
+                );
+            }
             for (pos, id, radius) in casters {
                 let strength = horizon_client::shadows::shadow_params(id).1;
                 horizon_client::shadows::shadow(
@@ -9664,6 +9676,7 @@ impl Game<'_> {
         }
         // Block entities (BlockEntityRenderers): chests, shulker boxes, banners, skulls...
         if let Some(r) = &self.renderer {
+            let cull_signs = self.settings.extras.cull_sign_text;
             let lid = |p: [i32; 3]| self.chest_lid(p, alpha as f32);
             let anim = |p: [i32; 3]| self.block_anim(p, alpha as f32);
             let scene = horizon_client::block_entity_render::Scene {
@@ -9678,9 +9691,19 @@ impl Game<'_> {
                 sprites: &self.gui.atlas.sprites,
                 nether: self.dim == Dim::Nether,
                 lid: &lid,
-                sign: &|p| match self.world.block_entities.get(&(p[0], p[1], p[2])) {
-                    Some(BlockEntity::Sign(sign)) => Some(sign),
-                    _ => None,
+                sign: &|p| {
+                    if cull_signs {
+                        let dx = f64::from(p[0]) + 0.5 - camera.x;
+                        let dy = f64::from(p[1]) + 0.5 - camera.y;
+                        let dz = f64::from(p[2]) + 0.5 - camera.z;
+                        if dx * dx + dy * dy + dz * dz > 256.0 {
+                            return None;
+                        }
+                    }
+                    match self.world.block_entities.get(&(p[0], p[1], p[2])) {
+                        Some(BlockEntity::Sign(sign)) => Some(sign),
+                        _ => None,
+                    }
                 },
                 banner: &|p| self.banner_layers_at(p),
                 skull: &|p| self.skull_skin_at(p),
@@ -9702,25 +9725,63 @@ impl Game<'_> {
                         | "minecraft:test_instance_block"
                 )
             };
-            let visible =
-                r.visible_block_entities(self.settings.chunk_fade)
-                    .filter(|(p, state)| {
-                        if !self.res.block_entity_render().renders(*state) {
-                            return false;
-                        }
-                        off_screen(*state)
-                            || view.is_none_or(|v| {
-                                let o = (glam::DVec3::new(
-                                    f64::from(p[0]),
-                                    f64::from(p[1]),
-                                    f64::from(p[2]),
-                                ) - camera)
-                                    .as_vec3();
-                                v.intersects(o - glam::Vec3::ONE, o + glam::Vec3::splat(2.0))
-                            })
+            let max_be = self.settings.extras.block_entity_cap.max_block_entities();
+            let mut visible_vec: Vec<([i32; 3], u32)> = r
+                .visible_block_entities(self.settings.chunk_fade)
+                .filter(|(p, state)| {
+                    if !self.res.block_entity_render().renders(*state) {
+                        return false;
+                    }
+                    if off_screen(*state) {
+                        return true;
+                    }
+                    let in_view = view.is_none_or(|v| {
+                        let o = (glam::DVec3::new(
+                            f64::from(p[0]),
+                            f64::from(p[1]),
+                            f64::from(p[2]),
+                        ) - camera)
+                            .as_vec3();
+                        v.intersects(o - glam::Vec3::ONE, o + glam::Vec3::splat(2.0))
                     });
+                    if !in_view {
+                        return false;
+                    }
+                    !self.is_aabb_occluded(
+                        [f64::from(p[0]), f64::from(p[1]), f64::from(p[2])],
+                        [
+                            f64::from(p[0]) + 1.0,
+                            f64::from(p[1]) + 1.0,
+                            f64::from(p[2]) + 1.0,
+                        ],
+                    )
+                })
+                .collect();
+            if max_be < usize::MAX && visible_vec.len() > max_be {
+                visible_vec.sort_unstable_by(|(pa, sa), (pb, sb)| {
+                    let oa = off_screen(*sa);
+                    let ob = off_screen(*sb);
+                    if oa != ob {
+                        return ob.cmp(&oa);
+                    }
+                    let da = (glam::DVec3::new(
+                        f64::from(pa[0]) + 0.5,
+                        f64::from(pa[1]) + 0.5,
+                        f64::from(pa[2]) + 0.5,
+                    ) - camera)
+                        .length_squared();
+                    let db = (glam::DVec3::new(
+                        f64::from(pb[0]) + 0.5,
+                        f64::from(pb[1]) + 0.5,
+                        f64::from(pb[2]) + 0.5,
+                    ) - camera)
+                        .length_squared();
+                    da.total_cmp(&db)
+                });
+                visible_vec.truncate(max_be);
+            }
             if self.entity_culler.is_some() || self.pack_ids.is_some() {
-                for block in visible {
+                for block in visible_vec {
                     let start = out.len();
                     self.mark_block_entity(start, block.1);
                     self.res
@@ -9733,7 +9794,7 @@ impl Game<'_> {
             } else {
                 self.res
                     .block_entity_render()
-                    .render(&scene, visible, &mut out);
+                    .render(&scene, visible_vec.into_iter(), &mut out);
             }
             self.mark_stage(out.len(), "DESTROY");
             for &(pos, stage) in &cracks {
@@ -10537,6 +10598,9 @@ impl Game<'_> {
         match action {
             Action::Quit => crate::game::exit_app(event_loop),
             Action::Options => self.open_options(true),
+            Action::VoltBoost => {
+                self.open_options_at(true, horizon_client::options_ui::Page::VoltBoost)
+            }
             Action::Accessibility => {
                 self.open_options_at(true, horizon_client::options_ui::Page::Accessibility)
             }
@@ -10913,6 +10977,11 @@ impl Game<'_> {
         self.mining = None;
         self.clear_lod();
         self.pending_uploads.clear();
+        if self.settings.extras.memory_saver {
+            self.particles.trim_memory();
+            self.pending_uploads.shrink_to_fit();
+            horizon_threads::release_free_memory();
+        }
         if let Some(r) = self.renderer.as_mut() {
             r.clear_sections(self.world.layout());
         }
@@ -11179,6 +11248,11 @@ impl Game<'_> {
         self.pickups.clear();
         self.riding = None;
         self.persist = Default::default();
+        if self.settings.extras.memory_saver {
+            self.particles.trim_memory();
+            self.pending_uploads.shrink_to_fit();
+            horizon_threads::release_free_memory();
+        }
     }
     /// Equipment attribute modifiers (LivingEntity.collectEquipmentChanges).
     fn apply_equipment(&mut self) {
@@ -12552,15 +12626,29 @@ impl Game<'_> {
         // LocalPlayer.refreshChatAbilities: the chat shows what the Chat option allows.
         let abilities = self.chat_abilities();
         self.ui.chat.set_abilities(&self.gui.atlas.font, abilities);
-        self.streaming.radius = self.settings.render_distance;
-        // Options.biomeBlendRadius, ambientOcclusion and cutoutLeaves:
+        self.streaming.radius = if self.settings.extras.distant_lod_boost {
+            self.settings.render_distance.min(8)
+        } else {
+            self.settings.render_distance
+        };
+        // Options.biomeBlendRadius, ambientOcclusion, cutoutLeaves, and Volt Cull Leaves:
         // LevelExtractor.allChanged when they change.
         let (s, st) = (&self.settings, &self.streaming);
-        let remesh = (s.biome_blend, s.smooth_lighting, s.cutout_leaves)
-            != (st.biome_blend, st.smooth_lighting, st.cutout_leaves);
+        let remesh = (
+            s.biome_blend,
+            s.smooth_lighting,
+            s.cutout_leaves,
+            s.extras.cull_leaves,
+        ) != (
+            st.biome_blend,
+            st.smooth_lighting,
+            st.cutout_leaves,
+            st.cull_leaves,
+        );
         self.streaming.biome_blend = self.settings.biome_blend;
         self.streaming.smooth_lighting = self.settings.smooth_lighting;
         self.streaming.cutout_leaves = self.settings.cutout_leaves;
+        self.streaming.cull_leaves = self.settings.extras.cull_leaves;
         if remesh {
             self.all_sections_changed();
         }
@@ -12634,7 +12722,12 @@ impl Game<'_> {
             camera.z.floor() as i32,
         );
         // The 32x32 direction table supports at most a 15-block radius.
-        let radius = self.settings.weather_radius.clamp(0, 15);
+        let base_radius = self.settings.weather_radius.clamp(0, 15);
+        let radius = if self.settings.extras.fast_weather {
+            base_radius.min(4)
+        } else {
+            base_radius
+        };
         let eye = camera.to_array();
         let mut rain = Vec::new();
         let mut snow_vertices = Vec::new();
@@ -13888,7 +13981,21 @@ impl Game<'_> {
         if !title {
             self.end_geometry(camera, &mut entities);
         }
-        let weather = if !title && self.dim == Dim::Overworld && self.settings.horizon.weather {
+        let cave_sealed = !title
+            && self.settings.extras.cave_sky_cull
+            && self.dim == Dim::Overworld
+            && camera.y < 52.0
+            && (self.world.light(
+                camera.x.floor() as i32,
+                camera.y.floor() as i32,
+                camera.z.floor() as i32,
+            ) >> 4)
+                == 0;
+        let weather = if !title
+            && !cave_sealed
+            && self.dim == Dim::Overworld
+            && self.settings.horizon.weather
+        {
             horizon_client::spans::time("weather", || self.weather_geometry(camera, alpha))
         } else {
             Vec::new()
@@ -13940,7 +14047,7 @@ impl Game<'_> {
                     ),
                     horizon_client::fog::FogType::Lava | horizon_client::fog::FogType::PowderSnow
                 ),
-            skybox: self.dim == Dim::Overworld && self.settings.horizon.sky,
+            skybox: self.dim == Dim::Overworld && self.settings.horizon.sky && !cave_sealed,
             end_sky: self.dim == Dim::End && self.settings.horizon.sky,
             end_sky_sprite: self
                 .gui
@@ -13963,6 +14070,7 @@ impl Game<'_> {
             glint_alpha: self.glint_frame.alpha,
             glint_ticks: self.glint_frame.scroll_ticks(),
             clouds: (!title
+                && !cave_sealed
                 && self.dim == Dim::Overworld
                 && horizon_client::clouds::visible(&self.settings.clouds, sky.cloud_color[3]))
             .then(|| self.gui.atlas.sprites.get("horizon/white"))
@@ -13987,12 +14095,12 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            celestial: if self.settings.horizon.sky || title {
+            celestial: if (self.settings.horizon.sky && !cave_sealed) || title {
                 &celestial
             } else {
                 &[]
             },
-            stars: stars.filter(|_| self.settings.horizon.sky || title),
+            stars: stars.filter(|_| (self.settings.horizon.sky && !cave_sealed) || title),
             hand: &hand,
             hand_fov_degrees: self.hud_fov_degrees(camera_alpha as f32, camera.to_array()),
             screen: &screen,
@@ -14138,6 +14246,11 @@ impl Game<'_> {
     /// `Screen.extractBlurredBackground` over the panorama or the world and
     /// HUD, when `menuBackgroundBlurriness` is at least 1.
     fn menu_blur(&self) -> Option<f32> {
+        if self.settings.extras.menu_bg_mode
+            == horizon_client::volt_features::MenuBgMode::FastDark
+        {
+            return None;
+        }
         let loading = self.loading_reason() == Some(horizon_client::level_loading::Reason::Other)
             || self.remote_loading();
         let blurred = loading
@@ -14456,7 +14569,12 @@ impl Game<'_> {
     /// (`render.set-far-terrain`).
     fn far_terrain_choice(&self) -> (u32, bool) {
         let g = &self.settings.horizon;
-        let reduced = g.far_detail == horizon_client::graphics::FarDetail::Reduced;
+        let reduced = g.far_detail == horizon_client::graphics::FarDetail::Reduced
+            || self.settings.extras.distant_lod_boost;
+        if self.settings.extras.distant_lod_boost && g.lod_distance == 0 {
+            let auto_lod = ((self.settings.render_distance.max(4) as u32) * 2).clamp(16, 48);
+            return (auto_lod, true);
+        }
         if g.lod_distance > 0 {
             return (g.lod_distance, reduced);
         }
@@ -14602,9 +14720,19 @@ impl Game<'_> {
         let (far_distance, far_reduced) = self.far_terrain_choice();
         if let Some(renderer) = self.renderer.as_mut() {
             let g = &self.settings.horizon;
+            let volt_cap = self.settings.extras.chunk_upload_cap.max_sections_per_frame();
+            let frustum_prio = self.settings.extras.frustum_priority_mesh;
+            let look_dir = self.forward();
+            let cam_pos = self.player.as_ref().map(|p| p.position);
             let mobile_uploads =
                 cfg!(target_os = "android") && self.options.execution_role.is_client();
-            let budgeted = g.chunk_updates > 0 || g.upload_budget_kib > 0 || mobile_uploads;
+            let effective_chunk_updates = match (g.chunk_updates as usize, volt_cap) {
+                (0, usize::MAX) => 0,
+                (0, vc) => vc,
+                (gu, usize::MAX) => gu,
+                (gu, vc) => gu.min(vc),
+            };
+            let budgeted = effective_chunk_updates > 0 || g.upload_budget_kib > 0 || mobile_uploads;
             if !budgeted && self.pending_uploads.is_empty() && uploads.len() <= AUTO_UPLOADS_AT_ONCE
             {
                 horizon_client::spans::time("upload", || {
@@ -14615,9 +14743,10 @@ impl Game<'_> {
                 self.streaming.free(uploads);
             } else {
                 // Horizon's chunk-update and upload budgets: the nearest
-                // sections go first, the rest wait for later frames; a newer
-                // mesh of a waiting section replaces it, and sections of
-                // chunks no longer loaded are dropped.
+                // sections (and sections inside the camera view cone when
+                // Frustum-Priority Meshing is active) go first, the rest wait
+                // for later frames; a newer mesh of a waiting section replaces
+                // it, and sections of chunks no longer loaded are dropped.
                 let pending = &mut self.pending_uploads;
                 let fresh: horizon_client::fast_hash::FxHashSet<(i32, i32, i32)> =
                     uploads.iter().map(|(k, _)| *k).collect();
@@ -14634,10 +14763,27 @@ impl Game<'_> {
                     }
                 }
                 let centre = self.streaming.center;
-                let far = |k: &(i32, i32, i32)| (k.0 - centre.0).pow(2) + (k.2 - centre.1).pow(2);
-                pending.sort_unstable_by_key(|(k, _)| std::cmp::Reverse(far(k)));
+                let score = |k: &(i32, i32, i32)| -> i64 {
+                    let dist2 = i64::from((k.0 - centre.0).pow(2) + (k.2 - centre.1).pow(2));
+                    if !frustum_prio {
+                        return dist2;
+                    }
+                    if let Some(p) = cam_pos {
+                        let sx = f64::from(k.0 * 16 + 8) - p.x;
+                        let sy = f64::from(k.1 * 16 + 8) - p.y;
+                        let sz = f64::from(k.2 * 16 + 8) - p.z;
+                        let len = (sx * sx + sy * sy + sz * sz).sqrt().max(1.0);
+                        let dot = (sx * look_dir[0] + sy * look_dir[1] + sz * look_dir[2]) / len;
+                        if dot < -0.25 && dist2 > 4 {
+                            // Behind camera: deprioritize behind visible sections.
+                            return dist2 + 10_000;
+                        }
+                    }
+                    dist2
+                };
+                pending.sort_unstable_by_key(|(k, _)| std::cmp::Reverse(score(k)));
                 let mut budget = horizon_client::gfx::upload_budget::UploadBudget::with_wait(
-                    g.chunk_updates as usize,
+                    effective_chunk_updates,
                     u64::from(g.upload_budget_kib) * 1024,
                     mobile_uploads,
                     renderer.last_wait,
@@ -17283,10 +17429,17 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
         f: impl FnOnce() -> T + Send + 'scope,
     ) -> Self {
         if parallel {
-            Self::Thread(scope.spawn(move || {
-                horizon_threads::behind_server();
-                f()
-            }))
+            if let Ok(handle) = std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn_scoped(scope, move || {
+                    horizon_threads::behind_server();
+                    f()
+                })
+            {
+                Self::Thread(handle)
+            } else {
+                Self::Later(Box::new(f))
+            }
         } else {
             Self::Later(Box::new(f))
         }
@@ -17347,47 +17500,32 @@ fn load_core(
     let registry = assets.registry;
     let (render, gameplay, visibility, biomes, environment, collision) =
         if cfg!(target_os = "android") {
-            // On unified mobile RAM (and 32-bit virtual address space), finish sprite/model
-            // decoding and return freed pages BEFORE parsing the ~140 MB block-behaviours.json DOM.
-            let (render, visibility, biomes, environment, collision) = std::thread::scope(|scope| {
-                let assets = &assets;
-                let render = Step::spawn(scope, parallel, move || {
-                    let render = if headless {
-                        assets.reload_for_server(root)
-                    } else {
-                        assets.reload(root)
-                    }
-                    .map_err(|e| e.to_string())?;
-                    let item_renderer =
-                        horizon_client::item_render::ItemRenderer::load_with_library(
-                            root,
-                            render.model_library.clone(),
-                        )
-                        .map_err(|e| e.to_string());
-                    Ok((render, item_renderer))
-                });
-                let visibility = Step::spawn(scope, parallel, || {
-                    models::load_visibility(root, registry).map_err(|e| e.to_string())
-                });
-                let biomes = Step::spawn(scope, parallel, || {
-                    Biomes::load(root).map_err(|e| e.to_string())
-                });
-                let environment = Step::spawn(scope, parallel, || {
-                    Environment::load(root).map_err(|e| e.to_string())
-                });
-                let collision = Step::spawn(scope, parallel, || {
-                    collisions::load(root, registry).map_err(|e| e.to_string())
-                });
-                (
-                    render.join(),
-                    visibility.join(),
-                    biomes.join(),
-                    environment.join(),
-                    collision.join(),
-                )
-            });
+            // On unified mobile RAM (and 32-bit virtual address space), parse and discard
+            // `block-behaviours.json` + `blocks.json` FIRST while zero sprite/model/biome
+            // tables are resident, returning all transient JSON pages to the OS before
+            // allocating `RenderAssets` (~220 MB) and world lookup tables.
+            let gameplay = gameplay_tables(root, &assets, false, progress);
             horizon_threads::release_free_memory();
-            let gameplay = gameplay_tables(root, &assets, parallel, progress);
+            let render = (|| -> std::result::Result<_, String> {
+                let render = if headless {
+                    assets.reload_for_server(root)
+                } else {
+                    assets.reload(root)
+                }
+                .map_err(|e| e.to_string())?;
+                let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
+                    root,
+                    render.model_library.clone(),
+                )
+                .map_err(|e| e.to_string());
+                Ok((render, item_renderer))
+            })();
+            horizon_threads::release_free_memory();
+            let visibility = models::load_visibility(root, registry).map_err(|e| e.to_string());
+            let biomes = Biomes::load(root).map_err(|e| e.to_string());
+            let environment = Environment::load(root).map_err(|e| e.to_string());
+            let collision = collisions::load(root, registry).map_err(|e| e.to_string());
+            horizon_threads::release_free_memory();
             (render, gameplay, visibility, biomes, environment, collision)
         } else {
             std::thread::scope(|scope| {
@@ -17469,43 +17607,41 @@ fn gameplay_tables(
         std::fs::File::open(root.join("block-behaviours.json")).map_err(|e| e.to_string())?,
     ))
     .map_err(|e| e.to_string())?;
-    let (facts, gameplay_projection) =
-        BlockFacts::load_with_projection(root, assets.registry, &behaviour_json)
-            .map_err(|e| e.to_string())?;
-    progress.set(2);
-    let deferred_behaviours = if cfg!(target_os = "android") {
-        // Resolve `Behaviours` immediately and drop both the ~260 MB `behaviour_json`
-        // AST and ~110 MB `gameplay_projection` Vec BEFORE building `LightTables`,
-        // `MotionResources`, `PackResources` (~220 MB sprites), or `behaviours-v2.bin`.
-        let ready = if let Some(b) = cached_behaviours {
+    let (facts, deferred_behaviours) = if cfg!(target_os = "android") {
+        // Zero-projection Android fast path: never materialize the ~110 MB
+        // `Vec<GameplayProjection>` on cold start or warm start.
+        let (facts, ready) = if let Some(b) = cached_behaviours {
+            let facts =
+                BlockFacts::load_with_behaviour_json(root, assets.registry, &behaviour_json)
+                    .map_err(|e| e.to_string())?;
             drop(behaviour_json);
-            drop(gameplay_projection);
             horizon_threads::release_free_memory();
-            b
+            (facts, b)
         } else {
-            let b = Behaviours::build_with_gameplay_uncached(
-                assets.registry,
-                root,
-                &behaviour_json,
-                &gameplay_projection,
-            )
-            .map_err(|e| e.to_string())?;
+            let (facts, b) =
+                BlockFacts::load_with_behaviours(root, assets.registry, &behaviour_json)
+                    .map_err(|e| e.to_string())?;
             drop(behaviour_json);
-            drop(gameplay_projection);
             horizon_threads::release_free_memory();
-            b.store_cache(assets.registry, root);
-            horizon_threads::release_free_memory();
-            b
+            (facts, b)
         };
+        progress.set(2);
         #[cfg(target_os = "android")]
         crate::performance::mark("behaviours_ready");
-        DeferredBehaviours::Ready(ready)
+        (facts, DeferredBehaviours::Ready(ready))
     } else {
         let _ = cached_behaviours;
-        DeferredBehaviours::Inputs {
-            behaviour_json,
-            gameplay_projection,
-        }
+        let (facts, gameplay_projection) =
+            BlockFacts::load_with_projection(root, assets.registry, &behaviour_json)
+                .map_err(|e| e.to_string())?;
+        progress.set(2);
+        (
+            facts,
+            DeferredBehaviours::Inputs {
+                behaviour_json,
+                gameplay_projection,
+            },
+        )
     };
     let (light, motion) = std::thread::scope(|scope| {
         let light = Step::spawn(scope, parallel, || {
@@ -18495,6 +18631,7 @@ impl Loading {
         self.renderer_job = Some(
             std::thread::Builder::new()
                 .name("Renderer preparation".into())
+                .stack_size(8 * 1024 * 1024)
                 .spawn(move || {
                     horizon_threads::behind_server();
                     let started = Instant::now();
