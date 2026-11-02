@@ -65,9 +65,9 @@ public final class HorizonActivity extends android.app.NativeActivity {
         try {
             android.content.pm.PackageInfo info =
                     getPackageManager().getPackageInfo(getPackageName(), 0);
-            return info != null && info.versionName != null ? info.versionName : "0.8.1";
+            return info != null && info.versionName != null ? info.versionName : "0.8.2";
         } catch (Throwable ignored) {
-            return "0.8.1";
+            return "0.8.2";
         }
     }
 

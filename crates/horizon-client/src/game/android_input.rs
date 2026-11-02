@@ -274,6 +274,13 @@ impl Game<'_> {
             if self.debug_key(key, action) {
                 continue;
             }
+            if down
+                && (self.sort_key_press(key)
+                    || self.hdr_key_press(key)
+                    || self.volt_key_press(key))
+            {
+                continue;
+            }
             for mapped in self.settings.keys.translate_all(key) {
                 let result = match mapped {
                     Ok(code) => self.mapped_key(code, down, false),
@@ -348,6 +355,13 @@ impl Game<'_> {
 
     fn android_custom_mouse(&mut self, button: MouseButton, down: bool) -> Result<()> {
         if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            if down
+                && (self.sort_mouse_press(button)
+                    || self.hdr_mouse_press(button)
+                    || self.volt_mouse_press(button))
+            {
+                return Ok(());
+            }
             return self.play_mouse(button, down);
         }
         if button == MouseButton::Middle {
@@ -445,7 +459,8 @@ impl Game<'_> {
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
         if !self.pad_in_menu()
             && t.phase == TouchPhase::Started
-            && self.try_click_waypoint_hud_button((p[0], p[1]))
+            && (self.try_click_waypoint_hud_button((p[0], p[1]))
+                || self.try_click_placement_hud_buttons((p[0], p[1])))
         {
             self.pad.touch.clear();
             self.pad.touch.ignore(t.id);

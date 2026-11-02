@@ -944,7 +944,9 @@ pub struct ResolvedPlacement {
     pub effective_pitch: f32,
     /// Clicked face normal to feed into `PlaceContext` / `UseItemOn`.
     pub effective_face: [i32; 3],
-    /// Sub-block cursor `[0..1]^3` (or Carpet encoded `cursor[0]` when `protocol == Carpet`).
+    /// Clean sub-block hit coordinates `[0.05..=0.95]^3` for local `PlaceContext` & prediction.
+    pub local_cursor: [f32; 3],
+    /// Wire cursor for `UseItemOn` (`local_cursor` in `VanillaSafe`, or Carpet encoded `cursor[0]`).
     pub cursor: [f32; 3],
     /// Whether multiplayer `VanillaSafe` benefits from sending a temporary `MovePlayerRot`.
     pub needs_rotation_packet: bool,
@@ -980,6 +982,16 @@ fn counter_clockwise_horiz(dir: Direction) -> Direction {
         Direction::West => Direction::South,
         Direction::South => Direction::East,
         Direction::East => Direction::North,
+        other => other,
+    }
+}
+
+fn clockwise_horiz(dir: Direction) -> Direction {
+    match dir {
+        Direction::North => Direction::East,
+        Direction::East => Direction::South,
+        Direction::South => Direction::West,
+        Direction::West => Direction::North,
         other => other,
     }
 }
@@ -1022,6 +1034,7 @@ fn classify_block_item(item: &str) -> (OrientKind, bool) {
     }
     if b.ends_with("_fence_gate")
         || b.ends_with("_door")
+        || b.ends_with("_bed")
         || matches!(b, "campfire" | "soul_campfire" | "decorated_pot")
     {
         return (OrientKind::HorizontalSame, false);
@@ -1057,6 +1070,8 @@ fn classify_block_item(item: &str) -> (OrientKind, bool) {
     if b.ends_with("_glazed_terracotta")
         || b.ends_with("_chest")
         || b.ends_with("_shelf")
+        || (b.ends_with("_sign") && !b.ends_with("_hanging_sign"))
+        || b.ends_with("_banner")
         || matches!(
             b,
             "repeater"
@@ -1076,6 +1091,7 @@ fn classify_block_item(item: &str) -> (OrientKind, bool) {
                 | "end_portal_frame"
                 | "vault"
                 | "dried_ghast"
+                | "small_dripleaf"
         )
     {
         return (OrientKind::HorizontalOpposite, false);
@@ -1101,9 +1117,12 @@ fn face_to_direction(face: [i32; 3]) -> Direction {
     }
 }
 
+/// Half-width of the centre zone (`0.20..=0.80`) on a clicked block face.
+pub const SUBFACE_CENTER_HALF: f32 = 0.30;
+
 /// 5-zone sub-face quadrant resolver:
-/// - Centre (`|du| <= 0.22 && |dv| <= 0.22`) picks the clicked `face` normal itself.
-/// - Outer wedges pick the tangent `Direction` toward the aimed edge of the face!
+/// - Centre (`|du| <= 0.30 && |dv| <= 0.30`) picks the clicked `face` normal itself.
+/// - Outer rim wedges (`< 0.20` or `> 0.80`) pick the tangent `Direction` toward the aimed edge!
 pub fn subface_quadrant_direction(face: [i32; 3], local: [f32; 3]) -> Direction {
     let base = face_to_direction(face);
     let (u, v, pos_u, neg_u, pos_v, neg_v) = match base {
@@ -1132,7 +1151,7 @@ pub fn subface_quadrant_direction(face: [i32; 3], local: [f32; 3]) -> Direction 
             Direction::Down,
         ),
     };
-    if u.abs() <= 0.24 && v.abs() <= 0.24 {
+    if u.abs() <= SUBFACE_CENTER_HALF && v.abs() <= SUBFACE_CENTER_HALF {
         return base;
     }
     if u.abs() >= v.abs() {
@@ -1156,19 +1175,28 @@ pub fn angles_looking_toward(dir: Direction) -> (f32, f32) {
     }
 }
 
-fn horizontal_fallback(dir: Direction, player_yaw: f32) -> Direction {
+fn horizontal_from_yaw(player_yaw: f32) -> Direction {
+    let mut w = (player_yaw % 360.0 + 360.0) % 360.0;
+    if w >= 360.0 {
+        w -= 360.0;
+    }
+    match (((w + 45.0) / 90.0).floor() as usize) % 4 {
+        0 => Direction::South,
+        1 => Direction::West,
+        2 => Direction::North,
+        _ => Direction::East,
+    }
+}
+
+fn horizontal_fallback_for_kind(dir: Direction, kind: OrientKind, player_yaw: f32) -> Direction {
     match dir {
         Direction::North | Direction::South | Direction::West | Direction::East => dir,
         Direction::Up | Direction::Down => {
-            let mut w = (player_yaw % 360.0 + 360.0) % 360.0;
-            if w >= 360.0 {
-                w -= 360.0;
-            }
-            match (((w + 45.0) / 90.0).floor() as usize) % 4 {
-                0 => Direction::South,
-                1 => Direction::West,
-                2 => Direction::North,
-                _ => Direction::East,
+            let look = horizontal_from_yaw(player_yaw);
+            match kind {
+                OrientKind::HorizontalOpposite => look.opposite(),
+                OrientKind::Anvil => clockwise_horiz(look),
+                _ => look,
             }
         }
     }
@@ -1207,22 +1235,50 @@ pub fn resolve_accurate_placement(
     ];
     let (orient_kind, has_half) = classify_block_item(item);
 
-    // 1. Determine base desired facing direction.
+    // 1. Determine base desired facing direction before reverse flip.
     let mut facing = if let Some(locked_dir) = lock.direction() {
         locked_dir
     } else if quadrant {
         subface_quadrant_direction(face, local)
     } else {
-        face_to_direction(face)
+        match orient_kind {
+            OrientKind::LookOppositeAll => {
+                if player_pitch > 50.0 {
+                    Direction::Up
+                } else if player_pitch < -50.0 {
+                    Direction::Down
+                } else {
+                    horizontal_from_yaw(player_yaw).opposite()
+                }
+            }
+            OrientKind::LookSameAll => {
+                if player_pitch > 50.0 {
+                    Direction::Down
+                } else if player_pitch < -50.0 {
+                    Direction::Up
+                } else {
+                    horizontal_from_yaw(player_yaw)
+                }
+            }
+            OrientKind::Hopper => face_to_direction(face).opposite(),
+            _ => face_to_direction(face),
+        }
     };
-    if reverse {
-        facing = facing.opposite();
-    }
     if matches!(
         orient_kind,
         OrientKind::HorizontalOpposite | OrientKind::HorizontalSame | OrientKind::Anvil
     ) {
-        facing = horizontal_fallback(facing, if reverse { player_yaw + 180.0 } else { player_yaw });
+        facing = horizontal_fallback_for_kind(facing, orient_kind, player_yaw);
+    }
+    if reverse {
+        facing = match orient_kind {
+            OrientKind::FaceAxis => match facing {
+                Direction::Up | Direction::Down => horizontal_from_yaw(player_yaw),
+                Direction::North | Direction::South => Direction::East,
+                Direction::East | Direction::West => Direction::South,
+            },
+            _ => facing.opposite(),
+        };
     }
 
     // 2. Determine slab / stair / trapdoor top vs bottom half.
@@ -1243,11 +1299,11 @@ pub fn resolve_accurate_placement(
         None
     };
 
-    // 3. Compute effective player `(yaw, pitch)`, `effective_face`, and `cursor`.
+    // 3. Compute effective player `(yaw, pitch)`, `effective_face`, `local_cursor`, and `cursor`.
     let mut effective_yaw = player_yaw;
     let mut effective_pitch = player_pitch;
     let mut effective_face = face;
-    let mut cursor = [
+    let mut local_cursor = [
         local[0].clamp(0.05, 0.95),
         local[1].clamp(0.05, 0.95),
         local[2].clamp(0.05, 0.95),
@@ -1255,8 +1311,9 @@ pub fn resolve_accurate_placement(
     let mut needs_rotation_packet = false;
 
     if let Some(top) = top_half {
-        cursor[1] = if top { 0.85 } else { 0.15 };
+        local_cursor[1] = if top { 0.85 } else { 0.15 };
     }
+    let mut cursor = local_cursor;
 
     match orient_kind {
         OrientKind::LookOppositeAll => {
@@ -1290,8 +1347,6 @@ pub fn resolve_accurate_placement(
             needs_rotation_packet = true;
         }
         OrientKind::FaceDir | OrientKind::FaceAxis | OrientKind::Hopper => {
-            // Note: in singleplayer / Carpet / Volt LAN, `place_block_accurate`
-            // applies `facing` directly without shifting `clicked_pos + face`.
             let _ = &mut effective_face;
         }
         OrientKind::Other => {}
@@ -1333,6 +1388,7 @@ pub fn resolve_accurate_placement(
         effective_yaw,
         effective_pitch,
         effective_face,
+        local_cursor,
         cursor,
         needs_rotation_packet,
         badge: badge_parts.join(" · "),
@@ -1441,11 +1497,69 @@ mod tests {
         );
         assert_eq!(carpet.top_half, Some(true));
         assert!(carpet.cursor[0] >= 2.0);
+        assert!(carpet.local_cursor.iter().all(|&c| (0.05..=0.95).contains(&c)));
         assert!(!carpet.needs_rotation_packet);
         let (clean, dir, half) = decode_carpet_cursor(carpet.cursor).unwrap();
         assert_eq!(dir, carpet.facing);
         assert_eq!(half, Some(true));
         assert!((0.0..=1.0).contains(&clean[0]));
+
+        // Facing North (180°), clicking floor centre:
+        // - Chest faces South (toward player), Reverse flips to North.
+        // - Stairs ascend North (away from player), Reverse flips to South.
+        // - Log stands vertically (Up), Reverse lays it horizontally along look (North).
+        let chest = resolve_accurate_placement(
+            "minecraft:chest",
+            [0, 63, 0],
+            [0, 1, 0],
+            [0.5, 64.0, 0.72],
+            180.0,
+            45.0,
+            true,
+            false,
+            PlacementLock::Off,
+            PlacementProtocol::Carpet,
+        );
+        assert_eq!(chest.facing, Direction::South);
+        let chest_rev = resolve_accurate_placement(
+            "minecraft:chest",
+            [0, 63, 0],
+            [0, 1, 0],
+            [0.5, 64.0, 0.72],
+            180.0,
+            45.0,
+            true,
+            true,
+            PlacementLock::Off,
+            PlacementProtocol::Carpet,
+        );
+        assert_eq!(chest_rev.facing, Direction::North);
+        let stairs = resolve_accurate_placement(
+            "minecraft:oak_stairs",
+            [0, 63, 0],
+            [0, 1, 0],
+            [0.5, 64.0, 0.72],
+            180.0,
+            45.0,
+            true,
+            false,
+            PlacementLock::Off,
+            PlacementProtocol::Carpet,
+        );
+        assert_eq!(stairs.facing, Direction::North);
+        let log_rev = resolve_accurate_placement(
+            "minecraft:oak_log",
+            [0, 63, 0],
+            [0, 1, 0],
+            [0.5, 64.0, 0.5],
+            180.0,
+            45.0,
+            true,
+            true,
+            PlacementLock::Off,
+            PlacementProtocol::Carpet,
+        );
+        assert_eq!(log_rev.facing, Direction::North);
     }
 
     #[test]

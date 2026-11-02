@@ -804,16 +804,15 @@ fn write(
     let fingerprint = fingerprint(registry, root)?;
     let snapshot = Snapshot::capture(behaviours);
     let serialized = postcard::to_allocvec(&snapshot).map_err(|e| invalid(e.to_string()))?;
+    // Release the ~140 MB Snapshot tree before LZ4 allocates its output buffer.
+    drop(snapshot);
     let body = lz4_flex::compress_prepend_size(&serialized);
+    // Release the ~120 MB postcard buffer before hashing and writing to disk.
+    drop(serialized);
     if body.len() + 76 > MAX_FILE_BYTES {
         return Err(invalid("behaviour cache too large"));
     }
-    let mut bytes = Vec::with_capacity(76 + body.len());
-    bytes.extend_from_slice(MAGIC);
-    bytes.extend_from_slice(&VERSION.to_le_bytes());
-    bytes.extend_from_slice(&fingerprint);
-    bytes.extend_from_slice(&Sha256::digest(&body));
-    bytes.extend_from_slice(&body);
+    let digest = Sha256::digest(&body);
     fs::create_dir_all(dir)?;
     let path = dir.join(FILE_NAME);
     let tmp = dir.join(format!(
@@ -826,7 +825,11 @@ fn write(
             .write(true)
             .create_new(true)
             .open(&tmp)?;
-        file.write_all(&bytes)?;
+        file.write_all(MAGIC)?;
+        file.write_all(&VERSION.to_le_bytes())?;
+        file.write_all(&fingerprint)?;
+        file.write_all(&digest)?;
+        file.write_all(&body)?;
         file.sync_all()?;
         fs::rename(&tmp, &path)
     })();

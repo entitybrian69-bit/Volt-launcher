@@ -165,8 +165,29 @@ pub struct TouchControls {
     sprint_latched: bool,
 }
 impl TouchControls {
+    /// Imported Java launcher layouts (Pojav / Zalith / FoldCraft) bind dedicated primary/secondary
+    /// mouse or attack/use buttons and expect center-crosshair aiming rather than tap-anywhere rays.
+    pub fn has_custom_crosshair_controls(&self) -> bool {
+        !self.controls_hidden
+            && self.settings.custom_buttons.iter().any(|b| {
+                b.in_game
+                    && b.drawer_parent.is_none()
+                    && std::iter::once(b.key.as_str())
+                        .chain(b.extra_keys.iter().map(String::as_str))
+                        .any(|token| {
+                            matches!(
+                                token,
+                                "special:mouse_pri"
+                                    | "special:mouse_sec"
+                                    | "action:key.attack"
+                                    | "action:key.use"
+                            )
+                        })
+            })
+    }
+
     pub fn crosshair(&self) -> bool {
-        self.force_crosshair || self.settings.crosshair()
+        self.force_crosshair || self.settings.crosshair() || self.has_custom_crosshair_controls()
     }
 
     pub fn viewport(&mut self, width: u32, height: u32) {
@@ -576,7 +597,7 @@ impl TouchControls {
                 && !dragged
                 && since.elapsed() < HOLD_DELAY
             {
-                self.tap_aim = Some(if self.settings.crosshair() || self.projectile_crosshair {
+                self.tap_aim = Some(if self.crosshair() || self.projectile_crosshair {
                     [0.5, 0.5]
                 } else {
                     start
@@ -737,7 +758,7 @@ impl TouchControls {
                     }
                     if !*dragged || *committed {
                         self.aim =
-                            Some(if self.settings.crosshair() || self.projectile_crosshair {
+                            Some(if self.crosshair() || self.projectile_crosshair {
                                 [0.5, 0.5]
                             } else {
                                 *point
@@ -1711,5 +1732,22 @@ mod tests {
         touch.update(2, center, false, true);
         touch.poll_state(); // consume the queued tap
         assert!(!touch.poll_state().held(Button::LeftStick));
+    }
+
+    #[test]
+    fn imported_custom_mouse_controls_enable_crosshair_without_thumb_hijack() {
+        let mut touch = TouchControls::default();
+        touch.settings.mode = Mode::Tap;
+        assert!(!touch.crosshair());
+        touch.settings.custom_buttons.push(CustomButton::new(
+            "special:mouse_sec".into(),
+            0,
+        ));
+        assert!(touch.has_custom_crosshair_controls());
+        assert!(touch.crosshair());
+        // Camera thumb resting on empty look area must NOT overwrite center aim!
+        touch.update(1, [0.82, 0.48], true, false);
+        touch.poll_state();
+        assert_ne!(touch.aim, Some([0.82, 0.48]));
     }
 }

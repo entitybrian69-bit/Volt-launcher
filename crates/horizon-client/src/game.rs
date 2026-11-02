@@ -2697,20 +2697,8 @@ impl Game<'_> {
     /// Whether a world hold should use the held item instead of mining.
     #[cfg(target_os = "android")]
     pub(super) fn touch_projectile_crosshair(&self) -> bool {
-        let accurate_block = self.settings.extras.accurate_placement
-            && (self
-                .held()
-                .and_then(|s| self.items().get(&s.item))
-                .is_some_and(|i| i.block.is_some())
-                || self
-                    .offhand
-                    .as_ref()
-                    .and_then(|s| self.items().get(&s.item))
-                    .is_some_and(|i| i.block.is_some()));
-        accurate_block
-            || self
-                .held()
-                .is_some_and(|s| horizon_client::touch::projectile_crosshair(&s.item))
+        self.held()
+            .is_some_and(|s| horizon_client::touch::projectile_crosshair(&s.item))
     }
     #[cfg(target_os = "android")]
     pub(super) fn touch_item_held_use(&self) -> bool {
@@ -2755,7 +2743,7 @@ impl Game<'_> {
         {
             crate::keyboard_mouse_input()
                 || self.settings.keypad.enabled
-                || self.pad.touch.settings.crosshair()
+                || self.pad.touch.crosshair()
                 || self.touch_projectile_crosshair()
         }
         #[cfg(not(target_os = "android"))]
@@ -5605,9 +5593,9 @@ impl Game<'_> {
         let eff_face = accurate.as_ref().map_or(hit.face, |a| a.effective_face);
         let eff_hit_pt = accurate.as_ref().map_or(hit.point, |a| {
             [
-                f64::from(hit.pos[0]) + f64::from(a.cursor[0]).clamp(0.05, 0.95),
-                f64::from(hit.pos[1]) + f64::from(a.cursor[1]).clamp(0.05, 0.95),
-                f64::from(hit.pos[2]) + f64::from(a.cursor[2]).clamp(0.05, 0.95),
+                f64::from(hit.pos[0]) + f64::from(a.local_cursor[0]).clamp(0.05, 0.95),
+                f64::from(hit.pos[1]) + f64::from(a.local_cursor[1]).clamp(0.05, 0.95),
+                f64::from(hit.pos[2]) + f64::from(a.local_cursor[2]).clamp(0.05, 0.95),
             ]
         });
         let eff_yaw = accurate.as_ref().map_or(self.yaw, |a| a.effective_yaw);
@@ -13683,7 +13671,8 @@ impl Game<'_> {
         let mut lines = self.fishing_line(alpha, size);
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
-        let on_top = g.on_top;
+        let mut on_top = g.on_top;
+        self.collect_placement_gizmos(&mut on_top);
         let view = horizon_client::camera::view_matrix(view_yaw, view_pitch);
         let at = camera.to_array();
         // GameRenderer.render3dHud: the debug crosshair, first person with the HUD shown.
@@ -13713,9 +13702,10 @@ impl Game<'_> {
         // does not open menus for spectators, so those never show it. An open
         // screen does not hide it: vanilla checks the HUD and the game mode, not the screen.
         let adventure = self.mode == horizon_client::command::args::GameMode::Adventure;
+        let holding_block = self.holding_any_block();
         let outline =
             if touch_target_visible && !self.ui.hide_gui && (self.may_build() || adventure) {
-                self.pick()
+                self.pick_for_placement(holding_block)
                     .filter(|h| {
                         self.may_build()
                             || !self.block_action_restricted(h.pos)
@@ -17322,10 +17312,17 @@ struct CoreTables {
     collision: BlockCollisionRegistry<'static>,
 }
 /// The block facts and the tables read from them.
+enum DeferredBehaviours {
+    Ready(Behaviours),
+    Inputs {
+        behaviour_json: serde_json::Value,
+        gameplay_projection: Vec<horizon_client::blocks::GameplayProjection>,
+    },
+}
+
 struct GameplayTables {
-    behaviour_json: serde_json::Value,
+    deferred_behaviours: DeferredBehaviours,
     facts: BlockFacts,
-    gameplay_projection: Vec<horizon_client::blocks::GameplayProjection>,
     light: LightTables,
     motion: MotionResources,
 }
@@ -17461,6 +17458,13 @@ fn gameplay_tables(
     parallel: bool,
     progress: &Progress,
 ) -> std::result::Result<GameplayTables, String> {
+    #[cfg(target_os = "android")]
+    crate::performance::mark("gameplay_tables_start");
+    let cached_behaviours = if cfg!(target_os = "android") {
+        Behaviours::load_cached(assets.registry, root)
+    } else {
+        None
+    };
     let behaviour_json: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(
         std::fs::File::open(root.join("block-behaviours.json")).map_err(|e| e.to_string())?,
     ))
@@ -17469,6 +17473,40 @@ fn gameplay_tables(
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json)
             .map_err(|e| e.to_string())?;
     progress.set(2);
+    let deferred_behaviours = if cfg!(target_os = "android") {
+        // Resolve `Behaviours` immediately and drop both the ~260 MB `behaviour_json`
+        // AST and ~110 MB `gameplay_projection` Vec BEFORE building `LightTables`,
+        // `MotionResources`, `PackResources` (~220 MB sprites), or `behaviours-v2.bin`.
+        let ready = if let Some(b) = cached_behaviours {
+            drop(behaviour_json);
+            drop(gameplay_projection);
+            horizon_threads::release_free_memory();
+            b
+        } else {
+            let b = Behaviours::build_with_gameplay_uncached(
+                assets.registry,
+                root,
+                &behaviour_json,
+                &gameplay_projection,
+            )
+            .map_err(|e| e.to_string())?;
+            drop(behaviour_json);
+            drop(gameplay_projection);
+            horizon_threads::release_free_memory();
+            b.store_cache(assets.registry, root);
+            horizon_threads::release_free_memory();
+            b
+        };
+        #[cfg(target_os = "android")]
+        crate::performance::mark("behaviours_ready");
+        DeferredBehaviours::Ready(ready)
+    } else {
+        let _ = cached_behaviours;
+        DeferredBehaviours::Inputs {
+            behaviour_json,
+            gameplay_projection,
+        }
+    };
     let (light, motion) = std::thread::scope(|scope| {
         let light = Step::spawn(scope, parallel, || {
             LightTables::load(root, assets.registry, &facts).map_err(|e| e.to_string())
@@ -17480,9 +17518,8 @@ fn gameplay_tables(
     Ok(GameplayTables {
         light: light?,
         motion: motion?,
-        behaviour_json,
+        deferred_behaviours,
         facts,
-        gameplay_projection,
     })
 }
 
@@ -17591,9 +17628,8 @@ fn load_resources(
         visibility,
         gameplay:
             GameplayTables {
-                behaviour_json,
+                deferred_behaviours,
                 facts,
-                gameplay_projection,
                 light,
                 motion,
             },
@@ -17654,12 +17690,13 @@ fn load_resources(
     // BEFORE allocating `prepare_renderer_textures(&pack)` (~100 MB RGBA mipmaps) and
     // uploading GPU textures on the main thread, preventing unified RAM / 32-bit OOM.
     if cfg!(target_os = "android") {
+        #[cfg(target_os = "android")]
+        crate::performance::mark("world_rest_start");
         let rest = load_world_rest(
             &root,
             &resources,
             &assets,
-            behaviour_json,
-            &gameplay_projection,
+            deferred_behaviours,
             visibility,
             progress,
             started,
@@ -17670,6 +17707,8 @@ fn load_resources(
             .map_err(|_| "world resources already loaded")?;
         horizon_threads::release_free_memory();
         progress.set(9);
+        #[cfg(target_os = "android")]
+        crate::performance::mark("world_rest_ready");
         if menu {
             horizon_client::telemetry::mark_rest_ready();
             log::info!(
@@ -17681,6 +17720,8 @@ fn load_resources(
         let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
         let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
         horizon_threads::release_free_memory();
+        #[cfg(target_os = "android")]
+        crate::performance::mark("handoff_cpu_ready");
         if menu {
             log::info!(
                 "Horizon: handoff CPU resources prepared on worker in {} ms",
@@ -17723,8 +17764,7 @@ fn load_resources(
                     &root,
                     &resources,
                     &assets,
-                    behaviour_json,
-                    &gameplay_projection,
+                    deferred_behaviours,
                     visibility,
                     &progress,
                     started,
@@ -17752,8 +17792,7 @@ fn load_resources(
             &root,
             &resources,
             &assets,
-            behaviour_json,
-            &gameplay_projection,
+            deferred_behaviours,
             visibility,
             progress,
             started,
@@ -17780,8 +17819,7 @@ fn load_world_rest(
     root: &std::path::Path,
     resources: &Resources,
     assets: &Assets,
-    behaviour_json: serde_json::Value,
-    gameplay_projection: &[horizon_client::blocks::GameplayProjection],
+    deferred_behaviours: DeferredBehaviours,
     visibility: horizon_world::block_render::FaceVisibility,
     progress: &Progress,
     started: Instant,
@@ -17802,12 +17840,33 @@ fn load_world_rest(
         let stations = horizon_client::stations::StationData::load(root, &items, overlay);
         Ok((items, recipes, stations))
     };
-    let load_behaviours = move || {
-        let loaded =
-            Behaviours::load_with_gameplay(registry, root, &behaviour_json, gameplay_projection);
-        drop(behaviour_json);
-        horizon_threads::release_free_memory();
-        loaded
+    let load_behaviours = move || -> Result<Behaviours> {
+        match deferred_behaviours {
+            DeferredBehaviours::Ready(b) => Ok(b),
+            DeferredBehaviours::Inputs {
+                behaviour_json,
+                gameplay_projection,
+            } => {
+                if let Some(b) = Behaviours::load_cached(registry, root) {
+                    drop(behaviour_json);
+                    drop(gameplay_projection);
+                    horizon_threads::release_free_memory();
+                    return Ok(b);
+                }
+                let built = Behaviours::build_with_gameplay_uncached(
+                    registry,
+                    root,
+                    &behaviour_json,
+                    &gameplay_projection,
+                )?;
+                drop(behaviour_json);
+                drop(gameplay_projection);
+                horizon_threads::release_free_memory();
+                built.store_cache(registry, root);
+                horizon_threads::release_free_memory();
+                Ok(built)
+            }
+        }
     };
     let load_block_entity_render = || {
         horizon_client::block_entity_render::BlockEntityRenderer::load_with_visibility(
@@ -17907,9 +17966,10 @@ fn load_world_rest(
                 )
             })
         } else {
+            let behaviours = text(load_behaviours());
             (
                 text(load_items()),
-                text(load_behaviours()),
+                behaviours,
                 text(load_block_entity_render()),
                 text(load_animate()),
                 text(load_mobs()),
@@ -18469,12 +18529,21 @@ impl Loading {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_os = "android")]
         if let Some(renderer) = &mut self.renderer {
-            if let Err(error) = renderer.recreate_surface() {
-                self.error = Some(error);
-                crate::game::exit_app(event_loop);
-            } else if let Some(window) = &self.window {
+            crate::performance::mark("loading_resumed");
+            if renderer.suspended {
+                if let Err(error) = renderer.recreate_surface() {
+                    self.error = Some(error);
+                    crate::game::exit_app(event_loop);
+                    return;
+                }
+            }
+            renderer.gamma = self.settings.gamma;
+            renderer.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);
+            horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
+            if let Some(window) = &self.window {
                 let size = window.inner_size();
                 renderer.resize(size.width, size.height);
+                window.request_redraw();
             }
             return;
         }
@@ -18820,6 +18889,38 @@ enum App {
     Loading(Box<Loading>),
     Ready(Box<Game<'static>>),
 }
+#[cfg(target_os = "android")]
+pub(crate) struct AndroidGame(App);
+#[cfg(target_os = "android")]
+impl AndroidGame {
+    pub(crate) fn take_android_handoff(&mut self) -> Option<(Arc<Window>, Renderer)> {
+        match &mut self.0 {
+            App::Loading(loading) => Some((loading.window.take()?, loading.renderer.take()?)),
+            App::Ready(game) => Some((game.window.take()?, game.renderer.take()?)),
+        }
+    }
+}
+#[cfg(target_os = "android")]
+impl ApplicationHandler for AndroidGame {
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        self.0.suspended(event_loop);
+    }
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.0.resumed(event_loop);
+    }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.0.window_event(event_loop, id, event);
+    }
+    fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
+        self.0.device_event(event_loop, id, event);
+    }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.0.about_to_wait(event_loop);
+    }
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        self.0.exiting(event_loop);
+    }
+}
 impl ApplicationHandler for App {
     #[cfg(target_os = "android")]
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
@@ -18897,7 +18998,11 @@ impl ApplicationHandler for App {
         };
         match step {
             Step::Waiting => {}
-            Step::Ready(game) => *self = App::Ready(game),
+            Step::Ready(game) => {
+                #[cfg(target_os = "android")]
+                crate::performance::mark("game_ready");
+                *self = App::Ready(game);
+            }
             Step::Done => crate::game::exit_app(event_loop),
             Step::Failed(e) => {
                 if let App::Loading(loading) = self {
@@ -18985,7 +19090,7 @@ fn loading_app(
 }
 
 #[cfg(target_os = "android")]
-pub(crate) fn android_game() -> Result<Box<dyn ApplicationHandler>> {
+pub(crate) fn android_game(handoff: Option<(Arc<Window>, Renderer)>) -> Result<AndroidGame> {
     horizon_client::auth::clear_current();
     let mut options = Options::read()?.ok_or("missing Android options")?;
     if crate::performance::active() {
@@ -18996,13 +19101,14 @@ pub(crate) fn android_game() -> Result<Box<dyn ApplicationHandler>> {
     let root = options.resources.clone();
     horizon_threads::put_helpers_behind();
     Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));
-    Ok(Box::new(loading_app(
-        options,
-        settings,
-        root,
-        None,
-        Instant::now(),
-    )?))
+    crate::performance::mark("android_game_init");
+    let mut app = loading_app(options, settings, root, None, Instant::now())?;
+    if let (App::Loading(loading), Some((window, renderer))) = (&mut app, handoff) {
+        horizon_client::telemetry::note_display(&window);
+        loading.window = Some(window);
+        loading.renderer = Some(renderer);
+    }
+    Ok(AndroidGame(app))
 }
 
 fn run_loading(

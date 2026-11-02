@@ -6779,18 +6779,29 @@ impl Game<'_> {
         let eff_face = acc.as_ref().map_or(hit.face, |a| a.effective_face);
         let eff_pt = acc.as_ref().map_or(hit.point, |a| {
             [
-                f64::from(hit.pos[0]) + f64::from(a.cursor[0]).clamp(0.05, 0.95),
-                f64::from(hit.pos[1]) + f64::from(a.cursor[1]).clamp(0.05, 0.95),
-                f64::from(hit.pos[2]) + f64::from(a.cursor[2]).clamp(0.05, 0.95),
+                f64::from(hit.pos[0]) + f64::from(a.local_cursor[0]).clamp(0.05, 0.95),
+                f64::from(hit.pos[1]) + f64::from(a.local_cursor[1]).clamp(0.05, 0.95),
+                f64::from(hit.pos[2]) + f64::from(a.local_cursor[2]).clamp(0.05, 0.95),
             ]
         });
+        let sync_rot = self.settings.extras.placement_protocol
+            == horizon_client::volt_features::PlacementProtocol::Carpet
+            || self.settings.extras.placement_rotation_sync;
         let ctx = horizon_world::level::PlaceContext {
             clicked_pos: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
             face: horizon_core::geometry::Direction::ALL[face_direction(eff_face) as usize],
             hit: Vec3::new(eff_pt[0], eff_pt[1], eff_pt[2]),
             inside: hit.face == [0; 3],
-            yaw: acc.as_ref().map_or(self.yaw, |a| a.effective_yaw),
-            pitch: acc.as_ref().map_or(self.pitch, |a| a.effective_pitch),
+            yaw: if sync_rot {
+                acc.as_ref().map_or(self.yaw, |a| a.effective_yaw)
+            } else {
+                self.yaw
+            },
+            pitch: if sync_rot {
+                acc.as_ref().map_or(self.pitch, |a| a.effective_pitch)
+            } else {
+                self.pitch
+            },
             sneaking: self.keys.contains(&KeyCode::ShiftLeft),
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),

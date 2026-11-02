@@ -85,6 +85,24 @@ fn write_line(file: &mut impl Write, row: &Value) -> std::io::Result<usize> {
 pub fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
+pub fn mark(stage: &str) {
+    if !active() {
+        return;
+    }
+    if let Some(r) = RECORDER.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        let elapsed_ms = r.start.elapsed().as_millis() as u64;
+        if r.sender
+            .try_send(json!({
+                "type": "stage",
+                "t_ms": elapsed_ms,
+                "stage": stage,
+            }))
+            .is_err()
+        {
+            r.dropped += 1;
+        }
+    }
+}
 pub fn slow_frame(cpu: f32, timings: &[spans::Span]) {
     if !active() || cpu < 50.0 {
         return;

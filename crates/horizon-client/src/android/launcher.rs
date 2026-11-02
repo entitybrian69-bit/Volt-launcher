@@ -37,9 +37,10 @@ pub(super) struct Launcher {
     controller_repeat: Option<(horizon_client::gamepad::Button, Instant, bool)>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    renderer_signature: Option<(crate::catalog::RendererMode, Option<PathBuf>)>,
     gui: Option<game::UiResources>,
     pub(super) audio: Option<horizon_client::audio::Audio>,
-    game: Option<Box<dyn ApplicationHandler>>,
+    game: Option<game::AndroidGame>,
     cursor: (f64, f64),
     mouse_down: bool,
     feedback: Option<(pages::Action, Instant)>,
@@ -149,6 +150,7 @@ impl Launcher {
             controller_repeat: None,
             window: None,
             renderer: None,
+            renderer_signature: None,
             gui: None,
             audio: None,
             game: None,
@@ -192,9 +194,28 @@ impl Launcher {
         if !horizon_client::android_runtime::take_launcher_return() {
             return;
         }
+        let mut reclaimed = None;
         if let Some(mut game) = self.game.take() {
             game.exiting(events);
+            reclaimed = game.take_android_handoff();
             drop(game);
+        }
+        if let Some((window, mut renderer)) = reclaimed {
+            if renderer.can_replace_world_textures(1) {
+                let _ = renderer.replace_world_textures(
+                    &[0; 4],
+                    1,
+                    1,
+                    1,
+                    &[],
+                    &[],
+                    (&[0; 4], 1),
+                    None,
+                );
+            }
+            self.window = Some(window);
+            self.renderer = Some(renderer);
+            self.gui = None;
         }
         horizon_threads::release_free_memory();
         crate::performance::stop();
@@ -248,14 +269,56 @@ impl Launcher {
         crate::platform::set_orientation(self.catalog.config.orientation);
         self.configure_screen();
         crate::display::set_scale(self.catalog.config.render_scale);
-        horizon_client::android_runtime::configure_gpu(false);
+        let desired_sig = (
+            self.catalog.config.renderer,
+            self.catalog.config.custom_vulkan_driver.clone(),
+        );
+        horizon_client::android_runtime::configure_graphics_api(
+            self.catalog.config.renderer.graphics_api(),
+        );
+        horizon_client::android_runtime::configure_gpu(
+            self.catalog.config.renderer == crate::catalog::RendererMode::Vulkan,
+        );
+        if self.renderer.is_some() && self.renderer_signature != Some(desired_sig.clone()) {
+            if let Some(mut old_renderer) = self.renderer.take() {
+                old_renderer.suspend_surface();
+                drop(old_renderer);
+            }
+            self.window = None;
+            self.gui = None;
+        }
         if let Some(renderer) = &mut self.renderer {
             if let Some(size) = crate::display::prepare(self.window.as_ref().unwrap())? {
                 renderer.resize(size[0], size[1]);
             }
-            renderer.recreate_surface()?;
+            if renderer.suspended {
+                renderer.recreate_surface()?;
+            }
             let size = self.window.as_ref().unwrap().inner_size();
             renderer.resize(size.width, size.height);
+            if self.gui.is_none() {
+                let gui = game::UiResources {
+                    atlas: HudAtlas::build(&self.home.join("installer"))?,
+                    panorama: Arc::new(horizon_client::gfx::panorama::Faces {
+                        size: 1,
+                        pixels: [0u8; 4].repeat(6),
+                    }),
+                };
+                let atlas = &gui.atlas;
+                atlas.font.reset_cache();
+                renderer.replace_ui_textures(
+                    (&atlas.pixels, atlas.width, atlas.height),
+                    (&atlas.glint.0, atlas.glint.1, atlas.glint.2),
+                    (
+                        &atlas.glint_armor.0,
+                        atlas.glint_armor.1,
+                        atlas.glint_armor.2,
+                    ),
+                    &gui.panorama,
+                )?;
+                renderer.hud.sprite_animations.clear();
+                self.gui = Some(gui);
+            }
             return Ok(());
         }
         let window = Arc::new(
@@ -269,9 +332,6 @@ impl Launcher {
                 pixels: [0u8; 4].repeat(6),
             }),
         };
-        horizon_client::android_runtime::configure_graphics_api(
-            self.catalog.config.renderer.graphics_api(),
-        );
         self.renderer = Some(game::loading_renderer(
             window.clone(),
             false,
@@ -279,6 +339,7 @@ impl Launcher {
             None,
             self.catalog.config.renderer.graphics_api(),
         )?);
+        self.renderer_signature = Some(desired_sig);
         self.window = Some(window);
         self.gui = Some(gui);
         Ok(())
@@ -413,15 +474,48 @@ impl Launcher {
             horizon_client::android_runtime::clear_gamepads();
             self.controller_edges = Default::default();
             self.controller_repeat = None;
-            // Release the launcher's GPU device, swapchain surface, and UI atlas BEFORE
-            // creating the game so first-launch asset extraction + game startup never
-            // hold two live Vulkan/GL contexts or exceed mobile LMKD budgets.
-            self.renderer = None;
-            self.window = None;
+            // Hand the live `(Window, Renderer)` directly into `Loading` when the
+            // active graphics mode & custom driver match, avoiding a second Vulkan
+            // instance/device/swapchain teardown + creation cycle on the same
+            // `ANativeWindow` during cold-start.
             self.gui = None;
             horizon_client::ui_theme::reset_atlas();
+            let desired_sig = (
+                self.catalog.config.renderer,
+                self.catalog.config.custom_vulkan_driver.clone(),
+            );
+            let handoff = if self.renderer_signature == Some(desired_sig.clone()) {
+                match (self.window.take(), self.renderer.take()) {
+                    (Some(window), Some(mut renderer)) => {
+                        let white = [255u8; 4];
+                        let blank_pano = horizon_client::gfx::panorama::Faces {
+                            size: 1,
+                            pixels: [0u8; 4].repeat(6),
+                        };
+                        let _ = renderer.replace_ui_textures(
+                            (&white, 1, 1),
+                            (&white, 1, 1),
+                            (&white, 1, 1),
+                            &blank_pano,
+                        );
+                        renderer.hud.sprite_animations.clear();
+                        crate::performance::mark("handoff_reuse_renderer");
+                        Some((window, renderer))
+                    }
+                    _ => None,
+                }
+            } else {
+                if let Some(mut old_renderer) = self.renderer.take() {
+                    old_renderer.suspend_surface();
+                    drop(old_renderer);
+                }
+                self.window = None;
+                self.renderer_signature = Some(desired_sig);
+                crate::performance::mark("handoff_recreate_renderer");
+                None
+            };
             horizon_threads::release_free_memory();
-            let game = match game::android_game() {
+            let game = match game::android_game(handoff) {
                 Ok(game) => game,
                 Err(error) => {
                     crate::performance::stop();
@@ -455,6 +549,7 @@ impl Launcher {
                         *current =
                             horizon_client::official_install::InstallProgress { done, ..update };
                     });
+                horizon_threads::release_free_memory();
                 let _ = sender.send(result.map_err(|e| e.to_string()));
             });
         }

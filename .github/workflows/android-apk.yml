@@ -994,10 +994,10 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher
-          - Built-in **Vulkan Supporter** & custom Vulkan driver loader (.zip / .adpkg / .so) so Vulkan 1.0, Mali, PowerVR, Adreno, and 32-bit GPUs run fast on Vulkan instead of slow OpenGL ES
-          - Fixed **first-launch game crash** by releasing launcher GPU resources before handoff and serializing initial asset & sprite-array loading within mobile memory limits
-          - Fixed **Accurate Block Placement** across Singleplayer, LAN, Multiplayer, and Android Touch Controls (6-way pistons/observers/dispensers/crafters/rods/shulkers, logs, hoppers, slabs, corner stairs, trapdoors, and anvils)
+          ### What's New in Volt Launcher 0.8.2
+          - Fixed **first-launch crash** via zero-destruction Vulkan/GL surface handoff between Volt Launcher and the game, Vulkan Supporter GPU timestamp/compute safety guards, and streaming cold-start cache writes (~900 MB lower peak RAM)
+          - Overhauled **Accurate Block Placement** across Touch Tap/D-Pad, Split Controls, imported custom controls, Singleplayer, LAN, and Multiplayer (3D sub-face quadrant guide, 3D reach-around bridging cube, tappable REV/LOCK HUD pills, and exact chest/furnace/stairs/piston/log orientation)
+          - Built-in **Vulkan Supporter** & custom Vulkan driver loader (.zip / .adpkg / .so) for Vulkan 1.0, Mali, PowerVR, Adreno, and 32-bit GPUs
           - Native **64-bit (arm64-v8a)** and **32-bit (armeabi-v7a)** Android APK builds with automatic ABI-matched one-time in-app update reminders
           EOF
           sed -i 's/^          //' "$NOTES_FILE"

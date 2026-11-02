@@ -1343,13 +1343,18 @@ async fn open_backend(
     // stand-in neither clamps nor drops NaN.
     let mobile = cfg!(target_os = "android");
     let compatibility = crate::android_runtime::compatibility();
+    let supporter = horizon_hdr::vulkan_supporter_mode();
     let features = timing::GpuTimer::features(&adapter)
-        | if compatibility {
+        | if compatibility || supporter {
             wgpu::Features::empty()
         } else {
             cull::Cull::features(&adapter)
         }
-        | oit::features(&adapter)
+        | if supporter {
+            wgpu::Features::empty()
+        } else {
+            oit::features(&adapter)
+        }
         | (adapter.features()
             & (if compatibility {
                 wgpu::Features::empty()

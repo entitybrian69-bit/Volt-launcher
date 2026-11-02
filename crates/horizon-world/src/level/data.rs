@@ -656,6 +656,23 @@ pub(super) fn load_with_gameplay<G: GameplayStateSource>(
     })
 }
 
+pub(super) fn load_cached(registry: &BlockRegistry, root: &Path) -> Option<Behaviours> {
+    cache::load(registry, root)
+}
+
+pub(super) fn build_with_gameplay_uncached<G: GameplayStateSource>(
+    registry: &BlockRegistry,
+    root: &Path,
+    behaviour: &Value,
+    gameplay_states: &[G],
+) -> io::Result<Behaviours> {
+    build_with_gameplay(registry, root, behaviour, gameplay_states)
+}
+
+pub(super) fn store_cache(registry: &BlockRegistry, root: &Path, behaviours: &Behaviours) {
+    cache::store(registry, root, behaviours);
+}
+
 /// The snapshot when it matches, else `build` and refresh the snapshot.
 fn cached(
     registry: &BlockRegistry,

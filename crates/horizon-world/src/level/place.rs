@@ -413,13 +413,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     }
                 }
             }
-            Class::Banner => {
-                Some(table.set_int(default, p.rotation, rotation_segment(ctx.yaw + 180.0)))
-            }
+            Class::Banner => Some(table.set_int(
+                default,
+                p.rotation,
+                acc_horiz
+                    .map_or_else(|| rotation_segment(ctx.yaw + 180.0), rotation_segment_of),
+            )),
             Class::StandingSign => Some(wl(table.set_int(
                 default,
                 p.rotation,
-                rotation_segment(ctx.yaw + 180.0),
+                acc_horiz
+                    .map_or_else(|| rotation_segment(ctx.yaw + 180.0), rotation_segment_of),
             ))),
             Class::Barrel | Class::Command | Class::Dispenser => Some(table.set_dir(
                 default,
@@ -860,7 +864,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::PitcherCrop => Some(default),
             Class::SmallDripleaf => {
                 let state = sup!()?;
-                let state = table.set_dir(state, p.facing, horizontal.opposite());
+                let state = table.set_dir(
+                    state,
+                    p.facing,
+                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
+                );
                 let water = self.is_water_at(pos);
                 Some(
                     table
@@ -879,7 +887,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::DriedGhast => {
                 let state = sup!()?;
-                Some(table.set_dir(wl(state), p.facing, horizontal.opposite()))
+                Some(table.set_dir(
+                    wl(state),
+                    p.facing,
+                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
+                ))
             }
             Class::EndRod => {
                 if let Some((dir, _)) = ctx.accurate {
@@ -911,7 +923,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         } else {
                             "floor"
                         };
-                        table.set_dir(table.set_text(default, p.face, face), p.facing, horizontal)
+                        table.set_dir(
+                            table.set_text(default, p.face, face),
+                            p.facing,
+                            acc_horiz.unwrap_or(horizontal),
+                        )
                     } else {
                         table.set_dir(
                             table.set_text(default, p.face, "wall"),

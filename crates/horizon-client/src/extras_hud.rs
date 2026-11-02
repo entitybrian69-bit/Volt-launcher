@@ -489,6 +489,83 @@ pub fn draw_waypoint_hud_button(batch: &mut HudBatch, atlas: &HudAtlas, rect: [f
     );
 }
 
+/// Touch-friendly `[REV]` and `[LOCK]` quick-action pills for Accurate Block Placement.
+pub fn placement_hud_button_rects(screen_w: f32, _screen_h: f32) -> ([f32; 4], [f32; 4]) {
+    let rev_w = 31.0;
+    let lock_w = 42.0;
+    let h = 16.0;
+    let rev_x = (screen_w * 0.5 - 136.0).max(75.0);
+    let lock_x = rev_x + rev_w + 3.0;
+    ([rev_x, 4.0, rev_w, h], [lock_x, 4.0, lock_w, h])
+}
+
+pub fn draw_placement_hud_buttons(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    screen_w: f32,
+    screen_h: f32,
+    reversed: bool,
+    lock_label: Option<&str>,
+) {
+    let (rev_rect, lock_rect) = placement_hud_button_rects(screen_w, screen_h);
+    let draw_pill = |batch: &mut HudBatch, rect: [f32; 4], text: &str, border: u32, fill: u32| {
+        let [x, y, w, h] = rect;
+        batch.fill(atlas, x, y, w, h, border);
+        batch.fill(atlas, x + 1.0, y + 1.0, w - 2.0, h - 2.0, fill);
+        let tw = HudBatch::text_width(atlas, text);
+        batch.text(
+            atlas,
+            text,
+            (x + (w - tw) * 0.5).floor(),
+            y + 4.0,
+            rgba(255, 255, 255, 250),
+            true,
+        );
+    };
+    draw_pill(
+        batch,
+        rev_rect,
+        "REV",
+        if reversed {
+            rgba(245, 158, 11, 235)
+        } else {
+            rgba(220, 38, 38, 200)
+        },
+        if reversed {
+            rgba(120, 53, 15, 230)
+        } else {
+            rgba(14, 15, 20, 225)
+        },
+    );
+    let lock_caption = match lock_label {
+        Some("North") => "LCK:N",
+        Some("South") => "LCK:S",
+        Some("East") => "LCK:E",
+        Some("West") => "LCK:W",
+        Some("Up") => "LCK:U",
+        Some("Down") => "LCK:D",
+        Some("Top Half") => "LCK:T",
+        Some("Bottom Half") => "LCK:B",
+        Some(_) => "LOCKED",
+        None => "LOCK",
+    };
+    draw_pill(
+        batch,
+        lock_rect,
+        lock_caption,
+        if lock_label.is_some() {
+            rgba(251, 191, 36, 240)
+        } else {
+            rgba(220, 38, 38, 200)
+        },
+        if lock_label.is_some() {
+            rgba(120, 53, 15, 230)
+        } else {
+            rgba(14, 15, 20, 225)
+        },
+    );
+}
+
 /// Crosshair quadrant reticle & orientation pill for Accurate Block Placement.
 pub fn draw_placement_hud_badge(
     batch: &mut HudBatch,

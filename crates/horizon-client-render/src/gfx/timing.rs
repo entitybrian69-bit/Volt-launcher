@@ -70,6 +70,17 @@ pub(super) const MARKER: &str =
 impl GpuTimer {
     /// The features timing uses that the adapter has (none: no timing).
     pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
+        // Legacy mobile Vulkan 1.0 drivers (VulkanSupporter) often advertise broken timestamp
+        // queues or lack compute pipelines required by `Markers` when `TIMESTAMP_QUERY_INSIDE_ENCODERS`
+        // is absent. Skip GPU timestamp queries cleanly there instead of panicking or crashing.
+        if horizon_hdr::vulkan_supporter_mode()
+            || !adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
+        {
+            return wgpu::Features::empty();
+        }
         adapter.features()
             & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
     }

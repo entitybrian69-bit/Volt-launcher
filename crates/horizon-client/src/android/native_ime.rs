@@ -801,7 +801,7 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.8.1".into()
+    "0.8.2".into()
 }
 
 pub fn configure_screen(immersive: bool, avoid_cutout: bool) {
