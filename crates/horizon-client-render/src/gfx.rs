@@ -3764,7 +3764,7 @@ impl Renderer {
                 },
             ],
         });
-        if self.sections.is_empty() {
+        if self.sections.len() == 0 {
             self.active_layer_counts.clear();
         }
         Ok(())

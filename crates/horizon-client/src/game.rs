@@ -14630,8 +14630,8 @@ impl Game<'_> {
             );
             if self.settings.extras.lookahead_stream {
                 let yaw = p.yaw.to_radians();
-                let vx = p.velocity.x * 4.0 - yaw.sin();
-                let vz = p.velocity.z * 4.0 + yaw.cos();
+                let vx = (p.velocity.x as f32) * 4.0 - yaw.sin();
+                let vz = (p.velocity.z as f32) * 4.0 + yaw.cos();
                 let len = (vx * vx + vz * vz).sqrt();
                 self.streaming.lookahead_dir = (len > 1e-3).then_some([vx / len, vz / len]);
             } else {

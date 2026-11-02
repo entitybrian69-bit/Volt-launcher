@@ -660,8 +660,8 @@ fn draw_rounded_hud_box(
     a: &HudAtlas,
     rect: [f32; 4],
     radius: f32,
-    fill: [f32; 4],
-    stroke: [f32; 4],
+    fill: u32,
+    stroke: u32,
 ) {
     let [x, y, w, h] = rect;
     let r = radius.floor().clamp(2.0, (w.min(h) * 0.48).max(2.0)) as i32;

@@ -453,15 +453,6 @@ impl Opt {
     pub fn label(self, s: &Settings) -> Text {
         let c = self.caption();
         let touch_value = match self {
-            Opt::TouchPreset => Some(
-                if let Some(p) = crate::touch::BuiltInPreset::detect(&s.touch) {
-                    p.label().to_owned()
-                } else if let Some(meta) = &s.touch.imported_from {
-                    meta.name.clone()
-                } else {
-                    "Custom Layout".to_owned()
-                },
-            ),
             Opt::TouchMode => Some(
                 crate::touch::Mode::SCHEMES
                     .iter()
@@ -908,6 +899,16 @@ impl Opt {
                 c,
                 Text::literal(format!("{}%", s.horizon.resolution_scale.clamp(25, 200))),
             ),
+            Opt::TouchPreset => {
+                let name = if let Some(p) = crate::touch::BuiltInPreset::detect(&s.touch) {
+                    p.label().to_owned()
+                } else if let Some(meta) = &s.touch.imported_from {
+                    meta.name.clone()
+                } else {
+                    "Custom Layout".to_owned()
+                };
+                generic(c, Text::literal(name))
+            }
             _ => Text::empty(),
         }
     }
@@ -5996,7 +5997,7 @@ mod tests {
         )));
         for expected in [
             crate::touch::BuiltInPreset::PojavClassic,
-            crate::touch::BuiltInPreset::Zalith,
+            crate::touch::BuiltInPreset::ZalithModern,
             crate::touch::BuiltInPreset::FoldCraft,
             crate::touch::BuiltInPreset::PvpClaw,
             crate::touch::BuiltInPreset::VoltDefault,

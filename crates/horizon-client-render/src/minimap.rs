@@ -101,6 +101,18 @@ struct Tile {
 fn scan_column(
     chunk: &Chunk,
     palette: &Palette,
+    x: i32,
+    z: i32,
+    top: i32,
+    layer: Layer,
+) -> (u8, i16, u8) {
+    scan_column_with_air(chunk, palette, 0, palette.get(0).0 == 0, x, z, top, layer)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_column_with_air(
+    chunk: &Chunk,
+    palette: &Palette,
     air: u32,
     skip_air: bool,
     x: i32,
@@ -175,7 +187,7 @@ fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision:
     };
     for z in 0..16 {
         for x in 0..16 {
-            let (c, h, d) = scan_column(chunk, palette, air, skip_air, x, z, top, layer);
+            let (c, h, d) = scan_column_with_air(chunk, palette, air, skip_air, x, z, top, layer);
             let i = (z * 16 + x) as usize;
             tile.color[i] = c;
             tile.height[i] = h;
