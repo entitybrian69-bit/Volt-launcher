@@ -895,10 +895,10 @@ impl Opt {
                 gamepad::TextKeyboard::Horizon => "horizon.options.keyboard.horizon",
                 gamepad::TextKeyboard::Steam => "horizon.options.keyboard.steam",
             }),
-            Opt::VoltResolutionScale => generic(
-                c,
-                Text::literal(format!("{}%", s.horizon.resolution_scale.clamp(25, 200))),
-            ),
+            Opt::VoltResolutionScale => Text::literal(format!(
+                "{}%",
+                s.horizon.resolution_scale.clamp(25, 200)
+            )),
             Opt::TouchPreset => {
                 let name = if let Some(p) = crate::touch::BuiltInPreset::detect(&s.touch) {
                     p.label().to_owned()
@@ -907,7 +907,7 @@ impl Opt {
                 } else {
                     "Custom Layout".to_owned()
                 };
-                generic(c, Text::literal(name))
+                Text::literal(name)
             }
             _ => Text::empty(),
         }
