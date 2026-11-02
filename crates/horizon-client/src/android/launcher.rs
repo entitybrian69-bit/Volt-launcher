@@ -37,7 +37,7 @@ pub(super) struct Launcher {
     controller_repeat: Option<(horizon_client::gamepad::Button, Instant, bool)>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
-    renderer_signature: Option<(crate::catalog::RendererMode, Option<PathBuf>)>,
+    renderer_signature: Option<(crate::catalog::RendererMode, Option<String>)>,
     gui: Option<game::UiResources>,
     pub(super) audio: Option<horizon_client::audio::Audio>,
     game: Option<game::AndroidGame>,
