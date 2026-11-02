@@ -104,7 +104,6 @@ impl Behaviours {
             sneaking: false,
             item: String::new(),
             replace_clicked: true,
-            accurate: None,
         };
         let may_replace = sim.can_be_replaced(current, &ctx);
         let would_continue = sim.is_free(sim.below_state(pos)) && (!concrete || !stuck_in_water);
