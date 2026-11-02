@@ -246,8 +246,12 @@ jobs:
           python3 - <<'PY'
           import subprocess, sys
           cmds = [
+              ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
+              ["cargo", "test", "-p", "horizon-protocol", "--lib", "multiversion"],
+              ["cargo", "test", "-p", "horizon-protocol", "--lib", "login_round_trips"],
               ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "packs"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
@@ -994,11 +998,11 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.8.3
-          - Permanently resolved **First-Launch Crash**: Vulkan Supporter default on fresh installs, async background engine-data unpacking, post-install `behaviours-v2.bin` cache pre-warming, zero-projection cold-start loader (~730 MB lower peak RAM), and `device.poll` texture swap fences
-          - New **Volt Settings** tab in the Volt Launcher left sidebar with full Tier 1–3 performance, Vulkan driver, resolution/Auto-DRS, big.LITTLE thread affinity, Volt Reflex, RAM compactor, and hardware tuning
-          - New **Volt Boost** Performance Hub on the **Pause Screen**, **Title Screen**, **Launcher Home Dashboard**, and **Volt Settings**: 1-click profiles (Balanced, Competitive PvP, Ultra FPS, Battery Saver, Low-RAM) + Auto-Tune My Device + Purge RAM Now
-          - Genuine native Rust engine optimizations across all 3 tiers: Auto-DRS, Live FPS/1% Low/Frame-Time Sparkline HUD, Smart Leaf Culling, Frustum-First Meshing, Cave Sky Culling, Entity/Item/Block-Entity Caps + 3D Wall Occlusion, Hub Lag Shield, Particle Burst Shield, Smart Texture Tick Throttling, Dynamic Menu/Idle FPS, Fast Dark Menu Backdrop, and Thermal Guard
+          ### What's New in Volt Launcher 0.9.0
+          - **Pure-Rust Multi-Version Support (`1.20.1` to `26.3`)**: Switch seamlessly between **21 official Minecraft Java releases** (`1.20.1`–`1.20.6`, `1.21`–`1.21.11`, and `26.1`–`26.3`) right from the Play Dashboard or Settings — 100% native Rust with zero JVM overhead
+          - **Multi-Version Multiplayer Protocol Engine (`763`–`777`)**: Join `1.20.1` (`763`, pre-Configuration direct `Login -> Play`), `1.20.2`–`1.20.6` (`764`–`766`), `1.21`–`1.21.11` (`767`–`774`), and `26.1`–`26.3` (`775`–`777`) servers with version-matched server-list pings, packet translation, and payload adapters
+          - **Era-Accurate Singleplayer & Legacy Resource Packs**: Isolated per-version save/pack directories (retaining existing `26.3` worlds intact), era-gated Creative inventory, Crafting recipes, and mob spawning per release drop, plus `pack_format 15+` (`1.20.1+`) resource-pack compatibility and legacy `grass`/`scute` asset aliasing
+          - **Version-Aware Catalogs**: Modrinth & CurseForge resource pack, mod, and shader searches automatically target your selected Minecraft version
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

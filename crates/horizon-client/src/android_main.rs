@@ -70,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.8.3"
+        "0.9.0"
     } else {
-        "0.8.3-dev"
+        "0.9.0-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -166,6 +166,8 @@ pub(crate) fn android_arguments() -> horizon_client::Result<Vec<String>> {
         home.join(".local/horizon-client/26.3")
             .to_string_lossy()
             .into_owned(),
+        "--mc-version".into(),
+        config.selected_version().id().into(),
     ];
     if !PUBLIC_BUILD {
         args.extend([

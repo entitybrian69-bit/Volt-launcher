@@ -230,8 +230,10 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
                                 save_icon(&file, &address, icon);
                             }
                         }
-                        // OnlineServerEntry: SUCCESSFUL only for this game's protocol.
-                        if protocol == i64::from(horizon_protocol::PROTOCOL_VERSION) {
+                        // OnlineServerEntry: SUCCESSFUL for the active GameVersion's protocol.
+                        let active_proto =
+                            i64::from(horizon_core::game_version::active_version().protocol());
+                        if protocol == active_proto {
                             Ping::Ok {
                                 motd,
                                 players,

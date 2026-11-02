@@ -644,6 +644,12 @@ impl Options {
                                 o.quick_play = Some(value);
                             }
                             "--game-dir" | "--gameDir" => o.game_dir = Some(value.into()),
+                            "--mc-version" | "--version" => {
+                                let Some(ver) = horizon_core::game_version::GameVersion::from_id(&value) else {
+                                    return Err(format!("unsupported Minecraft version {value}").into());
+                                };
+                                horizon_core::game_version::set_active_version(ver);
+                            }
                             // main has made it the game home already (logging::set_game_home).
                             "--home" => {}
                             "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),

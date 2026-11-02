@@ -244,7 +244,11 @@ pub fn is_valid_empty_spawn<L: SpawnLevel>(s: Species, l: &L, x: i32, y: i32, z:
 }
 /// `SpawnPlacements.isSpawnPositionOk`.
 pub fn is_spawn_position_ok<L: SpawnLevel>(s: Species, l: &L, x: i32, y: i32, z: i32) -> bool {
-    let id = format!("minecraft:{}", super::species::def(s).name);
+    let species_name = super::species::def(s).name;
+    if !horizon_core::game_version::active_version().is_mob_available(species_name) {
+        return false;
+    }
+    let id = format!("minecraft:{species_name}");
     match l.mob_data().placement(&id) {
         data::Placement::OnGround => {
             is_valid_spawn(s, l, x, y - 1, z)

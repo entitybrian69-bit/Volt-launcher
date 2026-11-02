@@ -24,6 +24,7 @@ impl Origin {
 }
 
 fn version(versions: &[Version]) -> Option<&Version> {
+    let target_game = horizon_core::game_version::active_version().id();
     let usable = |v: &&Version| {
         v.blocked.is_none()
             && v.file()
@@ -32,7 +33,13 @@ fn version(versions: &[Version]) -> Option<&Version> {
     versions
         .iter()
         .filter(usable)
-        .find(|v| v.game_versions.iter().any(|g| g == browser::GAME))
+        .find(|v| v.game_versions.iter().any(|g| g == target_game))
+        .or_else(|| {
+            versions
+                .iter()
+                .filter(usable)
+                .find(|v| v.game_versions.iter().any(|g| g == browser::GAME))
+        })
         .or_else(|| versions.iter().find(usable))
 }
 

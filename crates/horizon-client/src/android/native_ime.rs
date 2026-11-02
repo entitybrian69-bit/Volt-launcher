@@ -811,7 +811,7 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.8.3".into()
+    "0.9.0".into()
 }
 
 pub fn set_keep_screen_awake(awake: bool) {

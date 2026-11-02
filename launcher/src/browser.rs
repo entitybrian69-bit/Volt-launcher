@@ -292,12 +292,18 @@ pub fn source(id: SourceId) -> Option<Box<dyn Source>> {
     sources().into_iter().find(|s| s.id() == id)
 }
 
+/// Active target Minecraft release selected at runtime (defaults to [`GAME`] = `"26.3"`).
+pub fn active_game() -> &'static str {
+    horizon_core::game_version::active_version().id()
+}
+
 /// How well a project of `kind` made for `game_versions` and `loaders` runs in Horizon.
 pub fn support(kind: Kind, game_versions: &[String], loaders: &[String]) -> Support {
+    let target_game = active_game();
     if loaders.iter().any(|l| l == horizon::LOADER) {
         // Made for Horizon and reviewed: it runs when it is for the version Horizon plays.
         return match newest_release(game_versions)
-            .filter(|_| !game_versions.iter().any(|v| v == GAME))
+            .filter(|_| !game_versions.iter().any(|v| v == target_game || v == GAME))
         {
             Some(other) => Support::No(format!("Made for Horizon on {other}.")),
             None => Support::Works,
@@ -305,7 +311,7 @@ pub fn support(kind: Kind, game_versions: &[String], loaders: &[String]) -> Supp
     }
     match kind {
         Kind::ResourcePack => {
-            if game_versions.iter().any(|v| v == GAME) {
+            if game_versions.iter().any(|v| v == target_game) {
                 Support::Works
             } else if let Some(newest) = newest_release(game_versions) {
                 Support::Partial(format!(
@@ -322,7 +328,7 @@ pub fn support(kind: Kind, game_versions: &[String], loaders: &[String]) -> Supp
         Kind::Shader => Support::No("Not one of Horizon's own shader packs.".into()),
         Kind::DataPack => {
             let made_for = match newest_release(game_versions) {
-                _ if game_versions.iter().any(|v| v == GAME) => String::new(),
+                _ if game_versions.iter().any(|v| v == target_game) => String::new(),
                 Some(newest) => format!("Made for {newest}: the game may refuse it. "),
                 None => "Lists no Minecraft version. ".into(),
             };
@@ -381,6 +387,7 @@ fn newest_release(versions: &[String]) -> Option<&str> {
 /// The version to install: the newest one that runs, or with `everything` the newest at all.
 /// `versions` is newest first, as [`Source::versions`] gives them.
 pub fn pick(kind: Kind, versions: &[Version], everything: bool) -> Option<&Version> {
+    let target_game = active_game();
     let mut usable = versions
         .iter()
         .filter(|v| v.blocked.is_none() && v.file().is_some());
@@ -388,7 +395,7 @@ pub fn pick(kind: Kind, versions: &[Version], everything: bool) -> Option<&Versi
         .iter()
         .any(|v| v.loaders.iter().any(|l| l == horizon::LOADER))
     {
-        return usable.find(|v| v.game_versions.iter().any(|g| g == GAME));
+        return usable.find(|v| v.game_versions.iter().any(|g| g == target_game || g == GAME));
     }
     if kind == Kind::Mod {
         let java = |v: &&Version| {
@@ -396,7 +403,7 @@ pub fn pick(kind: Kind, versions: &[Version], everything: bool) -> Option<&Versi
                 .iter()
                 .any(|l| java::LOADERS.contains(&l.as_str()))
         };
-        let made_for = |v: &&Version| v.game_versions.iter().any(|g| g == GAME);
+        let made_for = |v: &&Version| v.game_versions.iter().any(|g| g == target_game);
         let ported = |v: &&Version| v.game_versions.iter().any(|g| portable_version(g));
         return usable
             .clone()
@@ -407,7 +414,7 @@ pub fn pick(kind: Kind, versions: &[Version], everything: bool) -> Option<&Versi
     if kind == Kind::DataPack {
         // Most data packs on Modrinth ship a mod build too: only the data pack files.
         let mut packs = usable.filter(|v| v.loaders.iter().any(|l| l == "datapack"));
-        let made_for = |v: &&Version| v.game_versions.iter().any(|g| g == GAME);
+        let made_for = |v: &&Version| v.game_versions.iter().any(|g| g == target_game);
         return packs
             .clone()
             .find(made_for)

@@ -394,6 +394,8 @@ impl Launcher {
                 .save(&keypad_path)?;
             }
             self.catalog.config.keypad_controls = false;
+            horizon_core::game_version::set_active_version(self.catalog.config.selected_version());
+            self.catalog.config.ensure_version_home(&self.home);
             let game_home = self.catalog.config.game_home(&self.home);
             if !self.session_ready {
                 let (active_name, launch_session) = self.volt_accounts.prepare_for_launch();

@@ -3,13 +3,13 @@
 //! splits into a reader (for a receive thread) and a shareable writer. It runs
 //! over TCP, or over an in-memory pipe between two threads of one process
 //! (vanilla's `LocalChannel`, which an integrated server's player uses).
-use crate::{Error, Result, buf::Reader, crypto::Cfb8, frame};
+use crate::{Error, PROTOCOL_VERSION, Result, State, buf::Reader, crypto::Cfb8, frame, multiversion};
 use std::{
     io::{Read, Write},
     net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicI64, AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -173,6 +173,7 @@ pub struct ConnReader {
     decrypt: Option<Cfb8>,
     pub threshold: Option<usize>,
     pub counters: Arc<Counters>,
+    wire: Option<(i32, Arc<AtomicU8>)>,
 }
 /// Closes a connection from another thread: a read or a write blocked on it fails.
 pub struct Closer(Stream);
@@ -187,6 +188,7 @@ pub struct ConnWriter {
     encrypt: Option<Cfb8>,
     pub threshold: Option<usize>,
     counters: Arc<Counters>,
+    wire: Option<(i32, Arc<AtomicU8>)>,
 }
 /// `InetAddress.getByName` under Java's default `java.net.preferIPv6Addresses=false`: IPv4
 /// addresses first, whatever order the system resolver gives (macOS lists IPv6 first). Vanilla
@@ -284,14 +286,33 @@ impl Connection {
                 decrypt: None,
                 threshold: None,
                 counters: counters.clone(),
+                wire: None,
             },
             writer: ConnWriter {
                 stream: write,
                 encrypt: None,
                 threshold: None,
                 counters,
+                wire: None,
             },
         })
+    }
+    /// Attach a multi-version wire translator (`763`..`776`) shared between reader and writer.
+    /// When `protocol == PROTOCOL_VERSION` (`777`), wire translation stays off (`None`).
+    pub fn set_wire_protocol(&mut self, protocol: i32, initial_state: State) {
+        if protocol == PROTOCOL_VERSION {
+            self.reader.wire = None;
+            self.writer.wire = None;
+        } else {
+            let state = Arc::new(AtomicU8::new(multiversion::state_to_u8(initial_state)));
+            self.reader.wire = Some((protocol, state.clone()));
+            self.writer.wire = Some((protocol, state));
+        }
+    }
+    /// Update the active connection state (`Login`, `Configuration`, `Play`) on an attached
+    /// multi-version wire translator.
+    pub fn set_wire_state(&self, state: State) {
+        self.reader.set_wire_state(state);
     }
     /// `Connection.isMemoryConnection`: through a [`Pipe`] rather than a socket.
     pub fn is_memory(&self) -> bool {
@@ -322,6 +343,12 @@ impl Connection {
     }
 }
 impl ConnReader {
+    /// Update the shared wire state (`Configuration` <-> `Play`) when multi-version translation is active.
+    pub fn set_wire_state(&self, state: State) {
+        if let Some((_, slot)) = &self.wire {
+            slot.store(multiversion::state_to_u8(state), Ordering::Relaxed);
+        }
+    }
     /// Read exactly `len` bytes as they are, with no framing.
     pub fn read_raw(&mut self, len: usize) -> Result<Vec<u8>> {
         let mut out = vec![0u8; len];
@@ -344,6 +371,10 @@ impl ConnReader {
                 let id = r.varint()?;
                 let start = r.position();
                 self.counters.received.fetch_add(1, Ordering::Relaxed);
+                if let Some((protocol, state)) = &self.wire {
+                    let st = multiversion::state_from_u8(state.load(Ordering::Relaxed));
+                    return multiversion::translate_clientbound(*protocol, st, id, &body[start..]);
+                }
                 return Ok((id, body[start..].to_vec()));
             }
             let mut chunk = [0u8; 16384];
@@ -390,6 +421,13 @@ impl ConnWriter {
     }
     /// Send one packet body (VarInt id + payload).
     pub fn send(&mut self, body: &[u8]) -> Result<()> {
+        if let Some((protocol, state)) = &self.wire {
+            let st = multiversion::state_from_u8(state.load(Ordering::Relaxed));
+            let Some(translated) = multiversion::translate_serverbound(*protocol, st, body)? else {
+                return Ok(());
+            };
+            return self.send_contents(&frame::contents(&translated, self.threshold)?);
+        }
         self.send_contents(&frame::contents(body, self.threshold)?)
     }
     /// Send a frame whose contents [`frame::contents`] made with this

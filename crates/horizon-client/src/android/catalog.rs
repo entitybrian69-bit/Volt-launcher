@@ -50,10 +50,16 @@ fn default_pack_source() -> crate::shader_catalog::Origin {
     crate::shader_catalog::Origin::Modrinth
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+fn default_game_version() -> String {
+    horizon_core::VANILLA_VERSION.into()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub profile: u32,
+    #[serde(default = "default_game_version")]
+    pub game_version: String,
     pub proxy: Option<String>,
     pub name: String,
     pub server: String,
@@ -77,6 +83,32 @@ pub struct Config {
     pub custom_vulkan_driver: Option<String>,
     #[serde(default)]
     pub custom_vulkan_driver_name: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            profile: 0,
+            game_version: default_game_version(),
+            proxy: None,
+            name: String::new(),
+            server: String::new(),
+            microsoft_client_id: String::new(),
+            renderer: RendererMode::default(),
+            render_scale: crate::display::RenderScale::default(),
+            orientation: Orientation::default(),
+            screen: crate::display::ScreenPreferences::default(),
+            input_host: InputHost::default(),
+            keypad_controls: false,
+            record_performance: false,
+            device: crate::device_preferences::Settings::default(),
+            shader_source: crate::shader_catalog::Origin::default(),
+            mod_source: crate::shader_catalog::Origin::default(),
+            pack_source: default_pack_source(),
+            custom_vulkan_driver: None,
+            custom_vulkan_driver_name: None,
+        }
+    }
 }
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
@@ -138,12 +170,19 @@ impl Config {
         if config.pack_source == crate::shader_catalog::Origin::Horizon {
             config.pack_source = crate::shader_catalog::Origin::Modrinth;
         }
+        let selected = config.selected_version();
+        config.game_version = selected.id().to_owned();
+        horizon_core::game_version::set_active_version(selected);
+        config.ensure_version_home(home);
         let legacy = std::fs::read(config.game_home(home).join("horizon-touch.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .unwrap_or_default();
         config.device.migrate_missing(&value, &legacy);
         config
+    }
+    pub fn selected_version(&self) -> horizon_core::game_version::GameVersion {
+        horizon_core::game_version::GameVersion::from_id(&self.game_version).unwrap_or_default()
     }
     pub fn save(&self, home: &Path) -> Result<(), String> {
         let part = home.join("android-launcher.partial");
@@ -163,8 +202,47 @@ impl Config {
         }
     }
     pub fn game_home(&self, home: &Path) -> PathBuf {
-        // Legacy modpack selections are ignored; their files remain untouched.
-        self.profile_home(home)
+        let base = self.profile_home(home);
+        let ver = self.selected_version();
+        if ver == horizon_core::game_version::GameVersion::V26_3 {
+            base
+        } else {
+            base.join("versions").join(ver.id())
+        }
+    }
+    /// Ensures the isolated per-version folder exists and seeds touch controls, graphics,
+    /// and Volt Boost preferences from the parent profile on first creation so existing
+    /// settings carry over cleanly while worlds (`saves/`) and packs stay version-isolated.
+    pub fn ensure_version_home(&self, home: &Path) {
+        let ver = self.selected_version();
+        if ver == horizon_core::game_version::GameVersion::V26_3 {
+            return;
+        }
+        let base = self.profile_home(home);
+        let target = base.join("versions").join(ver.id());
+        let first_init = !target.join("options.txt").exists();
+        if std::fs::create_dir_all(&target).is_err() || !first_init {
+            return;
+        }
+        for file in [
+            "horizon-touch.json",
+            "horizon-keypad.json",
+            "horizon-extras.txt",
+            "horizon-graphics.txt",
+        ] {
+            let src = base.join(file);
+            let dst = target.join(file);
+            if src.is_file() && !dst.exists() {
+                let _ = std::fs::copy(&src, &dst);
+            }
+        }
+        let base_opts = base.join("options.txt");
+        if base_opts.is_file() {
+            let mut settings = horizon_client::settings::Settings::load(&base_opts);
+            settings.resource_packs.clear();
+            settings.horizon.shader_pack.clear();
+            settings.save(&target.join("options.txt"));
+        }
     }
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -320,6 +398,8 @@ impl Catalog {
         }
     }
     pub fn refresh(&mut self, home: &Path) {
+        horizon_core::game_version::set_active_version(self.config.selected_version());
+        self.config.ensure_version_home(home);
         let game = self.config.game_home(home);
         let installed = Installed::load(&game);
         self.downloaded = installed
@@ -867,6 +947,7 @@ fn run_single_source_query(
         Page::Shaders => Kind::Shader,
         _ => Kind::ResourcePack,
     };
+    let active_ver = horizon_core::game_version::active_version();
     let mut query = Query::new(text, kind);
     query.offset = offset;
     query.limit = limit;
@@ -877,7 +958,14 @@ fn run_single_source_query(
             if page == Page::Shaders {
                 browser::modrinth::search_shader_packs(&query)
             } else {
-                browser::modrinth::Modrinth.search(&query)
+                query.filters.game_version = Some(active_ver.id().to_owned());
+                let items = browser::modrinth::Modrinth.search(&query)?;
+                if items.is_empty() && active_ver >= horizon_core::game_version::GameVersion::V26_1 {
+                    query.filters.game_version = None;
+                    browser::modrinth::Modrinth.search(&query)
+                } else {
+                    Ok(items)
+                }
             }
         }
         Origin::CurseForge => {
@@ -886,7 +974,14 @@ fn run_single_source_query(
             if page == Page::Shaders {
                 cf.search_shader_packs(&query)
             } else {
-                cf.search(&query)
+                query.filters.game_version = Some(active_ver.id().to_owned());
+                let items = cf.search(&query)?;
+                if items.is_empty() && active_ver >= horizon_core::game_version::GameVersion::V26_1 {
+                    query.filters.game_version = None;
+                    cf.search(&query)
+                } else {
+                    Ok(items)
+                }
             }
         }
         Origin::Both => Ok(Vec::new()),

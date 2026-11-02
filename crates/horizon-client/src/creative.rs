@@ -235,6 +235,7 @@ impl Creative {
         }
     }
     pub fn from_json(raw: &Value) -> Result<Self> {
+        let active_ver = horizon_core::game_version::active_version();
         let mut tabs = Vec::new();
         let mut search = Vec::new();
         for t in raw["tabs"].as_array().into_iter().flatten() {
@@ -246,11 +247,15 @@ impl Creative {
                 .filter_map(Value::as_u64)
                 .collect();
             let mut items = Vec::new();
+            let mut orig_indices = Vec::new();
             let mut operator = Vec::new();
             for (i, v) in t["items"].as_array().into_iter().flatten().enumerate() {
                 let snbt = v.as_str().unwrap_or("-");
-                if let Some(stack) = crate::item_data::parse_stack(snbt)? {
+                if let Some(stack) = crate::item_data::parse_stack(snbt)?
+                    && active_ver.is_item_available(&stack.item)
+                {
                     items.push(stack);
+                    orig_indices.push(i);
                     operator.push(only.contains(&(i as u64)));
                 }
             }
@@ -263,15 +268,19 @@ impl Creative {
                         .filter_map(|s| s.as_str().map(java_lower))
                         .collect()
                 };
-                for (i, stack) in items.iter().enumerate() {
+                for (filtered_idx, stack) in items.iter().enumerate() {
+                    let orig_i = orig_indices[filtered_idx];
                     let (namespace, path) = split_id(&java_lower(&stack.item));
                     let entry = SearchEntry {
                         namespace,
                         path,
-                        lines: strings(&t["lines"][i]),
-                        tags: strings(&t["tags"][i]).iter().map(|t| split_id(t)).collect(),
+                        lines: strings(&t["lines"][orig_i]),
+                        tags: strings(&t["tags"][orig_i])
+                            .iter()
+                            .map(|t| split_id(t))
+                            .collect(),
                     };
-                    search.push((stack.clone(), entry, operator[i]));
+                    search.push((stack.clone(), entry, operator[filtered_idx]));
                 }
             }
             let icon = t["icon"]
@@ -297,6 +306,7 @@ impl Creative {
     }
     /// The old export: item ids per tab, no components, tooltips or tags.
     fn from_legacy(raw: &Value) -> Result<Self> {
+        let active_ver = horizon_core::game_version::active_version();
         let mut tabs = Vec::new();
         let mut search_items: Vec<ItemStack> = Vec::new();
         for t in raw.as_array().into_iter().flatten() {
@@ -304,7 +314,11 @@ impl Creative {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter_map(|v| v.as_str().map(|id| ItemStack::new(id, 1)))
+                .filter_map(|v| {
+                    v.as_str()
+                        .filter(|id| active_ver.is_item_available(id))
+                        .map(|id| ItemStack::new(id, 1))
+                })
                 .collect();
             if t["id"] == "minecraft:hotbar" || t["id"] == "minecraft:op_blocks" {
                 continue;

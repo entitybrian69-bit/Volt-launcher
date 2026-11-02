@@ -23,13 +23,65 @@ packet!(
     }
 );
 packet!(Disconnect { reason_json: String => StrN<262144> });
-packet!(Hello {
-    server_id: String => StrN<20>,
-    public_key: Vec<u8> => Bytes,
-    challenge: Vec<u8> => Bytes,
-    should_authenticate: bool => Bool,
-});
-packet!(LoginFinished { profile: GameProfile => GameProfile, session: u128 => Uuid });
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hello {
+    pub server_id: String,
+    pub public_key: Vec<u8>,
+    pub challenge: Vec<u8>,
+    pub should_authenticate: bool,
+}
+impl crate::buf::Codec<Hello> for Hello {
+    fn read(r: &mut crate::buf::Reader) -> crate::Result<Self> {
+        let server_id = <StrN<20> as crate::buf::Codec<String>>::read(r)?;
+        let public_key = <Bytes as crate::buf::Codec<Vec<u8>>>::read(r)?;
+        let challenge = <Bytes as crate::buf::Codec<Vec<u8>>>::read(r)?;
+        // `should_authenticate` was added in 1.20.5 (protocol 766); 1.20.1..1.20.4 always authenticate.
+        let should_authenticate = if r.remaining() > 0 {
+            <Bool as crate::buf::Codec<bool>>::read(r)?
+        } else {
+            true
+        };
+        Ok(Self {
+            server_id,
+            public_key,
+            challenge,
+            should_authenticate,
+        })
+    }
+    fn write(v: &Self, w: &mut crate::buf::Writer) {
+        <StrN<20> as crate::buf::Codec<String>>::write(&v.server_id, w);
+        <Bytes as crate::buf::Codec<Vec<u8>>>::write(&v.public_key, w);
+        <Bytes as crate::buf::Codec<Vec<u8>>>::write(&v.challenge, w);
+        <Bool as crate::buf::Codec<bool>>::write(&v.should_authenticate, w);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoginFinished {
+    pub profile: GameProfile,
+    pub session: u128,
+}
+impl crate::buf::Codec<LoginFinished> for LoginFinished {
+    fn read(r: &mut crate::buf::Reader) -> crate::Result<Self> {
+        let profile = <GameProfile as crate::buf::Codec<GameProfile>>::read(r)?;
+        // 775..777 (26.x) append a 16-byte `session: Uuid`.
+        // 766..767 (1.20.5..1.21.1) append a 1-byte `strict_error_handling: bool`.
+        // 763..765 (1.20.1..1.20.4) and 768..774 (1.21.2..1.21.11) end right after `GameProfile`.
+        let session = if r.remaining() >= 16 {
+            <Uuid as crate::buf::Codec<u128>>::read(r)?
+        } else {
+            if r.remaining() == 1 {
+                let _ = r.bool()?;
+            }
+            0
+        };
+        Ok(Self { profile, session })
+    }
+    fn write(v: &Self, w: &mut crate::buf::Writer) {
+        <GameProfile as crate::buf::Codec<GameProfile>>::write(&v.profile, w);
+        <Uuid as crate::buf::Codec<u128>>::write(&v.session, w);
+    }
+}
 packet!(Compression { threshold: i32 => VarInt });
 packet!(CustomQuery { transaction: i32 => VarInt, channel: String => Ident, data: Vec<u8> => Rest });
 packet!(CookieRequest { key: String => Ident });

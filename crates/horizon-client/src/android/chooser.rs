@@ -11,6 +11,7 @@ pub(super) enum Kind {
     DisplayHz,
     Renderer,
     RenderScale,
+    GameVersion,
     Profile,
     Orientation,
     InputHost,
@@ -169,6 +170,36 @@ impl Launcher {
                     ),
                 ],
             ),
+            Kind::GameVersion => {
+                let active = c.selected_version();
+                let choices = horizon_core::game_version::GameVersion::ALL_NEWEST_FIRST
+                    .into_iter()
+                    .map(|ver| {
+                        let pack_fmt = ver.resource_pack_format();
+                        let pack_str = if pack_fmt.1 == 0 {
+                            format!("{}", pack_fmt.0)
+                        } else {
+                            format!("{}.{}", pack_fmt.0, pack_fmt.1)
+                        };
+                        (
+                            format!("Minecraft Java {}", ver.id()),
+                            format!(
+                                "{} • Protocol {} • Pack format {}",
+                                ver.era_name(),
+                                ver.protocol(),
+                                pack_str
+                            ),
+                            Action::ChooseGameVersion(ver),
+                            ver == active,
+                        )
+                    })
+                    .collect();
+                (
+                    "Choose Minecraft version",
+                    "Pure-Rust multi-version engine (1.20.1 to 26.3). Each version isolates saves & packs and matches server protocols.",
+                    choices,
+                )
+            }
             Kind::Profile => {
                 let mut ids = vec![0, c.profile];
                 ids.extend(

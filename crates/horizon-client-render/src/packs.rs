@@ -17,6 +17,12 @@ use std::{
 /// SharedConstants resource pack format of 26.3 (major, minor).
 pub const RESOURCE_FORMAT: (i64, i64) = horizon_core::version::RESOURCE_PACK_FORMAT;
 
+/// Resource pack format `(major, minor)` of the currently selected runtime [`horizon_core::game_version::GameVersion`].
+#[inline]
+pub fn active_resource_format() -> (i64, i64) {
+    horizon_core::game_version::active_version().resource_pack_format()
+}
+
 #[derive(Clone, Debug)]
 pub enum Source {
     Dir(PathBuf),
@@ -361,7 +367,7 @@ pub fn compatible(meta: &serde_json::Value) -> bool {
 /// `PackCompatibility.forVersion`: too old, too new, compatible, or unknown
 /// when the metadata names no (valid) format.
 pub fn compatibility(meta: &serde_json::Value) -> crate::pack_screen::Compat {
-    compatibility_for(meta, RESOURCE_FORMAT)
+    compatibility_for(meta, active_resource_format())
 }
 /// `compatibility` against `current`, the resource or the data pack format.
 /// Metadata that fails `PackFormat.packCodec` parses as the fallback type,
@@ -375,11 +381,10 @@ pub fn compatibility_for(meta: &serde_json::Value, current: Format) -> crate::pa
         Ok(_) => Compat::Compatible,
     }
 }
-/// Whether an `overlays.entries[]` item applies to the current format
+/// Whether an `overlays.entries[]` item applies to `current`
 /// (OverlayMetadataSection: `formats` as an int, `[min, max]` or
 /// `{min_inclusive, max_inclusive}`, or `min_format`/`max_format`).
-fn overlay_applies(entry: &serde_json::Value) -> bool {
-    let current = RESOURCE_FORMAT;
+fn overlay_applies_for(entry: &serde_json::Value, current: Format) -> bool {
     if let (Some(min), Some(max)) = (
         format_of(&entry["min_format"]),
         format_of(&entry["max_format"]),
@@ -407,12 +412,12 @@ fn overlay_applies(entry: &serde_json::Value) -> bool {
         _ => false,
     }
 }
-fn overlays_of(meta: &serde_json::Value) -> Vec<String> {
+fn overlays_of_for(meta: &serde_json::Value, current: Format) -> Vec<String> {
     meta["overlays"]["entries"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|e| overlay_applies(e))
+        .filter(|e| overlay_applies_for(e, current))
         .filter_map(|e| e["directory"].as_str().map(str::to_owned))
         // OverlayMetadataSection's DIR_VALIDATOR: one folder of the pack, `[-_a-zA-Z0-9.]+`.
         .filter(|d| {
@@ -422,6 +427,10 @@ fn overlays_of(meta: &serde_json::Value) -> Vec<String> {
                     .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
         })
         .collect()
+}
+#[cfg(test)]
+fn overlays_of(meta: &serde_json::Value) -> Vec<String> {
+    overlays_of_for(meta, active_resource_format())
 }
 fn filter_of(meta: &serde_json::Value) -> Vec<Filter> {
     meta["filter"]["block"]
@@ -458,15 +467,16 @@ fn pack(id: String, title: Text, source: Source) -> Option<Pack> {
 fn pack_for(id: String, title: Text, source: Source, format: (i64, i64)) -> Option<Pack> {
     let meta = read_meta(&source)?;
     let (raw_description, description_style) = component_root(&meta["pack"]["description"]);
+    let compatibility = compatibility_for(&meta, format);
     Some(Pack {
         id,
         title,
         description: raw_description.resolve_legacy(),
         raw_description,
         description_style,
-        compatible: compatible(&meta),
-        compatibility: compatibility_for(&meta, format),
-        overlays: overlays_of(&meta),
+        compatible: compatibility == crate::pack_screen::Compat::Compatible,
+        compatibility,
+        overlays: overlays_of_for(&meta, format),
         filter: filter_of(&meta),
         source,
     })
@@ -486,7 +496,7 @@ pub fn discover(resources: &Path, packs_dir: &Path) -> Vec<Pack> {
             out.push(p);
         }
     }
-    out.extend(folder(packs_dir, RESOURCE_FORMAT));
+    out.extend(folder(packs_dir, active_resource_format()));
     out
 }
 /// The packs (folders and zips) in `dir`, by name, as `FolderRepositorySource`
@@ -616,7 +626,51 @@ fn build_overlay_uncached(
         // A pack's filter hides what the packs below it provide.
         files.retain(|name, _| !p.filter.iter().any(|f| f.blocks(name)));
         stacks.retain(|name, _| !p.filter.iter().any(|f| f.blocks(name)));
-        for (name, provided) in pack_files(p)? {
+        let mut provided_map = pack_files(p)?;
+        // Legacy 1.20.1..1.20.4 (`pack_format 15..31`) asset path renames:
+        // `grass` -> `short_grass` (1.20.3) and `scute` -> `turtle_scute` (1.20.5).
+        const LEGACY_ALIASES: &[(&str, &str)] = &[
+            (
+                "assets/minecraft/textures/block/grass.png",
+                "assets/minecraft/textures/block/short_grass.png",
+            ),
+            (
+                "assets/minecraft/textures/block/grass.png.mcmeta",
+                "assets/minecraft/textures/block/short_grass.png.mcmeta",
+            ),
+            (
+                "assets/minecraft/models/block/grass.json",
+                "assets/minecraft/models/block/short_grass.json",
+            ),
+            (
+                "assets/minecraft/models/item/grass.json",
+                "assets/minecraft/models/item/short_grass.json",
+            ),
+            (
+                "assets/minecraft/blockstates/grass.json",
+                "assets/minecraft/blockstates/short_grass.json",
+            ),
+            (
+                "assets/minecraft/textures/item/scute.png",
+                "assets/minecraft/textures/item/turtle_scute.png",
+            ),
+            (
+                "assets/minecraft/textures/item/scute.png.mcmeta",
+                "assets/minecraft/textures/item/turtle_scute.png.mcmeta",
+            ),
+            (
+                "assets/minecraft/models/item/scute.json",
+                "assets/minecraft/models/item/turtle_scute.json",
+            ),
+        ];
+        for &(legacy_path, modern_path) in LEGACY_ALIASES {
+            if !provided_map.contains_key(modern_path)
+                && let Some(entry) = provided_map.get(legacy_path).cloned()
+            {
+                provided_map.insert(modern_path.to_owned(), entry);
+            }
+        }
+        for (name, provided) in provided_map {
             if merge_kind(&name).is_some() {
                 stacks
                     .entry(name.clone())
