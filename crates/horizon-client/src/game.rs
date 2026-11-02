@@ -9731,7 +9731,7 @@ impl Game<'_> {
                 .block_entity_cap
                 .limit_and_dist_sq()
                 .unwrap_or((usize::MAX, f64::INFINITY));
-            let mut visible_vec: Vec<([i32; 3], u32)> = r
+            let mut visible_vec: Vec<&([i32; 3], u32)> = r
                 .visible_block_entities(self.settings.chunk_fade)
                 .filter(|(p, state)| {
                     if !self.res.block_entity_render().renders(*state) {
@@ -14726,6 +14726,7 @@ impl Game<'_> {
             log::warn!("Horizon: failed to save unloaded chunks: {e}");
         }
         let (far_distance, far_reduced) = self.far_terrain_choice();
+        let look_dir = self.forward();
         if let Some(renderer) = self.renderer.as_mut() {
             let g = &self.settings.horizon;
             let volt_cap = self
@@ -14735,7 +14736,6 @@ impl Game<'_> {
                 .max_uploads()
                 .unwrap_or(usize::MAX);
             let frustum_prio = self.settings.extras.frustum_priority_mesh;
-            let look_dir = self.forward();
             let cam_pos = self.player.as_ref().map(|p| p.position);
             let mobile_uploads =
                 cfg!(target_os = "android") && self.options.execution_role.is_client();
@@ -17442,17 +17442,15 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
         f: impl FnOnce() -> T + Send + 'scope,
     ) -> Self {
         if parallel {
-            if let Ok(handle) = std::thread::Builder::new()
-                .stack_size(8 * 1024 * 1024)
-                .spawn_scoped(scope, move || {
-                    horizon_threads::behind_server();
-                    f()
-                })
-            {
-                Self::Thread(handle)
-            } else {
-                Self::Later(Box::new(f))
-            }
+            Self::Thread(
+                std::thread::Builder::new()
+                    .stack_size(8 * 1024 * 1024)
+                    .spawn_scoped(scope, move || {
+                        horizon_threads::behind_server();
+                        f()
+                    })
+                    .expect("spawn worker thread"),
+            )
         } else {
             Self::Later(Box::new(f))
         }
