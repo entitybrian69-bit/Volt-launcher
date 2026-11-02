@@ -1881,6 +1881,16 @@ impl super::InstanceShared {
                         && name != khr::zero_initialize_workgroup_memory::NAME
                         && name != khr::pipeline_executable_properties::NAME
                         && name != khr::timeline_semaphore::NAME
+                        && name != khr::maintenance4::NAME
+                        && name != khr::shader_integer_dot_product::NAME
+                        && name != khr::shader_float16_int8::NAME
+                        && name != khr::spirv_1_4::NAME
+                        && name != khr::buffer_device_address::NAME
+                        && name != khr::acceleration_structure::NAME
+                        && name != khr::ray_query::NAME
+                        && name != khr::ray_tracing_pipeline::NAME
+                        && name != khr::deferred_host_operations::NAME
+                        && name != ext::descriptor_indexing::NAME
                 });
             }
             capabilities.properties = unsafe { self.raw.get_physical_device_properties(phd) };
@@ -3093,7 +3103,10 @@ impl super::Adapter {
                 vk::Result::ERROR_TOO_MANY_OBJECTS => crate::DeviceError::OutOfMemory,
                 vk::Result::ERROR_INITIALIZATION_FAILED => crate::DeviceError::Lost,
                 vk::Result::ERROR_EXTENSION_NOT_PRESENT | vk::Result::ERROR_FEATURE_NOT_PRESENT => {
-                    crate::hal_usage_error(err)
+                    log::warn!(
+                        "vkCreateDevice rejected an advertised Vulkan extension or feature ({err:?}); treating device open as failed for fallback"
+                    );
+                    crate::DeviceError::Lost
                 }
                 other => super::map_host_device_oom_and_lost_err(other),
             }

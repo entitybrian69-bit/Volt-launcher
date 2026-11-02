@@ -459,8 +459,7 @@ impl Game<'_> {
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
         if !self.pad_in_menu()
             && t.phase == TouchPhase::Started
-            && (self.try_click_waypoint_hud_button((p[0], p[1]))
-                || self.try_click_placement_hud_buttons((p[0], p[1])))
+            && self.try_click_waypoint_hud_button((p[0], p[1]))
         {
             self.pad.touch.clear();
             self.pad.touch.ignore(t.id);

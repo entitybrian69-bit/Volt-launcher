@@ -60,7 +60,6 @@ pub(crate) struct Ctx {
     pub sneaking: bool,
     pub item: String,
     pub replace_clicked: bool,
-    pub accurate: Option<(Direction, Option<bool>)>,
 }
 
 /// `Direction.orderedByNearest(entity)`.
@@ -311,13 +310,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             };
         }
         let horizontal = ctx.horizontal_direction();
-        let acc_horiz = ctx.accurate.and_then(|(d, _)| is_horizontal(d).then_some(d));
         Some(match class {
             Class::AbstractBed => {
-                let bed_dir = acc_horiz.unwrap_or(horizontal);
-                let relative = rel(pos, bed_dir);
+                let relative = rel(pos, horizontal);
                 if self.can_be_replaced(self.state(relative), ctx) {
-                    Some(table.set_dir(default, p.facing, bed_dir))
+                    Some(table.set_dir(default, p.facing, horizontal))
                 } else {
                     None
                 }
@@ -330,31 +327,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             | Class::GlazedTerracotta
             | Class::Loom
             | Class::Stonecutter
-            | Class::Vault => Some(table.set_dir(
-                default,
-                p.facing,
-                acc_horiz.unwrap_or_else(|| horizontal.opposite()),
-            )),
+            | Class::Vault => Some(table.set_dir(default, p.facing, horizontal.opposite())),
             Class::Repeater => {
                 let state = sup!()?;
                 let locked = self.diode_is_locked(pos, state);
                 Some(table.set_bool(state, p.locked, locked))
             }
             Class::EndPortalFrame => Some(table.set_bool(
-                table.set_dir(
-                    default,
-                    p.facing,
-                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
-                ),
+                table.set_dir(default, p.facing, horizontal.opposite()),
                 p.eye,
                 false,
             )),
             Class::Lectern => Some(table.set_bool(
-                table.set_dir(
-                    default,
-                    p.facing,
-                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
-                ),
+                table.set_dir(default, p.facing, horizontal.opposite()),
                 p.has_book,
                 false,
             )),
@@ -378,16 +363,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 None
             }
-            Class::AmethystCluster => Some(table.set_dir(
-                wl(default),
-                p.facing,
-                ctx.accurate.map_or(ctx.face, |(d, _)| d),
-            )),
-            Class::Anvil => Some(table.set_dir(
-                default,
-                p.facing,
-                acc_horiz.unwrap_or_else(|| clockwise(horizontal)),
-            )),
+            Class::AmethystCluster => Some(table.set_dir(wl(default), p.facing, ctx.face)),
+            Class::Anvil => Some(table.set_dir(default, p.facing, clockwise(horizontal))),
             Class::BambooStalk => {
                 if self.fluid_at(pos).kind() != crate::fluid::FluidKind::Empty {
                     return Some(None);
@@ -413,36 +390,27 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     }
                 }
             }
-            Class::Banner => Some(table.set_int(
-                default,
-                p.rotation,
-                acc_horiz
-                    .map_or_else(|| rotation_segment(ctx.yaw + 180.0), rotation_segment_of),
-            )),
+            Class::Banner => {
+                Some(table.set_int(default, p.rotation, rotation_segment(ctx.yaw + 180.0)))
+            }
             Class::StandingSign => Some(wl(table.set_int(
                 default,
                 p.rotation,
-                acc_horiz
-                    .map_or_else(|| rotation_segment(ctx.yaw + 180.0), rotation_segment_of),
+                rotation_segment(ctx.yaw + 180.0),
             ))),
             Class::Barrel | Class::Command | Class::Dispenser => Some(table.set_dir(
                 default,
                 p.facing,
-                ctx.accurate
-                    .map_or_else(|| ctx.nearest_looking_direction().opposite(), |(d, _)| d),
+                ctx.nearest_looking_direction().opposite(),
             )),
-            Class::Observer => Some(table.set_dir(
-                default,
-                p.facing,
-                ctx.accurate
-                    .map_or_else(|| ctx.nearest_looking_direction(), |(d, _)| d),
-            )),
+            Class::Observer => {
+                Some(table.set_dir(default, p.facing, ctx.nearest_looking_direction()))
+            }
             Class::PistonBase => Some(table.set_bool(
                 table.set_dir(
                     default,
                     p.facing,
-                    ctx.accurate
-                        .map_or_else(|| ctx.nearest_looking_direction().opposite(), |(d, _)| d),
+                    ctx.nearest_looking_direction().opposite(),
                 ),
                 p.extended,
                 false,
@@ -666,7 +634,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 let state = table.set_bool(default, p.waterlogged, water);
                 let state = table.set_bool(state, p.signal_fire, hay);
                 let state = table.set_bool(state, p.lit, !water);
-                Some(table.set_dir(state, p.facing, acc_horiz.unwrap_or(horizontal)))
+                Some(table.set_dir(state, p.facing, horizontal))
             }
             Class::Candle => {
                 let current = self.state(pos);
@@ -725,7 +693,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::Chest => {
                 let mut kind = "single";
-                let mut facing = acc_horiz.unwrap_or_else(|| horizontal.opposite());
+                let mut facing = horizontal.opposite();
                 let face = ctx.face;
                 if is_horizontal(face) && ctx.sneaking {
                     if let Some(neighbour_facing) =
@@ -769,11 +737,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
             }
             Class::CopperGolemStatue | Class::EnderChest | Class::Shelf => {
-                let mut state = wl(table.set_dir(
-                    default,
-                    p.facing,
-                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
-                ));
+                let mut state = wl(table.set_dir(default, p.facing, horizontal.opposite()));
                 if class == Class::Shelf {
                     let signal = self.has_neighbor_signal(pos);
                     state = table.set_bool(state, p.powered, signal);
@@ -788,9 +752,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Some(default)
             }
             Class::Crafter => {
-                let front = ctx
-                    .accurate
-                    .map_or_else(|| ctx.nearest_looking_direction().opposite(), |(d, _)| d);
+                let front = ctx.nearest_looking_direction().opposite();
                 let top = match front {
                     Direction::Down => horizontal.opposite(),
                     Direction::Up => horizontal,
@@ -823,17 +785,15 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Some(table.set_text(default, p.orientation, &orientation))
             }
             Class::CreakingHeart => {
-                let pillar_axis = axis_of(ctx.accurate.map_or(ctx.face, |(d, _)| d));
                 let state =
-                    table.set_text(default, p.axis, super::states::axis_name(pillar_axis));
+                    table.set_text(default, p.axis, super::states::axis_name(axis_of(ctx.face)));
                 Some(self.heart_placement(state, ctx.pos))
             }
             Class::RotatedPillar | Class::InfestedRotatedPillar => {
-                let pillar_axis = axis_of(ctx.accurate.map_or(ctx.face, |(d, _)| d));
-                Some(table.set_text(default, p.axis, super::states::axis_name(pillar_axis)))
+                Some(table.set_text(default, p.axis, super::states::axis_name(axis_of(ctx.face))))
             }
             Class::DecoratedPot => {
-                let state = table.set_dir(default, p.facing, acc_horiz.unwrap_or(horizontal));
+                let state = table.set_dir(default, p.facing, horizontal);
                 Some(table.set_bool(wl(state), p.cracked, false))
             }
             Class::Door => {
@@ -843,7 +803,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     let powered =
                         self.has_neighbor_signal(pos) || self.has_neighbor_signal(above(pos));
                     let hinge = self.door_hinge(ctx);
-                    let state = table.set_dir(default, p.facing, acc_horiz.unwrap_or(horizontal));
+                    let state = table.set_dir(default, p.facing, horizontal);
                     let state = table.set_text(state, p.hinge, hinge);
                     let state =
                         table.set_bool(table.set_bool(state, p.powered, powered), p.open, powered);
@@ -864,11 +824,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::PitcherCrop => Some(default),
             Class::SmallDripleaf => {
                 let state = sup!()?;
-                let state = table.set_dir(
-                    state,
-                    p.facing,
-                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
-                );
+                let state = table.set_dir(state, p.facing, horizontal.opposite());
                 let water = self.is_water_at(pos);
                 Some(
                     table
@@ -887,34 +843,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::DriedGhast => {
                 let state = sup!()?;
-                Some(table.set_dir(
-                    wl(state),
-                    p.facing,
-                    acc_horiz.unwrap_or_else(|| horizontal.opposite()),
-                ))
+                Some(table.set_dir(wl(state), p.facing, horizontal.opposite()))
             }
             Class::EndRod => {
-                if let Some((dir, _)) = ctx.accurate {
-                    Some(table.set_dir(default, p.facing, dir))
+                let behind = self.state(rel(pos, ctx.face.opposite()));
+                if b.is_block(behind, block) && b.facing(behind) == ctx.face {
+                    Some(table.set_dir(default, p.facing, ctx.face.opposite()))
                 } else {
-                    let behind = self.state(rel(pos, ctx.face.opposite()));
-                    if b.is_block(behind, block) && b.facing(behind) == ctx.face {
-                        Some(table.set_dir(default, p.facing, ctx.face.opposite()))
-                    } else {
-                        Some(table.set_dir(default, p.facing, ctx.face))
-                    }
+                    Some(table.set_dir(default, p.facing, ctx.face))
                 }
             }
-            Class::LightningRod => Some(wl(table.set_dir(
-                default,
-                p.facing,
-                ctx.accurate.map_or(ctx.face, |(d, _)| d),
-            ))),
-            Class::ShulkerBox => Some(table.set_dir(
-                default,
-                p.facing,
-                ctx.accurate.map_or(ctx.face, |(d, _)| d),
-            )),
+            Class::LightningRod => Some(wl(table.set_dir(default, p.facing, ctx.face))),
+            Class::ShulkerBox => Some(table.set_dir(default, p.facing, ctx.face)),
             Class::FaceAttachedHorizontalDirectional => {
                 for direction in ctx.nearest_looking_directions() {
                     let state = if axis_of(direction) == Axis::Y {
@@ -923,11 +863,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         } else {
                             "floor"
                         };
-                        table.set_dir(
-                            table.set_text(default, p.face, face),
-                            p.facing,
-                            acc_horiz.unwrap_or(horizontal),
-                        )
+                        table.set_dir(table.set_text(default, p.face, face), p.facing, horizontal)
                     } else {
                         table.set_dir(
                             table.set_text(default, p.face, "wall"),
@@ -1004,14 +940,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Some(self.wall_shape(wl(default), top_pos, top, sides))
             }
             Class::FenceGate => {
-                let gate_dir = acc_horiz.unwrap_or(horizontal);
                 let open = self.has_neighbor_signal(pos);
                 let wall = |sim: &Self, d: Direction| b.in_set(sim.rel_state(pos, d), &t.walls);
-                let in_wall = match axis_of(gate_dir) {
+                let in_wall = match axis_of(horizontal) {
                     Axis::Z => wall(self, Direction::West) || wall(self, Direction::East),
                     _ => wall(self, Direction::North) || wall(self, Direction::South),
                 };
-                let state = table.set_dir(default, p.facing, gate_dir);
+                let state = table.set_dir(default, p.facing, horizontal);
                 let state = table.set_bool(table.set_bool(state, p.open, open), p.powered, open);
                 Some(table.set_bool(state, p.in_wall, in_wall))
             }
@@ -1051,7 +986,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Some(wl(state))
             }
             Class::Hopper => {
-                let direction = ctx.accurate.map_or_else(|| ctx.face.opposite(), |(d, _)| d);
+                let direction = ctx.face.opposite();
                 let facing = if axis_of(direction) == Axis::Y {
                     Direction::Down
                 } else {
@@ -1130,63 +1065,25 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     )));
                 }
                 let result = wl(table.set_text(default, p.kind, "bottom"));
-                let bottom = match ctx.accurate.and_then(|(_, top)| top) {
-                    Some(top) => !top,
-                    None => ctx.half_from_click(),
-                };
-                if bottom {
+                if ctx.half_from_click() {
                     Some(result)
                 } else {
                     Some(table.set_text(result, p.kind, "top"))
                 }
             }
             Class::Stair => {
-                let half = match ctx.accurate.and_then(|(_, top)| top) {
-                    Some(true) => "top",
-                    Some(false) => "bottom",
-                    None => {
-                        if ctx.half_from_click() {
-                            "bottom"
-                        } else {
-                            "top"
-                        }
-                    }
+                let half = if ctx.half_from_click() {
+                    "bottom"
+                } else {
+                    "top"
                 };
-                let stair_dir = acc_horiz.unwrap_or(horizontal);
                 let state =
-                    wl(table.set_text(table.set_dir(default, p.facing, stair_dir), p.half, half));
+                    wl(table.set_text(table.set_dir(default, p.facing, horizontal), p.half, half));
                 let shape = self.stairs_shape(state, pos);
                 Some(table.set_text(state, p.shape, shape))
             }
             Class::TrapDoor => {
-                let mut state = if let Some((_, acc_top)) = ctx.accurate {
-                    let facing = acc_horiz.unwrap_or_else(|| {
-                        if !ctx.replace_clicked && is_horizontal(ctx.face) {
-                            ctx.face
-                        } else {
-                            horizontal.opposite()
-                        }
-                    });
-                    let half = match acc_top {
-                        Some(true) => "top",
-                        Some(false) => "bottom",
-                        None if !ctx.replace_clicked && is_horizontal(ctx.face) => {
-                            if ctx.hit.y - f64::from(pos.y) > 0.5 {
-                                "top"
-                            } else {
-                                "bottom"
-                            }
-                        }
-                        None => {
-                            if ctx.face == Direction::Up {
-                                "bottom"
-                            } else {
-                                "top"
-                            }
-                        }
-                    };
-                    table.set_text(table.set_dir(default, p.facing, facing), p.half, half)
-                } else if !ctx.replace_clicked && is_horizontal(ctx.face) {
+                let mut state = if !ctx.replace_clicked && is_horizontal(ctx.face) {
                     let top = ctx.hit.y - f64::from(pos.y) > 0.5;
                     table.set_text(
                         table.set_dir(default, p.facing, ctx.face),
@@ -1605,14 +1502,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         &mut self,
         input: &PlaceContext,
     ) -> Option<(Ctx, super::data::ItemBinding, BlockStateId)> {
-        self.placement_with(input, None)
-    }
-
-    pub(crate) fn placement_with(
-        &mut self,
-        input: &PlaceContext,
-        accurate: Option<(Direction, Option<bool>)>,
-    ) -> Option<(Ctx, super::data::ItemBinding, BlockStateId)> {
         let b = self.b;
         let binding = b.item_binding(&input.item).cloned()?;
         let mut ctx = Ctx {
@@ -1626,7 +1515,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             sneaking: input.sneaking,
             item: input.item.clone(),
             replace_clicked: true,
-            accurate,
         };
         ctx.replace_clicked = self.can_be_replaced(self.state(input.clicked_pos), &ctx);
         if !ctx.replace_clicked {
@@ -1683,16 +1571,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     /// `BlockItem.place` (and its subclasses' overrides).
     pub(crate) fn place(&mut self, input: &PlaceContext) -> PlaceOutcome {
-        self.place_with(input, None)
-    }
-
-    pub(crate) fn place_with(
-        &mut self,
-        input: &PlaceContext,
-        accurate: Option<(Direction, Option<bool>)>,
-    ) -> PlaceOutcome {
         let b = self.b;
-        let Some((ctx, binding, state)) = self.placement_with(input, accurate) else {
+        let Some((ctx, binding, state)) = self.placement(input) else {
             return PlaceOutcome::Failed;
         };
         if !self.is_in_valid_bounds(ctx.pos) {
@@ -1799,17 +1679,6 @@ impl Behaviours {
     ) -> PlaceOutcome {
         self.sim(level, ticks).place(ctx)
     }
-    /// `BlockItem.place` with an optional Accurate Block Placement override
-    /// `(desired_facing, top_half)` applied directly during state resolution.
-    pub fn place_block_accurate<L: LevelAccess + ?Sized>(
-        &self,
-        level: &mut L,
-        ticks: &mut Ticks,
-        ctx: &PlaceContext,
-        accurate: Option<(Direction, Option<bool>)>,
-    ) -> PlaceOutcome {
-        self.sim(level, ticks).place_with(ctx, accurate)
-    }
     /// `DirectionalPlaceContext.canPlace`: whether the block at the clicked
     /// position can be replaced by the item (a dispenser places only there).
     pub fn directional_can_place<L: LevelAccess + ?Sized>(
@@ -1830,7 +1699,6 @@ impl Behaviours {
             sneaking: ctx.sneaking,
             item: ctx.item.clone(),
             replace_clicked: true,
-            accurate: None,
         };
         sim.can_be_replaced(sim.state(ctx.clicked_pos), &inner)
     }
@@ -1844,19 +1712,6 @@ impl Behaviours {
     ) -> Option<(BlockPos, BlockStateId)> {
         self.sim(level, ticks)
             .placement(ctx)
-            .map(|(ctx, _, state)| (ctx.pos, state))
-    }
-    /// The position and state `BlockItem.place` would place with an optional
-    /// Accurate Block Placement override, without writing anything.
-    pub fn placement_state_accurate<L: LevelAccess + ?Sized>(
-        &self,
-        level: &mut L,
-        ticks: &mut Ticks,
-        ctx: &PlaceContext,
-        accurate: Option<(Direction, Option<bool>)>,
-    ) -> Option<(BlockPos, BlockStateId)> {
-        self.sim(level, ticks)
-            .placement_with(ctx, accurate)
             .map(|(ctx, _, state)| (ctx.pos, state))
     }
     /// `getStateForPlacement` of `block` for `ctx` without placing anything
@@ -1881,7 +1736,6 @@ impl Behaviours {
             sneaking: input.sneaking,
             item: input.item.clone(),
             replace_clicked: true,
-            accurate: None,
         };
         ctx.replace_clicked = sim.can_be_replaced(sim.state(input.clicked_pos), &ctx);
         if !ctx.replace_clicked {

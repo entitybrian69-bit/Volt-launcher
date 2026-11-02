@@ -51,8 +51,6 @@ pub(super) enum Action {
     ConfirmDeleteLocal,
     Next,
     Previous,
-    GameVersion,
-    ChooseGameVersion(horizon_core::game_version::GameVersion),
     Profile,
     Logs,
     RecordPerformance,
@@ -727,8 +725,7 @@ impl DrawCtx<'_> {
     ) {
         use horizon_client::official_install::InstallStage;
         let [cx, cy, cw, ch] = area;
-        let selected_ver = self.catalog.config.selected_version();
-        let installed = horizon_client::official_install::ready_for(&self.home, selected_ver);
+        let installed = horizon_client::official_install::ready(&self.home);
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
 
@@ -777,13 +774,12 @@ impl DrawCtx<'_> {
             ui.volt_logo(lx + 6.0, ly + 6.0, 52.0, 52.0);
         }
 
-        let ver_title = format!("Minecraft Java {}", selected_ver.id());
         let heading = if installing {
             "Getting Game Ready"
         } else if installed {
             "Ready to Play"
         } else if compact {
-            ver_title.as_str()
+            "Minecraft Java 26.3"
         } else {
             "Java Worlds on Android"
         };
@@ -799,38 +795,20 @@ impl DrawCtx<'_> {
             &fitted_heading,
         );
 
-        // Interactive Crimson Version Selector Pill (`1.20.1` .. `26.3`)
+        // Version badge pill
         let badge_y = hy + if compact { 56.0 } else { 88.0 };
-        let ver_btn_label = format!("Minecraft Java {}   v", selected_ver.id());
-        let ver_w = (ui.measure(Face::Medium, 15.0, &ver_btn_label) + 52.0)
-            .clamp(216.0, (hw - 52.0).max(160.0));
-        let ver_rect = [hx + 26.0, badge_y, ver_w, 38.0];
-        ui.rounded(ver_rect[0], ver_rect[1], ver_rect[2], ver_rect[3], 10.0, theme::CRIMSON_BADGE);
-        ui.border(ver_rect[0], ver_rect[1], ver_rect[2], ver_rect[3], 10.0, theme::BORDER_CRIMSON);
+        let ver_w = 216.0f32.min(hw - 52.0);
+        ui.rounded(hx + 26.0, badge_y, ver_w, 38.0, 10.0, theme::CRIMSON_BADGE);
+        ui.border(hx + 26.0, badge_y, ver_w, 38.0, 10.0, theme::BORDER_CRIMSON);
         ui.rounded(hx + 38.0, badge_y + 12.5, 13.0, 13.0, 3.5, theme::CRIMSON_BRIGHT);
-        let fitted_ver = ui.fit_text(Face::Medium, 15.0, &ver_btn_label, (ver_w - 40.0).max(40.0));
         ui.text(
             Face::Medium,
             15.0,
             hx + 58.0,
             text_vcenter(badge_y, 38.0, 15.0),
             theme::CRIMSON_BRIGHT,
-            &fitted_ver,
+            "Minecraft Java 26.3",
         );
-        self.targets.push((ver_rect, Action::GameVersion));
-        if !compact && hw - 52.0 - ver_w >= 130.0 {
-            let era_x = ver_rect[0] + ver_rect[2] + 12.0;
-            let era_max = hw - (era_x - hx) - 20.0;
-            let era_fit = ui.fit_text(Face::Regular, 13.0, selected_ver.era_name(), era_max);
-            ui.text(
-                Face::Regular,
-                13.0,
-                era_x,
-                text_vcenter(badge_y, 38.0, 13.0),
-                theme::MUTED,
-                &era_fit,
-            );
-        }
 
         // Profile selector pill + Interactive Home Dashboard "Volt Boost" button!
         let prof_y = badge_y + if compact { 44.0 } else { 48.0 };
@@ -1104,16 +1082,14 @@ impl DrawCtx<'_> {
 
         // Bottom-Right PLAY CTA Button!
         let cta_y = ry + rh - cta_h;
-        let play_label = format!("PLAY {}", selected_ver.id());
-        let dl_label = format!("DOWNLOAD MINECRAFT {}", selected_ver.id());
         let cta_label = if installing {
             "INSTALLING..."
         } else if installed {
-            play_label.as_str()
+            "PLAY"
         } else if self.error.is_some() {
             "RETRY INSTALLATION"
         } else {
-            dl_label.as_str()
+            "DOWNLOAD MINECRAFT 26.3"
         };
         styled_button(
             ui,
@@ -2336,14 +2312,7 @@ impl DrawCtx<'_> {
             ),
         ];
 
-        let right_items: [(&str, String, Action, Option<bool>, bool); 9] = [
-            (
-                "Minecraft version",
-                format!("Java {}", c.selected_version().id()),
-                Action::GameVersion,
-                None,
-                true,
-            ),
+        let right_items: [(&str, String, Action, Option<bool>, bool); 8] = [
             (
                 "Profile",
                 format!("Profile {}", c.profile),
@@ -4927,7 +4896,6 @@ impl Launcher {
                 self.catalog.offset = self.catalog.offset.saturating_sub(12);
                 self.catalog.search(&self.home);
             }
-            Some(Action::GameVersion) => self.open_chooser(chooser::Kind::GameVersion),
             Some(Action::Profile) => self.open_chooser(chooser::Kind::Profile),
             Some(Action::Renderer) => self.open_chooser(chooser::Kind::Renderer),
             Some(Action::RenderScale) => self.open_chooser(chooser::Kind::RenderScale),
@@ -4989,24 +4957,6 @@ impl Launcher {
                     }
                     crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
                 }
-            }
-            Some(Action::ChooseGameVersion(ver)) => {
-                self.catalog.config.game_version = ver.id().to_owned();
-                horizon_core::game_version::set_active_version(ver);
-                self.catalog.config.ensure_version_home(&self.home);
-                self.catalog.config.save(&self.home)?;
-                self.catalog.refresh(&self.home);
-                if self.catalog.page.is_catalog() {
-                    self.catalog.offset = 0;
-                    self.catalog.search(&self.home);
-                }
-                self.catalog.status = format!(
-                    "Selected Minecraft Java {} ({} • Protocol {}).",
-                    ver.id(),
-                    ver.era_name(),
-                    ver.protocol()
-                );
-                self.chooser = None;
             }
             Some(Action::ChooseProfile(profile)) => {
                 std::fs::create_dir_all(if profile == 0 {

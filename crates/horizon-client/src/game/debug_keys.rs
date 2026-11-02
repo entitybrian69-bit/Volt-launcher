@@ -10,6 +10,7 @@ use horizon_client::{
     gizmos::Gizmos,
     hud::HudBatch,
     hud_layout, keybinds,
+    save::VERSION_NAME,
     text::Text,
 };
 use horizon_core::geometry::{Axis, Vec3};
@@ -328,8 +329,7 @@ impl Game<'_> {
             },
         ));
         // game_version: DebugEntryVersion (the launched version and brand).
-        let ver = horizon_core::game_version::active_version().id();
-        d.priority(format!("Minecraft {ver} ({ver}/horizon)"));
+        d.priority(format!("Minecraft {VERSION_NAME} ({VERSION_NAME}/horizon)"));
         // player_position, player_section_position.
         if let Some(p) = self.player.as_ref() {
             let mut lines = debug_overlay::position(

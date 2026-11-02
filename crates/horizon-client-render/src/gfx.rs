@@ -1450,6 +1450,11 @@ fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 impl Renderer {
+    /// Whether this live renderer opened on the OpenGL / OpenGL ES backend.
+    pub fn is_open_gl(&self) -> bool {
+        self.info.backend == wgpu::Backend::Gl
+    }
+
     /// Sections with GPU buffers, for soak tests watching residency.
     pub fn resident_sections(&self) -> usize {
         self.sections.len()
@@ -1538,9 +1543,11 @@ impl Renderer {
         #[cfg(target_os = "android")]
         impl Drop for CleanExitStartupGuard {
             fn drop(&mut self) {
-                // Only native driver SIGSEGV/SIGABRT skips Drop; caught Rust errors must not
-                // leave a stale `vulkan-startup.pending` marker that falsely downgrades Vulkan.
-                if let Some(startup) = self.0.take() {
+                // Only native driver SIGSEGV/SIGABRT or panic unwinds leave `vulkan-startup.pending`;
+                // caught Rust errors must clear it so non-crash fallbacks do not falsely downgrade Vulkan.
+                if !std::thread::panicking()
+                    && let Some(startup) = self.0.take()
+                {
                     startup.complete();
                 }
             }

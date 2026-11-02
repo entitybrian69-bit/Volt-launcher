@@ -644,12 +644,6 @@ impl Options {
                                 o.quick_play = Some(value);
                             }
                             "--game-dir" | "--gameDir" => o.game_dir = Some(value.into()),
-                            "--mc-version" | "--version" => {
-                                let Some(ver) = horizon_core::game_version::GameVersion::from_id(&value) else {
-                                    return Err(format!("unsupported Minecraft version {value}").into());
-                                };
-                                horizon_core::game_version::set_active_version(ver);
-                            }
                             // main has made it the game home already (logging::set_game_home).
                             "--home" => {}
                             "--dev-mod" => o.dev_mods.push(std::path::absolute(&value)?),
@@ -2425,8 +2419,6 @@ struct Game<'a> {
     world_icon: Option<WorldIcon>,
     /// The block a guest is acting on (game/lan_actions.rs).
     forced_hit: Option<Hit>,
-    /// Decoded Carpet/Volt Accurate Block Placement `(facing, top_half)` for a guest's `UseItemOn`.
-    forced_accurate: Option<(Direction, Option<bool>)>,
     /// `Minecraft.hitResult` while the clicks of a tick act (game/remote.rs
     /// `remote_handle_input`): picked once, so a creative break does not
     /// move the use that follows it past the broken block.
@@ -5166,19 +5158,8 @@ impl Game<'_> {
             return Ok(Some(Hand::Main));
         }
         // An EntityHitResult may fall through to Item.use, never to useItemOn.
-        let holding_any_block = self
-            .held()
-            .and_then(|s| self.items().get(&s.item))
-            .is_some_and(|i| i.block.is_some())
-            || self
-                .offhand
-                .as_ref()
-                .and_then(|s| self.items().get(&s.item))
-                .is_some_and(|i| i.block.is_some());
         let block_hit = if matches!(guest, Some(GuestUse::Item(_))) || self.entity_targeted() {
             None
-        } else if guest.is_none() {
-            self.pick_for_placement(holding_any_block)
         } else {
             self.pick()
         };
@@ -5598,21 +5579,7 @@ impl Game<'_> {
             // ItemStack.useOn passes in adventure mode; useItem eats.
             return Ok(!on_block && self.start_eating(&info));
         }
-        if !self.plane_lock_permits_and_record(hit) {
-            return Ok(true);
-        }
-        let accurate = self.resolve_local_accurate_placement(&stack.item, hit);
-        let eff_face = accurate.as_ref().map_or(hit.face, |a| a.effective_face);
-        let eff_hit_pt = accurate.as_ref().map_or(hit.point, |a| {
-            [
-                f64::from(hit.pos[0]) + f64::from(a.local_cursor[0]).clamp(0.05, 0.95),
-                f64::from(hit.pos[1]) + f64::from(a.local_cursor[1]).clamp(0.05, 0.95),
-                f64::from(hit.pos[2]) + f64::from(a.local_cursor[2]).clamp(0.05, 0.95),
-            ]
-        });
-        let eff_yaw = accurate.as_ref().map_or(self.yaw, |a| a.effective_yaw);
-        let eff_pitch = accurate.as_ref().map_or(self.pitch, |a| a.effective_pitch);
-        let face = match eff_face {
+        let face = match hit.face {
             [0, 1, 0] => Direction::Up,
             [0, -1, 0] => Direction::Down,
             [0, 0, -1] => Direction::North,
@@ -5624,21 +5591,15 @@ impl Game<'_> {
         let ctx = PlaceContext {
             clicked_pos: BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
             face,
-            hit: Vec3::new(eff_hit_pt[0], eff_hit_pt[1], eff_hit_pt[2]),
+            hit: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
             inside: false,
-            yaw: eff_yaw,
-            pitch: eff_pitch,
+            yaw: self.yaw,
+            pitch: self.pitch,
             sneaking: self.keys.contains(&KeyCode::ShiftLeft),
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        let acc_override = accurate
-            .as_ref()
-            .map(|a| (a.facing, a.top_half))
-            .or(self.forced_accurate);
-        let outcome = self.with_level(|b, level, ticks| {
-            b.place_block_accurate(level, ticks, &ctx, acc_override)
-        });
+        let outcome = self.with_level(|b, level, ticks| b.place_block(level, ticks, &ctx));
         let PlaceOutcome::Placed { pos, state } = outcome else {
             self.process_level_events()?;
             // BlockItem.useOn: a consumable that could not be placed is used,
@@ -6818,7 +6779,7 @@ impl Game<'_> {
             && self.sleeping.is_none()
         {
             self.use_with_hand()?;
-            self.use_delay = self.configured_use_delay();
+            self.use_delay = 4;
         }
         Ok(())
     }
@@ -7482,11 +7443,8 @@ impl Game<'_> {
             // Hud.nextContextualInfoState: the jump bar, the experience bar or
             // the locator bar above the hotbar.
             let has_experience = !self.creative && !spectator;
-            let has_locator = horizon_core::game_version::active_version()
-                >= horizon_core::game_version::GameVersion::V1_21_6
-                && self.waypoints.has_waypoints();
             let contextual = horizon_client::locator_bar::ContextualBar::next(
-                has_locator,
+                self.waypoints.has_waypoints(),
                 !spectator && self.jumpable_mount(),
                 self.mount_jumping(),
                 has_experience,
@@ -13781,8 +13739,7 @@ impl Game<'_> {
         let mut lines = self.fishing_line(alpha, size);
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
-        let mut on_top = g.on_top;
-        self.collect_placement_gizmos(&mut on_top);
+        let on_top = g.on_top;
         let view = horizon_client::camera::view_matrix(view_yaw, view_pitch);
         let at = camera.to_array();
         // GameRenderer.render3dHud: the debug crosshair, first person with the HUD shown.
@@ -13812,10 +13769,9 @@ impl Game<'_> {
         // does not open menus for spectators, so those never show it. An open
         // screen does not hide it: vanilla checks the HUD and the game mode, not the screen.
         let adventure = self.mode == horizon_client::command::args::GameMode::Adventure;
-        let holding_block = self.holding_any_block();
         let outline =
             if touch_target_visible && !self.ui.hide_gui && (self.may_build() || adventure) {
-                self.pick_for_placement(holding_block)
+                self.pick()
                     .filter(|h| {
                         self.may_build()
                             || !self.block_action_restricted(h.pos)
@@ -14263,11 +14219,6 @@ impl Game<'_> {
     /// `Screen.extractBlurredBackground` over the panorama or the world and
     /// HUD, when `menuBackgroundBlurriness` is at least 1.
     fn menu_blur(&self) -> Option<f32> {
-        if horizon_core::game_version::active_version()
-            < horizon_core::game_version::GameVersion::V1_20_5
-        {
-            return None;
-        }
         if self.settings.extras.menu_bg_mode
             == horizon_client::volt_features::MenuBgMode::FastDark
         {
@@ -16988,7 +16939,6 @@ impl<'a> Game<'a> {
             pending_save: None,
             world_icon: None,
             forced_hit: None,
-            forced_accurate: None,
             tick_hit: None,
             guest_use: None,
             lan_events: Vec::new(),

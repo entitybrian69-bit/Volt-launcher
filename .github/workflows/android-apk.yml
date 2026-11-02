@@ -247,16 +247,12 @@ jobs:
           import subprocess, sys
           cmds = [
               ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
-              ["cargo", "test", "-p", "horizon-protocol", "--lib", "multiversion"],
-              ["cargo", "test", "-p", "horizon-protocol", "--lib", "login_round_trips"],
               ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "packs"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
-              ["cargo", "test", "-p", "horizon-client", "--no-default-features", "--lib", "official_install"],
           ]
           for cmd in cmds:
               proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -999,10 +995,10 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.9.1
-          - **Per-Version Official Mojang Assets (`1.20.1` to `26.3`)**: Selecting any version now downloads and prepares that exact Minecraft release's official Mojang `client.jar` & assets (authentic `1.20.1` Cherry Grove / `1.21` Trial Chambers / `1.21.4` Pale Garden panoramas, classic `1.20.1`–`1.20.4` dark Dirt menu backgrounds, classic `1.20.1`–`1.21.4` two-tone spotted Spawn Eggs, version splashes, textures, lang, and sounds) while deduplicating shared SHA-1 assets
-          - **Era-Accurate Singleplayer Worldgen & Content**: Excludes Trial Chambers (`< 1.21`), Pale Gardens (`< 1.21.4`), Spring-to-Life vegetation (`< 1.21.5`), HUD Locator Bar (`< 1.21.6`), and post-era blocks/items per release, while stamping Singleplayer worlds with their active Minecraft version
-          - **Pure-Rust Multi-Version Multiplayer (`763`–`777`)**: Full server-ping and packet/handshake translation across `1.20.1` (`763` direct `Login -> Play`) through `26.3` (`777`)
+          ### What's New in Volt Launcher 0.9.2
+          - **First-Time Launch Fix**: Prevented Android PackageInstaller / Game Mode `HorizonActivity` recreation kills (`singleTask` + full `configChanges` + `sensorLandscape` alias + `winit` `MainEvent::Destroy` & `EventLoop` recreation support + live `native_ime` Activity rebinding + generation-guarded `android_main`), restored `Vulkan / compatibility (auto)` default on fresh installs, unified `VulkanSupporter` `1.1` instance/device API version & extension filtering without `hal_usage_error` panics, preserved `OPEN_GL` texture array split across `PLAY` handoff, and queried GPU `ATLAS_LIMIT` before building `HudAtlas`
+          - **Streamlined Minecraft `26.3` Core**: Focused purely on official Minecraft Java Edition `26.3` (ready for `26.4`), removing legacy pre-`26.3` multi-version overhead and post-install 400 MB JSON prewarm spike
+          - **Cleaned Volt Settings**: Removed Accurate Block Placement completely while keeping **Volt Boost**, **Volt Waypoints**, and **Volt Minimap** (all off by default)
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

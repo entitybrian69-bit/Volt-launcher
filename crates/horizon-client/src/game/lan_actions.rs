@@ -1390,12 +1390,8 @@ impl Game<'_> {
                 if !host.hub.guests[gi].may_reach_block(p.pos) {
                     return;
                 }
-                let (cursor, carpet_acc) =
-                    match horizon_client::volt_features::decode_carpet_cursor(p.cursor) {
-                        Some((clean, dir, top_half)) => (clean, Some((dir, top_half))),
-                        None => (p.cursor, None),
-                    };
-                let inside = cursor
+                let inside = p
+                    .cursor
                     .iter()
                     .all(|&c| (f64::from(c) - 0.5).abs() < 1.0000001);
                 if !inside {
@@ -1419,9 +1415,9 @@ impl Game<'_> {
                     pos: p.pos,
                     face,
                     point: [
-                        f64::from(p.pos[0]) + f64::from(cursor[0]),
-                        f64::from(p.pos[1]) + f64::from(cursor[1]),
-                        f64::from(p.pos[2]) + f64::from(cursor[2]),
+                        f64::from(p.pos[0]) + f64::from(p.cursor[0]),
+                        f64::from(p.pos[1]) + f64::from(p.cursor[1]),
+                        f64::from(p.pos[2]) + f64::from(p.cursor[2]),
                     ],
                 };
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
@@ -1451,12 +1447,10 @@ impl Game<'_> {
                     let used = self.as_guest(host, conn, |g| {
                         let attempt = g.was_block_placement_attempt(hand);
                         g.forced_hit = Some(hit);
-                        g.forced_accurate = carpet_acc;
                         g.guest_use = Some(GuestUse::OnBlock(hand));
                         let swings = g.swings_started;
                         let consumed = matches!(g.use_item(), Ok(Some(_)));
                         g.forced_hit = None;
-                        g.forced_accurate = None;
                         g.guest_use = None;
                         (g.swings_started != swings, consumed, attempt)
                     });

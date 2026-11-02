@@ -1898,10 +1898,7 @@ impl Title {
                         ];
                     }
                 }
-                let version = format!(
-                    "Minecraft {} (Volt Rust)",
-                    horizon_core::game_version::active_version().id()
-                );
+                let version = format!("Volt {} (Rust)", horizon_core::VANILLA_VERSION);
                 batch.text(atlas, &version, 2.0, h - 10.0, u32::MAX, true);
                 // A nightly names its build in the top-left corner, the one spot no button reaches at any GUI
                 // scale, so screenshots and reports say which build they come from.
@@ -2242,7 +2239,7 @@ impl Title {
                         translate(
                             "selectWorld.backupWarning.downgrade",
                             "This world was last played in version %s; you are on version %s. Downgrading a world could cause corruption - we cannot guarantee that it will load or work. If you still want to continue, please make a backup.",
-                            &[version, &horizon_core::game_version::active_version().id()],
+                            &[version, &crate::save::VERSION_NAME],
                         ),
                         rgba(223, 80, 80, 255),
                     ),

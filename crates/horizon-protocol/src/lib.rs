@@ -12,7 +12,6 @@ pub mod hash_ops;
 pub mod ids;
 pub mod item;
 pub mod mod_net;
-pub mod multiversion;
 pub mod packets;
 pub mod quiet;
 pub mod registry;

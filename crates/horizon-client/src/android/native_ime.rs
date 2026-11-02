@@ -9,7 +9,7 @@ use std::{
     io::{Read, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, Ordering},
     },
 };
@@ -25,6 +25,7 @@ unsafe extern "C" {
         callback: Option<unsafe extern "C" fn(i32, i32, *mut std::ffi::c_void) -> i32>,
         data: *mut std::ffi::c_void,
     ) -> i32;
+    fn ALooper_removeFd(looper: *mut std::ffi::c_void, fd: i32) -> i32;
 }
 enum Command {
     Show(String),
@@ -58,7 +59,13 @@ struct Ui {
     avoid_cutout: AtomicBool,
     immersive: AtomicBool,
 }
-static UI: OnceLock<Arc<Ui>> = OnceLock::new();
+static UI: Mutex<Option<Arc<Ui>>> = Mutex::new(None);
+
+fn current_ui() -> Option<Arc<Ui>> {
+    UI.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
 
 /// Must run during NativeActivity onCreate, on the Java UI thread.
 ///
@@ -69,11 +76,33 @@ pub unsafe fn initialize(
     vm: *mut jni::sys::JavaVM,
     activity: jni::sys::jobject,
 ) -> Result<(), String> {
-    if UI.get().is_some() {
-        return Ok(());
-    }
     let vm = unsafe { JavaVM::from_raw(vm) }.map_err(|e| e.to_string())?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    if let Some(existing) = current_ui() {
+        let same = env
+            .with_local_frame(4, |env| -> jni::errors::Result<bool> {
+                let incoming = unsafe { JObject::from_raw(activity) };
+                let same = env.is_same_object(&existing.activity, &incoming)?;
+                let _ = incoming.into_raw();
+                Ok(same)
+            })
+            .unwrap_or(false);
+        if same && !existing.failed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        existing.failed.store(true, Ordering::Release);
+        let looper = unsafe { ALooper_forThread() };
+        if !looper.is_null() {
+            let old_fd = existing
+                .reader
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_raw_fd();
+            unsafe {
+                let _ = ALooper_removeFd(looper, old_fd);
+            }
+        }
+    }
     let (edit, input, native, activity) = env
         .with_local_frame(32, |env| -> jni::errors::Result<_> {
             let activity = unsafe { JObject::from_raw(activity) };
@@ -184,9 +213,8 @@ pub unsafe fn initialize(
         drop(unsafe { Arc::from_raw(data.cast::<Ui>()) });
         return Err("Cannot register Android UI input channel".into());
     }
-    // The callback reference and these global JNI refs live for the activity's
-    // process lifetime, not per edit. Activity shutdown exits that process.
-    UI.set(ui).ok();
+    *UI.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ui);
     Ok(())
 }
 impl Ui {
@@ -683,7 +711,7 @@ fn callback_inner(ui: &Ui) -> i32 {
     1
 }
 pub fn show(text: &str) -> bool {
-    if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         winit::platform::android::set_native_text_input_active(true);
         // Do not diff an earlier editor buffer while Show is queued on the UI thread.
         ui.ready.store(false, Ordering::Release);
@@ -696,13 +724,13 @@ pub fn show(text: &str) -> bool {
 }
 pub fn hide() {
     winit::platform::android::set_native_text_input_active(false);
-    if let Some(ui) = UI.get() {
+    if let Some(ui) = current_ui() {
         ui.active.store(false, Ordering::Release);
         ui.enqueue(Command::Hide)
     }
 }
 pub fn text() -> Option<String> {
-    let ui = UI.get()?;
+    let ui = current_ui()?;
     if !ui.active.load(Ordering::Acquire) || !ui.ready.load(Ordering::Acquire) {
         return None;
     }
@@ -719,7 +747,7 @@ pub fn text() -> Option<String> {
 
 /// View operations, including pointer capture, belong to the Java UI thread.
 pub fn capture_mouse(capture: bool) -> bool {
-    if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         ui.enqueue(Command::Capture(capture));
         true
     } else {
@@ -729,7 +757,7 @@ pub fn capture_mouse(capture: bool) -> bool {
 
 /// Launcher-only safe bounds; View geometry is read on the Android UI thread.
 pub fn viewport_bottom() -> Option<u32> {
-    let ui = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
+    let ui = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
     if !ui.bounds_pending.swap(true, Ordering::AcqRel) {
         ui.enqueue(Command::Bounds);
     }
@@ -741,7 +769,7 @@ pub fn viewport_bottom() -> Option<u32> {
     })
 }
 pub fn pick_document() -> bool {
-    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+    let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
         return false;
     };
     ui.enqueue(Command::ImportDocument);
@@ -749,7 +777,7 @@ pub fn pick_document() -> bool {
 }
 
 pub fn install_update_apk(path: String) -> bool {
-    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+    let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
         return false;
     };
     ui.enqueue(Command::InstallUpdateApk(path));
@@ -757,7 +785,7 @@ pub fn install_update_apk(path: String) -> bool {
 }
 
 pub fn device_supported_abis() -> Vec<String> {
-    if let Some(ui) = UI.get()
+    if let Some(ui) = current_ui()
         && let Ok(mut env) = ui.vm.attach_current_thread()
     {
         let fetched = (|| -> jni::errors::Result<String> {
@@ -792,7 +820,7 @@ pub fn device_supported_abis() -> Vec<String> {
 }
 
 pub fn app_version_name() -> String {
-    if let Some(ui) = UI.get()
+    if let Some(ui) = current_ui()
         && let Ok(mut env) = ui.vm.attach_current_thread()
     {
         let fetched = (|| -> jni::errors::Result<String> {
@@ -811,22 +839,22 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.9.1".into()
+    "0.9.2".into()
 }
 
 pub fn set_keep_screen_awake(awake: bool) {
-    if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         ui.enqueue(Command::KeepAwake(awake));
     }
 }
 
 pub fn configure_screen(immersive: bool, avoid_cutout: bool) {
-    if let Some(ui) = UI.get() {
+    if let Some(ui) = current_ui() {
         ui.enqueue(Command::Screen(immersive, avoid_cutout));
     }
 }
 pub fn refresh_bounds() {
-    if let Some(ui) = UI.get().filter(|ui| {
+    if let Some(ui) = current_ui().filter(|ui| {
         ui.avoid_cutout.load(Ordering::Acquire) || !ui.immersive.load(Ordering::Acquire)
     }) {
         let mut last = ui

@@ -1,12 +1,11 @@
-//! Volt's optional extras (waypoints, minimap, accurate block placement,
+//! Volt's optional extras (waypoints, minimap, Volt Boost,
 //! lighting, inventory tools): their settings, kept in `horizon-extras.txt`
 //! next to `options.txt` so that file stays exactly vanilla's, and the logic
 //! behind them. Every gameplay extra is off by default.
 use crate::volt_features::{
     AutoDrsMode, AudioVoiceCap, BlockEntityCap, ChunkUploadCap, DynamicIdleFps, EntityCap,
     FastShadowMode, GlintTrimMode, ItemRenderCap, MenuBgMode, MinimapEntities, MinimapFrame,
-    MinimapTerrainMode, ParticleBudget, PerfHudMode, PlacementLock, PlacementProtocol, PlaneLock,
-    VoltBoostPreset, WaypointColor,
+    MinimapTerrainMode, ParticleBudget, PerfHudMode, VoltBoostPreset, WaypointColor,
 };
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -15,8 +14,6 @@ pub const FILE: &str = "horizon-extras.txt";
 pub const SORT_KEY: &str = "horizon.sort";
 pub const WAYPOINT_KEY: &str = "volt.waypoint_add";
 pub const MINIMAP_ZOOM_KEY: &str = "volt.minimap_zoom";
-pub const PLACEMENT_LOCK_KEY: &str = "volt.placement_lock";
-pub const PLACEMENT_REVERSE_KEY: &str = "volt.placement_reverse";
 
 /// The minimap's sizes in GUI pixels, and its zooms in blocks per pixel.
 pub const MINIMAP_SIZES: [(u8, &str); 4] = [
@@ -29,7 +26,6 @@ pub const MINIMAP_ZOOMS: [f32; 4] = [0.5, 1.0, 2.0, 4.0];
 pub const MINIMAP_OPACITIES: [u8; 4] = [50, 75, 90, 100];
 pub const WAYPOINT_SCALES: [u8; 3] = [75, 100, 125];
 pub const WAYPOINT_DISTANCES: [u16; 5] = [0, 256, 512, 1024, 2048];
-pub const PLACEMENT_DELAYS: [u8; 4] = [4, 2, 1, 0];
 
 /// A screen corner for an overlay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,19 +136,6 @@ pub struct Extras {
     pub waypoint_hud_button: bool,
     pub waypoint_new_color: WaypointColor,
     pub waypoint_key: String,
-    // --- Volt Accurate Block Placement (off by default) ---
-    pub accurate_placement: bool,
-    pub placement_quadrant: bool,
-    pub placement_reverse: bool,
-    pub placement_lock: PlacementLock,
-    pub placement_plane_lock: PlaneLock,
-    pub placement_reach_around: bool,
-    pub placement_fast_delay: u8,
-    pub placement_hud_preview: bool,
-    pub placement_protocol: PlacementProtocol,
-    pub placement_rotation_sync: bool,
-    pub placement_lock_key: String,
-    pub placement_reverse_key: String,
     // --- Other client extras ---
     pub auto_reconnect: bool,
     pub own_name_tag: bool,
@@ -245,18 +228,6 @@ impl Default for Extras {
             waypoint_hud_button: false,
             waypoint_new_color: WaypointColor::Crimson,
             waypoint_key: "key.keyboard.b".into(),
-            accurate_placement: false,
-            placement_quadrant: true,
-            placement_reverse: false,
-            placement_lock: PlacementLock::Off,
-            placement_plane_lock: PlaneLock::Off,
-            placement_reach_around: true,
-            placement_fast_delay: 4,
-            placement_hud_preview: true,
-            placement_protocol: PlacementProtocol::VanillaSafe,
-            placement_rotation_sync: true,
-            placement_lock_key: "key.keyboard.k".into(),
-            placement_reverse_key: "key.keyboard.v".into(),
             auto_reconnect: false,
             own_name_tag: false,
             mouse_tweaks: false,
@@ -413,29 +384,6 @@ impl Extras {
                     }
                 }
                 "waypointKey" if value.starts_with("key.") => e.waypoint_key = value.to_owned(),
-                // Accurate Block Placement:
-                "accuratePlacement" => e.accurate_placement = flag(e.accurate_placement),
-                "placementQuadrant" => e.placement_quadrant = flag(e.placement_quadrant),
-                "placementReverse" => e.placement_reverse = flag(e.placement_reverse),
-                "placementLock" => e.placement_lock = PlacementLock::parse(value),
-                "placementPlaneLock" => e.placement_plane_lock = PlaneLock::parse(value),
-                "placementReachAround" => e.placement_reach_around = flag(e.placement_reach_around),
-                "placementFastDelay" => {
-                    if let Some(&d) = PLACEMENT_DELAYS.iter().find(|d| d.to_string() == value) {
-                        e.placement_fast_delay = d;
-                    }
-                }
-                "placementHudPreview" => e.placement_hud_preview = flag(e.placement_hud_preview),
-                "placementProtocol" => e.placement_protocol = PlacementProtocol::parse(value),
-                "placementRotationSync" => {
-                    e.placement_rotation_sync = flag(e.placement_rotation_sync)
-                }
-                "placementLockKey" if value.starts_with("key.") => {
-                    e.placement_lock_key = value.to_owned()
-                }
-                "placementReverseKey" if value.starts_with("key.") => {
-                    e.placement_reverse_key = value.to_owned()
-                }
                 // General:
                 "autoReconnect" => e.auto_reconnect = flag(e.auto_reconnect),
                 "ownNameTag" => e.own_name_tag = flag(e.own_name_tag),
@@ -602,24 +550,6 @@ impl Extras {
         push("waypointHudButton", bool_text(self.waypoint_hud_button));
         push("waypointNewColor", self.waypoint_new_color.label());
         push("waypointKey", &self.waypoint_key);
-        push("accuratePlacement", bool_text(self.accurate_placement));
-        push("placementQuadrant", bool_text(self.placement_quadrant));
-        push("placementReverse", bool_text(self.placement_reverse));
-        push("placementLock", self.placement_lock.name());
-        push("placementPlaneLock", self.placement_plane_lock.name());
-        push(
-            "placementReachAround",
-            bool_text(self.placement_reach_around),
-        );
-        push("placementFastDelay", &self.placement_fast_delay.to_string());
-        push("placementHudPreview", bool_text(self.placement_hud_preview));
-        push("placementProtocol", self.placement_protocol.name());
-        push(
-            "placementRotationSync",
-            bool_text(self.placement_rotation_sync),
-        );
-        push("placementLockKey", &self.placement_lock_key);
-        push("placementReverseKey", &self.placement_reverse_key);
         push("autoReconnect", bool_text(self.auto_reconnect));
         push("ownNameTag", bool_text(self.own_name_tag));
         push("mouseTweaks", bool_text(self.mouse_tweaks));
@@ -899,15 +829,12 @@ impl Extras {
         }
         chosen
     }
-    /// Binds an extra key (`SORT_KEY`, `WAYPOINT_KEY`, `MINIMAP_ZOOM_KEY`,
-    /// `PLACEMENT_LOCK_KEY`, `PLACEMENT_REVERSE_KEY`); false for vanilla keys.
+    /// Binds an extra key (`SORT_KEY`, `WAYPOINT_KEY`, `MINIMAP_ZOOM_KEY`); false for vanilla keys.
     pub fn set_key(&mut self, name: &str, value: String) -> bool {
         match name {
             SORT_KEY => self.sort_key = value,
             WAYPOINT_KEY => self.waypoint_key = value,
             MINIMAP_ZOOM_KEY => self.minimap_zoom_key = value,
-            PLACEMENT_LOCK_KEY => self.placement_lock_key = value,
-            PLACEMENT_REVERSE_KEY => self.placement_reverse_key = value,
             _ => return false,
         }
         true
@@ -1072,19 +999,6 @@ pub enum Item {
     MinimapBiome,
     MinimapTime,
     MinimapZoomKey,
-    /// Volt Accurate Block Placement page:
-    AccuratePlacement,
-    PlacementQuadrant,
-    PlacementReverse,
-    PlacementLockMode,
-    PlacementPlaneMode,
-    PlacementReachAround,
-    PlacementFastDelay,
-    PlacementHudPreview,
-    PlacementServerProtocol,
-    PlacementRotationSync,
-    PlacementLockKey,
-    PlacementReverseKey,
     /// Volt Boost page (Tiers 1, 2 & 3):
     VoltPreset,
     VoltAutoOptimize,
@@ -1186,27 +1100,6 @@ pub fn minimap_rows() -> Vec<Result<Item, &'static str>> {
     ]
 }
 
-/// The Volt Accurate Block Placement settings rows.
-pub fn placement_rows() -> Vec<Result<Item, &'static str>> {
-    use Item::*;
-    vec![
-        Err("Accurate Block Placement"),
-        Ok(AccuratePlacement),
-        Ok(PlacementQuadrant),
-        Ok(PlacementReverse),
-        Ok(PlacementLockMode),
-        Ok(PlacementPlaneMode),
-        Ok(PlacementReachAround),
-        Ok(PlacementFastDelay),
-        Ok(PlacementHudPreview),
-        Err("Multiplayer & Hotkeys"),
-        Ok(PlacementServerProtocol),
-        Ok(PlacementRotationSync),
-        Ok(PlacementLockKey),
-        Ok(PlacementReverseKey),
-    ]
-}
-
 /// The Volt Boost performance & optimization suite rows (Tiers 1, 2 & 3).
 pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
     use Item::*;
@@ -1296,19 +1189,6 @@ impl Item {
             Item::MinimapBiome => "Heading & Biome",
             Item::MinimapTime => "World Clock",
             Item::MinimapZoomKey => "Zoom Key",
-            // Accurate Block Placement:
-            Item::AccuratePlacement => "Accurate Placement",
-            Item::PlacementQuadrant => "Sub-Face Aiming",
-            Item::PlacementReverse => "Reverse Facing",
-            Item::PlacementLockMode => "Orientation Lock",
-            Item::PlacementPlaneMode => "Plane / Line Lock",
-            Item::PlacementReachAround => "Reach-Around",
-            Item::PlacementFastDelay => "Place Delay",
-            Item::PlacementHudPreview => "Crosshair Badge",
-            Item::PlacementServerProtocol => "MP Protocol",
-            Item::PlacementRotationSync => "MP Look Sync",
-            Item::PlacementLockKey => "Lock Key",
-            Item::PlacementReverseKey => "Reverse Key",
             // Volt Boost:
             Item::VoltPreset => "Boost Profile",
             Item::VoltAutoOptimize => "Auto-Tune Device",
@@ -1375,17 +1255,6 @@ impl Item {
             | MinimapBiome
             | MinimapTime
             | MinimapZoomKey => Minimap,
-            PlacementQuadrant
-            | PlacementReverse
-            | PlacementLockMode
-            | PlacementPlaneMode
-            | PlacementReachAround
-            | PlacementFastDelay
-            | PlacementHudPreview
-            | PlacementServerProtocol
-            | PlacementRotationSync
-            | PlacementLockKey
-            | PlacementReverseKey => AccuratePlacement,
             Fullbright
             | DynamicLights
             | OwnNameTag
@@ -1399,7 +1268,6 @@ impl Item {
             | WaypointOnMinimap
             | WaypointNewColor
             | Minimap
-            | AccuratePlacement
             | VoltPreset
             | VoltAutoOptimize
             | VoltPurgeRam
@@ -1545,43 +1413,6 @@ impl Item {
             Item::MinimapBiome => "Shows your cardinal heading and current biome beneath the minimap.",
             Item::MinimapTime => "Shows the current in-game Day number and 24-hour clock beneath the minimap.",
             Item::MinimapZoomKey => "Press in-game to cycle minimap zoom levels on the fly. Escape unbinds.",
-            // Accurate Block Placement:
-            Item::AccuratePlacement => {
-                "Master switch for Volt Accurate Block Placement (off by default): sub-face aiming, orientation/half lock, plane lock, reach-around and fast place."
-            }
-            Item::PlacementQuadrant => {
-                "Divides every block face into 5 aiming zones (centre + 4 edges) so pistons, observers, stairs, repeaters and hoppers face whichever edge you aim at."
-            }
-            Item::PlacementReverse => {
-                "Flips placed block orientation (and top/bottom slab or stair half) to the opposite direction."
-            }
-            Item::PlacementLockMode => {
-                "Locks placed blocks to a fixed cardinal/vertical direction or forces Top / Bottom slabs and stairs."
-            }
-            Item::PlacementPlaneMode => {
-                "Constrains continuous right-click drag building to a single Horizontal Y layer, Vertical column or Straight row."
-            }
-            Item::PlacementReachAround => {
-                "Allows placing blocks against the far edge or underside of the block in front of you when aiming into empty air."
-            }
-            Item::PlacementFastDelay => {
-                "Reduces vanilla's 4-tick right-click repeat delay while holding blocks (4t Vanilla, 2t Fast, 1t Faster, 0t Instant)."
-            }
-            Item::PlacementHudPreview => {
-                "Displays a subtle directional / slab-half indicator pill below the crosshair while aiming with an orientable block."
-            }
-            Item::PlacementServerProtocol => {
-                "Vanilla Safe keeps hit cursors strictly inside [0..1] for anti-cheat safety; Carpet Protocol sends Tweakeroo/Carpet accurateBlockPlacement hit vectors."
-            }
-            Item::PlacementRotationSync => {
-                "In Vanilla Safe multiplayer mode, briefly aligns look packets during directional block placement so vanilla servers place the exact chosen facing."
-            }
-            Item::PlacementLockKey => {
-                "Press in-game to lock or unlock your current aimed block orientation. Escape unbinds."
-            }
-            Item::PlacementReverseKey => {
-                "Press in-game to toggle Reverse Facing on or off. Escape unbinds."
-            }
             // Volt Boost:
             Item::VoltPreset => {
                 "Applies a curated one-tap Volt Boost profile (OFF, Balanced, Competitive PvP, Ultra FPS, Battery Saver or Low-RAM Rescue)."
@@ -1691,8 +1522,7 @@ impl Item {
             | Item::AutoReconnect
             | Item::MouseTweaks
             | Item::Sort
-            | Item::Waypoints
-            | Item::AccuratePlacement => Some(Cost::None),
+            | Item::Waypoints => Some(Cost::None),
             Item::Minimap => Some(Cost::Low),
             _ => None,
         }
@@ -1727,13 +1557,6 @@ impl Item {
             Item::MinimapCoords => e.minimap_coords,
             Item::MinimapBiome => e.minimap_biome,
             Item::MinimapTime => e.minimap_time,
-            // Accurate Placement:
-            Item::AccuratePlacement => e.accurate_placement,
-            Item::PlacementQuadrant => e.placement_quadrant,
-            Item::PlacementReverse => e.placement_reverse,
-            Item::PlacementReachAround => e.placement_reach_around,
-            Item::PlacementHudPreview => e.placement_hud_preview,
-            Item::PlacementRotationSync => e.placement_rotation_sync,
             // Volt Boost switches:
             Item::VoltCullLeaves => e.cull_leaves,
             Item::VoltFrustumMesh => e.frustum_priority_mesh,
@@ -1760,10 +1583,6 @@ impl Item {
             Item::SortKey => crate::keybinds::display_name(&e.sort_key).plain(),
             Item::WaypointKey => crate::keybinds::display_name(&e.waypoint_key).plain(),
             Item::MinimapZoomKey => crate::keybinds::display_name(&e.minimap_zoom_key).plain(),
-            Item::PlacementLockKey => crate::keybinds::display_name(&e.placement_lock_key).plain(),
-            Item::PlacementReverseKey => {
-                crate::keybinds::display_name(&e.placement_reverse_key).plain()
-            }
             Item::WaypointScale => format!("{}%", e.waypoint_scale),
             Item::WaypointMaxDistance => {
                 if e.waypoint_max_distance == 0 {
@@ -1791,15 +1610,6 @@ impl Item {
             Item::MinimapOpacity => format!("{}%", e.minimap_opacity),
             Item::MinimapTerrain => e.minimap_terrain_mode.label().into(),
             Item::MinimapEntityRadar => e.minimap_entities.label().into(),
-            Item::PlacementLockMode => e.placement_lock.label().into(),
-            Item::PlacementPlaneMode => e.placement_plane_lock.label().into(),
-            Item::PlacementFastDelay => match e.placement_fast_delay {
-                0 => "Instant (0t)".into(),
-                1 => "Faster (1t)".into(),
-                2 => "Fast (2t)".into(),
-                _ => "Vanilla (4t)".into(),
-            },
-            Item::PlacementServerProtocol => e.placement_protocol.label().into(),
             // Volt Boost values:
             Item::VoltPreset => e.volt_preset.label().into(),
             Item::VoltAutoOptimize => {
@@ -1908,21 +1718,6 @@ impl Item {
             Item::MinimapCoords => e.minimap_coords = !e.minimap_coords,
             Item::MinimapBiome => e.minimap_biome = !e.minimap_biome,
             Item::MinimapTime => e.minimap_time = !e.minimap_time,
-            // Accurate Block Placement:
-            Item::AccuratePlacement => e.accurate_placement = !e.accurate_placement,
-            Item::PlacementQuadrant => e.placement_quadrant = !e.placement_quadrant,
-            Item::PlacementReverse => e.placement_reverse = !e.placement_reverse,
-            Item::PlacementLockMode => e.placement_lock = e.placement_lock.cycle(back),
-            Item::PlacementPlaneMode => e.placement_plane_lock = e.placement_plane_lock.cycle(back),
-            Item::PlacementReachAround => e.placement_reach_around = !e.placement_reach_around,
-            Item::PlacementFastDelay => {
-                e.placement_fast_delay = step(&PLACEMENT_DELAYS, e.placement_fast_delay, back)
-            }
-            Item::PlacementHudPreview => e.placement_hud_preview = !e.placement_hud_preview,
-            Item::PlacementServerProtocol => {
-                e.placement_protocol = e.placement_protocol.cycle(back)
-            }
-            Item::PlacementRotationSync => e.placement_rotation_sync = !e.placement_rotation_sync,
             // Volt Boost cycles:
             Item::VoltPreset => {
                 let next = step(&VoltBoostPreset::ALL, e.volt_preset, back);
@@ -1979,11 +1774,7 @@ impl Item {
             }
             Item::VoltMemorySaver => e.memory_saver = !e.memory_saver,
             Item::VoltKeepAwake => e.keep_screen_awake = !e.keep_screen_awake,
-            Item::SortKey
-            | Item::WaypointKey
-            | Item::MinimapZoomKey
-            | Item::PlacementLockKey
-            | Item::PlacementReverseKey => {}
+            Item::SortKey | Item::WaypointKey | Item::MinimapZoomKey => {}
         }
     }
     /// The key name the options screen waits on for a key item.
@@ -1992,8 +1783,6 @@ impl Item {
             Item::SortKey => Some(SORT_KEY),
             Item::WaypointKey => Some(WAYPOINT_KEY),
             Item::MinimapZoomKey => Some(MINIMAP_ZOOM_KEY),
-            Item::PlacementLockKey => Some(PLACEMENT_LOCK_KEY),
-            Item::PlacementReverseKey => Some(PLACEMENT_REVERSE_KEY),
             _ => None,
         }
     }
@@ -2008,7 +1797,7 @@ mod tests {
         let d = Extras::default();
         assert!(!d.fullbright && !d.dynamic_lights);
         assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
-        assert!(!d.waypoints && !d.accurate_placement);
+        assert!(!d.waypoints);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag);
         assert!(d.discord_presence);
         assert_eq!(Extras::parse(""), d);
@@ -2020,21 +1809,14 @@ mod tests {
         assert_eq!(Item::DynamicLights.switch(&e), Some(true));
         Item::Waypoints.cycle(&mut e, false);
         Item::Minimap.cycle(&mut e, false);
-        Item::AccuratePlacement.cycle(&mut e, false);
         Item::MinimapSize.cycle(&mut e, false);
         Item::MinimapFrameStyle.cycle(&mut e, false);
         Item::MinimapTerrain.cycle(&mut e, false);
         Item::MinimapEntityRadar.cycle(&mut e, false);
         Item::WaypointScale.cycle(&mut e, false);
         Item::WaypointMaxDistance.cycle(&mut e, false);
-        Item::PlacementLockMode.cycle(&mut e, false);
-        Item::PlacementPlaneMode.cycle(&mut e, false);
-        Item::PlacementFastDelay.cycle(&mut e, false);
-        Item::PlacementServerProtocol.cycle(&mut e, false);
         assert!(e.set_key(WAYPOINT_KEY, "key.keyboard.n".into()));
         assert!(e.set_key(MINIMAP_ZOOM_KEY, "key.keyboard.m".into()));
-        assert!(e.set_key(PLACEMENT_LOCK_KEY, "key.keyboard.l".into()));
-        assert!(e.set_key(PLACEMENT_REVERSE_KEY, "key.keyboard.x".into()));
         assert_eq!(Extras::parse(&e.serialize()), e);
     }
 
@@ -2127,13 +1909,7 @@ mod tests {
             Extras::parse("minimapSize:7\nminimapZoom:3").minimap_zoom,
             1.0
         );
-        for rows_fn in [
-            rows,
-            waypoint_rows,
-            minimap_rows,
-            placement_rows,
-            volt_boost_rows,
-        ] {
+        for rows_fn in [rows, waypoint_rows, minimap_rows, volt_boost_rows] {
             for item in rows_fn().into_iter().flatten() {
                 assert!(!item.caption().is_empty() && !item.description().is_empty());
             }

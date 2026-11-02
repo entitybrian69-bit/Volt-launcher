@@ -245,6 +245,12 @@ impl Default for PlatformSpecificEventLoopAttributes {
     }
 }
 
+impl<T: 'static> Drop for EventLoop<T> {
+    fn drop(&mut self) {
+        crate::event_loop::EventLoopBuilder::<()>::allow_event_loop_recreation();
+    }
+}
+
 impl<T: 'static> EventLoop<T> {
     pub(crate) fn new(
         attributes: &PlatformSpecificEventLoopAttributes,
@@ -377,9 +383,9 @@ impl<T: 'static> EventLoop<T> {
                     warn!("TODO: forward onStop notification to application");
                 }
                 MainEvent::Destroy => {
-                    // XXX: maybe exit mainloop to drop things before being
-                    // killed by the OS?
-                    warn!("TODO: forward onDestroy notification to application");
+                    debug!("Android Activity onDestroy - exiting event loop cleanly");
+                    self.running = false;
+                    self.window_target().exit();
                 }
                 MainEvent::InsetsChanged { .. } => {
                     // XXX: how to forward this state to applications?

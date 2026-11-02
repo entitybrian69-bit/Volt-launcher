@@ -243,8 +243,7 @@ pub fn needs_file_fixes(world: &Path) -> bool {
 /// shows `selectWorld.versionUnknown`).
 fn saved_version_name(version: Option<&Tag>) -> String {
     match version {
-        Some(v) => text(v.get("Name"))
-            .unwrap_or_else(|| horizon_core::game_version::active_version().id().to_string()),
+        Some(v) => text(v.get("Name")).unwrap_or_else(|| VERSION_NAME.to_string()),
         None => String::new(),
     }
 }
@@ -3989,10 +3988,7 @@ impl Level {
             (
                 "Version",
                 Tag::compound([
-                    (
-                        "Name",
-                        string(horizon_core::game_version::active_version().id()),
-                    ),
+                    ("Name", string(VERSION_NAME)),
                     ("Id", Tag::Int(DATA_VERSION)),
                     ("Snapshot", Tag::Byte(0)),
                     ("Series", string("main")),

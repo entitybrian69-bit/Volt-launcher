@@ -1253,7 +1253,6 @@ impl Recipes {
                 None => sources.push((name, bytes)),
             }
         }
-        let active_ver = horizon_core::game_version::active_version();
         for (name, bytes) in sources {
             // Vanilla's RecipeManager logs a file that does not parse and
             // goes on ("Couldn't parse data file").
@@ -1264,12 +1263,6 @@ impl Recipes {
                     continue;
                 }
             };
-            if active_ver != horizon_core::game_version::GameVersion::V26_3
-                && let Some(res_id) = v["result"]["id"].as_str().or_else(|| v["result"].as_str())
-                && !active_ver.is_item_available(res_id)
-            {
-                continue;
-            }
             if let Some(kind) = custom_type(&v) {
                 let id = if name.contains(':') {
                     name

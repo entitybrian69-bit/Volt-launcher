@@ -11,7 +11,6 @@ pub(super) enum Kind {
     DisplayHz,
     Renderer,
     RenderScale,
-    GameVersion,
     Profile,
     Orientation,
     InputHost,
@@ -170,36 +169,6 @@ impl Launcher {
                     ),
                 ],
             ),
-            Kind::GameVersion => {
-                let active = c.selected_version();
-                let choices = horizon_core::game_version::GameVersion::ALL_NEWEST_FIRST
-                    .into_iter()
-                    .map(|ver| {
-                        let pack_fmt = ver.resource_pack_format();
-                        let pack_str = if pack_fmt.1 == 0 {
-                            format!("{}", pack_fmt.0)
-                        } else {
-                            format!("{}.{}", pack_fmt.0, pack_fmt.1)
-                        };
-                        (
-                            format!("Minecraft Java {}", ver.id()),
-                            format!(
-                                "{} • Protocol {} • Pack format {}",
-                                ver.era_name(),
-                                ver.protocol(),
-                                pack_str
-                            ),
-                            Action::ChooseGameVersion(ver),
-                            ver == active,
-                        )
-                    })
-                    .collect();
-                (
-                    "Choose Minecraft version",
-                    "Pure-Rust multi-version engine (1.20.1 to 26.3). Each version isolates saves & packs and matches server protocols.",
-                    choices,
-                )
-            }
             Kind::Profile => {
                 let mut ids = vec![0, c.profile];
                 ids.extend(
@@ -296,28 +265,16 @@ impl Launcher {
                 )
             }
         };
-        let step = if choices.len() > 6 { 60.0 } else { 76.0 };
-        let initial_scroll = choices
-            .iter()
-            .position(|(_, _, _, sel)| *sel)
-            .map_or(0.0, |idx| (idx as f32 * step - step).max(0.0));
         self.chooser = Some(Chooser {
             title,
             help,
             choices,
             device,
-            scroll: initial_scroll,
+            scroll: 0.0,
         });
     }
 }
 impl Chooser {
-    fn row_metrics(&self) -> (f32, f32) {
-        if self.choices.len() > 6 {
-            (54.0, 60.0)
-        } else {
-            (68.0, 76.0)
-        }
-    }
     pub(super) fn confirm_delete(name: String) -> Self {
         Self {
             title: "Remove add-on?",
@@ -342,7 +299,6 @@ impl Chooser {
     }
     pub(super) fn navigation(&self, width: f32, height: f32) -> Vec<([f32; 4], Action)> {
         let [mx, my, mw, _] = Self::modal_box(width, height);
-        let (row_h, step) = self.row_metrics();
         let top = my + 108.0;
         self.choices
             .iter()
@@ -351,9 +307,9 @@ impl Chooser {
                 (
                     [
                         mx + 20.0,
-                        top + i as f32 * step - self.scroll,
+                        top + i as f32 * 76.0 - self.scroll,
                         mw - 40.0,
-                        row_h,
+                        68.0,
                     ],
                     *action,
                 )
@@ -362,19 +318,17 @@ impl Chooser {
     }
     pub(super) fn viewport(&self, height: f32) -> [f32; 3] {
         let [_, my, _, mh] = Self::modal_box(1040.0, height);
-        let (_, step) = self.row_metrics();
         let top = my + 108.0;
         let bottom = my + mh - 68.0;
         [
             top,
             bottom,
-            (self.choices.len() as f32 * step - (bottom - top)).max(0.0),
+            (self.choices.len() as f32 * 76.0 - (bottom - top)).max(0.0),
         ]
     }
     pub fn draw(&mut self, ui: &mut Ui, targets: &mut Vec<([f32; 4], Action)>) {
         use super::pages::theme;
         let (w, h) = (ui.w, ui.h);
-        let (row_h, step) = self.row_metrics();
         targets.clear();
         ui.rounded(0.0, 0.0, w, h, 0.0, theme::BACKDROP);
         let [mx, my, mw, mh] = Self::modal_box(w, h);
@@ -394,75 +348,64 @@ impl Chooser {
         let bottom = my + mh - 68.0;
         self.scroll = self.scroll.clamp(
             0.0,
-            (self.choices.len() as f32 * step - (bottom - top)).max(0.0),
+            (self.choices.len() as f32 * 76.0 - (bottom - top)).max(0.0),
         );
         for (i, (label, detail, action, selected)) in self.choices.iter().enumerate() {
-            let y = top + i as f32 * step - self.scroll;
-            if y + row_h * 0.5 < top || y + row_h * 0.5 > bottom {
+            let y = top + i as f32 * 76.0 - self.scroll;
+            if y < top - 2.0 || y + 68.0 > bottom + 2.0 {
                 continue;
             }
-            let vis_top = y.max(top);
-            let vis_bottom = (y + row_h).min(bottom);
-            let row_rect = [mx + 20.0, vis_top, mw - 40.0, (vis_bottom - vis_top).max(24.0)];
-            if y >= top - 2.0 && y + row_h <= bottom + 2.0 {
-                ui.rounded(
-                    mx + 20.0,
-                    y,
-                    mw - 40.0,
-                    row_h,
-                    10.0,
-                    if *selected {
-                        theme::HERO_BG
-                    } else {
-                        theme::CARD_INNER
-                    },
-                );
-                ui.border(
-                    mx + 20.0,
-                    y,
-                    mw - 40.0,
-                    row_h,
-                    10.0,
-                    if *selected {
-                        theme::CRIMSON
-                    } else {
-                        theme::BORDER
-                    },
-                );
-
-                let rx = mx + 36.0;
-                let ry = y + (row_h - 22.0) * 0.5;
-                ui.border(
-                    rx,
-                    ry,
-                    22.0,
-                    22.0,
-                    11.0,
-                    if *selected {
-                        theme::CRIMSON_BRIGHT
-                    } else {
-                        theme::MUTED
-                    },
-                );
+            let row_rect = [mx + 20.0, y, mw - 40.0, 68.0];
+            ui.rounded(
+                row_rect[0],
+                row_rect[1],
+                row_rect[2],
+                row_rect[3],
+                10.0,
                 if *selected {
-                    ui.rounded(rx + 5.0, ry + 5.0, 12.0, 12.0, 6.0, theme::CRIMSON);
-                }
-                let lbl_y = if detail.is_empty() {
-                    y + (row_h - 22.0) * 0.5
+                    theme::HERO_BG
                 } else {
-                    y + if row_h < 60.0 { 6.0 } else { 10.0 }
-                };
-                let lbl_fit = ui.fit_text(Face::Medium, 16.0, label, mw - 104.0);
-                ui.text(Face::Medium, 16.0, rx + 36.0, lbl_y, theme::TEXT, &lbl_fit);
-                if !detail.is_empty() {
-                    let det_y = y + if row_h < 60.0 { 30.0 } else { 38.0 };
-                    let det_fit = ui.fit_text(Face::Regular, 12.5, detail, mw - 104.0);
-                    ui.text(Face::Regular, 12.5, rx + 36.0, det_y, theme::MUTED, &det_fit);
-                }
-                targets.push(([mx + 20.0, y, mw - 40.0, row_h], *action));
-            } else {
-                let _ = row_rect;
+                    theme::CARD_INNER
+                },
+            );
+            ui.border(
+                row_rect[0],
+                row_rect[1],
+                row_rect[2],
+                row_rect[3],
+                10.0,
+                if *selected {
+                    theme::CRIMSON
+                } else {
+                    theme::BORDER
+                },
+            );
+
+            let rx = row_rect[0] + 16.0;
+            let ry = y + 23.0;
+            ui.border(
+                rx,
+                ry,
+                22.0,
+                22.0,
+                11.0,
+                if *selected {
+                    theme::CRIMSON_BRIGHT
+                } else {
+                    theme::MUTED
+                },
+            );
+            if *selected {
+                ui.rounded(rx + 5.0, ry + 5.0, 12.0, 12.0, 6.0, theme::CRIMSON);
             }
+            let lbl_y = if detail.is_empty() { y + 21.0 } else { y + 10.0 };
+            let lbl_fit = ui.fit_text(Face::Medium, 16.5, label, row_rect[2] - 64.0);
+            ui.text(Face::Medium, 16.5, rx + 36.0, lbl_y, theme::TEXT, &lbl_fit);
+            if !detail.is_empty() {
+                let det_fit = ui.fit_text(Face::Regular, 13.0, detail, row_rect[2] - 64.0);
+                ui.text(Face::Regular, 13.0, rx + 36.0, y + 38.0, theme::MUTED, &det_fit);
+            }
+            targets.push((row_rect, *action));
         }
         button(
             ui,

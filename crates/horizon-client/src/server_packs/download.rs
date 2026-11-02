@@ -24,23 +24,17 @@ const NET_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// `createDownloadHeaders`: who is downloading, with which game.
 pub fn headers(name: &str, uuid: u128) -> Vec<(&'static str, String)> {
-    let active = horizon_core::game_version::active_version();
-    let ver = active.id();
-    let fmt = active.resource_pack_format();
+    use horizon_core::version::{RESOURCE_PACK_FORMAT, VANILLA_VERSION, VERSION_ID};
     vec![
         ("X-Minecraft-Username", name.to_owned()),
         ("X-Minecraft-UUID", format!("{uuid:032x}")),
-        ("X-Minecraft-Version", ver.to_owned()),
-        ("X-Minecraft-Version-ID", ver.to_owned()),
+        ("X-Minecraft-Version", VANILLA_VERSION.to_owned()),
+        ("X-Minecraft-Version-ID", VERSION_ID.to_owned()),
         (
             "X-Minecraft-Pack-Format",
-            if fmt.1 == 0 {
-                format!("{}", fmt.0)
-            } else {
-                format!("{}.{}", fmt.0, fmt.1)
-            },
+            format!("{}.{}", RESOURCE_PACK_FORMAT.0, RESOURCE_PACK_FORMAT.1),
         ),
-        ("User-Agent", format!("Minecraft Java/{ver}")),
+        ("User-Agent", format!("Minecraft Java/{VANILLA_VERSION}")),
     ]
 }
 

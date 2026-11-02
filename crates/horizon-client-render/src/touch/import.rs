@@ -1907,19 +1907,8 @@ pub fn apply_to_profile(profile_home: &Path, settings: &Settings) -> Result<(), 
 }
 
 pub fn apply_to_all_profiles(root_home: &Path, settings: &Settings) -> Result<usize, String> {
-    let sync_version_subdirs = |profile_dir: &Path| {
-        if let Ok(vers) = std::fs::read_dir(profile_dir.join("versions")) {
-            for v in vers.flatten() {
-                let vp = v.path();
-                if vp.is_dir() {
-                    let _ = apply_to_profile(&vp, settings);
-                }
-            }
-        }
-    };
     let mut count = 0usize;
     apply_to_profile(root_home, settings)?;
-    sync_version_subdirs(root_home);
     count += 1;
     let profiles_dir = root_home.join("profiles");
     if let Ok(entries) = std::fs::read_dir(&profiles_dir) {
@@ -1932,7 +1921,6 @@ pub fn apply_to_all_profiles(root_home: &Path, settings: &Settings) -> Result<us
                     .is_some_and(|n| n.starts_with("profile-"))
             {
                 apply_to_profile(&p, settings)?;
-                sync_version_subdirs(&p);
                 count += 1;
             }
         }

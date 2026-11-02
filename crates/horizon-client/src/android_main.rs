@@ -70,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.9.1"
+        "0.9.2"
     } else {
-        "0.9.1-dev"
+        "0.9.2-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -161,18 +161,11 @@ pub(crate) fn android_event_loop() -> Result<EventLoop<()>, winit::error::EventL
 pub(crate) fn android_arguments() -> horizon_client::Result<Vec<String>> {
     let home = APP.with(|app| app.borrow().as_ref().unwrap().internal_data_path().unwrap());
     let config = catalog::Config::load(&home);
-    let selected_ver = config.selected_version();
-    let ver_res = home.join(".local/horizon-client").join(selected_ver.id());
-    let res_dir = if ver_res.join("horizon-resources.json").is_file() {
-        ver_res
-    } else {
-        home.join(".local/horizon-client/26.3")
-    };
     let mut args = vec![
         "--resources".into(),
-        res_dir.to_string_lossy().into_owned(),
-        "--mc-version".into(),
-        selected_ver.id().into(),
+        home.join(".local/horizon-client/26.3")
+            .to_string_lossy()
+            .into_owned(),
     ];
     if !PUBLIC_BUILD {
         args.extend([
@@ -275,8 +268,21 @@ fn apk_engine_stamp() -> Option<String> {
 }
 
 static ENGINE_DATA_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ENGINE_DATA_DONE: (std::sync::Mutex<bool>, std::sync::Condvar) =
+    (std::sync::Mutex::new(false), std::sync::Condvar::new());
+static ACTIVE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MAIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub(crate) fn ensure_engine_data(app: &AndroidApp, home: &std::path::Path) {
+    struct DoneGuard;
+    impl Drop for DoneGuard {
+        fn drop(&mut self) {
+            let (lock, cvar) = &ENGINE_DATA_DONE;
+            *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            cvar.notify_all();
+        }
+    }
+    let _done = DoneGuard;
     let _guard = ENGINE_DATA_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let zip_path = home.join("engine-data.zip");
     let stamp_path = home.join("engine-data.stamp");
@@ -308,11 +314,17 @@ pub(crate) fn ensure_engine_data(app: &AndroidApp, home: &std::path::Path) {
 }
 
 pub(crate) fn wait_for_engine_data() {
-    let _guard = ENGINE_DATA_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (lock, cvar) = &ENGINE_DATA_DONE;
+    let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
+    while !*done {
+        done = cvar.wait(done).unwrap_or_else(|e| e.into_inner());
+    }
 }
 
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    let generation = ACTIVE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+    let _main_guard = MAIN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     use winit::platform::android::activity::input::Axis;
     for axis in [
         Axis::Vscroll,
@@ -364,11 +376,17 @@ fn android_main(app: AndroidApp) {
     // Unpack `engine-data.zip` (~38 MB) on a background thread so `android_event_loop()`
     // starts draining NativeActivity lifecycle/input commands immediately on first launch.
     {
+        *ENGINE_DATA_DONE.0.lock().unwrap_or_else(|e| e.into_inner()) = false;
         let home_bg = home.clone();
-        let _ = std::thread::Builder::new()
+        let app_fallback = app_for_engine.clone();
+        if std::thread::Builder::new()
             .name("volt-engine-unpack".into())
             .stack_size(4 * 1024 * 1024)
-            .spawn(move || ensure_engine_data(&app_for_engine, &home_bg));
+            .spawn(move || ensure_engine_data(&app_for_engine, &home_bg))
+            .is_err()
+        {
+            ensure_engine_data(&app_fallback, &home);
+        }
     }
     let mut launcher = launcher::Launcher::new(home.clone());
     let result = android_event_loop()
@@ -380,12 +398,10 @@ fn android_main(app: AndroidApp) {
         horizon_client::crash::report_error(&home, "client", &*error);
         let _ = std::fs::write(home.join("android-error.txt"), error.to_string());
     }
-    // Winit permits one EventLoop per process. NativeActivity otherwise keeps
-    // this process cached after Quit, making the next launch fail. run_app's
-    // exiting callback has completed the world save before we get here.
     drop(launcher);
     diagnostics::finish();
-    platform::finish();
+    if ACTIVE_GENERATION.load(std::sync::atomic::Ordering::Acquire) == generation {
+        platform::finish();
+    }
     APP.with(|slot| *slot.borrow_mut() = None);
-    std::process::exit(0);
 }

@@ -442,13 +442,6 @@ fn run(
     transferred: bool,
     resources: &Path,
 ) -> Result<String, String> {
-    let is_local = local.is_some();
-    let is_friend = !is_local && address.starts_with(FRIEND);
-    let wire_protocol = if is_local || is_friend {
-        PROTOCOL_VERSION
-    } else {
-        horizon_core::game_version::active_version().protocol()
-    };
     let (host, port, mut c) = if let Some(pipe) = local {
         (address.to_owned(), 0, Connection::local(pipe))
     } else {
@@ -462,18 +455,17 @@ fn run(
                 target
             }
         };
-        let c = connect_tcp(&host, port, is_friend, READ_TIMEOUT)?;
+        let c = connect_tcp(&host, port, address.starts_with(FRIEND), READ_TIMEOUT)?;
         (host, port, c)
     };
-    c.set_wire_protocol(wire_protocol, horizon_protocol::State::Handshake);
     *shared_counters.lock().unwrap() = Some(c.reader.counters.clone());
     let e = |e: horizon_protocol::Error| connection_lost(e, lang);
     c.send(
         &handshake::Serverbound::Intention(handshake::Intention {
-            protocol: wire_protocol,
+            protocol: PROTOCOL_VERSION,
             host: host.clone(),
             port,
-            intent: if transferred && wire_protocol >= 766 {
+            intent: if transferred {
                 handshake::TRANSFER
             } else {
                 handshake::LOGIN
@@ -482,7 +474,6 @@ fn run(
         .encode(),
     )
     .map_err(e)?;
-    c.set_wire_state(horizon_protocol::State::Login);
     // Vanilla's login sends the account's profile id, or the offline one.
     let uuid = auth.map_or_else(|| offline_uuid(name), |a| a.uuid);
     c.send(
@@ -498,10 +489,8 @@ fn run(
         match login::Clientbound::decode(id, &payload).map_err(e)? {
             login::Clientbound::Compression(p) => c.set_compression(p.threshold),
             login::Clientbound::LoginFinished(p) => {
-                if wire_protocol >= 764 {
-                    c.send(&login::Serverbound::LoginAcknowledged(Empty).encode())
-                        .map_err(e)?;
-                }
+                c.send(&login::Serverbound::LoginAcknowledged(Empty).encode())
+                    .map_err(e)?;
                 break p.profile;
             }
             login::Clientbound::Disconnect(p) => {
@@ -567,40 +556,6 @@ fn run(
         }
     };
     status(send, "Joining world...");
-    if wire_protocol < 764 {
-        // 1.20.1 (protocol 763): Login transitions directly to Play without Configuration.
-        configuring.store(false, Ordering::Relaxed);
-        c.set_wire_state(horizon_protocol::State::Play);
-        c.send(&play::Serverbound::ClientInformation(info).encode())
-            .map_err(e)?;
-        c.send(
-            &play::Serverbound::CustomPayload(cfg::CustomPayload {
-                channel: "minecraft:brand".into(),
-                data: brand(),
-            })
-            .encode(),
-        )
-        .map_err(e)?;
-        let (mut reader, writer) = c.split();
-        *shared_writer.lock().unwrap() = Some(writer);
-        let _ = send.send(Event::Joined {
-            registries: Arc::new(Dynamic::legacy_defaults()),
-            uuid: profile.uuid,
-            name: profile.name,
-        });
-        return receive_play(
-            &mut reader,
-            shared_writer,
-            configuring,
-            lang,
-            send,
-            cookies,
-            resources,
-            wire_protocol,
-        );
-    }
-
-    c.set_wire_state(horizon_protocol::State::Configuration);
     c.send(&cfg::Serverbound::ClientInformation(info).encode())
         .map_err(e)?;
     c.send(
@@ -621,9 +576,7 @@ fn run(
         send,
         cookies,
         resources,
-        wire_protocol,
     )?;
-    reader.set_wire_state(horizon_protocol::State::Play);
     let _ = send.send(Event::Joined {
         registries: Arc::new(registries),
         uuid: profile.uuid,
@@ -637,11 +590,9 @@ fn run(
         send,
         cookies,
         resources,
-        wire_protocol,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn receive_play(
     reader: &mut ConnReader,
     shared_writer: &Mutex<Option<ConnWriter>>,
@@ -650,7 +601,6 @@ fn receive_play(
     send: &Sender<Event>,
     cookies: &Cookies,
     resources: &Path,
-    wire_protocol: i32,
 ) -> Result<String, String> {
     loop {
         let (id, payload) = reader.recv().map_err(|e| connection_lost(e, lang))?;
@@ -687,7 +637,6 @@ fn receive_play(
                     let _ = w.send(&play::Serverbound::ConfigurationAcknowledged(Empty).encode());
                     configuring.store(true, Ordering::Relaxed);
                 }
-                reader.set_wire_state(horizon_protocol::State::Configuration);
                 let registries = configure(
                     reader,
                     shared_writer,
@@ -696,9 +645,7 @@ fn receive_play(
                     send,
                     cookies,
                     resources,
-                    wire_protocol,
                 )?;
-                reader.set_wire_state(horizon_protocol::State::Play);
                 let _ = send.send(Event::Reconfigured(Arc::new(registries)));
             }
             // ClientCommonPacketListenerImpl.handleRequestCookie: the stored
@@ -740,7 +687,6 @@ fn receive_play(
 
 /// The configuration phase: registries, tags and known packs until the
 /// server finishes it (ClientConfigurationPacketListenerImpl).
-#[allow(clippy::too_many_arguments)]
 fn configure(
     reader: &mut ConnReader,
     writer: &Mutex<Option<ConnWriter>>,
@@ -749,13 +695,8 @@ fn configure(
     send: &Sender<Event>,
     cookies: &Cookies,
     resources: &Path,
-    wire_protocol: i32,
 ) -> Result<Dynamic, String> {
-    let mut registries = if wire_protocol <= 765 {
-        Dynamic::legacy_defaults()
-    } else {
-        Dynamic::default()
-    };
+    let mut registries = Dynamic::default();
     let reply = |p: cfg::Serverbound| -> Result<(), String> {
         match writer.lock().unwrap().as_mut() {
             Some(w) => w.send(&p.encode()).map_err(|e| connection_lost(e, lang)),
@@ -918,7 +859,7 @@ pub fn ping(address: &str, timeout: Duration) -> Result<(serde_json::Value, u128
     let e = |e: horizon_protocol::Error| e.to_string();
     c.send(
         &handshake::Serverbound::Intention(handshake::Intention {
-            protocol: horizon_core::game_version::active_version().protocol(),
+            protocol: PROTOCOL_VERSION,
             host: host.clone(),
             port,
             intent: handshake::STATUS,
@@ -1097,7 +1038,6 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
-                horizon_protocol::PROTOCOL_VERSION,
             ));
         });
         let ended = result
@@ -1145,7 +1085,6 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &root,
-                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
@@ -1262,7 +1201,6 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
-                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
@@ -1326,7 +1264,6 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
-                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
@@ -1374,7 +1311,6 @@ mod tests {
                 &send,
                 &thread_cookies,
                 Path::new("."),
-                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);

@@ -597,34 +597,28 @@ impl super::Instance {
         };
 
         let supporter = super::volt_supporter::supporter_mode();
+        let effective_instance_api_version = if instance_api_version < vk::API_VERSION_1_1 {
+            // Vulkan 1.0 doesn't like anything but 1.0 passed in here...
+            vk::API_VERSION_1_0
+        } else if supporter {
+            // Volt Vulkan Supporter: cap instance API at 1.1 so budget/legacy
+            // mobile OEM drivers stay off broken Vulkan 1.2/1.3 driver paths,
+            // and keep `InstanceShared::instance_api_version` in sync with `app_info`.
+            vk::API_VERSION_1_1
+        } else {
+            // This is the max Vulkan API version supported by `wgpu-hal`.
+            vk::API_VERSION_1_3
+        };
         let app_name = CString::new(desc.name).unwrap();
         let app_info = vk::ApplicationInfo::default()
             .application_name(app_name.as_c_str())
             .application_version(1)
             .engine_name(c"wgpu-hal")
             .engine_version(2)
-            .api_version(
-                // Vulkan 1.0 doesn't like anything but 1.0 passed in here...
-                if instance_api_version < vk::API_VERSION_1_1 {
-                    vk::API_VERSION_1_0
-                } else if supporter {
-                    // Volt Vulkan Supporter: cap instance API at 1.1 so budget/legacy
-                    // mobile OEM drivers stay off broken Vulkan 1.2/1.3 driver paths.
-                    vk::API_VERSION_1_1
-                } else {
-                    // This is the max Vulkan API version supported by `wgpu-hal`.
-                    //
-                    // If we want to increment this, there are some things that must be done first:
-                    //  - Audit the behavioral differences between the previous and new API versions.
-                    //  - Audit all extensions used by this backend:
-                    //    - If any were promoted in the new API version and the behavior has changed, we must handle the new behavior in addition to the old behavior.
-                    //    - If any were obsoleted in the new API version, we must implement a fallback for the new API version
-                    //    - If any are non-KHR-vendored, we must ensure the new behavior is still correct (since backwards-compatibility is not guaranteed).
-                    vk::API_VERSION_1_3
-                },
-            );
+            .api_version(effective_instance_api_version);
 
-        let mut extensions = Self::desired_extensions(&entry, instance_api_version, desc.flags)?;
+        let mut extensions =
+            Self::desired_extensions(&entry, effective_instance_api_version, desc.flags)?;
         let mut create_info = vk::InstanceCreateInfo::default();
 
         if let Some(callback) = callback {
@@ -845,7 +839,7 @@ impl super::Instance {
             Self::from_raw(
                 entry,
                 vk_instance,
-                instance_api_version,
+                effective_instance_api_version,
                 android_sdk_version,
                 debug_utils,
                 extensions,

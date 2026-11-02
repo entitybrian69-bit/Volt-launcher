@@ -6260,7 +6260,7 @@ impl Game<'_> {
         if self.remote.as_ref().is_some_and(|r| r.destroying.is_some()) {
             return;
         }
-        self.use_delay = self.configured_use_delay();
+        self.use_delay = 4;
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
         let entity = self.entity_targeted();
@@ -6364,17 +6364,10 @@ impl Game<'_> {
     /// (the block reacts, or a block item is placed).
     fn remote_use_item_on(&mut self, hand: Hand) -> bool {
         let held = self.with_hand(hand, |g| g.held().cloned());
-        let held_block = held
-            .as_ref()
-            .and_then(|h| self.items().get(&h.item))
-            .is_some_and(|i| i.block.is_some());
         let debug_stick = held
             .as_ref()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
-        if let Some(hit) = self.pick_for_placement(held_block) {
-            if held_block && !self.plane_lock_permits_and_record(&hit) {
-                return true;
-            }
+        if let Some(hit) = self.pick() {
             // ShelfBlock.useItemOn consumes a nonempty main-hand click client-side
             // without predicting the inventory swap or swinging.
             let shelf_reacts = hand == Hand::Main
@@ -6441,50 +6434,19 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|s| self.armor_stand_spawn(&hit, s).is_some());
             let seq = self.next_sequence();
-            let accurate = if held_block && !reacts && !spectator {
-                held.as_ref()
-                    .and_then(|s| self.resolve_local_accurate_placement(&s.item, &hit))
-            } else {
-                None
-            };
-            let send_rot = accurate.as_ref().is_some_and(|a| {
-                a.needs_rotation_packet && self.settings.extras.placement_rotation_sync
-            });
-            let move_flags = self.player.as_ref().map_or(0, |p| {
-                u8::from(p.ground.on_ground) | (u8::from(p.collision.horizontal) << 1)
-            });
-            if send_rot && let Some(acc) = &accurate {
-                self.send(S::MovePlayerRot(play::MovePlayerRot {
-                    yaw: acc.effective_yaw,
-                    pitch: acc.effective_pitch,
-                    flags: move_flags,
-                }));
-            }
-            let cursor = accurate.as_ref().map_or(
-                [
+            self.send(S::UseItemOn(play::UseItemOn {
+                hand: hand_id(hand),
+                pos: hit.pos,
+                face: i32::from(face_direction(hit.face)),
+                cursor: [
                     (hit.point[0] - f64::from(hit.pos[0])) as f32,
                     (hit.point[1] - f64::from(hit.pos[1])) as f32,
                     (hit.point[2] - f64::from(hit.pos[2])) as f32,
                 ],
-                |a| a.cursor,
-            );
-            let wire_face = accurate.as_ref().map_or(hit.face, |a| a.effective_face);
-            self.send(S::UseItemOn(play::UseItemOn {
-                hand: hand_id(hand),
-                pos: hit.pos,
-                face: i32::from(face_direction(wire_face)),
-                cursor,
                 inside: hit.face == [0; 3],
                 world_border: false,
                 sequence: seq,
             }));
-            if send_rot {
-                self.send(S::MovePlayerRot(play::MovePlayerRot {
-                    yaw: self.yaw,
-                    pitch: self.pitch,
-                    flags: move_flags,
-                }));
-            }
             // MultiPlayerGameMode.performUseItemOn: a spectator's use predicts
             // nothing and ends the click (CONSUME, no swing); the server opens
             // the block's menu.
@@ -6775,51 +6737,23 @@ impl Game<'_> {
         if !self.may_build() {
             return None;
         }
-        let acc = self.resolve_local_accurate_placement(&stack.item, hit);
-        let eff_face = acc.as_ref().map_or(hit.face, |a| a.effective_face);
-        let eff_pt = acc.as_ref().map_or(hit.point, |a| {
-            [
-                f64::from(hit.pos[0]) + f64::from(a.local_cursor[0]).clamp(0.05, 0.95),
-                f64::from(hit.pos[1]) + f64::from(a.local_cursor[1]).clamp(0.05, 0.95),
-                f64::from(hit.pos[2]) + f64::from(a.local_cursor[2]).clamp(0.05, 0.95),
-            ]
-        });
-        let sync_rot = self.settings.extras.placement_protocol
-            == horizon_client::volt_features::PlacementProtocol::Carpet
-            || self.settings.extras.placement_rotation_sync;
         let ctx = horizon_world::level::PlaceContext {
             clicked_pos: horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-            face: horizon_core::geometry::Direction::ALL[face_direction(eff_face) as usize],
-            hit: Vec3::new(eff_pt[0], eff_pt[1], eff_pt[2]),
+            face: horizon_core::geometry::Direction::ALL[face_direction(hit.face) as usize],
+            hit: Vec3::new(hit.point[0], hit.point[1], hit.point[2]),
             inside: hit.face == [0; 3],
-            yaw: if sync_rot {
-                acc.as_ref().map_or(self.yaw, |a| a.effective_yaw)
-            } else {
-                self.yaw
-            },
-            pitch: if sync_rot {
-                acc.as_ref().map_or(self.pitch, |a| a.effective_pitch)
-            } else {
-                self.pitch
-            },
+            yaw: self.yaw,
+            pitch: self.pitch,
             sneaking: self.keys.contains(&KeyCode::ShiftLeft),
             item: stack.item.to_string(),
             can_use_game_master_blocks: self.can_use_game_master_blocks(),
         };
-        let acc_override = if self.settings.extras.placement_protocol
-            == horizon_client::volt_features::PlacementProtocol::Carpet
-        {
-            acc.as_ref().map(|a| (a.facing, a.top_half))
-        } else {
-            None
-        };
         self.with_level(|b, level, _| {
             let mut level = DryLevel::new(level);
-            match b.place_block_accurate(
+            match b.place_block(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),
                 &ctx,
-                acc_override,
             ) {
                 horizon_world::level::PlaceOutcome::Placed { pos, .. } => {
                     Some((pos, level.changed.into_iter().collect()))

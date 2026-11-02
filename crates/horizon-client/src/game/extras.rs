@@ -3,14 +3,10 @@
 //!   chunk grid, entity radar, waypoint pins, and live XYZ/Biome/Clock pills)
 //! - **Volt Waypoints** (3D world markers, beacon beams, auto-death pins, 8x
 //!   Nether sync, screen-edge chevrons, quick-add hotkey & touch HUD button)
-//! - **Volt Accurate Block Placement** (sub-face 5-zone aiming, orientation &
-//!   slab-half lock, plane/line lock, reach-around edges, fast place delay,
-//!   Vanilla-Safe look sync & Carpet protocol)
 //! Plus mods' minimap/zoom/click/FPS hooks. Every Volt extra does nothing
 //! while its master switch is off.
-use super::{Dim, Game, Hit, Screen, native_hooks::NativeMinimap};
+use super::{Dim, Game, Screen, native_hooks::NativeMinimap};
 use horizon_client::{
-    blocks::Fluid,
     clipboard::Clipboard,
     extras::{Corner, Cps, FpsCounter, MINIMAP_ZOOMS, fov_target},
     extras_hud::{self, Corners, MinimapPin, RadarDot, WorldWaypointDraw},
@@ -22,11 +18,9 @@ use horizon_client::{
     text::{self, Text},
     title::Mode,
     volt_features::{
-        MinimapEntities, MinimapTerrainMode, PlacementLock, PlacementProtocol, PlaneLock,
-        RadarKind, ResolvedPlacement, SUBFACE_CENTER_HALF, classify_mob_id,
+        MinimapEntities, MinimapTerrainMode, RadarKind, classify_mob_id,
         effective_waypoint_coords, format_coords, format_heading_and_biome, format_world_clock,
-        is_orientable_block_item, plane_lock_allows, project_waypoint,
-        resolve_accurate_placement, subface_quadrant_direction, world_to_minimap_offset,
+        project_waypoint, world_to_minimap_offset,
     },
 };
 use std::time::Duration;
@@ -42,8 +36,6 @@ pub(super) struct ExtrasState {
     minimap_dim: Option<(Dim, MinimapTerrainMode)>,
     /// Auto-reconnect's attempts at the current server.
     reconnect: Tracker,
-    /// Active continuous right-click drag anchor `(first_pos, row_axis_is_x)` for Plane Lock.
-    pub(super) drag_plane_anchor: Option<([i32; 3], Option<bool>)>,
     /// Prevents recording duplicate death waypoints during a single death screen.
     pub(super) recorded_current_death: bool,
     /// Volt Boost rolling 48-frame times (ms) for Perf HUD sparkline, Auto-DRS & Thermal Guard.
@@ -66,7 +58,6 @@ impl Default for ExtrasState {
             minimap: Minimap::default(),
             minimap_dim: None,
             reconnect: Tracker::default(),
-            drag_plane_anchor: None,
             recorded_current_death: false,
             frame_ms_ring: [0.0; 48],
             frame_ms_head: 0,
@@ -102,9 +93,6 @@ impl Game<'_> {
             _ => return,
         };
         self.extras.mouse[i] = pressed;
-        if button == MouseButton::Right && !pressed {
-            self.extras.drag_plane_anchor = None;
-        }
         if pressed {
             let now = self.extras_now();
             self.extras.cps[i].click(now);
@@ -116,10 +104,6 @@ impl Game<'_> {
         let playing = self.screen == Screen::Playing && self.title.is_none() && focused;
         if !playing {
             self.extras.mouse = [false; 2];
-            self.extras.drag_plane_anchor = None;
-        }
-        if !self.right {
-            self.extras.drag_plane_anchor = None;
         }
         if self.screen != Screen::Dead
             && self
@@ -412,7 +396,7 @@ impl Game<'_> {
     }
 
     // ========================================================================
-    // Volt Hotkeys (Waypoints, Minimap Zoom, Placement Lock & Reverse)
+    // Volt Hotkeys (Waypoints & Minimap Zoom)
     // ========================================================================
 
     pub(super) fn volt_key_press(&mut self, key: KeyCode) -> bool {
@@ -447,620 +431,7 @@ impl Game<'_> {
             );
             return true;
         }
-        if self.settings.extras.accurate_placement {
-            if self.settings.extras.placement_reverse_key == name {
-                self.settings.extras.placement_reverse = !self.settings.extras.placement_reverse;
-                let state = if self.settings.extras.placement_reverse {
-                    "ON"
-                } else {
-                    "OFF"
-                };
-                self.settings.save(&Self::options_path());
-                self.titles.set_overlay(
-                    Text::literal(format!("Reverse Block Facing: {state}"))
-                        .with_color(text::YELLOW),
-                    false,
-                );
-                return true;
-            }
-            if self.settings.extras.placement_lock_key == name {
-                if self.settings.extras.placement_lock != PlacementLock::Off {
-                    self.settings.extras.placement_lock = PlacementLock::Off;
-                    self.settings.save(&Self::options_path());
-                    self.titles.set_overlay(
-                        Text::literal("Orientation Lock: OFF").with_color(text::GRAY),
-                        false,
-                    );
-                } else {
-                    let next_lock = self
-                        .preview_accurate_placement()
-                        .map(|r| PlacementLock::from_direction(r.facing))
-                        .unwrap_or_else(|| {
-                            let dir = self.aim().map_or([0.0, 0.0, 1.0], |(_, d)| d);
-                            PlacementLock::from_direction(
-                                horizon_core::geometry::Direction::approximate_nearest(
-                                    horizon_core::geometry::Vec3::new(dir[0], dir[1], dir[2]),
-                                ),
-                            )
-                        });
-                    self.settings.extras.placement_lock = next_lock;
-                    self.settings.save(&Self::options_path());
-                    self.titles.set_overlay(
-                        Text::literal(format!("Orientation Locked: {}", next_lock.label()))
-                            .with_color(text::GOLD),
-                        false,
-                    );
-                }
-                return true;
-            }
-        }
         false
-    }
-
-    // ========================================================================
-    // Volt Accurate Block Placement
-    // ========================================================================
-
-    pub(super) fn holding_any_block(&self) -> bool {
-        self.held()
-            .and_then(|h| self.items().get(&h.item))
-            .is_some_and(|i| i.block.is_some())
-            || self
-                .offhand
-                .as_ref()
-                .and_then(|h| self.items().get(&h.item))
-                .is_some_and(|i| i.block.is_some())
-    }
-
-    /// Handles taps on the `[REV]` and `[LOCK]` HUD pills when Accurate Block Placement is active.
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-    pub(super) fn try_click_placement_hud_buttons(&mut self, cursor: (f32, f32)) -> bool {
-        if !self.settings.extras.accurate_placement
-            || !self.settings.extras.placement_hud_preview
-            || self.screen != Screen::Playing
-            || self.title.is_some()
-            || self.ui.hide_gui
-            || !self.holding_any_block()
-        {
-            return false;
-        }
-        let (w, h) = self.gui_size();
-        let (rev_rect, lock_rect) = extras_hud::placement_hud_button_rects(w, h);
-        let inside = |[rx, ry, rw, rh]: [f32; 4]| {
-            cursor.0 >= rx && cursor.0 < rx + rw && cursor.1 >= ry && cursor.1 < ry + rh
-        };
-        if inside(rev_rect) {
-            self.audio.play_button_click();
-            self.settings.extras.placement_reverse = !self.settings.extras.placement_reverse;
-            let state = if self.settings.extras.placement_reverse {
-                "ON"
-            } else {
-                "OFF"
-            };
-            self.settings.save(&Self::options_path());
-            self.titles.set_overlay(
-                Text::literal(format!("Reverse Block Facing: {state}")).with_color(text::YELLOW),
-                false,
-            );
-            return true;
-        }
-        if inside(lock_rect) {
-            self.audio.play_button_click();
-            if self.settings.extras.placement_lock != PlacementLock::Off {
-                self.settings.extras.placement_lock = PlacementLock::Off;
-                self.settings.save(&Self::options_path());
-                self.titles.set_overlay(
-                    Text::literal("Orientation Lock: OFF").with_color(text::GRAY),
-                    false,
-                );
-            } else {
-                let next_lock = self
-                    .preview_accurate_placement()
-                    .map(|p| PlacementLock::from_direction(p.facing))
-                    .unwrap_or_else(|| {
-                        let (_, dir) = self.aim().unwrap_or(([0.0; 3], [0.0, 0.0, 1.0]));
-                        if dir[1] > 0.65 {
-                            PlacementLock::Up
-                        } else if dir[1] < -0.65 {
-                            PlacementLock::Down
-                        } else if dir[0].abs() >= dir[2].abs() {
-                            if dir[0] >= 0.0 {
-                                PlacementLock::East
-                            } else {
-                                PlacementLock::West
-                            }
-                        } else if dir[2] >= 0.0 {
-                            PlacementLock::South
-                        } else {
-                            PlacementLock::North
-                        }
-                    });
-                self.settings.extras.placement_lock = next_lock;
-                self.settings.save(&Self::options_path());
-                self.titles.set_overlay(
-                    Text::literal(format!("Orientation Locked: {}", next_lock.label()))
-                        .with_color(text::GOLD),
-                    false,
-                );
-            }
-            return true;
-        }
-        false
-    }
-
-    /// Emits 3D world wireframe overlays for Accurate Block Placement:
-    /// 1. Ghost placement cube when Reach-Around targets an adjacent air cell.
-    /// 2. 5-zone sub-face quadrant reticle on the targeted block face for orientable blocks.
-    pub(super) fn collect_placement_gizmos(
-        &self,
-        on_top: &mut Vec<horizon_client::gizmos::Line>,
-    ) {
-        if !self.settings.extras.accurate_placement
-            || !self.settings.extras.placement_hud_preview
-            || self.ui.hide_gui
-            || self.title.is_some()
-            || !self.may_build()
-        {
-            return;
-        }
-        let Some(held_stack) = self
-            .held()
-            .filter(|s| self.items().get(&s.item).is_some_and(|i| i.block.is_some()))
-            .or_else(|| {
-                self.offhand
-                    .as_ref()
-                    .filter(|s| self.items().get(&s.item).is_some_and(|i| i.block.is_some()))
-            })
-        else {
-            return;
-        };
-        let direct_hit = self.pick();
-        let Some(hit) = direct_hit.or_else(|| self.pick_for_placement(true)) else {
-            return;
-        };
-
-        // 1. Reach-Around ghost placement cube when direct ray missed solid geometry:
-        if direct_hit.is_none() {
-            let target = [
-                f64::from(hit.pos[0] + hit.face[0]),
-                f64::from(hit.pos[1] + hit.face[1]),
-                f64::from(hit.pos[2] + hit.face[2]),
-            ];
-            let eps = 0.004;
-            let [x0, y0, z0] = [target[0] + eps, target[1] + eps, target[2] + eps];
-            let [x1, y1, z1] = [
-                target[0] + 1.0 - eps,
-                target[1] + 1.0 - eps,
-                target[2] + 1.0 - eps,
-            ];
-            let col = 0xD8EF_4444;
-            for (a, b) in [
-                ([x0, y0, z0], [x1, y0, z0]),
-                ([x1, y0, z0], [x1, y0, z1]),
-                ([x1, y0, z1], [x0, y0, z1]),
-                ([x0, y0, z1], [x0, y0, z0]),
-                ([x0, y1, z0], [x1, y1, z0]),
-                ([x1, y1, z0], [x1, y1, z1]),
-                ([x1, y1, z1], [x0, y1, z1]),
-                ([x0, y1, z1], [x0, y1, z0]),
-                ([x0, y0, z0], [x0, y1, z0]),
-                ([x1, y0, z0], [x1, y1, z0]),
-                ([x1, y0, z1], [x1, y1, z1]),
-                ([x0, y0, z1], [x0, y1, z1]),
-            ] {
-                on_top.push(horizon_client::gizmos::Line {
-                    start: a,
-                    end: b,
-                    color: col,
-                    width: 2.0,
-                });
-            }
-        }
-
-        // 2. 5-zone sub-face quadrant overlay on the clicked face for orientable blocks:
-        if self.settings.extras.placement_quadrant && is_orientable_block_item(&held_stack.item) {
-            let base = hit.pos.map(f64::from);
-            let n = hit.face.map(f64::from);
-            let lift = 0.005;
-            let (origin, u_axis, v_axis) = match hit.face {
-                [0, 1, 0] => (
-                    [base[0], base[1] + 1.0 + lift, base[2]],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                ),
-                [0, -1, 0] => (
-                    [base[0], base[1] - lift, base[2]],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                ),
-                [0, 0, 1] => (
-                    [base[0], base[1], base[2] + 1.0 + lift],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                ),
-                [0, 0, -1] => (
-                    [base[0], base[1], base[2] - lift],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                ),
-                [1, 0, 0] => (
-                    [base[0] + 1.0 + lift, base[1], base[2]],
-                    [0.0, 0.0, 1.0],
-                    [0.0, 1.0, 0.0],
-                ),
-                _ => (
-                    [base[0] - lift, base[1], base[2]],
-                    [0.0, 0.0, 1.0],
-                    [0.0, 1.0, 0.0],
-                ),
-            };
-            let _ = n;
-            let pt = |u: f64, v: f64| -> [f64; 3] {
-                [
-                    origin[0] + u_axis[0] * u + v_axis[0] * v,
-                    origin[1] + u_axis[1] * u + v_axis[1] * v,
-                    origin[2] + u_axis[2] * u + v_axis[2] * v,
-                ]
-            };
-            let c0 = 0.5 - f64::from(SUBFACE_CENTER_HALF);
-            let c1 = 0.5 + f64::from(SUBFACE_CENTER_HALF);
-            let local = [
-                (hit.point[0] - base[0]).clamp(0.0, 1.0) as f32,
-                (hit.point[1] - base[1]).clamp(0.0, 1.0) as f32,
-                (hit.point[2] - base[2]).clamp(0.0, 1.0) as f32,
-            ];
-            let active_dir = subface_quadrant_direction(hit.face, local);
-            let locked = self.settings.extras.placement_lock != PlacementLock::Off;
-            let guide_col = if locked { 0x88FB_BF24 } else { 0x78EF_4444 };
-            let active_col = if locked { 0xFFFB_BF24 } else { 0xFFFF_4D4D };
-
-            // Inner centre square + 4 corner diagonal dividers:
-            for (a, b) in [
-                (pt(c0, c0), pt(c1, c0)),
-                (pt(c1, c0), pt(c1, c1)),
-                (pt(c1, c1), pt(c0, c1)),
-                (pt(c0, c1), pt(c0, c0)),
-                (pt(0.0, 0.0), pt(c0, c0)),
-                (pt(1.0, 0.0), pt(c1, c0)),
-                (pt(1.0, 1.0), pt(c1, c1)),
-                (pt(0.0, 1.0), pt(c0, c1)),
-            ] {
-                on_top.push(horizon_client::gizmos::Line {
-                    start: a,
-                    end: b,
-                    color: guide_col,
-                    width: 1.5,
-                });
-            }
-
-            // Highlight directional chevron in the active zone:
-            let du = match hit.face {
-                [0, 1, 0] | [0, -1, 0] | [0, 0, 1] | [0, 0, -1] => local[0] - 0.5,
-                _ => local[2] - 0.5,
-            };
-            let dv = match hit.face {
-                [0, 1, 0] | [0, -1, 0] => local[2] - 0.5,
-                _ => local[1] - 0.5,
-            };
-            let _ = active_dir;
-            if du.abs() > SUBFACE_CENTER_HALF || dv.abs() > SUBFACE_CENTER_HALF {
-                let (tip, w1, w2) = if du.abs() >= dv.abs() {
-                    if du >= 0.0 {
-                        (pt(0.93, 0.5), pt(c1 + 0.03, 0.36), pt(c1 + 0.03, 0.64))
-                    } else {
-                        (pt(0.07, 0.5), pt(c0 - 0.03, 0.36), pt(c0 - 0.03, 0.64))
-                    }
-                } else if dv >= 0.0 {
-                    (pt(0.5, 0.93), pt(0.36, c1 + 0.03), pt(0.64, c1 + 0.03))
-                } else {
-                    (pt(0.5, 0.07), pt(0.36, c0 - 0.03), pt(0.64, c0 - 0.03))
-                };
-                on_top.push(horizon_client::gizmos::Line {
-                    start: w1,
-                    end: tip,
-                    color: active_col,
-                    width: 2.5,
-                });
-                on_top.push(horizon_client::gizmos::Line {
-                    start: w2,
-                    end: tip,
-                    color: active_col,
-                    width: 2.5,
-                });
-            }
-        }
-    }
-
-    pub(super) fn configured_use_delay(&self) -> u32 {
-        if !self.settings.extras.accurate_placement {
-            return 4;
-        }
-        if self.holding_any_block() {
-            u32::from(self.settings.extras.placement_fast_delay.min(4))
-        } else {
-            4
-        }
-    }
-
-    /// Standard `self.pick()` with optional Reach-Around edge fallback when the
-    /// player aims just past the edge or underside of a nearby solid block while
-    /// holding a block item.
-    pub(super) fn pick_for_placement(&self, holding_block: bool) -> Option<Hit> {
-        if let Some(hit) = self.pick() {
-            return Some(hit);
-        }
-        if !holding_block
-            || !self.settings.extras.accurate_placement
-            || !self.settings.extras.placement_reach_around
-            || self.guest_use.is_some()
-        {
-            return None;
-        }
-        self.reach_around_hit()
-    }
-
-    fn reach_around_hit(&self) -> Option<Hit> {
-        let (eye, dir) = self.aim()?;
-        let reach = self.reach();
-        let facts = self.res.facts();
-        let is_solid_support = |pos: [i32; 3]| -> bool {
-            let st = self.world.block(pos[0], pos[1], pos[2]);
-            let f = facts.get(st);
-            !self.world.is_air(st) && !f.replaceable && !f.outline.is_empty()
-        };
-        let is_empty_target = |pos: [i32; 3]| -> bool {
-            let st = self.world.block(pos[0], pos[1], pos[2]);
-            let f = facts.get(st);
-            self.world.is_air(st) || (f.replaceable && f.outline.is_empty())
-        };
-
-        // 1. Forward / Bridging Reach-Around (Bedrock & Tweakeroo style):
-        // When standing on or just above a solid block and aiming forward-and-down into
-        // empty air past its edge (normal bridging pitches 10°..85°), intersect the eye ray
-        // with the bridge deck plane `y = support_y + 1.0` to place against the outer edge.
-        if let Some(player) = &self.player
-            && dir[1] < -0.04
-        {
-            let px = player.position.x;
-            let py = player.position.y;
-            let pz = player.position.z;
-            let base_y = (py - 0.25).floor() as i32;
-            let mut candidate_supports = Vec::with_capacity(5);
-            let center_sup = [px.floor() as i32, base_y, pz.floor() as i32];
-            if is_solid_support(center_sup) {
-                candidate_supports.push(center_sup);
-            }
-            for [ox, oz] in [[-0.29, -0.29], [-0.29, 0.29], [0.29, -0.29], [0.29, 0.29]] {
-                let s = [(px + ox).floor() as i32, base_y, (pz + oz).floor() as i32];
-                if !candidate_supports.contains(&s) && is_solid_support(s) {
-                    candidate_supports.push(s);
-                }
-            }
-            let deck_y = f64::from(base_y + 1);
-            let t_deck = (deck_y - eye[1]) / dir[1];
-            if t_deck > 0.2 && t_deck <= reach + 1.25 {
-                let ix = eye[0] + dir[0] * t_deck;
-                let iz = eye[2] + dir[2] * t_deck;
-                let mut best_bridge: Option<(f64, [i32; 3], [i32; 3], [f64; 3])> = None;
-                for sup in candidate_supports {
-                    let sx = f64::from(sup[0]) + 0.5;
-                    let sz = f64::from(sup[2]) + 0.5;
-                    let dx = ix - sx;
-                    let dz = iz - sz;
-                    let faces: [([i32; 3], f64, f64); 4] = [
-                        ([1, 0, 0], dx - 0.5, dz.abs()),
-                        ([-1, 0, 0], -dx - 0.5, dz.abs()),
-                        ([0, 0, 1], dz - 0.5, dx.abs()),
-                        ([0, 0, -1], -dz - 0.5, dx.abs()),
-                    ];
-                    for (face, over, lat) in faces {
-                        if !(0.0..=2.1).contains(&over) || lat > 0.95 {
-                            continue;
-                        }
-                        let target = [sup[0] + face[0], sup[1], sup[2] + face[2]];
-                        if !is_empty_target(target) {
-                            continue;
-                        }
-                        let point = [
-                            match face[0] {
-                                1 => f64::from(sup[0] + 1),
-                                -1 => f64::from(sup[0]),
-                                _ => ix.clamp(f64::from(sup[0]) + 0.22, f64::from(sup[0]) + 0.78),
-                            },
-                            f64::from(sup[1]) + 0.5,
-                            match face[2] {
-                                1 => f64::from(sup[2] + 1),
-                                -1 => f64::from(sup[2]),
-                                _ => iz.clamp(f64::from(sup[2]) + 0.22, f64::from(sup[2]) + 0.78),
-                            },
-                        ];
-                        let rx = point[0] - eye[0];
-                        let ry = point[1] - eye[1];
-                        let rz = point[2] - eye[2];
-                        let dist_sq = rx * rx + ry * ry + rz * rz;
-                        if dist_sq <= reach * reach {
-                            let score = over + lat * 0.5;
-                            if best_bridge.is_none_or(|(b, _, _, _)| score < b) {
-                                best_bridge = Some((score, sup, face, point));
-                            }
-                        }
-                    }
-                }
-                if let Some((_, support, face, point)) = best_bridge {
-                    return Some(Hit {
-                        pos: support,
-                        face,
-                        point,
-                    });
-                }
-            }
-        }
-
-        // 2. General Edge / Wall / Underside Reach-Around along the view ray:
-        let mut t = 0.45;
-        while t <= reach {
-            let p = [eye[0] + dir[0] * t, eye[1] + dir[1] * t, eye[2] + dir[2] * t];
-            let cell = [
-                p[0].floor() as i32,
-                p[1].floor() as i32,
-                p[2].floor() as i32,
-            ];
-            let cell_state = self.world.block(cell[0], cell[1], cell[2]);
-            let cell_facts = facts.get(cell_state);
-            if cell_facts.outline.is_empty() && cell_facts.fluid == Fluid::None {
-                let mut best: Option<(f64, [i32; 3], [i32; 3])> = None;
-                for normal in [
-                    [1, 0, 0],
-                    [-1, 0, 0],
-                    [0, 1, 0],
-                    [0, -1, 0],
-                    [0, 0, 1],
-                    [0, 0, -1],
-                ] {
-                    let support = [
-                        cell[0] - normal[0],
-                        cell[1] - normal[1],
-                        cell[2] - normal[2],
-                    ];
-                    if !is_solid_support(support) {
-                        continue;
-                    }
-                    let plane_dist = match normal {
-                        [1, 0, 0] => p[0] - f64::from(cell[0]),
-                        [-1, 0, 0] => f64::from(cell[0] + 1) - p[0],
-                        [0, 1, 0] => p[1] - f64::from(cell[1]),
-                        [0, -1, 0] => f64::from(cell[1] + 1) - p[1],
-                        [0, 0, 1] => p[2] - f64::from(cell[2]),
-                        _ => f64::from(cell[2] + 1) - p[2],
-                    };
-                    if (0.0..=0.78).contains(&plane_dist)
-                        && best.is_none_or(|(d, _, _)| plane_dist < d)
-                    {
-                        best = Some((plane_dist, support, normal));
-                    }
-                }
-                if let Some((_, support, face)) = best {
-                    let point = [
-                        match face[0] {
-                            1 => f64::from(support[0] + 1),
-                            -1 => f64::from(support[0]),
-                            _ => p[0].clamp(f64::from(support[0]) + 0.22, f64::from(support[0]) + 0.78),
-                        },
-                        match face[1] {
-                            1 => f64::from(support[1] + 1),
-                            -1 => f64::from(support[1]),
-                            _ => p[1].clamp(f64::from(support[1]) + 0.22, f64::from(support[1]) + 0.78),
-                        },
-                        match face[2] {
-                            1 => f64::from(support[2] + 1),
-                            -1 => f64::from(support[2]),
-                            _ => p[2].clamp(f64::from(support[2]) + 0.22, f64::from(support[2]) + 0.78),
-                        },
-                    ];
-                    let dx = point[0] - eye[0];
-                    let dy = point[1] - eye[1];
-                    let dz = point[2] - eye[2];
-                    if dx * dx + dy * dy + dz * dz <= reach * reach {
-                        return Some(Hit {
-                            pos: support,
-                            face,
-                            point,
-                        });
-                    }
-                }
-            }
-            t += 0.12;
-        }
-        None
-    }
-
-    pub(super) fn resolve_local_accurate_placement(
-        &self,
-        item: &str,
-        hit: &Hit,
-    ) -> Option<ResolvedPlacement> {
-        if !self.settings.extras.accurate_placement || self.guest_use.is_some() {
-            return None;
-        }
-        let e = &self.settings.extras;
-        let protocol = if self.remote.is_none() {
-            PlacementProtocol::Carpet
-        } else {
-            e.placement_protocol
-        };
-        Some(resolve_accurate_placement(
-            item,
-            hit.pos,
-            hit.face,
-            hit.point,
-            self.yaw,
-            self.pitch,
-            e.placement_quadrant,
-            e.placement_reverse,
-            e.placement_lock,
-            protocol,
-        ))
-    }
-
-    fn preview_accurate_placement(&self) -> Option<ResolvedPlacement> {
-        if !self.settings.extras.accurate_placement {
-            return None;
-        }
-        let item = self
-            .held()
-            .filter(|s| self.items().get(&s.item).is_some_and(|i| i.block.is_some()))
-            .or_else(|| {
-                self.offhand
-                    .as_ref()
-                    .filter(|s| self.items().get(&s.item).is_some_and(|i| i.block.is_some()))
-            })?;
-        let hit = self.pick_for_placement(true)?;
-        if !is_orientable_block_item(&item.item)
-            && self.settings.extras.placement_lock == PlacementLock::Off
-            && !self.settings.extras.placement_reverse
-        {
-            return None;
-        }
-        self.resolve_local_accurate_placement(&item.item, &hit)
-    }
-
-    /// Checks whether `candidate_target` (`clicked_pos + face`) satisfies the
-    /// active Plane / Line Lock during a continuous right-click hold.
-    pub(super) fn plane_lock_permits_and_record(&mut self, hit: &Hit) -> bool {
-        if !self.settings.extras.accurate_placement || self.guest_use.is_some() {
-            return true;
-        }
-        let mode = self.settings.extras.placement_plane_lock;
-        if mode == PlaneLock::Off {
-            return true;
-        }
-        let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let replaceable = self.res.facts().get(state).replaceable && !self.world.is_air(state);
-        let target = if replaceable {
-            hit.pos
-        } else {
-            [
-                hit.pos[0] + hit.face[0],
-                hit.pos[1] + hit.face[1],
-                hit.pos[2] + hit.face[2],
-            ]
-        };
-        match self.extras.drag_plane_anchor {
-            None => {
-                self.extras.drag_plane_anchor = Some((target, None));
-                true
-            }
-            Some((anchor, axis_x)) => {
-                if !plane_lock_allows(mode, anchor, axis_x, target) {
-                    return false;
-                }
-                if mode == PlaneLock::RowAxis && axis_x.is_none() && target != anchor {
-                    let chosen_x = target[0] != anchor[0];
-                    self.extras.drag_plane_anchor = Some((anchor, Some(chosen_x)));
-                }
-                true
-            }
-        }
     }
 
     // ========================================================================
@@ -1405,8 +776,8 @@ impl Game<'_> {
         self.zoom_now().2
     }
 
-    /// Renders Volt 3D waypoints, touch `[+WP]` pin button, Accurate Block
-    /// Placement crosshair indicator, Volt Minimap, and mod corner panels.
+    /// Renders Volt 3D waypoints, touch `[+WP]` pin button, Volt Minimap,
+    /// and mod corner panels.
     pub(super) fn draw_extras(&mut self, batch: &mut HudBatch) {
         // 1. In-world 3D Waypoints (beams, diamonds, distance/XYZ labels, rim chevrons):
         let world_wps = self.collect_world_waypoints(batch.width, batch.height);
@@ -1423,38 +794,7 @@ impl Game<'_> {
             extras_hud::draw_waypoint_hud_button(batch, &self.gui.atlas, rect);
         }
 
-        // 3. Accurate Block Placement touch pills (`[REV]` / `[LOCK]`), crosshair reticle & pill:
-        if self.screen == Screen::Playing
-            && self.title.is_none()
-            && self.settings.extras.accurate_placement
-            && self.settings.extras.placement_hud_preview
-        {
-            if self.holding_any_block() {
-                let lock_label = (self.settings.extras.placement_lock != PlacementLock::Off)
-                    .then(|| self.settings.extras.placement_lock.label());
-                extras_hud::draw_placement_hud_buttons(
-                    batch,
-                    &self.gui.atlas,
-                    batch.width,
-                    batch.height,
-                    self.settings.extras.placement_reverse,
-                    lock_label,
-                );
-            }
-            if let Some(preview) = self.preview_accurate_placement() {
-                extras_hud::draw_placement_hud_badge(
-                    batch,
-                    &self.gui.atlas,
-                    batch.width,
-                    batch.height,
-                    &preview.badge,
-                    self.settings.extras.placement_quadrant,
-                    self.settings.extras.placement_lock != PlacementLock::Off,
-                );
-            }
-        }
-
-        // 4. Minimap & corner panels:
+        // 3. Minimap & corner panels:
         let mod_panels = self.mods.has_panels();
         let map = self.minimap_shown();
         let visible = |corner| !(self.debug && corner == Corner::TopLeft);

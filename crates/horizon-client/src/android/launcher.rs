@@ -328,6 +328,15 @@ impl Launcher {
             events.create_window(Window::default_attributes().with_title("Volt Launcher"))?,
         );
         crate::display::prepare(&window)?;
+        // Open the GPU device first so `ATLAS_LIMIT` reflects this device's real
+        // `max_texture_dimension_2d` before building `HudAtlas`.
+        let mut renderer = game::loading_renderer(
+            window.clone(),
+            false,
+            None,
+            None,
+            self.catalog.config.renderer.graphics_api(),
+        )?;
         let gui = game::UiResources {
             atlas: HudAtlas::build(&self.home.join("installer"))?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces {
@@ -335,13 +344,20 @@ impl Launcher {
                 pixels: [0u8; 4].repeat(6),
             }),
         };
-        self.renderer = Some(game::loading_renderer(
-            window.clone(),
-            false,
-            Some(&gui),
-            None,
-            self.catalog.config.renderer.graphics_api(),
-        )?);
+        let atlas = &gui.atlas;
+        atlas.font.reset_cache();
+        renderer.replace_ui_textures(
+            (&atlas.pixels, atlas.width, atlas.height),
+            (&atlas.glint.0, atlas.glint.1, atlas.glint.2),
+            (
+                &atlas.glint_armor.0,
+                atlas.glint_armor.1,
+                atlas.glint_armor.2,
+            ),
+            &gui.panorama,
+        )?;
+        renderer.hud.sprite_animations.clear();
+        self.renderer = Some(renderer);
         self.renderer_signature = Some(desired_sig);
         self.window = Some(window);
         self.gui = Some(gui);
@@ -361,20 +377,25 @@ impl Launcher {
         );
         crate::configure_input_mode(self.catalog.config.input_host);
         crate::device_runtime::configure(self.catalog.config.device);
-        let selected_ver = self.catalog.config.selected_version();
-        if horizon_client::official_install::ready_for(&self.home, selected_ver) {
+        if horizon_client::official_install::ready(&self.home) {
+            crate::wait_for_engine_data();
             horizon_client::android_resources::repair_structure_transforms(
                 &self.home.join("engine-data.zip"),
                 &self
                     .home
                     .join(".local/horizon-client")
-                    .join(selected_ver.id()),
+                    .join(horizon_core::VANILLA_VERSION),
             )?;
             crate::platform::hide();
             self.catalog.config.save(&self.home)?;
             horizon_client::android_runtime::configure_graphics_api(
                 self.catalog.config.renderer.graphics_api(),
             );
+            // Preserve `OPEN_GL = true` (`sprite_split() == 256`) if the live launcher
+            // renderer already fell back to OpenGL ES under `Auto` / `VulkanSupporter`.
+            if self.renderer.as_ref().is_some_and(|r| r.is_open_gl()) {
+                horizon_client::android_runtime::note_opened_backend(true, false);
+            }
             horizon_client::android_runtime::configure_gpu(
                 self.catalog.config.renderer == crate::catalog::RendererMode::Vulkan,
             );
@@ -395,8 +416,6 @@ impl Launcher {
                 .save(&keypad_path)?;
             }
             self.catalog.config.keypad_controls = false;
-            horizon_core::game_version::set_active_version(self.catalog.config.selected_version());
-            self.catalog.config.ensure_version_home(&self.home);
             let game_home = self.catalog.config.game_home(&self.home);
             if !self.session_ready {
                 let (active_name, launch_session) = self.volt_accounts.prepare_for_launch();
@@ -539,10 +558,8 @@ impl Launcher {
                         ));
                         return;
                     }
-                    let result = horizon_client::official_install::install_version_with_progress(
-                        &home,
-                        selected_ver,
-                        |update| {
+                    let result =
+                        horizon_client::official_install::install_with_progress(&home, |update| {
                             let mut current = install.lock().unwrap();
                             let done = if current.stage == update.stage {
                                 current.done.max(update.done)
@@ -551,8 +568,7 @@ impl Launcher {
                             };
                             *current =
                                 horizon_client::official_install::InstallProgress { done, ..update };
-                        },
-                    );
+                        });
                     horizon_threads::release_free_memory();
                     let _ = sender.send(result.map_err(|e| e.to_string()));
                 });

@@ -1378,7 +1378,6 @@ pub enum Page {
     Extras,
     Waypoints,
     Minimap,
-    Placement,
     VoltBoost,
     /// CreditsAndAttributionScreen.
     Credits,
@@ -1679,7 +1678,6 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
         Page::VoltBoost => "volt.boost.tooltip",
         Page::Waypoints => "horizon.pages.waypoints.tooltip",
         Page::Minimap => "horizon.pages.minimap.tooltip",
-        Page::Placement => "horizon.pages.placement.tooltip",
         Page::Graphics => "horizon.pages.graphics.tooltip",
         Page::GraphicsAdvanced => "horizon.pages.graphics_advanced.tooltip",
         Page::Controller => "horizon.pages.controller.tooltip",
@@ -1943,7 +1941,6 @@ impl OptionsUi {
             Page::Extras => "horizon.pages.extras",
             Page::Waypoints => "horizon.pages.waypoints",
             Page::Minimap => "horizon.pages.minimap",
-            Page::Placement => "horizon.pages.placement",
             Page::VoltBoost => "volt.boost.title",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
@@ -2040,7 +2037,6 @@ impl OptionsUi {
         match self.page() {
             Page::Extras => self.extra_section_rows(s, crate::extras::rows()),
             Page::Minimap => self.extra_section_rows(s, crate::extras::minimap_rows()),
-            Page::Placement => self.extra_section_rows(s, crate::extras::placement_rows()),
             Page::VoltBoost => self.extra_section_rows(s, crate::extras::volt_boost_rows()),
             Page::Waypoints => {
                 let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
@@ -2162,8 +2158,14 @@ impl OptionsUi {
                         Some(open("horizon.pages.open.minimap", Page::Minimap)),
                     ),
                     Row::Buttons(
-                        open("horizon.pages.open.placement", Page::Placement),
-                        Some(open("horizon.pages.open.extras", Page::Extras)),
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("horizon.pages.open.extras"),
+                            Act::Push(Page::Extras),
+                        ),
+                        None,
                     ),
                     Row::Buttons(
                         open("horizon.pages.open.shader_packs", Page::ShaderPacks),
@@ -5831,7 +5833,6 @@ mod tests {
                 Page::GraphicsAdvanced,
                 Page::Waypoints,
                 Page::Minimap,
-                Page::Placement,
                 Page::Extras,
                 Page::ShaderPacks,
                 Page::Controller,
@@ -5839,12 +5840,10 @@ mod tests {
                 Page::Agent,
             ]
         );
-        // Verify Waypoints, Minimap, and Accurate Block Placement pages all
-        // default to Off and expose their master switch + child controls cleanly.
+        // Verify Waypoints and Minimap pages default to Off and expose their master switch.
         for (page, master) in [
             (Page::Waypoints, crate::extras::Item::Waypoints),
             (Page::Minimap, crate::extras::Item::Minimap),
-            (Page::Placement, crate::extras::Item::AccuratePlacement),
         ] {
             assert_eq!(master.switch(&s.extras), Some(false));
             ui.push(page);

@@ -150,7 +150,7 @@ pub(in crate::game) struct CommandExtras {
     pub pregen: Option<super::pregen::PregenTask>,
 }
 
-use horizon_core::version::{BUILD_TIME, STABLE};
+use horizon_core::version::{BUILD_TIME, DATA_VERSION, STABLE, VANILLA_VERSION, VERSION_ID};
 
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
@@ -1165,17 +1165,17 @@ impl Game<'_> {
         Ok(1)
     }
 
-    /// `VersionCommand.dumpVersion`'s lines: Horizon reports the active `GameVersion`.
+    /// `VersionCommand.dumpVersion`'s lines: Horizon reports the version it
+    /// implements.
     pub(in crate::game) fn version_lines(&self) -> Vec<Text> {
-        let active = horizon_core::game_version::active_version();
-        let ver_id = active.id();
-        let protocol = active.protocol();
-        let res_fmt = active.resource_pack_format();
-        let data_fmt = active.data_pack_format();
+        let protocol = horizon_protocol::PROTOCOL_VERSION;
         let mut lines: Vec<Text> = [
-            ("commands.version.id", vec![Text::literal(ver_id)]),
-            ("commands.version.name", vec![Text::literal(ver_id)]),
-            ("commands.version.data", vec![num(active.data_version())]),
+            ("commands.version.id", vec![Text::literal(VERSION_ID)]),
+            (
+                "commands.version.name",
+                vec![Text::literal(VANILLA_VERSION)],
+            ),
+            ("commands.version.data", vec![num(DATA_VERSION)]),
             ("commands.version.series", vec![Text::literal("main")]),
             (
                 "commands.version.protocol",
@@ -1187,12 +1187,9 @@ impl Game<'_> {
             ),
             (
                 "commands.version.pack.resource",
-                vec![Text::literal(format!("{}.{}", res_fmt.0, res_fmt.1))],
+                vec![Text::literal("97.1")],
             ),
-            (
-                "commands.version.pack.data",
-                vec![Text::literal(format!("{}.{}", data_fmt.0, data_fmt.1))],
-            ),
+            ("commands.version.pack.data", vec![Text::literal("121.0")]),
         ]
         .into_iter()
         .map(|(key, args)| Text::translate(key, &args))

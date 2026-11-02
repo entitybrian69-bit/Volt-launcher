@@ -235,7 +235,7 @@ impl Game<'_> {
                     break;
                 }
                 used = self.use_with_hand();
-                self.use_delay = self.configured_use_delay();
+                self.use_delay = 4;
                 if used.is_err() {
                     break;
                 }
