@@ -133,8 +133,8 @@ impl Launcher {
             } else {
                 // Never auto-downgrade or fall back to OpenGL on crash; preserve the configured Vulkan mode.
                 log::warn!(
-                    "Previous startup ended before first frame; keeping renderer mode {:?}",
-                    catalog.config.renderer
+                    "Previous startup ended before first frame; keeping renderer mode {}",
+                    catalog.config.renderer.label()
                 );
             }
         }

@@ -530,7 +530,7 @@ impl ControlsStudio {
                 {
                     self.label_draft = btn.label();
                     self.editing_label = true;
-                    crate::platform::show(&self.label_draft, false);
+                    crate::platform::show(&self.label_draft);
                     self.status_hint = "Type custom button label on keyboard, then press Enter.".into();
                 }
                 None
