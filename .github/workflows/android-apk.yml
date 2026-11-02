@@ -256,6 +256,7 @@ jobs:
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
+              ["cargo", "test", "-p", "horizon-client", "--no-default-features", "--lib", "official_install"],
           ]
           for cmd in cmds:
               proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -998,11 +999,10 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.9.0
-          - **Pure-Rust Multi-Version Support (`1.20.1` to `26.3`)**: Switch seamlessly between **21 official Minecraft Java releases** (`1.20.1`–`1.20.6`, `1.21`–`1.21.11`, and `26.1`–`26.3`) right from the Play Dashboard or Settings — 100% native Rust with zero JVM overhead
-          - **Multi-Version Multiplayer Protocol Engine (`763`–`777`)**: Join `1.20.1` (`763`, pre-Configuration direct `Login -> Play`), `1.20.2`–`1.20.6` (`764`–`766`), `1.21`–`1.21.11` (`767`–`774`), and `26.1`–`26.3` (`775`–`777`) servers with version-matched server-list pings, packet translation, and payload adapters
-          - **Era-Accurate Singleplayer & Legacy Resource Packs**: Isolated per-version save/pack directories (retaining existing `26.3` worlds intact), era-gated Creative inventory, Crafting recipes, and mob spawning per release drop, plus `pack_format 15+` (`1.20.1+`) resource-pack compatibility and legacy `grass`/`scute` asset aliasing
-          - **Version-Aware Catalogs**: Modrinth & CurseForge resource pack, mod, and shader searches automatically target your selected Minecraft version
+          ### What's New in Volt Launcher 0.9.1
+          - **Per-Version Official Mojang Assets (`1.20.1` to `26.3`)**: Selecting any version now downloads and prepares that exact Minecraft release's official Mojang `client.jar` & assets (authentic `1.20.1` Cherry Grove / `1.21` Trial Chambers / `1.21.4` Pale Garden panoramas, classic `1.20.1`–`1.20.4` dark Dirt menu backgrounds, classic `1.20.1`–`1.21.4` two-tone spotted Spawn Eggs, version splashes, textures, lang, and sounds) while deduplicating shared SHA-1 assets
+          - **Era-Accurate Singleplayer Worldgen & Content**: Excludes Trial Chambers (`< 1.21`), Pale Gardens (`< 1.21.4`), Spring-to-Life vegetation (`< 1.21.5`), HUD Locator Bar (`< 1.21.6`), and post-era blocks/items per release, while stamping Singleplayer worlds with their active Minecraft version
+          - **Pure-Rust Multi-Version Multiplayer (`763`–`777`)**: Full server-ping and packet/handshake translation across `1.20.1` (`763` direct `Login -> Play`) through `26.3` (`777`)
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

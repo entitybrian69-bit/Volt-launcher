@@ -333,7 +333,7 @@ impl GameVersion {
 /// Maps post-1.20.1 items and blocks to the exact release that introduced them.
 fn item_introduced_in(id: &str) -> GameVersion {
     // 26.x additions
-    if id.starts_with("sulfur") || id.contains("sulfur_") {
+    if id.starts_with("sulfur") || id.contains("sulfur_") || id == "golden_dandelion" {
         return GameVersion::V26_1;
     }
 
@@ -341,6 +341,7 @@ fn item_introduced_in(id: &str) -> GameVersion {
     if id.contains("nautilus")
         || id.ends_with("_spear")
         || id == "spear"
+        || id == "netherite_horse_armor"
         || id.starts_with("camel_husk")
         || id.starts_with("parched")
     {
@@ -349,10 +350,12 @@ fn item_introduced_in(id: &str) -> GameVersion {
 
     // 1.21.9 (The Copper Age)
     if id.starts_with("copper_golem")
+        || id.ends_with("copper_golem_statue")
         || id.ends_with("copper_chest")
         || id.ends_with("copper_bars")
         || id.ends_with("copper_chain")
         || id.ends_with("copper_lantern")
+        || (id.ends_with("_lightning_rod") && id != "lightning_rod")
         || matches!(
             id,
             "copper_torch"

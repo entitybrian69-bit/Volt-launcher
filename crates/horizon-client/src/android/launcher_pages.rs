@@ -727,7 +727,8 @@ impl DrawCtx<'_> {
     ) {
         use horizon_client::official_install::InstallStage;
         let [cx, cy, cw, ch] = area;
-        let installed = horizon_client::official_install::ready(&self.home);
+        let selected_ver = self.catalog.config.selected_version();
+        let installed = horizon_client::official_install::ready_for(&self.home, selected_ver);
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
 
@@ -776,7 +777,6 @@ impl DrawCtx<'_> {
             ui.volt_logo(lx + 6.0, ly + 6.0, 52.0, 52.0);
         }
 
-        let selected_ver = self.catalog.config.selected_version();
         let ver_title = format!("Minecraft Java {}", selected_ver.id());
         let heading = if installing {
             "Getting Game Ready"
@@ -1104,11 +1104,12 @@ impl DrawCtx<'_> {
 
         // Bottom-Right PLAY CTA Button!
         let cta_y = ry + rh - cta_h;
+        let play_label = format!("PLAY {}", selected_ver.id());
         let dl_label = format!("DOWNLOAD MINECRAFT {}", selected_ver.id());
         let cta_label = if installing {
             "INSTALLING..."
         } else if installed {
-            "PLAY"
+            play_label.as_str()
         } else if self.error.is_some() {
             "RETRY INSTALLATION"
         } else {

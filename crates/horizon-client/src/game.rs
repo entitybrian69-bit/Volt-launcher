@@ -7482,8 +7482,11 @@ impl Game<'_> {
             // Hud.nextContextualInfoState: the jump bar, the experience bar or
             // the locator bar above the hotbar.
             let has_experience = !self.creative && !spectator;
+            let has_locator = horizon_core::game_version::active_version()
+                >= horizon_core::game_version::GameVersion::V1_21_6
+                && self.waypoints.has_waypoints();
             let contextual = horizon_client::locator_bar::ContextualBar::next(
-                self.waypoints.has_waypoints(),
+                has_locator,
                 !spectator && self.jumpable_mount(),
                 self.mount_jumping(),
                 has_experience,
@@ -14260,6 +14263,11 @@ impl Game<'_> {
     /// `Screen.extractBlurredBackground` over the panorama or the world and
     /// HUD, when `menuBackgroundBlurriness` is at least 1.
     fn menu_blur(&self) -> Option<f32> {
+        if horizon_core::game_version::active_version()
+            < horizon_core::game_version::GameVersion::V1_20_5
+        {
+            return None;
+        }
         if self.settings.extras.menu_bg_mode
             == horizon_client::volt_features::MenuBgMode::FastDark
         {

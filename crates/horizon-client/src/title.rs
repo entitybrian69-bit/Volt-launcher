@@ -1899,7 +1899,7 @@ impl Title {
                     }
                 }
                 let version = format!(
-                    "Volt {} (Rust)",
+                    "Minecraft {} (Volt Rust)",
                     horizon_core::game_version::active_version().id()
                 );
                 batch.text(atlas, &version, 2.0, h - 10.0, u32::MAX, true);
@@ -2242,7 +2242,7 @@ impl Title {
                         translate(
                             "selectWorld.backupWarning.downgrade",
                             "This world was last played in version %s; you are on version %s. Downgrading a world could cause corruption - we cannot guarantee that it will load or work. If you still want to continue, please make a backup.",
-                            &[version, &crate::save::VERSION_NAME],
+                            &[version, &horizon_core::game_version::active_version().id()],
                         ),
                         rgba(223, 80, 80, 255),
                     ),

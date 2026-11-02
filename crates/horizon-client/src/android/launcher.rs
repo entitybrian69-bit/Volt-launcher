@@ -361,13 +361,14 @@ impl Launcher {
         );
         crate::configure_input_mode(self.catalog.config.input_host);
         crate::device_runtime::configure(self.catalog.config.device);
-        if horizon_client::official_install::ready(&self.home) {
+        let selected_ver = self.catalog.config.selected_version();
+        if horizon_client::official_install::ready_for(&self.home, selected_ver) {
             horizon_client::android_resources::repair_structure_transforms(
                 &self.home.join("engine-data.zip"),
                 &self
                     .home
                     .join(".local/horizon-client")
-                    .join(horizon_core::VANILLA_VERSION),
+                    .join(selected_ver.id()),
             )?;
             crate::platform::hide();
             self.catalog.config.save(&self.home)?;
@@ -538,8 +539,10 @@ impl Launcher {
                         ));
                         return;
                     }
-                    let result =
-                        horizon_client::official_install::install_with_progress(&home, |update| {
+                    let result = horizon_client::official_install::install_version_with_progress(
+                        &home,
+                        selected_ver,
+                        |update| {
                             let mut current = install.lock().unwrap();
                             let done = if current.stage == update.stage {
                                 current.done.max(update.done)
@@ -548,7 +551,8 @@ impl Launcher {
                             };
                             *current =
                                 horizon_client::official_install::InstallProgress { done, ..update };
-                        });
+                        },
+                    );
                     horizon_threads::release_free_memory();
                     let _ = sender.send(result.map_err(|e| e.to_string()));
                 });

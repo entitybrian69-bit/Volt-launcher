@@ -451,6 +451,24 @@ pub fn menu_background(
     h: f32,
     in_world: bool,
 ) {
+    if !in_world
+        && horizon_core::game_version::active_version()
+            < horizon_core::game_version::GameVersion::V1_20_5
+        && atlas.sprites.contains_key("gui/options_background")
+    {
+        tiled(
+            batch,
+            atlas,
+            "gui/options_background",
+            x,
+            y,
+            w,
+            h,
+            32.0,
+            rgba(64, 64, 64, 255),
+        );
+        return;
+    }
     let sprite = if in_world {
         "gui/inworld_menu_background"
     } else {
@@ -510,6 +528,24 @@ pub fn list_background(
     bottom: f32,
     in_world: bool,
 ) {
+    if !in_world
+        && horizon_core::game_version::active_version()
+            < horizon_core::game_version::GameVersion::V1_20_5
+        && atlas.sprites.contains_key("gui/options_background")
+    {
+        tiled(
+            batch,
+            atlas,
+            "gui/options_background",
+            0.0,
+            top,
+            batch.width,
+            bottom - top,
+            32.0,
+            rgba(32, 32, 32, 255),
+        );
+        return;
+    }
     let sprite = if in_world {
         "gui/inworld_menu_list_background"
     } else {

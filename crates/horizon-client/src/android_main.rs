@@ -70,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.9.0"
+        "0.9.1"
     } else {
-        "0.9.0-dev"
+        "0.9.1-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -161,13 +161,18 @@ pub(crate) fn android_event_loop() -> Result<EventLoop<()>, winit::error::EventL
 pub(crate) fn android_arguments() -> horizon_client::Result<Vec<String>> {
     let home = APP.with(|app| app.borrow().as_ref().unwrap().internal_data_path().unwrap());
     let config = catalog::Config::load(&home);
+    let selected_ver = config.selected_version();
+    let ver_res = home.join(".local/horizon-client").join(selected_ver.id());
+    let res_dir = if ver_res.join("horizon-resources.json").is_file() {
+        ver_res
+    } else {
+        home.join(".local/horizon-client/26.3")
+    };
     let mut args = vec![
         "--resources".into(),
-        home.join(".local/horizon-client/26.3")
-            .to_string_lossy()
-            .into_owned(),
+        res_dir.to_string_lossy().into_owned(),
         "--mc-version".into(),
-        config.selected_version().id().into(),
+        selected_ver.id().into(),
     ];
     if !PUBLIC_BUILD {
         args.extend([
