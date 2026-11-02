@@ -1097,6 +1097,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                horizon_protocol::PROTOCOL_VERSION,
             ));
         });
         let ended = result
@@ -1144,6 +1145,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &root,
+                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
@@ -1260,6 +1262,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
@@ -1323,6 +1326,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
@@ -1370,6 +1374,7 @@ mod tests {
                 &send,
                 &thread_cookies,
                 Path::new("."),
+                horizon_protocol::PROTOCOL_VERSION,
             )
         });
         let mut server = Connection::local(server);
