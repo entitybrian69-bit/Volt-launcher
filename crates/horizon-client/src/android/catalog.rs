@@ -599,7 +599,7 @@ impl Catalog {
             if self.icon_cache.contains_key(&url) || self.icon_pending.contains(&url) {
                 continue;
             }
-            self.icon_pending.insert(url.clone());
+            let url_key = url.clone();
             let tx = self.icon_tx.clone();
             let home_buf = home.to_path_buf();
             if std::thread::Builder::new()
@@ -609,9 +609,9 @@ impl Catalog {
                     let decoded = fetch_and_round_icon(&home_buf, &url);
                     let _ = tx.send((url, decoded));
                 })
-                .is_err()
+                .is_ok()
             {
-                self.icon_pending.remove(&p.icon_url);
+                self.icon_pending.insert(url_key);
             }
         }
     }
