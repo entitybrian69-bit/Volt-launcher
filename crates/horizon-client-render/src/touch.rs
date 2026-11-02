@@ -743,7 +743,9 @@ impl TouchControls {
         self.aim = self.tap_aim.take();
         self.holding_use = false;
         self.holding = false;
-        if !self.crosshair() || self.settings.crosshair_gestures {
+        let crosshair = self.crosshair();
+        if !crosshair || self.settings.crosshair_gestures {
+            let center_aim = crosshair || self.projectile_crosshair;
             for (role, point) in self.fingers.values_mut() {
                 if let Role::Look {
                     start: _,
@@ -757,12 +759,7 @@ impl TouchControls {
                         *committed = true;
                     }
                     if !*dragged || *committed {
-                        self.aim =
-                            Some(if self.crosshair() || self.projectile_crosshair {
-                                [0.5, 0.5]
-                            } else {
-                                *point
-                            });
+                        self.aim = Some(if center_aim { [0.5, 0.5] } else { *point });
                         if *committed {
                             self.holding = true;
                             self.holding_use = *held_use;
