@@ -6364,6 +6364,10 @@ impl Game<'_> {
     /// (the block reacts, or a block item is placed).
     fn remote_use_item_on(&mut self, hand: Hand) -> bool {
         let held = self.with_hand(hand, |g| g.held().cloned());
+        let held_block = held
+            .as_ref()
+            .and_then(|h| self.items().get(&h.item))
+            .is_some_and(|i| i.block.is_some());
         let debug_stick = held
             .as_ref()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
