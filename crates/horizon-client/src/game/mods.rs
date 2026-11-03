@@ -999,14 +999,21 @@ impl Game<'_> {
             self.close_mod_screen(false);
             return;
         };
-        use horizon_client::volt_options_style::{self as volt, ButtonTone};
         // Item icons draw in a second pass: `draw_item` needs `&mut self`,
         // so `atlas` may not stay borrowed across it.
         let mut items: Vec<(String, f32, f32)> = Vec::new();
         let atlas = &self.gui.atlas;
         let in_world = self.player.is_some();
-        volt::menu_backdrop(batch, atlas, batch.width, batch.height, in_world);
-        volt::draw_page_title(batch, atlas, &Text::literal(title), 15.0, 1.0);
+        ui::menu_background(batch, atlas, 0.0, 0.0, batch.width, batch.height, in_world);
+        ui::centered_text(
+            batch,
+            atlas,
+            &Text::literal(title),
+            0.0,
+            15.0,
+            batch.width,
+            u32::MAX,
+        );
         let cx = (batch.width / 2.0).floor();
         let x = cx - MOD_UI_COLUMN / 2.0;
         // A settings page starts with the mod's keys, as Key Binds rows.
@@ -1016,20 +1023,16 @@ impl Game<'_> {
             let hover = ui::hovered(self.cursor, x, wy, MOD_UI_COLUMN, 20.0);
             let waiting = ms.binding.as_deref() == Some(k.name.as_str());
             let label = Self::mod_key_label(k, waiting);
-            volt::button(
+            ui::button(
                 batch,
                 atlas,
-                (x, wy, MOD_UI_COLUMN, 20.0),
+                x,
+                wy,
+                MOD_UI_COLUMN,
+                20.0,
                 &label,
                 true,
                 hover,
-                if waiting {
-                    ButtonTone::Hero
-                } else {
-                    ButtonTone::Standard
-                },
-                (if hover { 1.0 } else { 0.0 }, 0.0),
-                0.0,
             );
         }
         let top = MOD_UI_TOP + keys.len() as f32 * MOD_UI_KEY_ROW;
@@ -1040,22 +1043,21 @@ impl Game<'_> {
                 UiWidget::Button(b) => {
                     let hover = ui::hovered(self.cursor, x, wy, MOD_UI_COLUMN, 20.0);
                     let label = Text::literal(b.label.clone());
-                    let tone = volt::infer_toggle_tone(&b.label);
-                    volt::button(
+                    ui::button(
                         batch,
                         atlas,
-                        (x, wy, MOD_UI_COLUMN, 20.0),
+                        x,
+                        wy,
+                        MOD_UI_COLUMN,
+                        20.0,
                         &label,
                         true,
                         hover,
-                        tone,
-                        (if hover { 1.0 } else { 0.0 }, 0.0),
-                        0.0,
                     );
                 }
                 UiWidget::Text(t) => {
                     let color = if t.color == 0 {
-                        volt::TEXT_COLOR
+                        u32::MAX
                     } else {
                         t.color | 0xFF00_0000
                     };
@@ -1073,7 +1075,7 @@ impl Game<'_> {
                     if self.res.items().get(&i.item).is_some() {
                         items.push((i.item.clone(), x + 2.0, wy + 2.0));
                     } else {
-                        batch.text(atlas, "?", x + 6.0, wy + 6.0, volt::TEXT_COLOR, true);
+                        batch.text(atlas, "?", x + 6.0, wy + 6.0, u32::MAX, true);
                     }
                     let name = if i.name.is_empty() {
                         i.item.rsplit(':').next().unwrap_or(&i.item).to_string()
@@ -1085,7 +1087,7 @@ impl Game<'_> {
                         &Text::literal(name),
                         x + 22.0,
                         wy + 6.0,
-                        volt::TEXT_COLOR,
+                        u32::MAX,
                         true,
                     );
                 }
@@ -1095,13 +1097,13 @@ impl Game<'_> {
                     list_i += 1;
                     let rows_top = wy + 4.0;
                     let rows_bottom = wy + wh - 4.0;
-                    volt::draw_card_box(
-                        batch,
-                        atlas,
-                        (x, wy, MOD_UI_COLUMN, wh),
-                        volt::hex_rgba(volt::BG_HEX, 232),
-                        volt::hex_rgba(volt::BORDER_CRIMSON_HEX, 225),
-                    );
+                    batch.fill(atlas, x, wy, MOD_UI_COLUMN, wh, 0x8000_0000);
+                    for (b, yy) in [(x, wy), (x, wy + wh - 1.0)] {
+                        batch.fill(atlas, b, yy, MOD_UI_COLUMN, 1.0, 0xFF50_5050);
+                    }
+                    for (xx, yy) in [(x, wy), (x + MOD_UI_COLUMN - 1.0, wy)] {
+                        batch.fill(atlas, xx, yy, 1.0, wh, 0xFF50_5050);
+                    }
                     let content = l.rows.len() as f32 * 12.0;
                     draw_list_rows(
                         batch,
@@ -1112,7 +1114,7 @@ impl Game<'_> {
                         scroll.amount,
                         (x, wy, wh),
                     );
-                    volt::scrollbar(
+                    ui::scrollbar(
                         batch,
                         atlas,
                         x + MOD_UI_COLUMN - 5.0,
@@ -1120,22 +1122,21 @@ impl Game<'_> {
                         rows_bottom,
                         content,
                         scroll.amount,
-                        false,
                     );
                 }
             }
         }
         let hover = ui::hovered(self.cursor, cx - 100.0, batch.height - 27.0, 200.0, 20.0);
-        volt::button(
+        ui::button(
             batch,
             atlas,
-            (cx - 100.0, batch.height - 27.0, 200.0, 20.0),
+            cx - 100.0,
+            batch.height - 27.0,
+            200.0,
+            20.0,
             &Text::literal("Done"),
             true,
             hover,
-            ButtonTone::Primary,
-            (if hover { 1.0 } else { 0.0 }, 0.0),
-            0.0,
         );
         for (id, ix, iy) in items {
             let stack = ItemStack::new(id.as_str(), 1);

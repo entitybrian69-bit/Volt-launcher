@@ -152,7 +152,6 @@ impl Game<'_> {
             );
             self.pad.touch.inventory_mode = self.android_inventory_controls();
             self.android_virtual_mouse_clicks(event_loop);
-            self.android_kinetic_scroll(event_loop);
             let active = horizon_client::android_runtime::active_input();
             if self.pad.last_input_mode.replace(active).is_some_and(|old| {
                 old == horizon_client::android_gamepad::InputMode::KeyboardMouse && old != active

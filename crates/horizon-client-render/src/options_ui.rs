@@ -1759,8 +1759,6 @@ pub struct OptionsUi {
     pub graphics: crate::graphics_ui::GraphicsUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
-    /// Smooth Volt theme animation state (hover, slider, click pulse, page transitions).
-    pub anim: crate::volt_options_style::OptionAnim,
 }
 impl Default for OptionsUi {
     fn default() -> Self {
@@ -1800,7 +1798,6 @@ impl Default for OptionsUi {
             center_language: false,
             graphics: Default::default(),
             agent_status: Vec::new(),
-            anim: Default::default(),
         }
     }
 }
@@ -2027,8 +2024,6 @@ impl OptionsUi {
     pub fn show(&mut self, page: Page) {
         if page != Page::Main {
             self.push(page);
-            self.anim.settle_transition();
-            self.graphics.anim.settle_transition();
         }
     }
     pub fn open(&mut self, in_world: bool) {
@@ -2077,8 +2072,6 @@ impl OptionsUi {
         self.stack.clear();
         self.data_pack_dir = None;
         self.push(page);
-        self.anim.start_transition(0.0);
-        self.graphics.anim.start_transition(0.0);
         self.in_world = in_world;
         self.selected_key = None;
     }
@@ -2086,7 +2079,6 @@ impl OptionsUi {
         self.stack.push(page);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
-        self.anim.start_transition(1.0);
         if matches!(
             page,
             Page::Video
@@ -3479,41 +3471,6 @@ impl OptionsUi {
         let max = (content - (bottom - top)).max(0.0);
         self.scroll = self.scroll.clamp(0.0, max);
     }
-    fn slot_prefix(&self) -> u64 {
-        let p = match self.page() {
-            Page::Main => 1,
-            Page::Video => 2,
-            Page::Sound => 3,
-            Page::Controls => 4,
-            Page::KeyBinds => 5,
-            Page::Mouse => 6,
-            Page::Chat => 7,
-            Page::Accessibility => 8,
-            Page::Language => 9,
-            Page::Font => 10,
-            Page::Packs => 11,
-            Page::Mods => 12,
-            Page::NativeMod(i) => 100 + i as u64,
-            Page::ShaderPacks => 13,
-            Page::Graphics => 14,
-            Page::GraphicsAdvanced => 15,
-            Page::GraphicsHdr => 16,
-            Page::Controller => 17,
-            Page::Touch => 18,
-            Page::PadBinds => 19,
-            Page::Extras => 20,
-            Page::Waypoints => 21,
-            Page::Minimap => 22,
-            Page::VoltBoost => 23,
-            Page::VoltShaders => 24,
-            Page::Credits => 25,
-            Page::Horizon => 26,
-            Page::Agent => 27,
-            Page::Skin => 28,
-            Page::Online => 29,
-        };
-        p << 16
-    }
     pub fn draw(
         &mut self,
         s: &Settings,
@@ -3521,17 +3478,18 @@ impl OptionsUi {
         atlas: &HudAtlas,
         cursor: (f32, f32),
     ) {
-        use crate::volt_options_style::{self as volt, ButtonTone};
         let (w, h) = (batch.width, batch.height);
-        if self.resource_error.is_some() {
-            let dt = self.anim.begin_frame();
-            let elapsed = self.anim.elapsed_secs();
-            let hover_done = ui::hovered(cursor, w / 2.0 - 100.0, h - 28.0, 200.0, 20.0);
-            let done_anim = self.anim.step_button(0xFFFF_0001, hover_done, dt);
-            let error = self.resource_error.as_deref().unwrap_or_default();
-            volt::menu_backdrop(batch, atlas, w, h, self.in_world);
+        if let Some(error) = &self.resource_error {
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
             let title = tr("resourcePack.load_fail");
-            volt::draw_page_title(batch, atlas, &title, 26.0, 1.0);
+            batch.text_styled(
+                atlas,
+                &title,
+                ((w - atlas.font.width_text(&title)) / 2.0).floor(),
+                30.0,
+                u32::MAX,
+                true,
+            );
             let lines = atlas.font.split(&Text::literal(error), (w - 50.0).max(1.0));
             let limit = ((h - 110.0) / 9.0).max(1.0) as usize;
             for (i, line) in lines.iter().take(limit).enumerate() {
@@ -3540,20 +3498,20 @@ impl OptionsUi {
                     line,
                     ((w - atlas.font.width_text(line)) / 2.0).floor(),
                     60.0 + i as f32 * 9.0,
-                    volt::TEXT_COLOR,
+                    u32::MAX,
                     true,
                 );
             }
-            volt::button(
+            ui::button(
                 batch,
                 atlas,
-                (w / 2.0 - 100.0, h - 28.0, 200.0, 20.0),
+                w / 2.0 - 100.0,
+                h - 28.0,
+                200.0,
+                20.0,
                 &tr("gui.done"),
                 true,
-                hover_done,
-                ButtonTone::Primary,
-                done_anim,
-                elapsed,
+                ui::hovered(cursor, w / 2.0 - 100.0, h - 28.0, 200.0, 20.0),
             );
             return;
         }
@@ -3564,40 +3522,30 @@ impl OptionsUi {
             return;
         }
         if self.page() == Page::Packs {
-            let _ = self.anim.begin_frame();
-            let (tx, ty, t_alpha, _) = self.anim.transition_state();
             self.watch_data_packs(atlas, (w, h));
-            volt::menu_backdrop(batch, atlas, w, h, self.in_world);
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
             let blink = self.pack_focus.elapsed().as_millis() as u64;
             let m = crate::screen_draw::Measure(&atlas.font);
             let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
             let packs = self.packs(atlas, (w, h));
             let mut draws = packs.draw(&m, mouse, blink);
             packs.bind_icons(&mut draws, atlas, &mut batch.patches);
-            let start = batch.vertices.len();
-            crate::screen_draw::paint_volt(batch, atlas, &draws);
-            volt::apply_transition(batch, start, tx, ty, t_alpha);
+            crate::screen_draw::paint(batch, atlas, &draws);
             return;
         }
-        let dt = self.anim.begin_frame();
-        let elapsed = self.anim.elapsed_secs();
-        let (tx, ty, t_alpha, underline_t) = self.anim.transition_state();
-        let prefix = self.slot_prefix();
         let (widgets, top, bottom, content) = self.layout(s, w, h);
         let in_world = self.in_world;
-        volt::menu_backdrop(batch, atlas, w, h, in_world);
+        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
         let list = bottom > top;
         if list {
-            volt::list_well(batch, atlas, top, bottom, in_world);
-            volt::list_rail_bands(batch, atlas, top, bottom, in_world);
+            ui::list_background(batch, atlas, top, bottom, in_world);
         }
         let visible = |wd: &Widget| !wd.list || (wd.y < bottom && wd.y + wd.h > top);
         let mut tooltip = None;
-        for (wi, wd) in widgets.iter().enumerate() {
+        for wd in &widgets {
             if !visible(wd) {
                 continue;
             }
-            let slot_id = prefix | (wi as u64);
             let start = batch.vertices.len();
             let hover = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
                 && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
@@ -3669,71 +3617,7 @@ impl OptionsUi {
             }
             match &wd.kind {
                 WKind::Button { label, active, act } => {
-                    let anim_state = self.anim.step_button(slot_id, hover && *active, dt);
-                    let tone = match act {
-                        Act::Done => ButtonTone::Primary,
-                        Act::Push(
-                            Page::Horizon
-                            | Page::VoltBoost
-                            | Page::VoltShaders
-                            | Page::Extras
-                            | Page::Waypoints
-                            | Page::Minimap
-                            | Page::Graphics
-                            | Page::GraphicsAdvanced,
-                        ) => ButtonTone::Hero,
-                        Act::ToggleMod(i) => {
-                            if s.mods
-                                .installed
-                                .get(*i)
-                                .is_some_and(|m| s.mods.enabled.contains(&m.id))
-                            {
-                                ButtonTone::ActiveOn
-                            } else {
-                                ButtonTone::ActiveOff
-                            }
-                        }
-                        Act::PickShaderPack(i) => {
-                            if s.shader_packs
-                                .get(*i)
-                                .is_some_and(|p| p.file == s.horizon.shader_pack)
-                            {
-                                ButtonTone::ActiveOn
-                            } else {
-                                ButtonTone::Standard
-                            }
-                        }
-                        Act::ToggleWaypoint(i) => {
-                            if s.volt_waypoints
-                                .entries
-                                .get(*i)
-                                .is_some_and(|w| w.enabled)
-                            {
-                                ButtonTone::ActiveOn
-                            } else {
-                                ButtonTone::ActiveOff
-                            }
-                        }
-                        Act::Key(name) if self.selected_key == Some(*name) => ButtonTone::Hero,
-                        Act::PadKey(a) if self.selected_pad_action == Some(*a) => ButtonTone::Hero,
-                        Act::Extra(item) => match item.switch(&s.extras) {
-                            Some(true) => ButtonTone::ActiveOn,
-                            Some(false) => ButtonTone::ActiveOff,
-                            None => volt::infer_toggle_tone(&label.plain()),
-                        },
-                        _ => volt::infer_toggle_tone(&label.plain()),
-                    };
-                    volt::button(
-                        batch,
-                        atlas,
-                        (wd.x, wd.y, wd.w, wd.h),
-                        label,
-                        *active,
-                        hover,
-                        tone,
-                        anim_state,
-                        elapsed,
-                    );
+                    ui::button(batch, atlas, wd.x, wd.y, wd.w, wd.h, label, *active, hover);
                     if hover && let Act::Key(name) = act {
                         let conflicts = s.keys.conflicts(name);
                         if !conflicts.is_empty() {
@@ -3758,21 +3642,17 @@ impl OptionsUi {
                 WKind::Slider { label, value, opt } => {
                     let dragging = self.dragging == Some(*opt);
                     let shown = self.slider_shown(*opt, *value);
-                    let (anim_val, hover_t) =
-                        self.anim
-                            .step_slider(slot_id, shown, hover, dragging, dt);
-                    volt::slider(
+                    ui::slider(
                         batch,
                         atlas,
-                        (wd.x, wd.y, wd.w),
+                        wd.x,
+                        wd.y,
+                        wd.w,
                         label,
                         shown,
-                        anim_val,
                         hover || dragging,
                         true,
                         dragging,
-                        hover_t,
-                        elapsed,
                     );
                 }
                 WKind::Text {
@@ -3781,40 +3661,19 @@ impl OptionsUi {
                     centered,
                 } => {
                     if text.is_empty() {
-                        let bar_col = if *color == rgba(255, 255, 0, 255) {
-                            volt::CRIMSON_BRIGHT_COLOR
-                        } else {
-                            *color
-                        };
-                        batch.fill(atlas, wd.x, wd.y, wd.w, wd.h, bar_col);
-                    } else if !wd.list && *centered && wd.y <= 15.0 && *color == u32::MAX {
-                        volt::draw_page_title(batch, atlas, text, wd.y, underline_t);
-                    } else if wd.list && *centered && *color == u32::MAX {
-                        volt::draw_section_header(batch, atlas, text, wd.y);
+                        batch.fill(atlas, wd.x, wd.y, wd.w, wd.h, *color);
                     } else if *centered {
-                        let c = if *color == u32::MAX {
-                            volt::TEXT_COLOR
-                        } else if *color == 0xFFA0A0A0 || *color == rgba(0xBA, 0xBA, 0xBA, 255) {
-                            volt::MUTED_COLOR
-                        } else {
-                            *color
-                        };
                         let tw = atlas.font.width_text(text);
                         batch.text_styled(
                             atlas,
                             text,
                             wd.x + ((wd.w - tw) / 2.0).floor(),
                             wd.y,
-                            c,
+                            *color,
                             true,
                         );
                     } else {
-                        let c = if *color == u32::MAX {
-                            volt::TEXT_COLOR
-                        } else {
-                            *color
-                        };
-                        batch.text_styled(atlas, text, wd.x, wd.y, c, true);
+                        batch.text_styled(atlas, text, wd.x, wd.y, *color, true);
                     }
                 }
                 WKind::LanguageRow {
@@ -3828,30 +3687,15 @@ impl OptionsUi {
                         crate::widgets::Kind::Row,
                     );
                     crate::widgets::target_as(rect, crate::widgets::Kind::Row);
-                    let (hover_t, _) = self.anim.step_button(slot_id, hover, dt);
                     if *selected {
-                        volt::draw_card_box(
-                            batch,
-                            atlas,
-                            (wd.x, wd.y, wd.w, wd.h),
-                            volt::hex_rgba(volt::HERO_BG_HEX, 245),
-                            volt::CRIMSON_COLOR,
-                        );
+                        batch.fill(atlas, wd.x, wd.y, wd.w, wd.h, u32::MAX);
                         batch.fill(
                             atlas,
                             wd.x + 1.0,
-                            wd.y + 2.0,
-                            2.0,
-                            (wd.h - 4.0).max(2.0),
-                            volt::CRIMSON_BRIGHT_COLOR,
-                        );
-                    } else if hover_t > 0.02 {
-                        volt::draw_card_box(
-                            batch,
-                            atlas,
-                            (wd.x, wd.y, wd.w, wd.h),
-                            volt::scale_alpha(volt::hex_rgba(volt::CARD_HEX, 225), hover_t),
-                            volt::scale_alpha(volt::hex_rgba(volt::BORDER_HEX, 235), hover_t),
+                            wd.y + 1.0,
+                            wd.w - 2.0,
+                            wd.h - 2.0,
+                            rgba(0, 0, 0, 255),
                         );
                     }
                     let tw = atlas.font.width_text(label);
@@ -3860,33 +3704,23 @@ impl OptionsUi {
                         label,
                         wd.x + ((wd.w - tw) / 2.0).floor(),
                         wd.y + 2.0 + 7.0 - 4.0,
-                        if *selected || hover {
-                            rgba(255, 255, 255, 255)
-                        } else {
-                            volt::TEXT_COLOR
-                        },
+                        u32::MAX,
                         true,
                     );
                 }
             }
-            let animate_body = wd.list || (!list && wd.y > 16.0 && wd.y < h - 32.0);
-            if animate_body {
-                volt::apply_transition(batch, start, tx, ty, t_alpha);
-            }
-            if wd.list && (wd.y + ty < top || wd.y + ty + wd.h > bottom) {
+            if wd.list && (wd.y < top || wd.y + wd.h > bottom) {
                 batch.clip_since(start, 0.0, top, w, bottom);
             }
         }
         if list {
-            volt::list_rail_dividers(batch, atlas, top, bottom);
+            ui::separators(batch, atlas, top, bottom, in_world);
             let sx = self.scrollbar_x(w);
-            let sb_active = self.scrollbar_drag_y.is_some()
-                || ui::hovered(cursor, sx, top, 6.0, (bottom - top).max(0.0));
-            volt::scrollbar(batch, atlas, sx, top, bottom, content, self.scroll, sb_active);
+            ui::scrollbar(batch, atlas, sx, top, bottom, content, self.scroll);
         }
         if self.page() == Page::Language {
             let mut search = self.language_search.clone();
-            volt::draw_edit_box(batch, atlas, &mut search);
+            search.draw(batch, atlas, None);
             if search.value.is_empty() && !search.focused {
                 batch.text_styled(
                     atlas,
@@ -3901,7 +3735,7 @@ impl OptionsUi {
         }
         if self.has_settings_search(s) {
             let mut search = self.settings_search.clone();
-            volt::draw_edit_box(batch, atlas, &mut search);
+            search.draw(batch, atlas, None);
             if search.value.is_empty() && !search.focused {
                 batch.text_styled(
                     atlas,
@@ -3916,7 +3750,7 @@ impl OptionsUi {
         }
         if self.page() == Page::Waypoints {
             let mut name_box = self.waypoint_name.clone();
-            volt::draw_edit_box(batch, atlas, &mut name_box);
+            name_box.draw(batch, atlas, None);
             if name_box.value.is_empty() && !name_box.focused {
                 batch.text_styled(
                     atlas,
@@ -4098,8 +3932,7 @@ impl OptionsUi {
             self.scrollbar_drag_y = Some(y);
             return events;
         }
-        let prefix = self.slot_prefix();
-        for (wi, wd) in widgets.into_iter().enumerate() {
+        for wd in widgets {
             if !ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h) {
                 continue;
             }
@@ -4110,7 +3943,6 @@ impl OptionsUi {
                 WKind::Button {
                     active: true, act, ..
                 } => {
-                    self.anim.pulse(prefix | (wi as u64));
                     events.push(Event::ButtonClick);
                     match act {
                         Act::Push(p) => {
@@ -4456,8 +4288,6 @@ impl OptionsUi {
         self.slider_value = None;
         self.selected_key = None;
         self.selected_pad_action = None;
-        self.anim.start_transition(-1.0);
-        self.graphics.anim.start_transition(-1.0);
         match page {
             Page::Language => {
                 if let Some(code) = self.language_choice.take()
@@ -5985,8 +5815,20 @@ mod tests {
 
     #[test]
     fn partially_visible_keybind_rows_are_clipped_and_clickable() {
-        let atlas = atlas();
-        let card_bg = crate::volt_options_style::hex_rgba(crate::volt_options_style::CARD_HEX, 242);
+        let mut atlas = atlas();
+        let button = crate::hud::Rect {
+            u0: 0.25,
+            v0: 0.25,
+            u1: 0.5,
+            v1: 0.5,
+            w: 20,
+            h: 20,
+        };
+        for name in ["button", "button_disabled", "button_highlighted"] {
+            atlas
+                .sprites
+                .insert(format!("gui/sprites/widget/{name}"), button);
+        }
         for above in [true, false] {
             let mut s = Settings::default();
             let mut ui = OptionsUi::default();
@@ -6021,7 +5863,8 @@ mod tests {
                 .vertices
                 .iter()
                 .filter(|v| {
-                    v.color == card_bg
+                    (0.25..=0.5).contains(&v.uv[0])
+                        && (0.25..=0.5).contains(&v.uv[1])
                         && v.pos[0] >= x
                         && v.pos[0] <= x + width
                         && v.pos[1] >= row_y
