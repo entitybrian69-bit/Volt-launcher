@@ -605,7 +605,7 @@ pub fn button(
 
     // Left crimson accent bar: always present on Hero & ActiveOn, expands smoothly on hover!
     if active && h >= 6.0 && w >= 12.0 {
-        let base_bar = match tone {
+        let base_bar: f32 = match tone {
             ButtonTone::Hero | ButtonTone::ActiveOn => 1.0,
             ButtonTone::Primary => 0.65,
             _ => 0.0,

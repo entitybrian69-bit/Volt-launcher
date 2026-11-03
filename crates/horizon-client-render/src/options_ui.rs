@@ -3696,7 +3696,7 @@ impl OptionsUi {
                         Act::PickShaderPack(i) => {
                             if s.shader_packs
                                 .get(*i)
-                                .is_some_and(|p| p == &s.horizon.shader_pack)
+                                .is_some_and(|p| p.file == s.horizon.shader_pack)
                             {
                                 ButtonTone::ActiveOn
                             } else {
