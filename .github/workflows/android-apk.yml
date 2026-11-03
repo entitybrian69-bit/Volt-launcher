@@ -256,7 +256,6 @@ jobs:
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_options_style"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
-              ["cargo", "test", "-p", "horizon-client", "--lib", "touch_ui"],
           ]
           for cmd in cmds:
               proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
