@@ -811,10 +811,9 @@ impl Game<'_> {
                 if self.screen == Screen::Options {
                     self.cursor = (-1.0, -1.0);
                     let amount = y * (30.0 / (18.0 * b.scale.max(1.0)));
-                    if let Some(ui) = &mut self.ui {
-                        ui.options
-                            .scroll_at(&self.settings, (b.width, b.height), (p[0], p[1]), amount);
-                    }
+                    self.ui
+                        .options
+                        .scroll_at(&self.settings, (b.width, b.height), (p[0], p[1]), amount);
                 } else {
                     self.window_event(
                         events,
@@ -841,10 +840,9 @@ impl Game<'_> {
             if let Some(b) = self.gui_scale() {
                 let at = self.pad.touch_ui.last_scroll_point(b.scale);
                 let amount = y * (30.0 / (18.0 * b.scale.max(1.0)));
-                if let Some(ui) = &mut self.ui {
-                    ui.options
-                        .scroll_at(&self.settings, (b.width, b.height), at, amount);
-                }
+                self.ui
+                    .options
+                    .scroll_at(&self.settings, (b.width, b.height), at, amount);
             }
         } else if let Some(id) = self.window.as_ref().map(|w| w.id()) {
             self.window_event(

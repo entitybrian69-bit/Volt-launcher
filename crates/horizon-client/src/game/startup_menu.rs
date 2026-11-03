@@ -966,7 +966,7 @@ impl Loading {
                         let initial = if self.menu.options_open {
                             self.gui
                                 .as_ref()
-                                .and_then(|gui| self.menu.options.android_edit_value(&gui.atlas))
+                                .map(|gui| self.menu.options.android_edit_value(&gui.atlas))
                                 .unwrap_or_default()
                         } else {
                             self.menu
