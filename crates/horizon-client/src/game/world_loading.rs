@@ -231,12 +231,7 @@ impl WorldLoader {
                 drop(self.finish());
                 Err("world initialization cancelled".into())
             })
-            .unwrap_or_else(|_| {
-                std::thread::spawn(move || {
-                    drop(self.finish());
-                    Err("world initialization cancelled".into())
-                })
-            });
+            .expect("failed to spawn thread");
         Self {
             cancelled: true,
             upgrade,
