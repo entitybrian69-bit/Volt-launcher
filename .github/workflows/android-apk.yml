@@ -103,6 +103,8 @@ jobs:
               out.write(f"publish_release={'true' if publish_release else 'false'}\n")
               out.write(f"multi_abi={'true' if len(include) > 1 else 'false'}\n")
           PY
+      - name: Validate Volt Shaders WGSL & Shader API
+        run: cargo test -p horizon-shader-api
 
   prepare:
     name: Prepare engine tables
@@ -995,15 +997,14 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.9.6
-          - **Zero-Freeze Post-Launch Minecraft Main Menu Handoff & Tap Crash Fix (MediaTek Helio G96 / Arm Mali-G57 MC2)**:
-            - Eliminated the `T ≈ 5s` post-launch freeze and single-tap crash (`Loading::finish` handoff on `ALooper`): replaced synchronous `wait_indefinitely()` + ~10,000–11,600 per-layer `LayerMajor` `queue.write_texture` uploads (`~200 MB` staging spike) in `Renderer::replace_world_textures` with empty `VkImage` allocation and `<= 512 KiB/frame` `MipMajor` streaming batches across Title frames (auto-flushing in `4 MiB` `MipMajor` batches on world entry or shader-pack atlas creation)
-            - Precomputed animated block-sprite mip sheets (`SpriteAnimator::prepare`), ~110 `particles/*.json` definitions (`ParticleSpriteSets`), `BlockEntityAnims::classify`, and `SoundRegistry` (~450 KB `sounds.json`) on background worker threads, and immediately freed ~95 MB of duplicate `RenderAssets::pixels` on Android once mip chains are built
-            - Moved Android NDK `AAudioStream` open, reopen, and close off `ALooper` onto a dedicated `2 MiB` `"volt-audio-stream"` owner thread so `audioserver` Binder IPC never stalls menu rendering or input acknowledgement
-            - Compiled `SPRITE_ARRAYS = 8` unconditionally on Android so 1-layer loading renderers always upgrade in-place up to 16,384 sprite layers without synchronous UI-thread pipeline recompilation, preserved `TouchUi` gesture state across `StartupMenu -> Game` handoff, and deduplicated `Game::apply_settings()` at startup
-          - **Mali-G57 Swapchain, Stack & Input Hardening (`0.9.5`)**:
-            - Routed Android `MenuBlur` & screenshots through `FrameScale`'s GPU-local `Rgba8Unorm` target (keeping `SurfaceFlinger` swapchain images pure `RENDER_ATTACHMENT`), disabled `STORAGE_BINDING` compute sprite animation on Android, deferred `WindowEvent::Touch` out of `AInputQueue`, and expanded Bionic worker stacks to `2–8 MiB`
-          - **Controls Studio, Volt Boost & 10 Engine Optimizations**: 5 built-in control presets (**Volt Default**, **Pojav Classic**, **Zalith Layout**, **Fold Craft (FCL)**, **PvP 4-Finger Claw**) + visual editor + `.json`/`.zip` import/export, Vulkan-only crash recovery (no OpenGL fallback), LOD off across all Volt Boost presets, in-game Volt Boost Resolution Scaler (`25%–200%`), and 10 pure-Rust engine optimizations
+          ### What's New in Volt Launcher 0.9.7
+          - **In-Game Performance-First Native WGSL "Volt Shaders" (`Options... -> Volt Shaders`)**:
+            - Added **Volt Shaders** directly above **Video Settings...** in the in-game Options menu (100% pure native Rust + WGSL on `wgpu` Vulkan)
+            - **`Enable Shaders`** master toggle (`OFF` by default): when `OFF`, zero shader passes run and all profiles/customization controls stay completely hidden; toggling `ON` reveals the full Volt Shaders suite
+            - **6 Mobile-Tuned Shader Profiles**: **`Potato`**, **`Low`**, **`Medium`**, **`High`**, **`Ultra`**, and **`Custom`** — `Potato`/`Low`/`Medium` use a **Zero-Post Direct TBDR** `[sky] + [material]` topology (`StoreOp::Discard` depth, zero off-screen resolve passes); `High`/`Ultra` use a **Single-Pass Post** topology with **0 bytes** of intermediate ping-pong `RGBA16F` targets and WGSL `override` dead-code elimination
+            - **Zero-Remesh Moving Vegetation & Water**: root-anchored waving grass, tall plants, flowers & crops, phase-coherent waving leaves & vines, ceiling-anchored hanging foliage, storm wind boost, and gentle still-water vertex motion within 56 blocks
+            - **35 Live Shader Controls**: directional sun/sky bounce shading, sunlit foliage subsurface translucency, torchlight color styles (`Vanilla`, `Warm Amber`, `Cozy Gold`, `Soul Cool`), emissive block glow, rain wet sheen, dual-wave water ripples & sun/moon glint, clear water & underwater wave refraction, Rayleigh/Mie atmospheric sky, sun/moon corona, night aurora (`Subtle`/`Medium`/`Vibrant`), distance haze, ACES/Neutral/Cinema tonemapping, single-pass bloom, crepuscular sun rays, vignette, vibrance, saturation, contrast, exposure, and color warmth
+          - **Zero-Freeze Main Menu Handoff & Mali-G57 Hardening (`0.9.5`–`0.9.6`)**: `MipMajor` sprite streaming, background asset preparation, dedicated `"volt-audio-stream"` NDK `AAudio` thread, GPU-local `MenuBlur` target, Controls Studio presets, and Volt Boost optimizations
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

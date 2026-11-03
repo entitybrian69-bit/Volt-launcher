@@ -336,6 +336,18 @@ impl Opt {
             Opt::MusicToast => "options.musicToast",
             Opt::VoltResolutionScale => "volt.options.resolution_scale",
             Opt::TouchPreset => "volt.options.touch_preset",
+            Opt::VoltShaderWindSpeed => "volt.shaders.opt.wind_speed",
+            Opt::VoltShaderWindStrength => "volt.shaders.opt.wind_strength",
+            Opt::VoltShaderShadowRichness => "volt.shaders.opt.shadow_richness",
+            Opt::VoltShaderTorchIntensity => "volt.shaders.opt.torch_intensity",
+            Opt::VoltShaderEmissiveGlow => "volt.shaders.opt.emissive_glow",
+            Opt::VoltShaderWaterReflection => "volt.shaders.opt.water_reflection",
+            Opt::VoltShaderSunsetGlow => "volt.shaders.opt.sunset_glow",
+            Opt::VoltShaderVibrance => "volt.shaders.opt.vibrance",
+            Opt::VoltShaderSaturation => "volt.shaders.opt.saturation",
+            Opt::VoltShaderContrast => "volt.shaders.opt.contrast",
+            Opt::VoltShaderExposure => "volt.shaders.opt.exposure",
+            Opt::VoltShaderWarmth => "volt.shaders.opt.warmth",
         }
     }
     pub(crate) fn kind(self, s: &Settings) -> Kind {
@@ -406,6 +418,42 @@ impl Opt {
             Opt::SprintWindow => unit(s.sprint_window as f32, 0.0, 10.0),
             Opt::VoltResolutionScale => {
                 unit(s.horizon.resolution_scale.clamp(25, 200) as f32, 25.0, 200.0)
+            }
+            Opt::VoltShaderWindSpeed => {
+                unit(s.extras.volt_shaders.wind_speed.clamp(25, 200) as f32, 25.0, 200.0)
+            }
+            Opt::VoltShaderWindStrength => {
+                unit(s.extras.volt_shaders.wind_strength.clamp(25, 200) as f32, 25.0, 200.0)
+            }
+            Opt::VoltShaderShadowRichness => {
+                unit(s.extras.volt_shaders.shadow_richness.clamp(0, 100) as f32, 0.0, 100.0)
+            }
+            Opt::VoltShaderTorchIntensity => {
+                unit(s.extras.volt_shaders.torch_intensity.clamp(50, 200) as f32, 50.0, 200.0)
+            }
+            Opt::VoltShaderEmissiveGlow => {
+                unit(s.extras.volt_shaders.emissive_glow.clamp(0, 200) as f32, 0.0, 200.0)
+            }
+            Opt::VoltShaderWaterReflection => {
+                unit(s.extras.volt_shaders.water_reflection.clamp(0, 150) as f32, 0.0, 150.0)
+            }
+            Opt::VoltShaderSunsetGlow => {
+                unit(s.extras.volt_shaders.sunset_glow.clamp(0, 200) as f32, 0.0, 200.0)
+            }
+            Opt::VoltShaderVibrance => {
+                unit(s.extras.volt_shaders.vibrance.clamp(50, 180) as f32, 50.0, 180.0)
+            }
+            Opt::VoltShaderSaturation => {
+                unit(s.extras.volt_shaders.saturation.clamp(50, 180) as f32, 50.0, 180.0)
+            }
+            Opt::VoltShaderContrast => {
+                unit(s.extras.volt_shaders.contrast.clamp(70, 150) as f32, 70.0, 150.0)
+            }
+            Opt::VoltShaderExposure => {
+                unit(s.extras.volt_shaders.exposure.clamp(70, 150) as f32, 70.0, 150.0)
+            }
+            Opt::VoltShaderWarmth => {
+                unit(s.extras.volt_shaders.warmth.clamp(-50, 50) as f32, -50.0, 50.0)
             }
             _ => Kind::Cycle,
         }
@@ -909,6 +957,56 @@ impl Opt {
                 };
                 Text::literal(name)
             }
+            Opt::VoltShaderWindSpeed => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.wind_speed.clamp(25, 200)))
+            }
+            Opt::VoltShaderWindStrength => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.wind_strength.clamp(25, 200)
+            )),
+            Opt::VoltShaderShadowRichness => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.shadow_richness.clamp(0, 100)
+            )),
+            Opt::VoltShaderTorchIntensity => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.torch_intensity.clamp(50, 200)
+            )),
+            Opt::VoltShaderEmissiveGlow => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.emissive_glow.clamp(0, 200)
+            )),
+            Opt::VoltShaderWaterReflection => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.water_reflection.clamp(0, 150)
+            )),
+            Opt::VoltShaderSunsetGlow => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.sunset_glow.clamp(0, 200)
+            )),
+            Opt::VoltShaderVibrance => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.vibrance.clamp(50, 180)))
+            }
+            Opt::VoltShaderSaturation => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.saturation.clamp(50, 180)
+            )),
+            Opt::VoltShaderContrast => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.contrast.clamp(70, 150)))
+            }
+            Opt::VoltShaderExposure => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.exposure.clamp(70, 150)))
+            }
+            Opt::VoltShaderWarmth => {
+                let w = s.extras.volt_shaders.warmth.clamp(-50, 50);
+                Text::literal(if w == 0 {
+                    "Neutral".to_owned()
+                } else if w > 0 {
+                    format!("+{w} Warm")
+                } else {
+                    format!("{w} Cool")
+                })
+            }
             _ => Text::empty(),
         }
     }
@@ -993,6 +1091,54 @@ impl Opt {
             Opt::SprintWindow => s.sprint_window = step(0.0, 10.0) as i32,
             Opt::VoltResolutionScale => {
                 s.horizon.resolution_scale = (25.0 + step(0.0, 35.0) * 5.0) as u32;
+            }
+            Opt::VoltShaderWindSpeed => {
+                s.extras.volt_shaders.wind_speed = (25.0 + step(0.0, 35.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderWindStrength => {
+                s.extras.volt_shaders.wind_strength = (25.0 + step(0.0, 35.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderShadowRichness => {
+                s.extras.volt_shaders.shadow_richness = (step(0.0, 20.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderTorchIntensity => {
+                s.extras.volt_shaders.torch_intensity = (50.0 + step(0.0, 30.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderEmissiveGlow => {
+                s.extras.volt_shaders.emissive_glow = (step(0.0, 40.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderWaterReflection => {
+                s.extras.volt_shaders.water_reflection = (step(0.0, 30.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderSunsetGlow => {
+                s.extras.volt_shaders.sunset_glow = (step(0.0, 40.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderVibrance => {
+                s.extras.volt_shaders.vibrance = (50.0 + step(0.0, 65.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderSaturation => {
+                s.extras.volt_shaders.saturation = (50.0 + step(0.0, 65.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderContrast => {
+                s.extras.volt_shaders.contrast = (70.0 + step(0.0, 40.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderExposure => {
+                s.extras.volt_shaders.exposure = (70.0 + step(0.0, 40.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderWarmth => {
+                s.extras.volt_shaders.warmth = (-50.0 + step(0.0, 50.0) * 2.0) as i16;
+                s.extras.volt_shaders.mark_custom();
             }
             _ => {}
         }
@@ -1416,6 +1562,7 @@ pub enum Page {
     Waypoints,
     Minimap,
     VoltBoost,
+    VoltShaders,
     /// CreditsAndAttributionScreen.
     Credits,
     /// Volt Settings: every page Volt adds, as a mod's settings
@@ -1713,6 +1860,7 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
         Page::Horizon => "horizon.pages.settings.tooltip",
         Page::VoltBoost => "volt.boost.tooltip",
+        Page::VoltShaders => "volt.shaders.tooltip",
         Page::Waypoints => "horizon.pages.waypoints.tooltip",
         Page::Minimap => "horizon.pages.minimap.tooltip",
         Page::Graphics => "horizon.pages.graphics.tooltip",
@@ -1746,11 +1894,22 @@ impl OptionsUi {
         let label = format!("{}: {}", item.caption(), item.value(&s.extras));
         button(0.0, 0.0, 150.0, Text::literal(label), Act::Extra(item))
     }
+    fn has_settings_search(&self, s: &Settings) -> bool {
+        match self.page() {
+            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost => true,
+            Page::VoltShaders => s.extras.volt_shaders.enabled,
+            _ => false,
+        }
+    }
     fn settings_search_active(&self) -> bool {
         self.settings_search.focused
             && matches!(
                 self.page(),
-                Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+                Page::Video
+                    | Page::Controls
+                    | Page::KeyBinds
+                    | Page::VoltBoost
+                    | Page::VoltShaders
             )
     }
     fn waypoint_name_active(&self) -> bool {
@@ -1922,7 +2081,11 @@ impl OptionsUi {
         self.scrollbar_drag_y = None;
         if matches!(
             page,
-            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
+            Page::Video
+                | Page::Controls
+                | Page::KeyBinds
+                | Page::VoltBoost
+                | Page::VoltShaders
         ) {
             self.settings_search.set_value("");
             self.settings_search.focused = false;
@@ -1979,6 +2142,7 @@ impl OptionsUi {
             Page::Waypoints => "horizon.pages.waypoints",
             Page::Minimap => "horizon.pages.minimap",
             Page::VoltBoost => "volt.boost.title",
+            Page::VoltShaders => "volt.shaders.title",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "horizon.pages.settings",
@@ -2079,6 +2243,7 @@ impl OptionsUi {
                 rows.extend(self.extra_section_rows(s, crate::extras::volt_boost_rows()));
                 rows
             }
+            Page::VoltShaders => self.volt_shader_rows(s),
             Page::Waypoints => {
                 let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
                 rows.push(Row::Header("Saved Waypoints"));
@@ -2553,15 +2718,168 @@ impl OptionsUi {
             }
         }
     }
+
+    fn volt_shader_rows(&self, s: &Settings) -> Vec<Row> {
+        use crate::extras::Item;
+        #[derive(Clone, Copy)]
+        enum Entry {
+            Item(Item),
+            Slider(Opt),
+            BigSlider(Opt),
+        }
+        let master = Row::Buttons(
+            button(
+                0.0,
+                0.0,
+                310.0,
+                Text::literal(format!(
+                    "{}: {}",
+                    Item::VoltShaderEnable.caption(),
+                    Item::VoltShaderEnable.value(&s.extras)
+                )),
+                Act::Extra(Item::VoltShaderEnable),
+            ),
+            None,
+        );
+        if !s.extras.volt_shaders.enabled {
+            return vec![master];
+        }
+        let mut rows = vec![master];
+        let query = self.settings_search.value.trim().to_lowercase();
+        let entry_matches = |entry: Entry| -> bool {
+            if query.is_empty() {
+                return true;
+            }
+            match entry {
+                Entry::Item(item) => {
+                    item.caption().to_lowercase().contains(&query)
+                        || item.description().to_lowercase().contains(&query)
+                        || item.value(&s.extras).to_lowercase().contains(&query)
+                }
+                Entry::Slider(opt) | Entry::BigSlider(opt) => {
+                    lang::get(opt.caption()).to_lowercase().contains(&query)
+                        || lang::get(&opt.tooltip_key(s))
+                            .to_lowercase()
+                            .contains(&query)
+                }
+            }
+        };
+        if query.is_empty()
+            || entry_matches(Entry::Item(Item::VoltShaderProfile))
+            || entry_matches(Entry::Item(Item::VoltShaderReset))
+        {
+            rows.push(Row::Buttons(
+                self.extra_button(s, Item::VoltShaderProfile),
+                Some(self.extra_button(s, Item::VoltShaderReset)),
+            ));
+        }
+        let sections: &[(&str, &[Entry])] = &[
+            (
+                "Moving Vegetation & Wind",
+                &[
+                    Entry::Item(Item::VoltShaderWavePlants),
+                    Entry::Item(Item::VoltShaderWaveLeaves),
+                    Entry::Item(Item::VoltShaderWaveWater),
+                    Entry::Item(Item::VoltShaderStormWind),
+                    Entry::Slider(Opt::VoltShaderWindSpeed),
+                    Entry::Slider(Opt::VoltShaderWindStrength),
+                ],
+            ),
+            (
+                "Lighting & Shadows",
+                &[
+                    Entry::Item(Item::VoltShaderSunShading),
+                    Entry::Item(Item::VoltShaderFoliageGlow),
+                    Entry::Slider(Opt::VoltShaderShadowRichness),
+                    Entry::Item(Item::VoltShaderRainWetness),
+                    Entry::Item(Item::VoltShaderTorchStyle),
+                    Entry::Slider(Opt::VoltShaderTorchIntensity),
+                    Entry::BigSlider(Opt::VoltShaderEmissiveGlow),
+                ],
+            ),
+            (
+                "Water & Reflections",
+                &[
+                    Entry::Item(Item::VoltShaderWaterRipples),
+                    Entry::Item(Item::VoltShaderWaterGlint),
+                    Entry::Item(Item::VoltShaderClearWater),
+                    Entry::Item(Item::VoltShaderUnderwaterRefract),
+                    Entry::BigSlider(Opt::VoltShaderWaterReflection),
+                ],
+            ),
+            (
+                "Sky & Atmosphere",
+                &[
+                    Entry::Item(Item::VoltShaderCustomSky),
+                    Entry::Item(Item::VoltShaderSunHalo),
+                    Entry::Item(Item::VoltShaderAurora),
+                    Entry::Item(Item::VoltShaderDepthHaze),
+                    Entry::BigSlider(Opt::VoltShaderSunsetGlow),
+                ],
+            ),
+            (
+                "Post-Processing & Color Grading",
+                &[
+                    Entry::Item(Item::VoltShaderTonemap),
+                    Entry::Item(Item::VoltShaderBloom),
+                    Entry::Item(Item::VoltShaderSunRays),
+                    Entry::Item(Item::VoltShaderVignette),
+                    Entry::Slider(Opt::VoltShaderVibrance),
+                    Entry::Slider(Opt::VoltShaderSaturation),
+                    Entry::Slider(Opt::VoltShaderContrast),
+                    Entry::Slider(Opt::VoltShaderExposure),
+                    Entry::BigSlider(Opt::VoltShaderWarmth),
+                ],
+            ),
+        ];
+        let to_half_widget = |entry: Entry| -> Widget {
+            match entry {
+                Entry::Item(item) => self.extra_button(s, item),
+                Entry::Slider(opt) | Entry::BigSlider(opt) => {
+                    option_widget(s, opt, 0.0, 0.0, 150.0)
+                }
+            }
+        };
+        for &(header, entries) in sections {
+            let mut section_rows = Vec::new();
+            let mut left: Option<Widget> = None;
+            for &entry in entries {
+                if !entry_matches(entry) {
+                    continue;
+                }
+                match entry {
+                    Entry::BigSlider(opt) => {
+                        if let Some(prev) = left.take() {
+                            section_rows.push(Row::Buttons(prev, None));
+                        }
+                        section_rows.push(Row::Big(opt));
+                    }
+                    half => {
+                        let w = to_half_widget(half);
+                        if let Some(prev) = left.take() {
+                            section_rows.push(Row::Buttons(prev, Some(w)));
+                        } else {
+                            left = Some(w);
+                        }
+                    }
+                }
+            }
+            if let Some(prev) = left.take() {
+                section_rows.push(Row::Buttons(prev, None));
+            }
+            if !section_rows.is_empty() {
+                rows.push(Row::Header(header));
+                rows.extend(section_rows);
+            }
+        }
+        rows
+    }
     /// Build every widget of the current page.
     fn layout(&mut self, s: &Settings, w: f32, h: f32) -> (Vec<Widget>, f32, f32, f32) {
         let mut out = Vec::new();
         let page = self.page();
         let cx = (w / 2.0).floor();
-        if matches!(
-            page,
-            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
-        ) {
+        if self.has_settings_search(s) {
             self.settings_search.x = cx - 100.0;
             self.settings_search.y = 17.0;
         }
@@ -2597,8 +2915,9 @@ impl OptionsUi {
                 let entries = [
                     ("options.skinCustomisation", Some(Page::Skin)),
                     ("options.sounds", Some(Page::Sound)),
-                    ("options.video", Some(Page::Video)),
+                    ("volt.shaders.button", Some(Page::VoltShaders)),
                     ("options.controls", Some(Page::Controls)),
+                    ("options.video", Some(Page::Video)),
                     ("options.language", Some(Page::Language)),
                     ("options.chat", Some(Page::Chat)),
                     ("options.resourcepack", Some(Page::Packs)),
@@ -3026,22 +3345,15 @@ impl OptionsUi {
             // Drawn by `pack_screen`.
             Page::Packs => {}
             _ => {
-                if matches!(
-                    page,
-                    Page::Video | Page::Controls | Page::Waypoints | Page::VoltBoost
-                ) {
+                let header_input = self.has_settings_search(s)
+                    && page != Page::KeyBinds
+                    || page == Page::Waypoints;
+                if header_input {
                     top = 38.0;
                 }
                 out.push(Widget {
                     x: 0.0,
-                    y: if matches!(
-                        page,
-                        Page::Video | Page::Controls | Page::Waypoints | Page::VoltBoost
-                    ) {
-                        4.0
-                    } else {
-                        12.0
-                    },
+                    y: if header_input { 4.0 } else { 12.0 },
                     w,
                     h: 9.0,
                     kind: WKind::Text {
@@ -3421,10 +3733,7 @@ impl OptionsUi {
             }
             self.language_search = search;
         }
-        if matches!(
-            self.page(),
-            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
-        ) {
+        if self.has_settings_search(s) {
             let mut search = self.settings_search.clone();
             search.draw(batch, atlas, None);
             if search.value.is_empty() && !search.focused {
@@ -3551,12 +3860,7 @@ impl OptionsUi {
         }
         let (widgets, top, bottom, content) = self.layout(s, size.0, size.1);
         let mut events = Vec::new();
-        if !drag
-            && matches!(
-                self.page(),
-                Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost
-            )
-        {
+        if !drag && self.has_settings_search(s) {
             let search = &mut self.settings_search;
             search.focused = ui::hovered((x, y), search.x, search.y, search.width, search.height);
             if search.focused {
@@ -3663,6 +3967,13 @@ impl OptionsUi {
                                 ) {
                                     s.extras.distant_lod_boost = false;
                                     s.horizon.lod_distance = 0;
+                                }
+                                if item == crate::extras::Item::VoltShaderEnable
+                                    && !s.extras.volt_shaders.enabled
+                                {
+                                    self.scroll = 0.0;
+                                    self.settings_search.set_value("");
+                                    self.settings_search.focused = false;
                                 }
                                 events.push(Event::Changed);
                             }
@@ -6033,5 +6344,84 @@ mod tests {
             Opt::SoundDevice.cycle(&mut s, true, [854, 480]);
         }
         assert_eq!(s.sound_device, "");
+    }
+
+    #[test]
+    fn volt_shaders_sits_above_video_and_hides_all_customization_when_disabled() {
+        let mut s = Settings::default();
+        assert!(!s.extras.volt_shaders.enabled);
+        let mut ui = OptionsUi::default();
+        let (main_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        let shaders_btn = main_widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    &w.kind,
+                    WKind::Button {
+                        act: Act::Push(Page::VoltShaders),
+                        active: true,
+                        ..
+                    }
+                )
+            })
+            .expect("Volt Shaders button on Options main page");
+        let video_btn = main_widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    &w.kind,
+                    WKind::Button {
+                        act: Act::Push(Page::Video),
+                        active: true,
+                        ..
+                    }
+                )
+            })
+            .expect("Video Settings button on Options main page");
+        assert_eq!(shaders_btn.x, video_btn.x, "same left column as Video");
+        assert!(
+            shaders_btn.y < video_btn.y,
+            "Volt Shaders must sit directly above Video Settings"
+        );
+
+        ui.push(Page::VoltShaders);
+        let (off_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        let off_list: Vec<&Widget> = off_widgets.iter().filter(|w| w.list).collect();
+        assert_eq!(
+            off_list.len(),
+            1,
+            "when Enable Shaders is OFF, every profile/customization widget must be hidden"
+        );
+        assert!(matches!(
+            &off_list[0].kind,
+            WKind::Button {
+                act: Act::Extra(crate::extras::Item::VoltShaderEnable),
+                active: true,
+                ..
+            }
+        ));
+
+        s.extras.volt_shaders.enabled = true;
+        let (on_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        let on_list: Vec<&Widget> = on_widgets.iter().filter(|w| w.list).collect();
+        assert!(
+            on_list.len() >= 35,
+            "enabling Volt Shaders must reveal profiles, moving vegetation, toggles and sliders"
+        );
+        assert!(on_list.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Button {
+                act: Act::Extra(crate::extras::Item::VoltShaderProfile),
+                active: true,
+                ..
+            }
+        )));
+        assert!(on_list.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Slider {
+                opt: Opt::VoltShaderWindSpeed,
+                ..
+            }
+        )));
     }
 }

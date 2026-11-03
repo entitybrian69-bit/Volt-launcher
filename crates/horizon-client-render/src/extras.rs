@@ -183,6 +183,8 @@ pub struct Extras {
     pub particle_frustum_cull: bool,
     /// Transient one-shot flag triggered when the user taps "Purge Unused RAM Now".
     pub purge_ram_requested: bool,
+    /// Built-in native WGSL Volt Shaders configuration (`enabled: false` by default).
+    pub volt_shaders: horizon_shader_api::volt_shaders::VoltShadersConfig,
 }
 
 impl Default for Extras {
@@ -276,6 +278,7 @@ impl Default for Extras {
             fast_translucency: false,
             particle_frustum_cull: false,
             purge_ram_requested: false,
+            volt_shaders: horizon_shader_api::volt_shaders::VoltShadersConfig::default(),
         }
     }
 }
@@ -493,6 +496,149 @@ impl Extras {
                 "voltLookaheadStream" => e.lookahead_stream = flag(e.lookahead_stream),
                 "voltFastTranslucency" => e.fast_translucency = flag(e.fast_translucency),
                 "voltParticleFrustum" => e.particle_frustum_cull = flag(e.particle_frustum_cull),
+                // Volt Shaders:
+                "voltShadersEnabled" => e.volt_shaders.enabled = flag(e.volt_shaders.enabled),
+                "voltShadersProfile" => {
+                    if let Some(p) =
+                        horizon_shader_api::volt_shaders::VoltShaderProfile::parse(value)
+                    {
+                        e.volt_shaders.profile = p;
+                    }
+                }
+                "voltShaderWavePlants" => {
+                    e.volt_shaders.waving_plants = flag(e.volt_shaders.waving_plants)
+                }
+                "voltShaderWaveLeaves" => {
+                    e.volt_shaders.waving_leaves = flag(e.volt_shaders.waving_leaves)
+                }
+                "voltShaderWaveWater" => {
+                    e.volt_shaders.waving_water = flag(e.volt_shaders.waving_water)
+                }
+                "voltShaderWindSpeed" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.wind_speed = v.clamp(25, 200);
+                    }
+                }
+                "voltShaderWindStrength" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.wind_strength = v.clamp(25, 200);
+                    }
+                }
+                "voltShaderStormWind" => {
+                    e.volt_shaders.storm_wind = flag(e.volt_shaders.storm_wind)
+                }
+                "voltShaderSunShading" => {
+                    e.volt_shaders.sun_shading = flag(e.volt_shaders.sun_shading)
+                }
+                "voltShaderShadowRichness" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.shadow_richness = v.clamp(0, 100);
+                    }
+                }
+                "voltShaderFoliageGlow" => {
+                    e.volt_shaders.foliage_subsurface = flag(e.volt_shaders.foliage_subsurface)
+                }
+                "voltShaderTorchStyle" => {
+                    if let Some(v) =
+                        horizon_shader_api::volt_shaders::TorchLightStyle::parse(value)
+                    {
+                        e.volt_shaders.torch_style = v;
+                    }
+                }
+                "voltShaderTorchIntensity" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.torch_intensity = v.clamp(50, 200);
+                    }
+                }
+                "voltShaderEmissiveGlow" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.emissive_glow = v.clamp(0, 200);
+                    }
+                }
+                "voltShaderRainWetness" => {
+                    e.volt_shaders.rain_wetness = flag(e.volt_shaders.rain_wetness)
+                }
+                "voltShaderWaterRipples" => {
+                    e.volt_shaders.water_ripples = flag(e.volt_shaders.water_ripples)
+                }
+                "voltShaderWaterReflection" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.water_reflection = v.clamp(0, 150);
+                    }
+                }
+                "voltShaderWaterGlint" => {
+                    e.volt_shaders.water_glint = flag(e.volt_shaders.water_glint)
+                }
+                "voltShaderClearWater" => {
+                    e.volt_shaders.clear_water = flag(e.volt_shaders.clear_water)
+                }
+                "voltShaderUnderwaterRefract" => {
+                    e.volt_shaders.underwater_refraction =
+                        flag(e.volt_shaders.underwater_refraction)
+                }
+                "voltShaderCustomSky" => {
+                    e.volt_shaders.custom_sky = flag(e.volt_shaders.custom_sky)
+                }
+                "voltShaderSunsetGlow" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.sunset_glow = v.clamp(0, 200);
+                    }
+                }
+                "voltShaderSunHalo" => {
+                    e.volt_shaders.sun_halo = flag(e.volt_shaders.sun_halo)
+                }
+                "voltShaderAurora" => {
+                    if let Some(v) = horizon_shader_api::volt_shaders::AuroraMode::parse(value) {
+                        e.volt_shaders.aurora = v;
+                    }
+                }
+                "voltShaderDepthHaze" => {
+                    if let Some(v) = horizon_shader_api::volt_shaders::DepthHazeMode::parse(value)
+                    {
+                        e.volt_shaders.depth_haze = v;
+                    }
+                }
+                "voltShaderTonemap" => {
+                    if let Some(v) = horizon_shader_api::volt_shaders::TonemapMode::parse(value) {
+                        e.volt_shaders.tonemap = v;
+                    }
+                }
+                "voltShaderBloom" => {
+                    if let Some(v) = horizon_shader_api::volt_shaders::BloomMode::parse(value) {
+                        e.volt_shaders.bloom = v;
+                    }
+                }
+                "voltShaderSunRays" => e.volt_shaders.sun_rays = flag(e.volt_shaders.sun_rays),
+                "voltShaderVibrance" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.vibrance = v.clamp(50, 180);
+                    }
+                }
+                "voltShaderSaturation" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.saturation = v.clamp(50, 180);
+                    }
+                }
+                "voltShaderContrast" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.contrast = v.clamp(70, 150);
+                    }
+                }
+                "voltShaderExposure" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.exposure = v.clamp(70, 150);
+                    }
+                }
+                "voltShaderWarmth" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_shaders.warmth = v.clamp(-50, 50);
+                    }
+                }
+                "voltShaderVignette" => {
+                    if let Some(v) = horizon_shader_api::volt_shaders::VignetteMode::parse(value) {
+                        e.volt_shaders.vignette = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -608,6 +754,115 @@ impl Extras {
         push("voltLookaheadStream", bool_text(self.lookahead_stream));
         push("voltFastTranslucency", bool_text(self.fast_translucency));
         push("voltParticleFrustum", bool_text(self.particle_frustum_cull));
+        push("voltShadersEnabled", bool_text(self.volt_shaders.enabled));
+        push("voltShadersProfile", self.volt_shaders.profile.as_str());
+        push(
+            "voltShaderWavePlants",
+            bool_text(self.volt_shaders.waving_plants),
+        );
+        push(
+            "voltShaderWaveLeaves",
+            bool_text(self.volt_shaders.waving_leaves),
+        );
+        push(
+            "voltShaderWaveWater",
+            bool_text(self.volt_shaders.waving_water),
+        );
+        push(
+            "voltShaderWindSpeed",
+            &self.volt_shaders.wind_speed.to_string(),
+        );
+        push(
+            "voltShaderWindStrength",
+            &self.volt_shaders.wind_strength.to_string(),
+        );
+        push(
+            "voltShaderStormWind",
+            bool_text(self.volt_shaders.storm_wind),
+        );
+        push(
+            "voltShaderSunShading",
+            bool_text(self.volt_shaders.sun_shading),
+        );
+        push(
+            "voltShaderShadowRichness",
+            &self.volt_shaders.shadow_richness.to_string(),
+        );
+        push(
+            "voltShaderFoliageGlow",
+            bool_text(self.volt_shaders.foliage_subsurface),
+        );
+        push(
+            "voltShaderTorchStyle",
+            self.volt_shaders.torch_style.as_str(),
+        );
+        push(
+            "voltShaderTorchIntensity",
+            &self.volt_shaders.torch_intensity.to_string(),
+        );
+        push(
+            "voltShaderEmissiveGlow",
+            &self.volt_shaders.emissive_glow.to_string(),
+        );
+        push(
+            "voltShaderRainWetness",
+            bool_text(self.volt_shaders.rain_wetness),
+        );
+        push(
+            "voltShaderWaterRipples",
+            bool_text(self.volt_shaders.water_ripples),
+        );
+        push(
+            "voltShaderWaterReflection",
+            &self.volt_shaders.water_reflection.to_string(),
+        );
+        push(
+            "voltShaderWaterGlint",
+            bool_text(self.volt_shaders.water_glint),
+        );
+        push(
+            "voltShaderClearWater",
+            bool_text(self.volt_shaders.clear_water),
+        );
+        push(
+            "voltShaderUnderwaterRefract",
+            bool_text(self.volt_shaders.underwater_refraction),
+        );
+        push(
+            "voltShaderCustomSky",
+            bool_text(self.volt_shaders.custom_sky),
+        );
+        push(
+            "voltShaderSunsetGlow",
+            &self.volt_shaders.sunset_glow.to_string(),
+        );
+        push(
+            "voltShaderSunHalo",
+            bool_text(self.volt_shaders.sun_halo),
+        );
+        push("voltShaderAurora", self.volt_shaders.aurora.as_str());
+        push("voltShaderDepthHaze", self.volt_shaders.depth_haze.as_str());
+        push("voltShaderTonemap", self.volt_shaders.tonemap.as_str());
+        push("voltShaderBloom", self.volt_shaders.bloom.as_str());
+        push("voltShaderSunRays", bool_text(self.volt_shaders.sun_rays));
+        push(
+            "voltShaderVibrance",
+            &self.volt_shaders.vibrance.to_string(),
+        );
+        push(
+            "voltShaderSaturation",
+            &self.volt_shaders.saturation.to_string(),
+        );
+        push(
+            "voltShaderContrast",
+            &self.volt_shaders.contrast.to_string(),
+        );
+        push(
+            "voltShaderExposure",
+            &self.volt_shaders.exposure.to_string(),
+        );
+        push("voltShaderWarmth", &self.volt_shaders.warmth.to_string());
+        push("voltShaderVignette", self.volt_shaders.vignette.as_str());
         s
     }
 
@@ -1081,7 +1336,58 @@ pub enum Item {
     VoltLookaheadStream,
     VoltFastTranslucency,
     VoltParticleFrustum,
+    /// Volt Shaders page (`Options -> Volt Shaders`):
+    VoltShaderEnable,
+    VoltShaderProfile,
+    VoltShaderReset,
+    VoltShaderWavePlants,
+    VoltShaderWaveLeaves,
+    VoltShaderWaveWater,
+    VoltShaderStormWind,
+    VoltShaderSunShading,
+    VoltShaderFoliageGlow,
+    VoltShaderTorchStyle,
+    VoltShaderRainWetness,
+    VoltShaderWaterRipples,
+    VoltShaderWaterGlint,
+    VoltShaderClearWater,
+    VoltShaderUnderwaterRefract,
+    VoltShaderCustomSky,
+    VoltShaderSunHalo,
+    VoltShaderAurora,
+    VoltShaderDepthHaze,
+    VoltShaderTonemap,
+    VoltShaderBloom,
+    VoltShaderSunRays,
+    VoltShaderVignette,
 }
+
+/// Every Volt Shaders toggle/choice item (used by tests and search).
+pub const VOLT_SHADER_ITEMS: &[Item] = &[
+    Item::VoltShaderEnable,
+    Item::VoltShaderProfile,
+    Item::VoltShaderReset,
+    Item::VoltShaderWavePlants,
+    Item::VoltShaderWaveLeaves,
+    Item::VoltShaderWaveWater,
+    Item::VoltShaderStormWind,
+    Item::VoltShaderSunShading,
+    Item::VoltShaderFoliageGlow,
+    Item::VoltShaderTorchStyle,
+    Item::VoltShaderRainWetness,
+    Item::VoltShaderWaterRipples,
+    Item::VoltShaderWaterGlint,
+    Item::VoltShaderClearWater,
+    Item::VoltShaderUnderwaterRefract,
+    Item::VoltShaderCustomSky,
+    Item::VoltShaderSunHalo,
+    Item::VoltShaderAurora,
+    Item::VoltShaderDepthHaze,
+    Item::VoltShaderTonemap,
+    Item::VoltShaderBloom,
+    Item::VoltShaderSunRays,
+    Item::VoltShaderVignette,
+];
 
 /// The Volt Extras page: headers and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
@@ -1279,6 +1585,30 @@ impl Item {
             Item::VoltLookaheadStream => "Velocity Lookahead Stream",
             Item::VoltFastTranslucency => "Adaptive Water Sort",
             Item::VoltParticleFrustum => "Frustum Particle Cull",
+            // Volt Shaders:
+            Item::VoltShaderEnable => "Enable Shaders",
+            Item::VoltShaderProfile => "Shader Profile",
+            Item::VoltShaderReset => "Reset Profile",
+            Item::VoltShaderWavePlants => "Waving Grass & Plants",
+            Item::VoltShaderWaveLeaves => "Waving Leaves & Vines",
+            Item::VoltShaderWaveWater => "Waving Water",
+            Item::VoltShaderStormWind => "Storm Wind Boost",
+            Item::VoltShaderSunShading => "Sun Angle Shading",
+            Item::VoltShaderFoliageGlow => "Foliage Subsurface",
+            Item::VoltShaderTorchStyle => "Torchlight Color",
+            Item::VoltShaderRainWetness => "Rain Wet Sheen",
+            Item::VoltShaderWaterRipples => "Water Ripples",
+            Item::VoltShaderWaterGlint => "Water Sun Glint",
+            Item::VoltShaderClearWater => "Clear Water",
+            Item::VoltShaderUnderwaterRefract => "Underwater Wave",
+            Item::VoltShaderCustomSky => "Atmospheric Sky",
+            Item::VoltShaderSunHalo => "Sun & Moon Halo",
+            Item::VoltShaderAurora => "Night Aurora",
+            Item::VoltShaderDepthHaze => "Distance Haze",
+            Item::VoltShaderTonemap => "Tonemapper",
+            Item::VoltShaderBloom => "Bloom",
+            Item::VoltShaderSunRays => "Sun Rays",
+            Item::VoltShaderVignette => "Vignette",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -1360,7 +1690,30 @@ impl Item {
             | VoltActiveAnimCull
             | VoltLookaheadStream
             | VoltFastTranslucency
-            | VoltParticleFrustum => {
+            | VoltParticleFrustum
+            | VoltShaderEnable
+            | VoltShaderProfile
+            | VoltShaderReset
+            | VoltShaderWavePlants
+            | VoltShaderWaveLeaves
+            | VoltShaderWaveWater
+            | VoltShaderStormWind
+            | VoltShaderSunShading
+            | VoltShaderFoliageGlow
+            | VoltShaderTorchStyle
+            | VoltShaderRainWetness
+            | VoltShaderWaterRipples
+            | VoltShaderWaterGlint
+            | VoltShaderClearWater
+            | VoltShaderUnderwaterRefract
+            | VoltShaderCustomSky
+            | VoltShaderSunHalo
+            | VoltShaderAurora
+            | VoltShaderDepthHaze
+            | VoltShaderTonemap
+            | VoltShaderBloom
+            | VoltShaderSunRays
+            | VoltShaderVignette => {
                 return None;
             }
         })
@@ -1583,6 +1936,76 @@ impl Item {
             Item::VoltParticleFrustum => {
                 "Rejects off-screen and behind-camera particles before sprite lookup, lighting and billboard generation."
             }
+            // Volt Shaders:
+            Item::VoltShaderEnable => {
+                "Master switch for built-in native WGSL Volt Shaders (off by default). When OFF, zero shader passes run and all customization controls stay hidden."
+            }
+            Item::VoltShaderProfile => {
+                "Switches between Potato, Low, Medium, High, Ultra and Custom native WGSL shader profiles tuned for mobile TBDR GPUs."
+            }
+            Item::VoltShaderReset => {
+                "Restores every Volt Shaders setting back to the active profile's defaults."
+            }
+            Item::VoltShaderWavePlants => {
+                "Animates short grass, tall grass, ferns, flowers, crops and saplings with root-anchored vertex wind."
+            }
+            Item::VoltShaderWaveLeaves => {
+                "Animates tree leaves, vines, hanging moss and kelp with seamless phase-coherent canopy sway."
+            }
+            Item::VoltShaderWaveWater => {
+                "Adds gentle vertex surface motion to still water within 56 blocks at near-zero vertex ALU cost."
+            }
+            Item::VoltShaderStormWind => {
+                "Intensifies vegetation wind speed and sway amplitude dynamically during rain and thunderstorms."
+            }
+            Item::VoltShaderSunShading => {
+                "Applies directional sunlight and sky bounce shading across terrain faces without shadow-map overhead."
+            }
+            Item::VoltShaderFoliageGlow => {
+                "Adds warm sunlit subsurface translucency when looking through leaves, grass and crops toward the sun."
+            }
+            Item::VoltShaderTorchStyle => {
+                "Selects block-light colour temperature for torches, lanterns and campfires (Vanilla, Warm Amber, Cozy Gold or Soul Cool)."
+            }
+            Item::VoltShaderRainWetness => {
+                "Adds sky-exposed wet surface sheen and specular sky reflection on terrain blocks while raining."
+            }
+            Item::VoltShaderWaterRipples => {
+                "Computes dual-wave procedural surface ripples on water with zero extra texture fetches."
+            }
+            Item::VoltShaderWaterGlint => {
+                "Renders crisp sun and moon specular highlights dancing across rippled water surfaces."
+            }
+            Item::VoltShaderClearWater => {
+                "Clarifies shallow water alpha and deepens turquoise-to-abyss absorption."
+            }
+            Item::VoltShaderUnderwaterRefract => {
+                "Applies subtle screen-space underwater wave refraction when the camera is submerged."
+            }
+            Item::VoltShaderCustomSky => {
+                "Replaces the sky dome with a smooth zenith-to-horizon Rayleigh and Mie atmospheric gradient."
+            }
+            Item::VoltShaderSunHalo => {
+                "Adds soft golden sun and cool silver moon atmospheric corona glow."
+            }
+            Item::VoltShaderAurora => {
+                "Renders procedural northern lights ribbons across clear night skies (OFF, Subtle, Medium or Vibrant)."
+            }
+            Item::VoltShaderDepthHaze => {
+                "Blends distant terrain into sun-tinted atmospheric perspective haze (OFF, Subtle or Lush)."
+            }
+            Item::VoltShaderTonemap => {
+                "Selects the HDR-to-SDR tonemapping curve (OFF, Filmic ACES, Crisp Neutral or Lush Cinema)."
+            }
+            Item::VoltShaderBloom => {
+                "Adds soft single-pass emissive and sky bloom with zero intermediate render targets (OFF, Low 4-tap or High 8-tap)."
+            }
+            Item::VoltShaderSunRays => {
+                "Casts lightweight depth-occluded crepuscular sun shafts when looking near the sun."
+            }
+            Item::VoltShaderVignette => {
+                "Applies a gentle cinematic edge darkening around the frame (OFF, Subtle or Strong)."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -1651,6 +2074,22 @@ impl Item {
             Item::VoltLookaheadStream => e.lookahead_stream,
             Item::VoltFastTranslucency => e.fast_translucency,
             Item::VoltParticleFrustum => e.particle_frustum_cull,
+            // Volt Shaders switches:
+            Item::VoltShaderEnable => e.volt_shaders.enabled,
+            Item::VoltShaderWavePlants => e.volt_shaders.waving_plants,
+            Item::VoltShaderWaveLeaves => e.volt_shaders.waving_leaves,
+            Item::VoltShaderWaveWater => e.volt_shaders.waving_water,
+            Item::VoltShaderStormWind => e.volt_shaders.storm_wind,
+            Item::VoltShaderSunShading => e.volt_shaders.sun_shading,
+            Item::VoltShaderFoliageGlow => e.volt_shaders.foliage_subsurface,
+            Item::VoltShaderRainWetness => e.volt_shaders.rain_wetness,
+            Item::VoltShaderWaterRipples => e.volt_shaders.water_ripples,
+            Item::VoltShaderWaterGlint => e.volt_shaders.water_glint,
+            Item::VoltShaderClearWater => e.volt_shaders.clear_water,
+            Item::VoltShaderUnderwaterRefract => e.volt_shaders.underwater_refraction,
+            Item::VoltShaderCustomSky => e.volt_shaders.custom_sky,
+            Item::VoltShaderSunHalo => e.volt_shaders.sun_halo,
+            Item::VoltShaderSunRays => e.volt_shaders.sun_rays,
             _ => return None,
         })
     }
@@ -1732,6 +2171,16 @@ impl Item {
                 MenuBgMode::FastDark => "Fast Dark".into(),
             },
             Item::VoltAudioCap => e.audio_voice_cap.label().into(),
+            // Volt Shaders values:
+            Item::VoltShaderEnable => if e.volt_shaders.enabled { "ON" } else { "OFF" }.into(),
+            Item::VoltShaderProfile => e.volt_shaders.profile.label().into(),
+            Item::VoltShaderReset => "Restore".into(),
+            Item::VoltShaderTorchStyle => e.volt_shaders.torch_style.label().into(),
+            Item::VoltShaderAurora => e.volt_shaders.aurora.label().into(),
+            Item::VoltShaderDepthHaze => e.volt_shaders.depth_haze.label().into(),
+            Item::VoltShaderTonemap => e.volt_shaders.tonemap.label().into(),
+            Item::VoltShaderBloom => e.volt_shaders.bloom.label().into(),
+            Item::VoltShaderVignette => e.volt_shaders.vignette.label().into(),
             other => match other.switch(e) {
                 Some(true) => "On".into(),
                 _ => "Off".into(),
@@ -1855,6 +2304,136 @@ impl Item {
             Item::VoltLookaheadStream => e.lookahead_stream = !e.lookahead_stream,
             Item::VoltFastTranslucency => e.fast_translucency = !e.fast_translucency,
             Item::VoltParticleFrustum => e.particle_frustum_cull = !e.particle_frustum_cull,
+            // Volt Shaders cycles:
+            Item::VoltShaderEnable => e.volt_shaders.enabled = !e.volt_shaders.enabled,
+            Item::VoltShaderProfile => {
+                use horizon_shader_api::volt_shaders::VoltShaderProfile;
+                let presets = [
+                    VoltShaderProfile::Potato,
+                    VoltShaderProfile::Low,
+                    VoltShaderProfile::Medium,
+                    VoltShaderProfile::High,
+                    VoltShaderProfile::Ultra,
+                ];
+                let next = match e.volt_shaders.profile {
+                    VoltShaderProfile::Custom => {
+                        if back {
+                            VoltShaderProfile::Ultra
+                        } else {
+                            VoltShaderProfile::Potato
+                        }
+                    }
+                    cur => step(&presets, cur, back),
+                };
+                e.volt_shaders.apply_profile(next);
+            }
+            Item::VoltShaderReset => {
+                e.volt_shaders.reset_current_profile();
+            }
+            Item::VoltShaderWavePlants => {
+                e.volt_shaders.waving_plants = !e.volt_shaders.waving_plants;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderWaveLeaves => {
+                e.volt_shaders.waving_leaves = !e.volt_shaders.waving_leaves;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderWaveWater => {
+                e.volt_shaders.waving_water = !e.volt_shaders.waving_water;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderStormWind => {
+                e.volt_shaders.storm_wind = !e.volt_shaders.storm_wind;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderSunShading => {
+                e.volt_shaders.sun_shading = !e.volt_shaders.sun_shading;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderFoliageGlow => {
+                e.volt_shaders.foliage_subsurface = !e.volt_shaders.foliage_subsurface;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderTorchStyle => {
+                e.volt_shaders.torch_style = step(
+                    &horizon_shader_api::volt_shaders::TorchLightStyle::ALL,
+                    e.volt_shaders.torch_style,
+                    back,
+                );
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderRainWetness => {
+                e.volt_shaders.rain_wetness = !e.volt_shaders.rain_wetness;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderWaterRipples => {
+                e.volt_shaders.water_ripples = !e.volt_shaders.water_ripples;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderWaterGlint => {
+                e.volt_shaders.water_glint = !e.volt_shaders.water_glint;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderClearWater => {
+                e.volt_shaders.clear_water = !e.volt_shaders.clear_water;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderUnderwaterRefract => {
+                e.volt_shaders.underwater_refraction = !e.volt_shaders.underwater_refraction;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderCustomSky => {
+                e.volt_shaders.custom_sky = !e.volt_shaders.custom_sky;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderSunHalo => {
+                e.volt_shaders.sun_halo = !e.volt_shaders.sun_halo;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderAurora => {
+                e.volt_shaders.aurora = step(
+                    &horizon_shader_api::volt_shaders::AuroraMode::ALL,
+                    e.volt_shaders.aurora,
+                    back,
+                );
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderDepthHaze => {
+                e.volt_shaders.depth_haze = step(
+                    &horizon_shader_api::volt_shaders::DepthHazeMode::ALL,
+                    e.volt_shaders.depth_haze,
+                    back,
+                );
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderTonemap => {
+                e.volt_shaders.tonemap = step(
+                    &horizon_shader_api::volt_shaders::TonemapMode::ALL,
+                    e.volt_shaders.tonemap,
+                    back,
+                );
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderBloom => {
+                e.volt_shaders.bloom = step(
+                    &horizon_shader_api::volt_shaders::BloomMode::ALL,
+                    e.volt_shaders.bloom,
+                    back,
+                );
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderSunRays => {
+                e.volt_shaders.sun_rays = !e.volt_shaders.sun_rays;
+                e.volt_shaders.mark_custom();
+            }
+            Item::VoltShaderVignette => {
+                e.volt_shaders.vignette = step(
+                    &horizon_shader_api::volt_shaders::VignetteMode::ALL,
+                    e.volt_shaders.vignette,
+                    back,
+                );
+                e.volt_shaders.mark_custom();
+            }
             Item::SortKey | Item::WaypointKey | Item::MinimapZoomKey => {}
         }
     }
@@ -1995,6 +2574,26 @@ mod tests {
                 assert!(!item.caption().is_empty() && !item.description().is_empty());
             }
         }
+        for &item in VOLT_SHADER_ITEMS {
+            assert!(!item.caption().is_empty() && !item.description().is_empty());
+        }
+        let mut vs = Extras::default();
+        assert!(!vs.volt_shaders.enabled);
+        assert_eq!(Item::VoltShaderEnable.value(&vs), "OFF");
+        Item::VoltShaderEnable.cycle(&mut vs, false);
+        assert!(vs.volt_shaders.enabled);
+        assert_eq!(Item::VoltShaderEnable.value(&vs), "ON");
+        Item::VoltShaderProfile.cycle(&mut vs, false);
+        assert_eq!(
+            vs.volt_shaders.profile,
+            horizon_shader_api::volt_shaders::VoltShaderProfile::High
+        );
+        Item::VoltShaderWavePlants.cycle(&mut vs, false);
+        assert_eq!(
+            vs.volt_shaders.profile,
+            horizon_shader_api::volt_shaders::VoltShaderProfile::Custom
+        );
+        assert_eq!(Extras::parse(&vs.serialize()), vs);
         let mut vb = Extras::default();
         assert_eq!(vb.active_volt_optimizations(), 0);
         for preset in VoltBoostPreset::ALL {

@@ -38,7 +38,13 @@ impl Game<'_> {
     pub(super) fn shader_pack_inputs(&mut self, camera: glam::DVec3, partial: f32) -> PackInputs {
         static DEV_PACK: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
         let dev = DEV_PACK.get_or_init(|| std::env::var("HORIZON_SHADER_PACK").ok());
-        let picked = dev.as_deref().unwrap_or(&self.settings.horizon.shader_pack);
+        let picked = if let Some(dev_name) = dev.as_deref() {
+            dev_name
+        } else if self.settings.extras.volt_shaders.enabled {
+            super::native_shaders::VOLT_SHADERS_PICKED
+        } else {
+            self.settings.horizon.shader_pack.as_str()
+        };
         if self.native_shaders.picked != picked {
             // Another pack, or none: drop what ran.
             self.native_shaders = super::native_shaders::NativeShaders::picking(picked);
@@ -50,102 +56,106 @@ impl Game<'_> {
         if picked.is_empty() {
             return PackInputs::default();
         }
-        let name = picked.to_owned();
-        let dimension = match self.dim {
-            Dim::Overworld => 0,
-            Dim::Nether => -1,
-            Dim::End => 1,
-        };
-        let path = Self::shader_packs_dir().join(&name);
-        if horizon_shader_api::package::is_pack(&path) {
-            // One of Horizon's own packs (game/native_shaders.rs).
-            self.tick_native_shader_pack(&path);
-        } else if let Some(renderer) = &mut self.renderer
-            && renderer.shader_pack_dimension() != Some(dimension)
-        {
-            let name = name.as_str();
-            let started = std::time::Instant::now();
-            // A pack is not the game's own code: one that makes the shader compiler (or our
-            // translation of it) panic is turned off instead of crashing every world load (#3525).
-            let loaded = horizon_client::crash::contain(|| {
-                match Pack::open(&path) {
-                    Ok(pack) => {
-                        let macros = Macros::standard();
-                        let text = pack.read_text("shaders.properties").unwrap_or_default();
-                        let properties = Properties::parse(&text, &macros);
-                        for note in &properties.notes {
-                            log::warn!(
-                                "shader pack {name}: shaders.properties:{}: {}",
-                                note.line,
-                                note.message
-                            );
-                        }
-                        let folder = dimension_folder(&pack, dimension);
-                        let inputs = renderer.pack_inputs();
-                        let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
-                        let biomes = self.res.biomes();
-                        let names: Vec<&str> =
-                            biomes.list.iter().map(|b| b.name.as_str()).collect();
-                        post.custom.set_biomes(&names);
-                        let text = pack.read_text("block.properties").unwrap_or_default();
-                        let ids = BlockIds::parse(&Properties::parse(&text, &macros));
-                        for note in &ids.notes {
-                            log::warn!("shader pack {name}: block.properties: {note}");
-                        }
-                        let text = pack.read_text("entity.properties");
-                        let entities = BlockIds::parse_kind(
-                            &Properties::parse(text.as_deref().unwrap_or_default(), &macros),
-                            "entity",
-                        );
-                        let text = pack.read_text("item.properties");
-                        let items = BlockIds::parse_kind(
-                            &Properties::parse(text.as_deref().unwrap_or_default(), &macros),
-                            "item",
-                        );
-                        self.pack_ids = Some(PackIds {
-                            items: items.plain(),
-                            missing_item: if text.is_some() { -1 } else { 0 },
-                            // OQ-21: on unless the pack turns it off.
-                            old_hand_light: properties
-                                .get("oldHandLight")
-                                .is_none_or(|v| v.trim() != "false"),
-                            entities: entities.plain(),
-                            missing_entity: if text.is_some() { 65535 } else { 0 },
-                            missing_block: if ids.is_empty() { 0 } else { 65535 },
-                            blocks: ids.clone(),
-                            block_states: RefCell::default(),
-                        });
-                        let started_ids = std::time::Instant::now();
-                        let table = block_id_table(&self.pack, &ids);
-                        log::info!(
-                            "shader pack {name}: mc_Entity for {} of {} block sprites in {} ms",
-                            table.chunks(2).filter(|p| p[0] != -1).count(),
-                            table.len() / 2,
-                            started_ids.elapsed().as_millis()
-                        );
-                        if let Some((programs, notes)) =
-                            renderer.set_shader_pack(dimension, Some(post), &table)
-                        {
-                            for note in notes {
-                                log::warn!("shader pack {name}: {note}");
+        if picked == super::native_shaders::VOLT_SHADERS_PICKED {
+            self.tick_volt_shaders();
+        } else {
+            let name = picked.to_owned();
+            let dimension = match self.dim {
+                Dim::Overworld => 0,
+                Dim::Nether => -1,
+                Dim::End => 1,
+            };
+            let path = Self::shader_packs_dir().join(&name);
+            if horizon_shader_api::package::is_pack(&path) {
+                // One of Horizon's own packs (game/native_shaders.rs).
+                self.tick_native_shader_pack(&path);
+            } else if let Some(renderer) = &mut self.renderer
+                && renderer.shader_pack_dimension() != Some(dimension)
+            {
+                let name = name.as_str();
+                let started = std::time::Instant::now();
+                // A pack is not the game's own code: one that makes the shader compiler (or our
+                // translation of it) panic is turned off instead of crashing every world load (#3525).
+                let loaded = horizon_client::crash::contain(|| {
+                    match Pack::open(&path) {
+                        Ok(pack) => {
+                            let macros = Macros::standard();
+                            let text = pack.read_text("shaders.properties").unwrap_or_default();
+                            let properties = Properties::parse(&text, &macros);
+                            for note in &properties.notes {
+                                log::warn!(
+                                    "shader pack {name}: shaders.properties:{}: {}",
+                                    note.line,
+                                    note.message
+                                );
                             }
-                            log::info!(
-                                "shader pack {name}: folder `{folder}`, {} programs ({}) in {} ms",
-                                programs.len(),
-                                programs.join(" "),
-                                started.elapsed().as_millis()
+                            let folder = dimension_folder(&pack, dimension);
+                            let inputs = renderer.pack_inputs();
+                            let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
+                            let biomes = self.res.biomes();
+                            let names: Vec<&str> =
+                                biomes.list.iter().map(|b| b.name.as_str()).collect();
+                            post.custom.set_biomes(&names);
+                            let text = pack.read_text("block.properties").unwrap_or_default();
+                            let ids = BlockIds::parse(&Properties::parse(&text, &macros));
+                            for note in &ids.notes {
+                                log::warn!("shader pack {name}: block.properties: {note}");
+                            }
+                            let text = pack.read_text("entity.properties");
+                            let entities = BlockIds::parse_kind(
+                                &Properties::parse(text.as_deref().unwrap_or_default(), &macros),
+                                "entity",
                             );
+                            let text = pack.read_text("item.properties");
+                            let items = BlockIds::parse_kind(
+                                &Properties::parse(text.as_deref().unwrap_or_default(), &macros),
+                                "item",
+                            );
+                            self.pack_ids = Some(PackIds {
+                                items: items.plain(),
+                                missing_item: if text.is_some() { -1 } else { 0 },
+                                // OQ-21: on unless the pack turns it off.
+                                old_hand_light: properties
+                                    .get("oldHandLight")
+                                    .is_none_or(|v| v.trim() != "false"),
+                                entities: entities.plain(),
+                                missing_entity: if text.is_some() { 65535 } else { 0 },
+                                missing_block: if ids.is_empty() { 0 } else { 65535 },
+                                blocks: ids.clone(),
+                                block_states: RefCell::default(),
+                            });
+                            let started_ids = std::time::Instant::now();
+                            let table = block_id_table(&self.pack, &ids);
+                            log::info!(
+                                "shader pack {name}: mc_Entity for {} of {} block sprites in {} ms",
+                                table.chunks(2).filter(|p| p[0] != -1).count(),
+                                table.len() / 2,
+                                started_ids.elapsed().as_millis()
+                            );
+                            if let Some((programs, notes)) =
+                                renderer.set_shader_pack(dimension, Some(post), &table)
+                            {
+                                for note in notes {
+                                    log::warn!("shader pack {name}: {note}");
+                                }
+                                log::info!(
+                                    "shader pack {name}: folder `{folder}`, {} programs ({}) in {} ms",
+                                    programs.len(),
+                                    programs.join(" "),
+                                    started.elapsed().as_millis()
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            self.pack_ids = None;
+                            log::warn!("shader pack {name}: {e}");
+                            renderer.set_shader_pack(dimension, None, &[]);
                         }
                     }
-                    Err(e) => {
-                        self.pack_ids = None;
-                        log::warn!("shader pack {name}: {e}");
-                        renderer.set_shader_pack(dimension, None, &[]);
-                    }
+                });
+                if let Err(panic) = loaded {
+                    self.shader_pack_failed(name, dimension, &panic);
                 }
-            });
-            if let Err(panic) = loaded {
-                self.shader_pack_failed(name, dimension, &panic);
             }
         }
         let lerp = |(old, new): (f32, f32)| old + (new - old) * partial;

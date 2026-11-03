@@ -861,6 +861,19 @@ pub enum Opt {
     VoltResolutionScale,
     /// Built-in Controls Studio touch layout preset switcher.
     TouchPreset,
+    /// Volt Shaders customization sliders:
+    VoltShaderWindSpeed,
+    VoltShaderWindStrength,
+    VoltShaderShadowRichness,
+    VoltShaderTorchIntensity,
+    VoltShaderEmissiveGlow,
+    VoltShaderWaterReflection,
+    VoltShaderSunsetGlow,
+    VoltShaderVibrance,
+    VoltShaderSaturation,
+    VoltShaderContrast,
+    VoltShaderExposure,
+    VoltShaderWarmth,
 }
 
 #[cfg(test)]

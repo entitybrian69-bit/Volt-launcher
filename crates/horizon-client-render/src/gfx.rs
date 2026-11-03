@@ -704,6 +704,8 @@ pub struct Renderer {
     pack_post: Option<(i32, Option<pack_post::PackPost>)>,
     /// The post passes of one of Horizon's own shader packs; never beside `pack_post`'s.
     native: Option<native_pack::NativePack>,
+    /// Cached 4-bit block sprite wave/material class lookup table for `NativePack`.
+    native_layer_kinds: Box<[[u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS]>,
     /// Time the shader pack's passes on the GPU (F3, or `HORIZON_SHADER_PACK_TIMING`).
     pass_timing: bool,
     /// The entity vertices Horizon draws itself while a shader pack draws the others.
@@ -3414,6 +3416,9 @@ impl Renderer {
             hdr_marker: None,
             pack_post: None,
             native: None,
+            native_layer_kinds: Box::new(
+                [[0u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS],
+            ),
             pass_timing: pack_timing::PassTiming::logging(),
             pack_entity_rest: Vec::new(),
             cloud_bindings,
@@ -4774,11 +4779,24 @@ impl Renderer {
         let (pack, labels) =
             native_pack::NativePack::new(&self.device, &terrain, report, &constants)?;
         self.native = pack.draws().then_some(pack);
-        if self.native.is_some() {
+        if let Some(native) = &self.native {
+            native
+                .frame
+                .write_layer_kinds(&self.queue, &self.native_layer_kinds);
             self.pack_post = None;
             self.pack_atlas = None;
         }
         Ok(labels)
+    }
+    /// Uploads the 4-bit block sprite wave/material class table into the active `NativePack`.
+    pub fn set_native_layer_kinds(
+        &mut self,
+        kinds: &[[u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS],
+    ) {
+        *self.native_layer_kinds = *kinds;
+        if let Some(native) = &self.native {
+            native.frame.write_layer_kinds(&self.queue, kinds);
+        }
     }
     /// What a shader pack's gbuffers programs read from Horizon's geometry: the sky's, and
     /// terrain's in the pack's block atlas (made here when missing; none when it does not fit).

@@ -358,6 +358,7 @@ impl Game<'_> {
         self.options.resources = root.clone();
         let context = pack.context.clone();
         self.pack = pack;
+        self.native_shaders.volt_layers_uploaded = false;
         self.gui = gui;
         // The new atlas's skin and map slots are blank: players and maps
         // upload into it again instead of naming sprites it does not have.

@@ -16,7 +16,11 @@ use horizon_shader_api::{Pack, check};
 use super::Game;
 
 const LOOK_EVERY: Duration = Duration::from_millis(500);
+const SLIDER_REBUILD_DEBOUNCE: Duration = Duration::from_millis(100);
 const RED: u32 = 0xFF5555;
+
+/// Synthetic `picked` identifier used when built-in Volt Shaders are enabled.
+pub(super) const VOLT_SHADERS_PICKED: &str = "__volt_shaders__";
 
 #[derive(Default)]
 pub(super) struct NativeShaders {
@@ -25,6 +29,12 @@ pub(super) struct NativeShaders {
     /// The pack's files when it was last read (`fingerprint`).
     stamp: Option<u64>,
     looked: Option<Instant>,
+    /// Active `VoltShadersConfig::fingerprint()` currently compiled on the GPU.
+    pub volt_fingerprint: Option<u64>,
+    /// Last instant a Volt Shaders specialization pipeline was rebuilt.
+    pub volt_built_at: Option<Instant>,
+    /// Whether the current resource pack's sprite-layer wave/water table is uploaded.
+    pub volt_layers_uploaded: bool,
 }
 
 impl NativeShaders {
@@ -88,6 +98,60 @@ impl Game<'_> {
                 for p in problems {
                     self.system_message(Text::colored(p, RED));
                 }
+            }
+        }
+    }
+
+    /// Compiles and updates the built-in native WGSL Volt Shaders pack and 4-bit sprite-layer
+    /// wave/water lookup table whenever `settings.extras.volt_shaders` or resource packs change.
+    pub(super) fn tick_volt_shaders(&mut self) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+        if !self.native_shaders.volt_layers_uploaded {
+            let kinds = horizon_shader_api::volt_shaders::pack_sprite_layer_kinds(
+                self.pack
+                    .render
+                    .sprite_layers
+                    .iter()
+                    .map(|(name, &layer)| (name.as_str(), layer)),
+            );
+            renderer.set_native_layer_kinds(&kinds);
+            self.native_shaders.volt_layers_uploaded = true;
+        }
+        let cfg = &self.settings.extras.volt_shaders;
+        let fp = cfg.fingerprint();
+        if self.native_shaders.volt_fingerprint == Some(fp) {
+            return;
+        }
+        let now = Instant::now();
+        if self.dragging
+            && self
+                .native_shaders
+                .volt_built_at
+                .is_some_and(|last| now.saturating_duration_since(last) < SLIDER_REBUILD_DEBOUNCE)
+        {
+            return;
+        }
+        let started = Instant::now();
+        match cfg
+            .build_runtime()
+            .and_then(|(prepared, constants)| renderer.set_native_shader_pack(Some((prepared, constants))))
+        {
+            Ok(labels) => {
+                self.native_shaders.volt_fingerprint = Some(fp);
+                self.native_shaders.volt_built_at = Some(now);
+                log::info!(
+                    "Volt Shaders ({}): {} in {} ms",
+                    cfg.profile.label(),
+                    labels.join(", "),
+                    started.elapsed().as_millis()
+                );
+            }
+            Err(err) => {
+                self.native_shaders.volt_fingerprint = Some(fp);
+                self.native_shaders.volt_built_at = Some(now);
+                log::warn!("Volt Shaders build failed: {err}");
             }
         }
     }
