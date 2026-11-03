@@ -1,11 +1,14 @@
-//! The look of Horizon's graphics settings screens, in one place: sizes,
-//! colours and the widgets they draw with. The screens (`graphics_ui`) only
-//! lay out rows and handle input; a menu theme replaces this module.
+//! The look of Volt's graphics settings screens (`Simple`, `Advanced`, `HDR`),
+//! matching the Volt Launcher obsidian-dark and crimson-red UI theme with
+//! animated hover/press feedback, crimson fill-bar sliders, and cost badges.
 use crate::{
     hud::{HudAtlas, HudBatch},
     lang,
-    text::Text,
-    ui,
+    text::{Style as TextStyle, Text},
+    volt_options_style::{
+        self as volt, BORDER_CRIMSON_HEX, BORDER_HEX, ButtonTone, CRIMSON_BADGE_HEX, CRIMSON_COLOR,
+        MUTED_COLOR, TEXT_COLOR, hex_rgba,
+    },
 };
 
 /// What a setting costs in frame time, shown beside its description.
@@ -49,11 +52,6 @@ pub struct Style {
     pub cost_colors: [u32; 5],
 }
 
-/// `hud::rgba` with full alpha, usable in constants.
-const fn opaque(r: u8, g: u8, b: u8) -> u32 {
-    0xFF00_0000 | (b as u32) << 16 | (g as u32) << 8 | r as u32
-}
-
 pub const STYLE: Style = Style {
     control_width: 150.0,
     gap: 8.0,
@@ -61,15 +59,15 @@ pub const STYLE: Style = Style {
     row_height: 25.0,
     header_height: 16.0,
     band: 33.0,
-    title_color: u32::MAX,
-    header_color: opaque(255, 255, 85),
-    description_color: opaque(170, 170, 170),
+    title_color: TEXT_COLOR,
+    header_color: TEXT_COLOR,
+    description_color: MUTED_COLOR,
     cost_colors: [
-        opaque(120, 200, 120),
-        opaque(170, 220, 120),
-        opaque(240, 200, 90),
-        opaque(240, 110, 90),
-        opaque(85, 255, 85),
+        hex_rgba(0x9898AA, 255),
+        hex_rgba(0x4ADE80, 255),
+        hex_rgba(0xFBBF24, 255),
+        hex_rgba(0xFF4D6D, 255),
+        hex_rgba(0x22C55E, 255),
     ],
 };
 
@@ -92,8 +90,8 @@ impl Style {
         in_world: bool,
     ) {
         let (w, h) = (batch.width, batch.height);
-        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
-        ui::list_background(batch, atlas, top, bottom, in_world);
+        volt::menu_backdrop(batch, atlas, w, h, in_world);
+        volt::list_well(batch, atlas, top, bottom, in_world);
     }
     pub fn frame(
         &self,
@@ -103,14 +101,40 @@ impl Style {
         bottom: f32,
         in_world: bool,
     ) {
-        ui::separators(batch, atlas, top, bottom, in_world);
+        volt::list_rails(batch, atlas, top, bottom, in_world);
     }
     pub fn title(&self, batch: &mut HudBatch, atlas: &HudAtlas, text: &Text) {
-        let w = batch.width;
-        ui::centered_text(batch, atlas, text, 0.0, 12.0, w, self.title_color);
+        self.title_animated(batch, atlas, text, 1.0);
+    }
+    pub fn title_animated(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        text: &Text,
+        underline_progress: f32,
+    ) {
+        volt::draw_page_title(batch, atlas, text, 11.0, underline_progress);
     }
     pub fn header(&self, batch: &mut HudBatch, atlas: &HudAtlas, text: &Text, x: f32, y: f32) {
-        batch.text_styled(atlas, text, x, y + 4.0, self.header_color, true);
+        let row_w = self.control_width + self.gap + self.text_width(batch.width);
+        batch.fill(atlas, x, y + 3.0, 3.0, 9.0, CRIMSON_COLOR);
+        let bold = Text::literal(text.plain()).with_style(&TextStyle {
+            bold: Some(true),
+            ..TextStyle::default()
+        });
+        let tw = atlas.font.width_text(&bold);
+        batch.text_styled(atlas, &bold, x + 7.0, y + 4.0, self.header_color, true);
+        let rule_x = x + 12.0 + tw;
+        if rule_x + 8.0 < x + row_w {
+            batch.fill(
+                atlas,
+                rule_x,
+                y + 8.0,
+                x + row_w - rule_x,
+                1.0,
+                hex_rgba(BORDER_CRIMSON_HEX, 185),
+            );
+        }
     }
     pub fn button(
         &self,
@@ -121,8 +145,45 @@ impl Style {
         hover: bool,
         active: bool,
     ) {
-        ui::button(batch, atlas, x, y, w, 20.0, label, active, hover);
+        let tone = volt::infer_toggle_tone(&label.plain());
+        volt::button(
+            batch,
+            atlas,
+            (x, y, w, 20.0),
+            label,
+            active,
+            hover,
+            tone,
+            (if hover { 1.0 } else { 0.0 }, 0.0),
+            0.0,
+        );
     }
+    #[allow(clippy::too_many_arguments)]
+    pub fn button_animated(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        (x, y, w): (f32, f32, f32),
+        label: &Text,
+        hover: bool,
+        active: bool,
+        tone: ButtonTone,
+        anim_state: (f32, f32),
+        elapsed_secs: f32,
+    ) {
+        volt::button(
+            batch,
+            atlas,
+            (x, y, w, 20.0),
+            label,
+            active,
+            hover,
+            tone,
+            anim_state,
+            elapsed_secs,
+        );
+    }
+    #[allow(clippy::too_many_arguments)]
     pub fn slider(
         &self,
         batch: &mut HudBatch,
@@ -134,20 +195,50 @@ impl Style {
         active: bool,
         dragging: bool,
     ) {
-        ui::slider(
+        volt::slider(
             batch,
             atlas,
-            x,
-            y,
-            w,
+            (x, y, w),
             label,
+            value,
             value,
             hover && active,
             active,
             dragging && active,
+            if hover || dragging { 1.0 } else { 0.0 },
+            0.0,
         );
     }
-    /// The cost tag and the description beside a control, wrapped to two lines.
+    #[allow(clippy::too_many_arguments)]
+    pub fn slider_animated(
+        &self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        (x, y, w): (f32, f32, f32),
+        label: &Text,
+        value: f32,
+        shown_value: f32,
+        hover: bool,
+        active: bool,
+        dragging: bool,
+        hover_t: f32,
+        elapsed_secs: f32,
+    ) {
+        volt::slider(
+            batch,
+            atlas,
+            (x, y, w),
+            label,
+            value,
+            shown_value,
+            hover && active,
+            active,
+            dragging && active,
+            hover_t,
+            elapsed_secs,
+        );
+    }
+    /// The cost pill badge and the description beside a control, wrapped to two lines.
     pub fn description(
         &self,
         batch: &mut HudBatch,
@@ -158,8 +249,33 @@ impl Style {
         text: &str,
     ) {
         let tag = Text::literal(lang::get(cost.label()));
-        batch.text_styled(atlas, &tag, x, y, self.cost_colors[cost as usize], true);
-        let indent = atlas.font.width_text(&tag) + 4.0;
+        let tag_w = atlas.font.width_text(&tag);
+        let (pill_bg, pill_border) = match cost {
+            Cost::None => (hex_rgba(0x14141D, 225), hex_rgba(BORDER_HEX, 220)),
+            Cost::Low => (hex_rgba(0x0E2418, 230), hex_rgba(0x1E5436, 235)),
+            Cost::Medium => (hex_rgba(0x281C0B, 230), hex_rgba(0x6B4814, 235)),
+            Cost::High => (
+                hex_rgba(CRIMSON_BADGE_HEX, 240),
+                hex_rgba(BORDER_CRIMSON_HEX, 245),
+            ),
+            Cost::Saves => (hex_rgba(0x0C2A1A, 235), hex_rgba(0x1F6E43, 240)),
+        };
+        volt::draw_card_box(
+            batch,
+            atlas,
+            (x, y - 1.0, tag_w + 6.0, 10.0),
+            pill_bg,
+            pill_border,
+        );
+        batch.text_styled(
+            atlas,
+            &tag,
+            x + 3.0,
+            y,
+            self.cost_colors[cost as usize],
+            true,
+        );
+        let indent = tag_w + 10.0;
         let text = lang::get(text);
         let lines = wrap(atlas, &text, self.text_width(batch.width), indent);
         for (i, line) in lines.iter().take(2).enumerate() {

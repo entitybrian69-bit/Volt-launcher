@@ -642,8 +642,7 @@ pub fn scrollbar(
     );
 }
 
-/// Screen tooltip (DefaultTooltipPositioner + TooltipRenderUtil): the
-/// background and frame sprites around the lines, beside the cursor.
+/// Screen tooltip: Volt obsidian-dark card with crimson frame & top accent bar.
 pub fn tooltip(batch: &mut HudBatch, atlas: &HudAtlas, lines: &[Text], cursor: (f32, f32)) {
     if lines.is_empty() {
         return;
@@ -659,36 +658,42 @@ pub fn tooltip(batch: &mut HudBatch, atlas: &HudAtlas, lines: &[Text], cursor: (
     };
     let mut x = cursor.0 + 12.0;
     let mut y = cursor.1 - 12.0;
-    if x + w > batch.width {
-        x = (cursor.0 - 24.0 - w).max(4.0);
+    if x + w + 6.0 > batch.width {
+        x = (cursor.0 - 18.0 - w).max(6.0);
     }
-    if y + h + 3.0 > batch.height {
-        y = batch.height - h - 3.0;
+    if y + h + 6.0 > batch.height {
+        y = batch.height - h - 6.0;
     }
-    y = y.max(4.0);
-    nine_slice(
+    y = y.max(6.0);
+    let (bx, by, bw, bh) = (x - 5.0, y - 5.0, w + 10.0, h + 10.0);
+    batch.fill(atlas, bx + 2.0, by + 2.0, bw, bh, rgba(0, 0, 0, 125));
+    crate::volt_options_style::draw_card_box(
         batch,
         atlas,
-        "gui/sprites/tooltip/background",
-        x - 12.0,
-        y - 12.0,
-        w + 24.0,
-        h + 24.0,
-        u32::MAX,
+        (bx, by, bw, bh),
+        crate::volt_options_style::hex_rgba(0x0D0D14, 246),
+        crate::volt_options_style::hex_rgba(crate::volt_options_style::BORDER_CRIMSON_HEX, 255),
     );
-    nine_slice(
-        batch,
-        atlas,
-        "gui/sprites/tooltip/frame",
-        x - 12.0,
-        y - 12.0,
-        w + 24.0,
-        h + 24.0,
-        u32::MAX,
-    );
+    if bw > 2.0 {
+        batch.fill(
+            atlas,
+            bx + 1.0,
+            by,
+            bw - 2.0,
+            1.0,
+            crate::volt_options_style::CRIMSON_COLOR,
+        );
+    }
     let mut ly = y;
     for (i, line) in lines.iter().enumerate() {
-        batch.text_styled(atlas, line, x, ly, u32::MAX, true);
+        batch.text_styled(
+            atlas,
+            line,
+            x,
+            ly,
+            crate::volt_options_style::TEXT_COLOR,
+            true,
+        );
         ly += if i == 0 { 12.0 } else { 10.0 };
     }
 }
@@ -1214,6 +1219,23 @@ impl EditBox {
                 u32::MAX,
             );
         }
+        self.draw_inner(batch, atlas, format);
+    }
+    /// Draw field target, text, selection, and caret inside a custom frame.
+    pub fn draw_custom_framed(
+        &mut self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        format: Option<&Text>,
+    ) {
+        self.layout(atlas);
+        crate::widgets::target_as(
+            [self.x, self.y, self.width, self.height],
+            crate::widgets::Kind::Field,
+        );
+        self.draw_inner(batch, atlas, format);
+    }
+    fn draw_inner(&mut self, batch: &mut HudBatch, atlas: &HudAtlas, format: Option<&Text>) {
         let color = self.text_color;
         let rest: String = self.value.chars().skip(self.display).collect();
         let shown_len = atlas.font.fit(&rest, self.inner_width());

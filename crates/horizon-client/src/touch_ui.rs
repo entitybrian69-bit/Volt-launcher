@@ -21,6 +21,10 @@ pub struct TouchUi {
     pointer_drag: Option<u64>,
     held_keys: BTreeMap<u64, KeyCode>,
     pub f3_latched: bool,
+    scroll_velocity: f32,
+    last_scroll_sample: Option<Instant>,
+    fling_frame: Option<Instant>,
+    last_scroll_pixel: [f32; 2],
 }
 struct RelativeTouch {
     id: u64,
@@ -166,6 +170,9 @@ impl TouchUi {
         self.pointer_drag = None;
         self.relative = None;
         self.relative_click = None;
+        self.scroll_velocity = 0.0;
+        self.last_scroll_sample = None;
+        self.fling_frame = None;
     }
     pub fn cancel_relative(&mut self) {
         self.relative = None;
@@ -245,12 +252,44 @@ impl TouchUi {
             self.pointer_drag = Some(id);
         }
         if self.pointer_drag == Some(id) {
+            self.scroll_velocity = 0.0;
+            self.fling_frame = None;
             if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
                 self.pointer_drag = None;
             }
             return true;
         }
         false
+    }
+    /// Advance smooth kinetic touch-scroll inertia after a finger flick.
+    pub fn step_kinetic_scroll(&mut self) -> Option<f32> {
+        if self.gesture.is_some() || self.pointer_drag.is_some() {
+            return None;
+        }
+        if self.scroll_velocity.abs() < 0.25 {
+            self.scroll_velocity = 0.0;
+            self.fling_frame = None;
+            return None;
+        }
+        let now = Instant::now();
+        let dt = self
+            .fling_frame
+            .map_or(1.0 / 60.0, |prev| {
+                now.saturating_duration_since(prev).as_secs_f32()
+            })
+            .clamp(0.001, 0.05);
+        self.fling_frame = Some(now);
+        let delta = self.scroll_velocity * dt;
+        self.scroll_velocity *= (-7.2 * dt).exp();
+        if self.scroll_velocity.abs() < 0.25 {
+            self.scroll_velocity = 0.0;
+            self.fling_frame = None;
+        }
+        Some(delta)
+    }
+    pub fn last_scroll_point(&self, scale: f32) -> (f32, f32) {
+        let s = scale.max(0.001);
+        (self.last_scroll_pixel[0] / s, self.last_scroll_pixel[1] / s)
     }
     /// A drag scrolls; a tap clicks only on release. Never activate a row while scrolling it.
     pub fn gesture(&mut self, id: u64, p: [f32; 2], phase: TouchPhase) -> Gesture {
@@ -259,6 +298,9 @@ impl TouchUi {
             return Gesture::None;
         }
         if phase == TouchPhase::Started {
+            self.scroll_velocity = 0.0;
+            self.last_scroll_sample = None;
+            self.fling_frame = None;
             if self.gesture.is_none() {
                 self.gesture = Some((id, p, p, false));
             }
@@ -273,13 +315,39 @@ impl TouchUi {
         *dragged |= (p[0] - start[0]).hypot(p[1] - start[1]) > 12.0;
         let dy = p[1] - previous[1];
         *previous = p;
+        self.last_scroll_pixel = p;
         if phase == TouchPhase::Ended {
             let tap = !*dragged;
+            let keep_fling = !tap
+                && self
+                    .last_scroll_sample
+                    .is_some_and(|at| at.elapsed() < Duration::from_millis(95))
+                && self.scroll_velocity.abs() > 1.2;
+            let vel = self.scroll_velocity;
             self.cancel();
+            if keep_fling {
+                self.scroll_velocity = vel;
+                self.fling_frame = Some(Instant::now());
+            }
             return if tap { Gesture::Tap } else { Gesture::None };
         }
         if *dragged {
-            Gesture::Scroll(dy / 30.0)
+            let now = Instant::now();
+            let dt = self
+                .last_scroll_sample
+                .map_or(1.0 / 60.0, |prev| {
+                    now.saturating_duration_since(prev).as_secs_f32()
+                })
+                .clamp(0.004, 0.08);
+            let step = dy / 30.0;
+            let inst = (step / dt).clamp(-75.0, 75.0);
+            self.scroll_velocity = if self.last_scroll_sample.is_some() {
+                self.scroll_velocity * 0.35 + inst * 0.65
+            } else {
+                inst
+            };
+            self.last_scroll_sample = Some(now);
+            Gesture::Scroll(step)
         } else {
             Gesture::None
         }
@@ -350,6 +418,7 @@ impl TouchUi {
                 x,
                 3.0,
                 width,
+                menu,
             );
         }
         if menu {
@@ -364,15 +433,16 @@ impl TouchUi {
                 b.width - 108.0,
                 3.0,
                 50.0,
+                true,
             );
         }
         if menu && self.virtual_mouse {
             for ([x, y, width, _], right) in mouse_button_rects(b.width, b.height) {
-                button(b, a, if right { "RMB" } else { "LMB" }, x, y, width);
+                button(b, a, if right { "RMB" } else { "LMB" }, x, y, width, true);
             }
         }
         if menu {
-            button(b, a, "Back", b.width - 53.0, 3.0, 50.0);
+            button(b, a, "Back", b.width - 53.0, 3.0, 50.0, true);
         }
         if self.expanded {
             button(
@@ -382,6 +452,7 @@ impl TouchUi {
                 3.0,
                 195.0,
                 48.0,
+                menu,
             );
             for (i, (label, _)) in KEYS.iter().enumerate() {
                 button(
@@ -391,6 +462,7 @@ impl TouchUi {
                     3.0 + (i % 4) as f32 * 50.0,
                     27.0 + (i / 4) as f32 * 24.0,
                     48.0,
+                    menu,
                 );
             }
         }
@@ -420,7 +492,30 @@ impl TouchUi {
         }
     }
 }
-fn button(b: &mut HudBatch, a: &HudAtlas, label: &str, x: f32, y: f32, w: f32) {
+fn button(b: &mut HudBatch, a: &HudAtlas, label: &str, x: f32, y: f32, w: f32, menu: bool) {
+    if menu {
+        use crate::volt_options_style as volt;
+        let active_accent = label.ends_with("ON") || label.ends_with('*') || label == "Back";
+        let (bg, border) = if active_accent {
+            (
+                volt::hex_rgba(volt::HERO_BG_HEX, 240),
+                volt::hex_rgba(volt::BORDER_CRIMSON_HEX, 250),
+            )
+        } else {
+            (
+                volt::hex_rgba(volt::CARD_HEX, 235),
+                volt::hex_rgba(volt::BORDER_HEX, 240),
+            )
+        };
+        volt::draw_card_box(b, a, (x, y, w, 20.0), bg, border);
+        if active_accent {
+            b.fill(a, x + 1.0, y + 3.0, 2.0, 14.0, volt::CRIMSON_BRIGHT_COLOR);
+        }
+        let tw = HudBatch::text_width(a, label);
+        let tx = x + ((w - tw) / 2.0).floor().max(3.0);
+        b.text(a, label, tx, y + 6.0, volt::TEXT_COLOR, true);
+        return;
+    }
     if !crate::touch::theme_button(b, a, "button", [x, y, w, 20.0], false, u32::MAX, true) {
         b.fill(a, x, y, w, 20.0, rgba(16, 18, 24, 180));
     }
@@ -611,5 +706,17 @@ mod tests {
             u.gesture(1, [20.0, 20.0], TouchPhase::Ended),
             Gesture::None
         ));
+    }
+    #[test]
+    fn kinetic_scroll_flings_and_cancels_on_next_touch() {
+        let mut u = TouchUi::default();
+        u.gesture(1, [100.0, 220.0], TouchPhase::Started);
+        u.gesture(1, [100.0, 150.0], TouchPhase::Moved);
+        u.gesture(1, [100.0, 150.0], TouchPhase::Ended);
+        let first = u.step_kinetic_scroll().expect("flick produces kinetic step");
+        assert!(first < 0.0);
+        assert_eq!(u.last_scroll_point(2.0), (50.0, 75.0));
+        u.gesture(2, [100.0, 150.0], TouchPhase::Started);
+        assert_eq!(u.step_kinetic_scroll(), None);
     }
 }

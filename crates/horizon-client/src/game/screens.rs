@@ -163,34 +163,32 @@ impl Game<'_> {
         self.remote.is_some() && self.integrated.is_none()
     }
     pub(super) fn draw_pause_menu(&mut self, batch: &mut HudBatch) {
+        use horizon_client::volt_options_style::{self as volt, ButtonTone};
         let friends = self.friends_view().shown;
         let atlas = &self.gui.atlas;
         let (w, h) = (batch.width, batch.height);
-        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
+        volt::menu_backdrop(batch, atlas, w, h, true);
         let title = Text::translate("menu.game", &[]);
-        let tw = atlas.font.width_text(&title);
-        batch.text_styled(
-            atlas,
-            &title,
-            ((w - tw) / 2.0).floor(),
-            40.0,
-            u32::MAX,
-            true,
-        );
+        volt::draw_page_title(batch, atlas, &title, 40.0, 1.0);
         let links = !self.server_links().is_empty();
         let mut tooltip = None;
         for (x, y, bw, key, id, active) in pause_buttons(w, h, self.external_server(), links) {
             let hover = active && ui::hovered(self.cursor, x, y, bw, 20.0);
-            ui::button(
+            let tone = match id {
+                0 => ButtonTone::Primary,
+                5 => ButtonTone::Hero,
+                _ => ButtonTone::Standard,
+            };
+            volt::button(
                 batch,
                 atlas,
-                x,
-                y,
-                bw,
-                20.0,
+                (x, y, bw, 20.0),
                 &Text::translate(key, &[]),
                 active,
                 hover,
+                tone,
+                (if hover { 1.0 } else { 0.0 }, 0.0),
+                0.0,
             );
             // PauseScreen's customAdditions button: CUSTOM_OPTIONS_TOOLTIP.
             if id == 11 && hover {
@@ -209,16 +207,16 @@ impl Game<'_> {
                     active,
                 );
             }
-            ui::button(
+            volt::button(
                 batch,
                 atlas,
-                x,
-                y,
-                20.0,
-                20.0,
+                (x, y, 20.0, 20.0),
                 &Text::empty(),
                 active,
                 active && hover,
+                ButtonTone::Standard,
+                (if active && hover { 1.0 } else { 0.0 }, 0.0),
+                0.0,
             );
             // SpriteIconButton.CenteredIcon: the 15x15 sprite at
             // x + width / 2 - 15 / 2 in integer pixels, untinted even

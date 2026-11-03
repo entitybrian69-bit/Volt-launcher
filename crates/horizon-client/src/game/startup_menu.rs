@@ -963,26 +963,45 @@ impl Loading {
                         )?;
                     }
                     if field {
-                        let initial = self
-                            .menu
-                            .title
-                            .as_mut()
-                            .and_then(|t| {
-                                t.field_key(KeyCode::End, false, false);
-                                t.focused_field().map(|(_, s, _)| s.to_owned())
-                            })
-                            .unwrap_or_default();
+                        let initial = if self.menu.options_open {
+                            self.gui
+                                .as_ref()
+                                .and_then(|gui| self.menu.options.android_edit_value(&gui.atlas))
+                                .unwrap_or_default()
+                        } else {
+                            self.menu
+                                .title
+                                .as_mut()
+                                .and_then(|t| {
+                                    t.field_key(KeyCode::End, false, false);
+                                    t.focused_field().map(|(_, s, _)| s.to_owned())
+                                })
+                                .unwrap_or_default()
+                        };
                         crate::platform::show(&initial);
                     }
                 }
-                Gesture::Scroll(y) => self.menu_event(
-                    event_loop,
-                    WindowEvent::MouseWheel {
-                        device_id: touch.device_id,
-                        delta: MouseScrollDelta::LineDelta(0.0, y),
-                        phase: TouchPhase::Moved,
-                    },
-                )?,
+                Gesture::Scroll(y) => {
+                    if self.menu.options_open {
+                        self.menu.cursor = (-1.0, -1.0);
+                        let amount = y * (30.0 / (18.0 * b.scale.max(1.0)));
+                        self.menu.options.scroll_at(
+                            &self.settings,
+                            (b.width, b.height),
+                            (p[0], p[1]),
+                            amount,
+                        );
+                    } else {
+                        self.menu_event(
+                            event_loop,
+                            WindowEvent::MouseWheel {
+                                device_id: touch.device_id,
+                                delta: MouseScrollDelta::LineDelta(0.0, y),
+                                phase: TouchPhase::Moved,
+                            },
+                        )?;
+                    }
+                }
                 Gesture::None => {}
             }
             return Ok(());
@@ -1176,6 +1195,25 @@ impl Loading {
 
     pub(super) fn draw_menu(&mut self, batch: &mut HudBatch) {
         let Some(gui) = &self.gui else { return };
+        #[cfg(target_os = "android")]
+        if !self.menu.touch.virtual_mouse
+            && self.menu.controls.editor.is_none()
+            && self.menu.pending.is_none()
+            && let Some(y) = self.menu.touch.step_kinetic_scroll()
+        {
+            let at = self.menu.touch.last_scroll_point(batch.scale);
+            let amount = y * (30.0 / (18.0 * batch.scale.max(1.0)));
+            if self.menu.options_open {
+                self.menu.options.scroll_at(
+                    &self.settings,
+                    (batch.width, batch.height),
+                    at,
+                    amount,
+                );
+            } else if let Some(title) = &mut self.menu.title {
+                title.scroll_worlds(amount, at, (batch.width, batch.height));
+            }
+        }
         #[cfg(target_os = "android")]
         if self.menu.keyboard_navigation
             && self.menu.keyboard_focus.is_none()

@@ -748,12 +748,15 @@ pub struct GraphicsUi {
     dragging: Option<Item>,
     /// The key binding the options screen is waiting on (`Action::BindKey`).
     pub binding: Option<&'static str>,
+    /// Smooth hover, slider, click-pulse, and page-entrance animation state.
+    pub anim: crate::volt_options_style::OptionAnim,
 }
 
 impl GraphicsUi {
     pub fn reset(&mut self) {
         self.scroll = ui::Scroll::default();
         self.dragging = None;
+        self.anim.start_transition(1.0);
     }
     /// The scrollbar's column: right of the descriptions.
     fn scrollbar_x(w: f32) -> f32 {
@@ -851,14 +854,22 @@ impl GraphicsUi {
         in_world: bool,
     ) {
         let (w, h) = (batch.width, batch.height);
+        let dt = self.anim.begin_frame();
+        let elapsed = self.anim.elapsed_secs();
+        let (tx, ty, t_alpha, underline_t) = self.anim.transition_state();
         let (widgets, headers, content) = self.layout(level, s, w, h);
         let (top, bottom) = Self::bounds(h);
         STYLE.background(batch, atlas, top, bottom, in_world);
-        let shown = |y: f32, height: f32| y >= top && y + height <= bottom;
+        let visible = |y: f32, height: f32| y < bottom && y + height > top;
         let x = STYLE.row_x(w);
         for (y, name) in headers {
-            if shown(y, STYLE.header_height) {
+            if visible(y, STYLE.header_height) {
+                let start = batch.vertices.len();
                 STYLE.header(batch, atlas, &Text::literal(lang::get(name)), x, y);
+                crate::volt_options_style::apply_transition(batch, start, tx, ty, t_alpha);
+                if y + ty < top || y + ty + STYLE.header_height > bottom {
+                    batch.clip_since(start, 0.0, top, w, bottom);
+                }
             }
         }
         let descriptions: Vec<(Cost, &'static str)> = extra_rows(level, s)
@@ -870,16 +881,19 @@ impl GraphicsUi {
             .collect();
         let mut index = 0;
         let mut tooltip = None;
-        for wd in &widgets {
+        let mut footer_widgets = Vec::new();
+        for (wi, wd) in widgets.iter().enumerate() {
+            let slot_id = ((level as u64) << 16) | (wi as u64);
             let hover = ui::hovered(cursor, wd.x, wd.y, wd.w, 20.0)
                 && (!wd.list || (cursor.1 >= top && cursor.1 < bottom));
             match wd.target {
                 Target::Item(item) => {
                     let (cost, text) = descriptions[index];
                     index += 1;
-                    if !shown(wd.y, 20.0) {
+                    if !visible(wd.y, 20.0) {
                         continue;
                     }
+                    let start = batch.vertices.len();
                     let mut label = item.label(s);
                     if item == Item::Horizon(H::HdrKey) && self.binding.is_some() {
                         // KeyBindsScreen: "> key <" while it waits.
@@ -893,24 +907,46 @@ impl GraphicsUi {
                         tooltip = Some(atlas.font.split(&Text::literal(lang::get(why)), 170.0));
                     }
                     match item.slider(s) {
-                        Some(value) => STYLE.slider(
-                            batch,
-                            atlas,
-                            (wd.x, wd.y, wd.w),
-                            &label,
-                            value,
-                            hover || self.dragging == Some(item),
-                            live,
-                            self.dragging == Some(item),
-                        ),
-                        None => STYLE.button(
-                            batch,
-                            atlas,
-                            (wd.x, wd.y, wd.w),
-                            &label,
-                            hover && live,
-                            live,
-                        ),
+                        Some(value) => {
+                            let dragging = self.dragging == Some(item);
+                            let (shown_val, hover_t) =
+                                self.anim.step_slider(slot_id, value, hover && live, dragging, dt);
+                            STYLE.slider_animated(
+                                batch,
+                                atlas,
+                                (wd.x, wd.y, wd.w),
+                                &label,
+                                value,
+                                shown_val,
+                                hover || dragging,
+                                live,
+                                dragging,
+                                hover_t,
+                                elapsed,
+                            );
+                        }
+                        None => {
+                            let anim_state = self.anim.step_button(slot_id, hover && live, dt);
+                            let tone = match item.switch(s) {
+                                Some(true) => crate::volt_options_style::ButtonTone::ActiveOn,
+                                Some(false) => crate::volt_options_style::ButtonTone::ActiveOff,
+                                None if matches!(item, Item::Horizon(H::Preset | H::HdrSettings)) => {
+                                    crate::volt_options_style::ButtonTone::Hero
+                                }
+                                None => crate::volt_options_style::infer_toggle_tone(&label.plain()),
+                            };
+                            STYLE.button_animated(
+                                batch,
+                                atlas,
+                                (wd.x, wd.y, wd.w),
+                                &label,
+                                hover && live,
+                                live,
+                                tone,
+                                anim_state,
+                                elapsed,
+                            );
+                        }
                     }
                     STYLE.description(
                         batch,
@@ -920,40 +956,61 @@ impl GraphicsUi {
                         cost,
                         text,
                     );
+                    crate::volt_options_style::apply_transition(batch, start, tx, ty, t_alpha);
+                    if wd.y + ty < top || wd.y + ty + 24.0 > bottom {
+                        batch.clip_since(start, 0.0, top, w, bottom);
+                    }
                 }
                 Target::Button(action) => {
-                    let label = match action {
-                        Action::OpenAdvanced => "Advanced...",
-                        Action::OpenSimple => "Simple...",
-                        _ => "Done",
-                    };
-                    STYLE.button(
-                        batch,
-                        atlas,
-                        (wd.x, wd.y, wd.w),
-                        &Text::literal(lang::get(label)),
-                        hover,
-                        true,
-                    );
+                    footer_widgets.push((slot_id, wd.x, wd.y, wd.w, hover, action));
                 }
             }
         }
         STYLE.frame(batch, atlas, top, bottom, in_world);
-        ui::scrollbar(
+        for (slot_id, bx, by, bw, hover, action) in footer_widgets {
+            let (label, tone) = match action {
+                Action::OpenAdvanced => (
+                    "Advanced...",
+                    crate::volt_options_style::ButtonTone::Hero,
+                ),
+                Action::OpenSimple => (
+                    "Simple...",
+                    crate::volt_options_style::ButtonTone::Hero,
+                ),
+                _ => ("Done", crate::volt_options_style::ButtonTone::Primary),
+            };
+            let anim_state = self.anim.step_button(slot_id, hover, dt);
+            STYLE.button_animated(
+                batch,
+                atlas,
+                (bx, by, bw),
+                &Text::literal(lang::get(label)),
+                hover,
+                true,
+                tone,
+                anim_state,
+                elapsed,
+            );
+        }
+        let sx = Self::scrollbar_x(w);
+        let sb_active =
+            self.scroll.held() || ui::hovered(cursor, sx, top, 6.0, (bottom - top).max(0.0));
+        crate::volt_options_style::scrollbar(
             batch,
             atlas,
-            Self::scrollbar_x(w),
+            sx,
             top,
             bottom,
             content,
             self.scroll.amount,
+            sb_active,
         );
         let title = match level {
             Level::Simple => "Graphics",
             Level::Advanced => "Graphics: Advanced",
             Level::Hdr => "Graphics: HDR",
         };
-        STYLE.title(batch, atlas, &Text::literal(lang::get(title)));
+        STYLE.title_animated(batch, atlas, &Text::literal(lang::get(title)), underline_t);
         if let Some(lines) = tooltip {
             ui::tooltip(batch, atlas, &lines, cursor);
         }
@@ -997,21 +1054,27 @@ impl GraphicsUi {
         {
             return Vec::new();
         }
-        for wd in widgets {
+        for (wi, wd) in widgets.into_iter().enumerate() {
             if !ui::hovered((x, y), wd.x, wd.y, wd.w, 20.0) {
                 continue;
             }
-            if wd.list && (y < top || y >= bottom || wd.y < top || wd.y + 20.0 > bottom) {
+            if wd.list && (y < top || y >= bottom) {
                 continue;
             }
+            let slot_id = ((level as u64) << 16) | (wi as u64);
             return match wd.target {
-                Target::Button(action) => vec![Action::ButtonClick, action],
+                Target::Button(action) => {
+                    self.anim.pulse(slot_id);
+                    vec![Action::ButtonClick, action]
+                }
                 // A disabled control does nothing: no sound, no preset change.
                 Target::Item(item) if item.blocked(s).is_some() => Vec::new(),
                 Target::Item(Item::Horizon(H::HdrSettings)) => {
+                    self.anim.pulse(slot_id);
                     vec![Action::ButtonClick, Action::OpenHdr]
                 }
                 Target::Item(Item::Horizon(H::HdrKey)) => {
+                    self.anim.pulse(slot_id);
                     vec![
                         Action::ButtonClick,
                         Action::BindKey(crate::graphics::HDR_KEY),
@@ -1023,6 +1086,7 @@ impl GraphicsUi {
                         item.set_slider(s, ui::slider_value(wd.x, wd.w, x));
                         vec![Action::SliderDrag]
                     } else {
+                        self.anim.pulse(slot_id);
                         item.cycle(s, right, framebuffer);
                         vec![Action::ButtonClick, Action::Changed]
                     }

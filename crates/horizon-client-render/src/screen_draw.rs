@@ -940,3 +940,255 @@ pub fn paint(batch: &mut HudBatch, atlas: &HudAtlas, draws: &[Draw]) {
         crate::ui::tooltip(batch, atlas, &lines, at);
     }
 }
+
+/// Draws `pack_screen` calls using Volt Launcher's obsidian-dark and crimson-red
+/// cards, search box, list wells, separators, and scrollbars while keeping
+/// `pack_screen::draw`'s exact `Vec<Draw>` untouched for parity fixtures.
+pub fn paint_volt(batch: &mut HudBatch, atlas: &HudAtlas, draws: &[Draw]) {
+    use crate::volt_options_style as volt;
+    let mut clip: Option<(usize, [i32; 4])> = None;
+    let mut tooltip = None;
+    for d in draws {
+        match d {
+            Draw::Sprite {
+                sprite,
+                x,
+                y,
+                w,
+                h,
+                color,
+            } => {
+                let (fx, fy, fw, fh) = (*x as f32, *y as f32, *w as f32, *h as f32);
+                match sprite.as_str() {
+                    "widget/button" | "widget/button_highlighted" | "widget/button_disabled" => {
+                        let active = sprite != "widget/button_disabled";
+                        let hover = sprite == "widget/button_highlighted";
+                        let (bg, border) = if !active {
+                            (
+                                volt::hex_rgba(0x0B0B10, 220),
+                                volt::hex_rgba(volt::BORDER_SUBTLE_HEX, 210),
+                            )
+                        } else if hover {
+                            (
+                                volt::hex_rgba(volt::HOVER_HEX, 250),
+                                volt::CRIMSON_BRIGHT_COLOR,
+                            )
+                        } else {
+                            (
+                                volt::hex_rgba(volt::CARD_HEX, 244),
+                                volt::hex_rgba(volt::BORDER_HEX, 245),
+                            )
+                        };
+                        volt::draw_card_box(batch, atlas, (fx, fy, fw, fh), bg, border);
+                        if active && hover && fh >= 6.0 {
+                            batch.fill(
+                                atlas,
+                                fx + 1.0,
+                                fy + 2.0,
+                                2.0,
+                                fh - 4.0,
+                                volt::CRIMSON_BRIGHT_COLOR,
+                            );
+                        }
+                    }
+                    "widget/text_field" | "widget/text_field_highlighted" => {
+                        let focused = sprite == "widget/text_field_highlighted";
+                        volt::draw_card_box(
+                            batch,
+                            atlas,
+                            (fx, fy, fw, fh),
+                            if focused {
+                                volt::hex_rgba(volt::CARD_INNER_HEX, 250)
+                            } else {
+                                volt::hex_rgba(0x0E0E15, 242)
+                            },
+                            if focused {
+                                volt::CRIMSON_COLOR
+                            } else {
+                                volt::hex_rgba(volt::BORDER_HEX, 245)
+                            },
+                        );
+                        batch.fill(
+                            atlas,
+                            fx + 1.0,
+                            fy + 2.0,
+                            2.0,
+                            (fh - 4.0).max(1.0),
+                            if focused {
+                                volt::CRIMSON_BRIGHT_COLOR
+                            } else {
+                                volt::hex_rgba(volt::BORDER_CRIMSON_HEX, 230)
+                            },
+                        );
+                    }
+                    "widget/scroller_background" => {
+                        volt::draw_card_box(
+                            batch,
+                            atlas,
+                            (fx, fy, fw, fh),
+                            volt::hex_rgba(0x0A0A10, 225),
+                            volt::hex_rgba(0x1F1F2D, 230),
+                        );
+                    }
+                    "widget/scroller" => {
+                        batch.fill(
+                            atlas,
+                            fx + 1.0,
+                            fy,
+                            (fw - 2.0).max(2.0),
+                            fh,
+                            volt::CRIMSON_COLOR,
+                        );
+                    }
+                    _ => crate::ui::nine_slice(
+                        batch,
+                        atlas,
+                        &format!("gui/sprites/{sprite}"),
+                        fx,
+                        fy,
+                        fw,
+                        fh,
+                        crate::hud_layout::abgr(*color as u32),
+                    ),
+                }
+            }
+            Draw::Blit {
+                texture,
+                x,
+                y,
+                w,
+                h,
+                u,
+                v,
+                src,
+                tex,
+                color,
+            } => {
+                let (fx, fy, fw, fh) = (*x as f32, *y as f32, *w as f32, *h as f32);
+                if texture.ends_with("menu_list_background.png") {
+                    volt::draw_card_box(
+                        batch,
+                        atlas,
+                        (fx, fy, fw, fh),
+                        volt::hex_rgba(volt::BACKDROP_HEX, 210),
+                        volt::hex_rgba(volt::BORDER_HEX, 235),
+                    );
+                } else if texture.ends_with("header_separator.png")
+                    || texture.ends_with("footer_separator.png")
+                {
+                    batch.fill(
+                        atlas,
+                        fx,
+                        fy,
+                        fw,
+                        1.0,
+                        volt::hex_rgba(volt::BORDER_CRIMSON_HEX, 240),
+                    );
+                    let mid = (fw * 0.45).floor();
+                    batch.fill(
+                        atlas,
+                        fx + ((fw - mid) / 2.0).floor(),
+                        fy,
+                        mid,
+                        1.0,
+                        volt::CRIMSON_COLOR,
+                    );
+                } else {
+                    let key = texture
+                        .trim_start_matches("textures/")
+                        .trim_end_matches(".png");
+                    let key = if atlas.sprites.contains_key(key) {
+                        key
+                    } else {
+                        "misc/unknown_pack"
+                    };
+                    let color = crate::hud_layout::abgr(*color as u32);
+                    if src[0] == tex[0] && src[1] == tex[1]
+                        || (*u == 0.0 && *v == 0.0 && src[0] <= tex[0] && src[1] <= tex[1])
+                    {
+                        if let Some(mut r) = atlas.sprites.get(key).copied() {
+                            let (du, dv) = (r.u1 - r.u0, r.v1 - r.v0);
+                            r.u1 = r.u0 + du * src[0] as f32 / tex[0] as f32;
+                            r.v1 = r.v0 + dv * src[1] as f32 / tex[1] as f32;
+                            batch.rect_uv(fx, fy, fw, fh, r, color);
+                        }
+                    } else {
+                        crate::ui::tiled(
+                            batch,
+                            atlas,
+                            key,
+                            fx,
+                            fy,
+                            fw,
+                            fh,
+                            tex[0] as f32,
+                            color,
+                        );
+                    }
+                }
+            }
+            Draw::Fill {
+                x0,
+                y0,
+                x1,
+                y1,
+                color,
+            } => {
+                let raw = *color;
+                let fill_col = if raw == -1 {
+                    volt::CRIMSON_COLOR
+                } else if raw == -16777216 {
+                    volt::hex_rgba(volt::HERO_BG_HEX, 245)
+                } else {
+                    crate::hud_layout::abgr(raw as u32)
+                };
+                batch.fill(
+                    atlas,
+                    *x0 as f32,
+                    *y0 as f32,
+                    (x1 - x0) as f32,
+                    (y1 - y0) as f32,
+                    fill_col,
+                );
+            }
+            Draw::Highlight { x0, y0, x1, y1 } => {
+                let (a, b) = ((*x0).min(*x1), (*x0).max(*x1));
+                batch.text_highlight(
+                    atlas,
+                    (a as f32, *y0 as f32, (b - a) as f32, (y1 - y0) as f32),
+                    true,
+                );
+            }
+            Draw::Text {
+                text,
+                x,
+                y,
+                color,
+                shadow,
+            } => {
+                batch.text_styled(
+                    atlas,
+                    text,
+                    *x as f32,
+                    *y as f32,
+                    crate::hud_layout::abgr(*color as u32),
+                    *shadow,
+                );
+            }
+            Draw::Scissor { x0, y0, x1, y1 } => {
+                clip = Some((batch.vertices.len(), [*x0, *y0, *x1, *y1]))
+            }
+            Draw::NoScissor => {
+                if let Some((start, [x0, y0, x1, y1])) = clip.take() {
+                    batch.clip_since(start, x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+                }
+            }
+            Draw::Tooltip { lines, x, y } => {
+                tooltip = Some((lines.clone(), (*x as f32, *y as f32)))
+            }
+        }
+    }
+    if let Some((lines, at)) = tooltip {
+        crate::ui::tooltip(batch, atlas, &lines, at);
+    }
+}

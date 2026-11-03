@@ -254,7 +254,9 @@ jobs:
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_options_style"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
+              ["cargo", "test", "-p", "horizon-client", "--lib", "touch_ui"],
           ]
           for cmd in cmds:
               proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -997,14 +999,12 @@ jobs:
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.9.7
-          - **In-Game Performance-First Native WGSL "Volt Shaders" (`Options... -> Volt Shaders`)**:
-            - Added **Volt Shaders** directly above **Video Settings...** in the in-game Options menu (100% pure native Rust + WGSL on `wgpu` Vulkan)
-            - **`Enable Shaders`** master toggle (`OFF` by default): when `OFF`, zero shader passes run and all profiles/customization controls stay completely hidden; toggling `ON` reveals the full Volt Shaders suite
-            - **6 Mobile-Tuned Shader Profiles**: **`Potato`**, **`Low`**, **`Medium`**, **`High`**, **`Ultra`**, and **`Custom`** — `Potato`/`Low`/`Medium` use a **Zero-Post Direct TBDR** `[sky] + [material]` topology (`StoreOp::Discard` depth, zero off-screen resolve passes); `High`/`Ultra` use a **Single-Pass Post** topology with **0 bytes** of intermediate ping-pong `RGBA16F` targets and WGSL `override` dead-code elimination
-            - **Zero-Remesh Moving Vegetation & Water**: root-anchored waving grass, tall plants, flowers & crops, phase-coherent waving leaves & vines, ceiling-anchored hanging foliage, storm wind boost, and gentle still-water vertex motion within 56 blocks
-            - **35 Live Shader Controls**: directional sun/sky bounce shading, sunlit foliage subsurface translucency, torchlight color styles (`Vanilla`, `Warm Amber`, `Cozy Gold`, `Soul Cool`), emissive block glow, rain wet sheen, dual-wave water ripples & sun/moon glint, clear water & underwater wave refraction, Rayleigh/Mie atmospheric sky, sun/moon corona, night aurora (`Subtle`/`Medium`/`Vibrant`), distance haze, ACES/Neutral/Cinema tonemapping, single-pass bloom, crepuscular sun rays, vignette, vibrance, saturation, contrast, exposure, and color warmth
-          - **Zero-Freeze Main Menu Handoff & Mali-G57 Hardening (`0.9.5`–`0.9.6`)**: `MipMajor` sprite streaming, background asset preparation, dedicated `"volt-audio-stream"` NDK `AAudio` thread, GPU-local `MenuBlur` target, Controls Studio presets, and Volt Boost optimizations
+          ### What's New in Volt Launcher 0.9.8
+          - **Crimson & Dark In-Game Option Screens Overhaul**:
+            - Complete visual overhaul of all in-game **Options**, **Video Settings**, **Graphics: Simple & Advanced**, **Volt Shaders**, **Volt Settings**, **Volt Boost**, **Volt Extras**, **Controls / Key Binds / Touch / Controller**, **Sound**, **Language**, **Resource & Data Packs**, **Pause Menu**, **Mod Settings**, and **Tooltips** matching Volt Launcher's signature **Crimson-Red (`#DC143C` / `#FF2E54`) & Dark Obsidian (`#07070A` / `#111118` / `#181822`)** UI
+            - **Smooth Animations & Interactive Polish**: smooth cubic-out page slide/fade transitions, animated crimson title underline, smooth exponential hover/press elevation, click pulse feedback, smooth slider fill-bar & thumb interpolation, crimson `ON` / emerald status-pip toggle cards, color-coded `Cost` pill badges (`None` / `Low` / `Medium` / `High` / `Saves`), crimson-framed search inputs & tooltips, and smooth marquee scrolling for long option labels
+            - **1:1 Pixel-Accurate Touch Scrolling & Kinetic Fling Inertia**: fixed Android touch-drag scrolling on Option screens so finger drags never accidentally cycle `CycleButton` options or jump under `Discrete Scrolling`, track finger movement 1:1 across every GUI scale, dismiss stuck hover tooltips while scrolling, prefill Android IME on Title-screen Option search fields, and glide smoothly with exponential kinetic fling inertia
+          - **In-Game Native WGSL "Volt Shaders" & Mali-G57 Hardening (`0.9.5`–`0.9.7`)**: `Options... -> Volt Shaders` (`OFF` by default, `Potato`..`Ultra` + `Custom`, Moving Vegetation, 35 live shader controls), zero-freeze Main Menu handoff, Controls Studio presets, and Volt Boost optimizations
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then
