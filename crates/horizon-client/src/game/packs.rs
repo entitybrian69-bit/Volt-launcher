@@ -274,37 +274,79 @@ impl Game<'_> {
             gui,
             pack,
             textures,
+            particle_sets,
+            sounds,
         } = staged;
-        // Keep the working GPU resources, and hand its window surface over.
-        if let Some(renderer) = &mut self.renderer {
-            renderer.release_surface();
-        }
-        let renderer = match self
-            .window
-            .clone()
-            .map(|window| {
-                build_renderer(
-                    window,
-                    self.options.offscreen,
-                    &pack,
-                    &gui,
-                    self.renderer.as_ref(),
-                    Some(textures),
-                    self.settings.horizon.api,
-                )
-            })
-            .transpose()
-        {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.recreate_surface().map_err(|restore| {
-                        format!(
-                            "{error}; could not restore the previous rendering surface: {restore}"
-                        )
-                    })?;
+        let in_place_menu_reload = cfg!(target_os = "android")
+            && self.player.is_none()
+            && self.world.chunks.is_empty()
+            && self
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.can_replace_world_textures(pack.render.texture_layers));
+        let renderer = if in_place_menu_reload {
+            let renderer = self.renderer.as_mut().expect("checked above");
+            let atlas = &gui.atlas;
+            atlas.font.reset_cache();
+            renderer.replace_ui_textures(
+                (&atlas.pixels, atlas.width, atlas.height),
+                (&atlas.glint.0, atlas.glint.1, atlas.glint.2),
+                (
+                    &atlas.glint_armor.0,
+                    atlas.glint_armor.1,
+                    atlas.glint_armor.2,
+                ),
+                &gui.panorama,
+            )?;
+            renderer.hud.sprite_animations = atlas
+                .sprite_animations
+                .iter()
+                .map(|(rect, animation)| (*rect, animation.clone(), (usize::MAX, 0, 0)))
+                .collect();
+            let assets = &pack.render;
+            renderer.replace_world_textures(
+                &assets.pixels,
+                assets.sprite_size,
+                assets.sprite_minimum_size,
+                assets.texture_layers,
+                &assets.sprite_mips,
+                &assets.animations,
+                (&pack.forcefield.2, pack.forcefield.0),
+                Some(textures),
+            )?;
+            None
+        } else {
+            // Keep the working GPU resources, and hand its window surface over.
+            if let Some(renderer) = &mut self.renderer {
+                renderer.release_surface();
+            }
+            match self
+                .window
+                .clone()
+                .map(|window| {
+                    build_renderer(
+                        window,
+                        self.options.offscreen,
+                        &pack,
+                        &gui,
+                        self.renderer.as_ref(),
+                        Some(textures),
+                        rendering_api(&self.settings),
+                    )
+                })
+                .transpose()
+            {
+                Ok(renderer) => renderer,
+                Err(error) => {
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.recreate_surface().map_err(|restore| {
+                            format!(
+                                "{error}; could not restore the previous rendering surface: {restore}"
+                            )
+                        })?;
+                    }
+                    return Err(error);
                 }
-                return Err(error);
             }
         };
         // Everything loaded: switch over.
@@ -322,8 +364,11 @@ impl Game<'_> {
         self.maps.slots.forget();
         // The atlas's sprites moved: the particle engine re-reads every rect
         // and the packs' sprite sets, or every particle draws a stale region.
-        self.particles
-            .reload(&root, &self.gui.atlas.sprites, &self.gui.atlas.translucent);
+        self.particles.reload_with_sets(
+            particle_sets,
+            &self.gui.atlas.sprites,
+            &self.gui.atlas.translucent,
+        );
         horizon_client::ui_theme::reset_atlas();
         // Villager hats come from the pack's texture metadata (shared data, swapped in place).
         *self
@@ -336,7 +381,7 @@ impl Game<'_> {
         horizon_client::ui::load_metadata(&root);
         lang::set(lang::Language::load(&[&root], &lang::code()));
         self.refresh_remote_language();
-        self.audio.reload(&root);
+        self.audio.reload_with_registry(&root, Some(sounds));
         self.clear_lod();
         self.streaming.reload_resources(&mut self.world, context);
         self.pending_uploads.clear();
@@ -344,6 +389,8 @@ impl Game<'_> {
         // sections are uploaded again as they are meshed.
         if let Some(renderer) = renderer {
             self.renderer = Some(renderer);
+            self.apply_ui_settings();
+        } else if in_place_menu_reload {
             self.apply_ui_settings();
         }
         self.ui.chat.rescale(&self.gui.atlas);
@@ -376,9 +423,18 @@ pub(super) fn stage_pack(
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
     let (render, atlas, panorama) = std::thread::scope(|s| {
-        let atlas =
-            s.spawn(|| HudAtlas::build_over(&root, vanilla_root).map_err(|e| e.to_string()));
-        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root));
+        let atlas = std::thread::Builder::new()
+            .name("pack-atlas".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn_scoped(s, || {
+                HudAtlas::build_over(&root, vanilla_root).map_err(|e| e.to_string())
+            })
+            .expect("failed to spawn pack-atlas worker");
+        let panorama = std::thread::Builder::new()
+            .name("pack-panorama".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn_scoped(s, || horizon_client::gfx::panorama::Faces::load(&root))
+            .expect("failed to spawn pack-panorama worker");
         (assets.reload(&root), atlas.join(), panorama.join())
     });
     let render = Arc::new(render?);
@@ -399,12 +455,16 @@ pub(super) fn stage_pack(
         context.light.clone(),
     )?;
     let textures = prepare_renderer_textures(&pack);
+    let particle_sets = horizon_client::particles::ParticleSpriteSets::load(&root);
+    let sounds = horizon_client::sound_events::SoundRegistry::load(&root);
     progress.set(3);
     Ok(StagedPack {
         root,
         gui,
         pack,
         textures,
+        particle_sets,
+        sounds,
     })
 }
 
@@ -415,6 +475,8 @@ pub(super) struct StagedPack {
     pub gui: UiResources,
     pub pack: PackResources,
     pub textures: PreparedTextures,
+    pub particle_sets: horizon_client::particles::ParticleSpriteSets,
+    pub sounds: horizon_client::sound_events::SoundRegistry,
 }
 
 /// `LoadingOverlay`'s stage lines for a pack reload, indexed by `progress`.

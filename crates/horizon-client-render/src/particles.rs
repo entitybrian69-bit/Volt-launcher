@@ -1081,10 +1081,52 @@ pub struct ParticleEngine {
     /// Rejects off-screen particles behind the camera before sprite/light lookups.
     pub frustum_cull: bool,
 }
+/// Pre-parsed `assets/minecraft/particles/*.json` sprite sets loaded on the
+/// background resource worker so `Game::new` and pack reloads never block the
+/// UI thread on ~110 filesystem reads + JSON parses.
+#[derive(Clone, Default)]
+pub struct ParticleSpriteSets(Vec<(ParticleType, Vec<String>)>);
+
+impl ParticleSpriteSets {
+    pub fn load(root: &Path) -> Self {
+        let dir = root.join("assets/minecraft/particles");
+        let mut sets = Vec::new();
+        for &ty in ParticleType::ALL {
+            let Ok(bytes) = std::fs::read(dir.join(format!("{}.json", ty.name()))) else {
+                continue;
+            };
+            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+                continue;
+            };
+            let sprites: Vec<String> = json["textures"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str())
+                        .map(|t| format!("particle/{}", t.trim_start_matches("minecraft:")))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !sprites.is_empty() {
+                sets.push((ty, sprites));
+            }
+        }
+        Self(sets)
+    }
+}
+
 /// `ParticleGroup.MAX_PARTICLES` (per render group; one group here).
 const MAX_PARTICLES: usize = 16384;
 impl ParticleEngine {
     pub fn new(root: &Path, atlas: &HashMap<String, Rect>, translucent: &HashSet<String>) -> Self {
+        Self::from_sprite_sets(ParticleSpriteSets::load(root), atlas, translucent)
+    }
+
+    pub fn from_sprite_sets(
+        sets: ParticleSpriteSets,
+        atlas: &HashMap<String, Rect>,
+        translucent: &HashSet<String>,
+    ) -> Self {
         let mut engine = Self {
             particles: Vec::new(),
             pending: Vec::new(),
@@ -1111,15 +1153,25 @@ impl ParticleEngine {
             burst_shield: false,
             frustum_cull: false,
         };
-        engine.reload(root, atlas, translucent);
+        engine.reload_with_sets(sets, atlas, translucent);
         engine
     }
+
     /// `onResourceManagerReload`: sprite rects and sets come from the
     /// reloaded atlas and pack; a live particle keeps drawing its sprite by
     /// name or index.
     pub fn reload(
         &mut self,
         root: &Path,
+        atlas: &HashMap<String, Rect>,
+        translucent: &HashSet<String>,
+    ) {
+        self.reload_with_sets(ParticleSpriteSets::load(root), atlas, translucent);
+    }
+
+    pub fn reload_with_sets(
+        &mut self,
+        sets: ParticleSpriteSets,
         atlas: &HashMap<String, Rect>,
         translucent: &HashSet<String>,
     ) {
@@ -1135,29 +1187,8 @@ impl ParticleEngine {
         self.sets.clear();
         self.set_sprites.clear();
         self.item_sprites.clear();
-        self.load_sprites(root);
-    }
-    /// The sprite sets of every `particles/*.json` under `root`.
-    fn load_sprites(&mut self, root: &Path) {
-        let dir = root.join("assets/minecraft/particles");
-        for &ty in ParticleType::ALL {
-            let Ok(bytes) = std::fs::read(dir.join(format!("{}.json", ty.name()))) else {
-                continue;
-            };
-            let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                continue;
-            };
-            let sprites: Vec<u32> = json["textures"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|t| t.as_str())
-                        .map(|t| {
-                            self.intern(&format!("particle/{}", t.trim_start_matches("minecraft:")))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        for (ty, names) in sets.0 {
+            let sprites: Vec<u32> = names.into_iter().map(|n| self.intern(&n)).collect();
             if !sprites.is_empty() {
                 self.sets.insert(ty, self.set_sprites.len() as u32);
                 self.set_sprites.push(sprites);

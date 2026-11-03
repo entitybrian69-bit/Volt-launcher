@@ -143,10 +143,89 @@ fn attach(mixer: &Mutex<Mixer>, channel: ChannelId, samples: Samples, looping: b
         c.looping |= looping;
     }
 }
+/// On Android, opening, reopening, or closing NDK `AAudioStream` executes synchronous
+/// `audioserver` Binder IPC (`200-800 ms`), and `cpal::Stream` is `!Send`. Keep the
+/// stream owned on a dedicated `2 MiB` background thread so `ALooper` never stalls.
+#[cfg(all(feature = "audio", target_os = "android"))]
+enum AndroidStreamCmd {
+    Reopen(String),
+}
+#[cfg(all(feature = "audio", target_os = "android"))]
+struct AndroidStreamHandle {
+    tx: std::sync::mpsc::Sender<AndroidStreamCmd>,
+    live: Arc<std::sync::atomic::AtomicBool>,
+}
+#[cfg(all(feature = "audio", target_os = "android"))]
+impl AndroidStreamHandle {
+    fn spawn(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Self> {
+        if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
+            return Err(reason.into());
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<AndroidStreamCmd>();
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let worker_live = live.clone();
+        let initial = target.to_owned();
+        std::thread::Builder::new()
+            .name("volt-audio-stream".into())
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let mut stream: Option<cpal::Stream> =
+                    match Audio::open_cpal_named(mixer.clone(), &initial) {
+                        Ok(s) => {
+                            worker_live.store(true, std::sync::atomic::Ordering::Release);
+                            Some(s)
+                        }
+                        Err(e) => {
+                            log::warn!("Horizon: no sound: {e}");
+                            worker_live.store(false, std::sync::atomic::Ordering::Release);
+                            None
+                        }
+                    };
+                while let Ok(cmd) = rx.recv() {
+                    match cmd {
+                        AndroidStreamCmd::Reopen(device_name) => {
+                            // Drop the previous AAudioStream on this background thread
+                            // before opening the replacement so `AAudioStream_close`
+                            // never blocks the UI thread either.
+                            stream = None;
+                            match Audio::open_cpal_named(mixer.clone(), &device_name) {
+                                Ok(s) => {
+                                    worker_live.store(true, std::sync::atomic::Ordering::Release);
+                                    stream = Some(s);
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Horizon: could not reopen the audio output: {e}"
+                                    );
+                                    worker_live.store(false, std::sync::atomic::Ordering::Release);
+                                }
+                            }
+                        }
+                    }
+                }
+                drop(stream);
+            })
+            .map_err(|e| format!("could not spawn Android audio stream thread: {e}"))?;
+        Ok(Self { tx, live })
+    }
+
+    fn reopen(&self, target: &str) -> bool {
+        self.tx
+            .send(AndroidStreamCmd::Reopen(target.to_owned()))
+            .is_ok()
+    }
+
+    fn is_live(&self) -> bool {
+        self.live.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 /// The open output stream. A build without the `audio` feature (the server build, which must not
 /// need libasound) never has one.
-#[cfg(feature = "audio")]
+#[cfg(all(feature = "audio", not(target_os = "android")))]
 type Stream = cpal::Stream;
+#[cfg(all(feature = "audio", target_os = "android"))]
+type Stream = AndroidStreamHandle;
 #[cfg(not(feature = "audio"))]
 type Stream = std::convert::Infallible;
 pub struct Audio {
@@ -674,20 +753,35 @@ impl Audio {
     pub fn new(root: &Path) -> Self {
         Self::with_device(root, "")
     }
+    pub fn new_with_registry(root: &Path, registry: Option<SoundRegistry>) -> Self {
+        Self::with_device_and_registry(root, "", registry)
+    }
     pub fn with_device(root: &Path, device_name: &str) -> Self {
-        Self::with_output(root, true, device_name)
+        Self::with_output(root, true, device_name, None)
+    }
+    pub fn with_device_and_registry(
+        root: &Path,
+        device_name: &str,
+        registry: Option<SoundRegistry>,
+    ) -> Self {
+        Self::with_output(root, true, device_name, registry)
     }
     /// No output device: the dedicated server.
     pub fn silent(root: &Path) -> Self {
-        Self::with_output(root, false, "")
+        Self::with_output(root, false, "", None)
     }
     /// The output device asked for (`soundDevice`), empty for the system's default; the
     /// default plays when that one can't be opened, as in vanilla.
     pub fn device(&self) -> &str {
         &self.device_name
     }
-    fn with_output(root: &Path, output: bool, target_device: &str) -> Self {
-        let registry = SoundRegistry::load(root);
+    fn with_output(
+        root: &Path,
+        output: bool,
+        target_device: &str,
+        preloaded: Option<SoundRegistry>,
+    ) -> Self {
+        let registry = preloaded.unwrap_or_else(|| SoundRegistry::load(root));
         if output && registry.is_empty() {
             // The game then plays nothing on a working output (#1035, #1076).
             log::warn!(
@@ -750,8 +844,16 @@ impl Audio {
     fn open_named(_: Arc<Mutex<Mixer>>, _: &str) -> Result<Stream> {
         Err("this build has no sound output (built without the `audio` feature)".into())
     }
-    #[cfg(feature = "audio")]
+    #[cfg(all(feature = "audio", target_os = "android"))]
     fn open_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Stream> {
+        AndroidStreamHandle::spawn(mixer, target)
+    }
+    #[cfg(all(feature = "audio", not(target_os = "android")))]
+    fn open_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Stream> {
+        Self::open_cpal_named(mixer, target)
+    }
+    #[cfg(feature = "audio")]
+    fn open_cpal_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<cpal::Stream> {
         if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
             return Err(reason.into());
         }
@@ -780,11 +882,18 @@ impl Audio {
                 }
             }
         }
-        Self::open(mixer)
+        Self::open_cpal(mixer)
     }
     #[cfg(feature = "audio")]
     pub fn set_device(&mut self, name: &str) -> Result<()> {
         if !self.backend.live && self._stream.is_none() && !self.engine.loaded {
+            self.device_name = name.to_owned();
+            return Ok(());
+        }
+        #[cfg(target_os = "android")]
+        if let Some(handle) = &self._stream
+            && handle.reopen(name)
+        {
             self.device_name = name.to_owned();
             return Ok(());
         }
@@ -800,7 +909,7 @@ impl Audio {
         Ok(())
     }
     #[cfg(feature = "audio")]
-    fn open(mixer: Arc<Mutex<Mixer>>) -> Result<Stream> {
+    fn open_cpal(mixer: Arc<Mutex<Mixer>>) -> Result<cpal::Stream> {
         if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
             return Err(reason.into());
         }
@@ -964,6 +1073,12 @@ impl Audio {
     }
     /// `SoundManager.tick(paused)`, once per client tick.
     pub fn tick(&mut self, paused: bool, ctx: &TickContext) {
+        #[cfg(all(feature = "audio", target_os = "android"))]
+        if let Some(handle) = &self._stream {
+            let live = handle.is_live();
+            self.backend.live = live;
+            self.engine.loaded = live;
+        }
         #[cfg(feature = "audio")]
         {
             if self.should_change_device() {
@@ -996,8 +1111,11 @@ impl Audio {
     /// `SoundManager.reload` (resource packs changed): stop every sound, then
     /// read sound events and sound files from the new resource root.
     pub fn reload(&mut self, root: &Path) {
+        self.reload_with_registry(root, None);
+    }
+    pub fn reload_with_registry(&mut self, root: &Path, registry: Option<SoundRegistry>) {
         self.stop_all();
-        self.engine.registry = SoundRegistry::load(root);
+        self.engine.registry = registry.unwrap_or_else(|| SoundRegistry::load(root));
         self.backend.root = root.to_owned();
         let mut cache = self.backend.cache.lock().unwrap();
         cache.entries.clear();

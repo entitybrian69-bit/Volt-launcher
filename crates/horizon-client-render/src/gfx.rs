@@ -11,7 +11,12 @@ use crate::{
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    path::PathBuf,
+    sync::Arc,
+    time::Instant,
+};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
@@ -584,6 +589,11 @@ pub struct Renderer {
     /// The block sprites, [`SPRITE_SPLIT`] layers per array (the first is
     /// `sprites` in terrain.wgsl, the others `sprites_1`...).
     sprite_textures: Vec<wgpu::Texture>,
+    /// Incremental mip-major block-sprite uploads streamed across title-screen
+    /// frames on Android so `Loading::finish` never stalls `ALooper` or spikes
+    /// Vulkan staging memory with thousands of per-layer `write_texture` calls.
+    pending_sprite_uploads: VecDeque<PendingSpriteArrayUpload>,
+    sprite_upload_scratch: Vec<u8>,
     /// A 1-layer array bound where a pack needs fewer arrays.
     sprite_unused: wgpu::TextureView,
     mip_levels: u32,
@@ -802,12 +812,13 @@ fn instance_buffer_usage(limits: &wgpu::Limits) -> wgpu::BufferUsages {
 /// Sprite arrays terrain.wgsl binds (`sprites`, `sprites_1`...).
 const SPRITE_ARRAYS: u32 = 8;
 /// Effective `SPRITE_ARRAYS` constant compiled into `terrain.wgsl`.
-/// When `split < SPRITE_SPLIT` (OpenGL ES or Vulkan GPUs with <2048 array layers),
-/// compile the multi-array branch (`SPRITE_ARRAYS > 1`) up front so the 1-layer
-/// loading renderer upgrades in-place to the ~1450-layer world textures without
-/// building a second `Renderer` on the live Android window surface.
+/// On Android (where concurrent background `Renderer` rebuilds are skipped on Mali
+/// and `Launcher::open` starts with a 1-layer loading renderer) and whenever
+/// `split < SPRITE_SPLIT`, compile the multi-array branch (`SPRITE_ARRAYS`) up
+/// front so any pack up to `8 * split` layers upgrades in-place via
+/// `replace_world_textures` without recompiling pipelines on the UI thread.
 fn effective_sprite_arrays(layers: u32, split: u32) -> u32 {
-    if split < SPRITE_SPLIT {
+    if cfg!(target_os = "android") || split < SPRITE_SPLIT {
         SPRITE_ARRAYS
     } else {
         layers.div_ceil(split).max(1)
@@ -923,6 +934,7 @@ pub struct PreparedTextures {
     sprites: Vec<(Vec<u8>, u32)>,
     forcefield: (Vec<u8>, u32),
     split: u32,
+    animations: Option<Vec<animate::PreparedAnimation>>,
 }
 impl PreparedTextures {
     pub fn new(
@@ -933,6 +945,18 @@ impl PreparedTextures {
         forcefield: (&[u8], u32),
     ) -> Self {
         Self::with_split(pixels, size, layers, settings, forcefield, sprite_split())
+    }
+
+    /// Precompute animated block-sprite mip sheets on the resource worker so
+    /// `SpriteAnimator` construction on the UI thread needs zero mipmap work.
+    pub fn with_animations(
+        mut self,
+        animations: &[SpriteAnimation],
+        size: u32,
+        settings: &[crate::mipmap::Settings],
+    ) -> Self {
+        self.animations = Some(animate::prepare(animations, size, settings));
+        self
     }
 
     /// Reuse the worker's exact mip bytes when the selected GPU needs smaller arrays.
@@ -961,6 +985,7 @@ impl PreparedTextures {
             sprites,
             forcefield: self.forcefield,
             split,
+            animations: self.animations,
         }
     }
 
@@ -984,7 +1009,91 @@ impl PreparedTextures {
                 .collect(),
             forcefield: mip_chain(forcefield.0, forcefield.1, &[], 0, 1),
             split,
+            animations: None,
         }
+    }
+}
+
+struct PendingSpriteArrayUpload {
+    array: usize,
+    sprite_size: u32,
+    levels: u32,
+    used_layers: u32,
+    next_layer: u32,
+    chain_bytes: usize,
+    mips: Vec<u8>,
+}
+
+impl PendingSpriteArrayUpload {
+    fn new(array: usize, sprite_size: u32, levels: u32, used_layers: u32, mips: Vec<u8>) -> Self {
+        let layer_bytes = (sprite_size * sprite_size * 4) as usize;
+        let chain_bytes: usize = (0..levels).map(|l| layer_bytes >> (2 * l)).sum();
+        Self {
+            array,
+            sprite_size,
+            levels,
+            used_layers,
+            next_layer: 0,
+            chain_bytes,
+            mips,
+        }
+    }
+
+    fn upload_next_batch(
+        &mut self,
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+        scratch: &mut Vec<u8>,
+        max_bytes: usize,
+        max_layers: u32,
+    ) -> bool {
+        if self.used_layers == 0
+            || self.chain_bytes == 0
+            || self.next_layer >= self.used_layers
+            || self.mips.len() < self.used_layers as usize * self.chain_bytes
+        {
+            return true;
+        }
+        let batch_limit = (max_bytes / self.chain_bytes).clamp(1, max_layers as usize) as u32;
+        let first_layer = self.next_layer;
+        let batch_count = (self.used_layers - first_layer).min(batch_limit);
+        let mut mip_offset = 0usize;
+        for level in 0..self.levels {
+            let edge = (self.sprite_size >> level).max(1);
+            let level_bytes = (edge * edge * 4) as usize;
+            scratch.clear();
+            scratch.reserve(level_bytes * batch_count as usize);
+            for layer in first_layer..first_layer + batch_count {
+                let start = layer as usize * self.chain_bytes + mip_offset;
+                scratch.extend_from_slice(&self.mips[start..start + level_bytes]);
+            }
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: level,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: first_layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                scratch,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(edge * 4),
+                    rows_per_image: Some(edge),
+                },
+                wgpu::Extent3d {
+                    width: edge,
+                    height: edge,
+                    depth_or_array_layers: batch_count,
+                },
+            );
+            mip_offset += level_bytes;
+        }
+        self.next_layer += batch_count;
+        self.next_layer >= self.used_layers
     }
 }
 
@@ -2006,6 +2115,7 @@ impl Renderer {
                 PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
             })
             .for_split(layers, split);
+        let prepared_animations = prepared.animations;
         let mut mip_levels = 1;
         let sprite_compute = animate::SpriteAnimator::compute(&adapter, &device);
         let sprite_storage = if sprite_compute {
@@ -2014,43 +2124,58 @@ impl Renderer {
             wgpu::TextureUsages::empty()
         };
         let gl = adapter.get_info().backend == wgpu::Backend::Gl;
+        let mut init_uploads = VecDeque::new();
         let sprite_textures: Vec<wgpu::Texture> = prepared
             .sprites
             .into_iter()
             .enumerate()
-            .map(|(array, (mut mips, levels))| {
+            .map(|(array, (mips, levels))| {
                 let first = array as u32 * split;
                 let used = layers.saturating_sub(first).clamp(1, split);
                 let count = array_layers(used, gl);
-                // The extra layers are empty.
-                mips.resize(mips.len() / used as usize * count as usize, 0);
                 mip_levels = levels;
-                device.create_texture_with_data(
-                    &queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some("Block sprites"),
-                        size: wgpu::Extent3d {
-                            width: sprite_size,
-                            height: sprite_size,
-                            depth_or_array_layers: count,
-                        },
-                        mip_level_count: levels,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST
-                            // Shader packs' atlas copies them (pack_atlas.rs).
-                            | wgpu::TextureUsages::COPY_SRC
-                            | sprite_storage,
-                        view_formats: &[],
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Block sprites"),
+                    size: wgpu::Extent3d {
+                        width: sprite_size,
+                        height: sprite_size,
+                        depth_or_array_layers: count,
                     },
-                    wgpu::util::TextureDataOrder::LayerMajor,
-                    &mips,
-                )
+                    mip_level_count: levels,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        // Shader packs' atlas copies them (pack_atlas.rs).
+                        | wgpu::TextureUsages::COPY_SRC
+                        | sprite_storage,
+                    view_formats: &[],
+                });
+                init_uploads.push_back(PendingSpriteArrayUpload::new(
+                    array,
+                    sprite_size,
+                    levels,
+                    used,
+                    mips,
+                ));
+                tex
             })
             .collect();
-        let animations = animate::SpriteAnimator::new(
+        let mut init_scratch = Vec::new();
+        while let Some(mut upload) = init_uploads.pop_front() {
+            if let Some(tex) = sprite_textures.get(upload.array) {
+                while !upload.upload_next_batch(
+                    &queue,
+                    tex,
+                    &mut init_scratch,
+                    4 * 1024 * 1024,
+                    256,
+                ) {}
+            }
+        }
+        drop(init_scratch);
+        let animations = animate::SpriteAnimator::new_prepared(
             &device,
             animations,
             sprite_size,
@@ -2058,6 +2183,7 @@ impl Renderer {
             &sprite_textures,
             split,
             sprite_compute,
+            prepared_animations,
         );
         let sprite_unused = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -3214,6 +3340,8 @@ impl Renderer {
             globals,
             lightmap,
             sprite_textures,
+            pending_sprite_uploads: VecDeque::new(),
+            sprite_upload_scratch: Vec::new(),
             sprite_unused,
             mip_levels,
             mipmaps: mip_levels - 1,
@@ -3620,10 +3748,18 @@ impl Renderer {
         if !self.can_replace_world_textures(layers) {
             return Err("renderer terrain sprite array count changed".into());
         }
-        // Finish any in-flight loading-screen command buffers before replacing the
-        // bound terrain sprite arrays on unified mobile GPUs.
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        // Only wait synchronously when live terrain sections are currently bound on
+        // the GPU; on the title screen (`sections.len() == 0`), a non-blocking poll
+        // avoids stalling `ALooper` behind in-flight swapchain work.
+        let poll_mode = if self.sections.len() == 0 {
+            wgpu::PollType::Poll
+        } else {
+            wgpu::PollType::wait_indefinitely()
+        };
+        let _ = self.device.poll(poll_mode);
         let split = sprite_split().min(self.device.limits().max_texture_array_layers);
+        self.pending_sprite_uploads.clear();
+        self.sprite_upload_scratch = Vec::new();
         self.sprite_textures.clear();
         self.pack_atlas = None;
         self.menu_blur = None;
@@ -3633,6 +3769,7 @@ impl Renderer {
                 PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
             })
             .for_split(layers, split);
+        let prepared_animations = prepared.animations;
         let mut mip_levels = 1;
         let sprite_compute = animate::SpriteAnimator::compute(&self.adapter, &self.device);
         let sprite_storage = if sprite_compute {
@@ -3641,41 +3778,44 @@ impl Renderer {
             wgpu::TextureUsages::empty()
         };
         let gl = self.info.backend == wgpu::Backend::Gl;
+        let mut pending_uploads = VecDeque::new();
         let sprite_textures: Vec<wgpu::Texture> = prepared
             .sprites
             .into_iter()
             .enumerate()
-            .map(|(array, (mut mips, levels))| {
+            .map(|(array, (mips, levels))| {
                 let first = array as u32 * split;
                 let used = layers.saturating_sub(first).clamp(1, split);
                 let count = array_layers(used, gl);
-                mips.resize(mips.len() / used as usize * count as usize, 0);
                 mip_levels = levels;
-                self.device.create_texture_with_data(
-                    &self.queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some("Block sprites"),
-                        size: wgpu::Extent3d {
-                            width: sprite_size,
-                            height: sprite_size,
-                            depth_or_array_layers: count,
-                        },
-                        mip_level_count: levels,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST
-                            | wgpu::TextureUsages::COPY_SRC
-                            | sprite_storage,
-                        view_formats: &[],
+                let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Block sprites"),
+                    size: wgpu::Extent3d {
+                        width: sprite_size,
+                        height: sprite_size,
+                        depth_or_array_layers: count,
                     },
-                    wgpu::util::TextureDataOrder::LayerMajor,
-                    &mips,
-                )
+                    mip_level_count: levels,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC
+                        | sprite_storage,
+                    view_formats: &[],
+                });
+                pending_uploads.push_back(PendingSpriteArrayUpload::new(
+                    array,
+                    sprite_size,
+                    levels,
+                    used,
+                    mips,
+                ));
+                tex
             })
             .collect();
-        self.animations = animate::SpriteAnimator::new(
+        self.animations = animate::SpriteAnimator::new_prepared(
             &self.device,
             animations,
             sprite_size,
@@ -3683,6 +3823,7 @@ impl Renderer {
             &sprite_textures,
             split,
             sprite_compute,
+            prepared_animations,
         );
         self.sprite_sampler = self.device.create_sampler(&sprite_sampler_descriptor(0, 1));
         self.texture_filtering = 0;
@@ -3709,10 +3850,14 @@ impl Renderer {
             &self.lightmap_sampler,
         );
         self.sprite_textures = sprite_textures;
+        self.pending_sprite_uploads = pending_uploads;
         self.mip_levels = mip_levels;
         self.mipmaps = mip_levels - 1;
         self.sprite_minimum_size = sprite_minimum_size;
         self.lightmap_uploaded = false;
+        if !cfg!(target_os = "android") || layers <= 16 || self.sections.len() > 0 {
+            self.flush_pending_sprite_uploads();
+        }
 
         let forcefield_size = forcefield.1;
         let (forcefield_mips, forcefield_levels) = prepared.forcefield;
@@ -4649,7 +4794,50 @@ impl Renderer {
         }
     }
 
+    fn step_pending_sprite_uploads(&mut self) {
+        let Some(front) = self.pending_sprite_uploads.front_mut() else {
+            return;
+        };
+        let done = match self.sprite_textures.get(front.array) {
+            Some(tex) => front.upload_next_batch(
+                &self.queue,
+                tex,
+                &mut self.sprite_upload_scratch,
+                512 * 1024,
+                64,
+            ),
+            None => true,
+        };
+        if done {
+            self.pending_sprite_uploads.pop_front();
+            if self.pending_sprite_uploads.is_empty() {
+                self.sprite_upload_scratch = Vec::new();
+                horizon_threads::release_free_memory();
+            }
+        }
+    }
+
+    fn flush_pending_sprite_uploads(&mut self) {
+        if self.pending_sprite_uploads.is_empty() {
+            return;
+        }
+        while let Some(mut upload) = self.pending_sprite_uploads.pop_front() {
+            if let Some(tex) = self.sprite_textures.get(upload.array) {
+                while !upload.upload_next_batch(
+                    &self.queue,
+                    tex,
+                    &mut self.sprite_upload_scratch,
+                    4 * 1024 * 1024,
+                    256,
+                ) {}
+            }
+        }
+        self.sprite_upload_scratch = Vec::new();
+        horizon_threads::release_free_memory();
+    }
+
     fn pack_terrain_inputs(&mut self) -> Option<horizon_shaders::GbuffersInputs> {
+        self.flush_pending_sprite_uploads();
         if self.pack_atlas.is_none() {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             let layers = self
@@ -4902,8 +5090,14 @@ impl Renderer {
         if let Some(flat) = &mut self.flat {
             flat.trim(|page| self.arena.has_page(page));
         }
+        if !frame.title {
+            self.flush_pending_sprite_uploads();
+        }
         if self.suspended {
             return Ok(false);
+        }
+        if frame.title {
+            self.step_pending_sprite_uploads();
         }
         let started = Instant::now();
         if self.first_frame == FirstFrame::Acquire {

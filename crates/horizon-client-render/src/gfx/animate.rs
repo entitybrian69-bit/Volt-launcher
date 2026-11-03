@@ -64,6 +64,28 @@ enum Writer {
     },
 }
 
+pub(super) struct PreparedAnimation {
+    chains: Vec<Vec<u8>>,
+    edge: u32,
+}
+
+pub(super) fn prepare(
+    animations: &[SpriteAnimation],
+    size: u32,
+    settings: &[Settings],
+) -> Vec<PreparedAnimation> {
+    animations
+        .iter()
+        .map(|animation| {
+            let pixels: Vec<_> = (0..animation.frame_count())
+                .map(|frame| animation.pixels(frame))
+                .collect();
+            let (chains, edge) = source_chains(&pixels, size, settings, animation.layer);
+            PreparedAnimation { chains, edge }
+        })
+        .collect()
+}
+
 pub(super) struct SpriteAnimator {
     sprites: Vec<Sprite>,
     groups: Vec<Group>,
@@ -89,6 +111,22 @@ impl SpriteAnimator {
         split: u32,
         compute: bool,
     ) -> Self {
+        Self::new_prepared(
+            device, animations, size, settings, textures, split, compute, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new_prepared(
+        device: &wgpu::Device,
+        animations: &[SpriteAnimation],
+        size: u32,
+        settings: &[Settings],
+        textures: &[wgpu::Texture],
+        split: u32,
+        compute: bool,
+        prepared: Option<Vec<PreparedAnimation>>,
+    ) -> Self {
         let pipeline = if compute { pipeline(device) } else { None };
         let limits = device.limits();
         let limit = if pipeline.is_some() {
@@ -104,11 +142,19 @@ impl SpriteAnimator {
         let mut keys: Vec<(u32, usize)> = Vec::new();
         let mut counts: Vec<usize> = Vec::new();
         let mut sprites = Vec::with_capacity(animations.len());
+        let mut precomputed = prepared
+            .filter(|list| list.len() == animations.len())
+            .map(Vec::into_iter);
         for animation in animations {
-            let pixels: Vec<_> = (0..animation.frame_count())
-                .map(|frame| animation.pixels(frame))
-                .collect();
-            let (chains, edge) = source_chains(&pixels, size, settings, animation.layer);
+            let (chains, edge) = match precomputed.as_mut().and_then(Iterator::next) {
+                Some(entry) => (entry.chains, entry.edge),
+                None => {
+                    let pixels: Vec<_> = (0..animation.frame_count())
+                        .map(|frame| animation.pixels(frame))
+                        .collect();
+                    source_chains(&pixels, size, settings, animation.layer)
+                }
+            };
             let bytes: u64 = chains.iter().map(|chain| chain.len() as u64).sum();
             if bytes > limit {
                 log::warn!(

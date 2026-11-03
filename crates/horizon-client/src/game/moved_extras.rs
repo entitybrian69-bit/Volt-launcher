@@ -58,6 +58,7 @@ mod with_mods {
             self.mods.moved.running = Some(rx);
             let spawned = std::thread::Builder::new()
                 .name("Moved extras".into())
+                .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
                     let done = match moved_extras::fetch_index() {
                         Ok(index) => pending

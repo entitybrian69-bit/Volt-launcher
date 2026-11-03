@@ -16601,8 +16601,8 @@ impl<'a> Game<'a> {
         let inventory = vec![None; 36];
         let now = Instant::now();
         let look = options.look;
-        let particles = horizon_client::particles::ParticleEngine::new(
-            &root,
+        let particles = horizon_client::particles::ParticleEngine::from_sprite_sets(
+            prepared.particle_sets,
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );
@@ -16769,11 +16769,11 @@ impl<'a> Game<'a> {
             last_hurt_by_player: HashMap::new(),
             love_cause: HashMap::new(),
             died: HashSet::new(),
-            be_anims: {
+            be_anims: prepared.be_anims.unwrap_or_else(|| {
                 let mut anims = horizon_client::block_entity_anim::BlockEntityAnims::default();
                 anims.classify(registry);
                 anims
-            },
+            }),
             using: None,
             view: Default::default(),
             limiter: horizon_client::window::FramerateLimiter::new(0),
@@ -17043,6 +17043,8 @@ struct GameCpuResources {
     bee_stinger_model: Option<horizon_client::mobs::Part>,
     trident_model: Option<horizon_client::mobs::Part>,
     creative_screen: Creative,
+    particle_sets: horizon_client::particles::ParticleSpriteSets,
+    be_anims: Option<horizon_client::block_entity_anim::BlockEntityAnims>,
 }
 impl GameCpuResources {
     fn load(root: &std::path::Path) -> Result<Self> {
@@ -17065,7 +17067,16 @@ impl GameCpuResources {
             bee_stinger_model: model("minecraft:bee_stinger#main"),
             trident_model: model("minecraft:trident#main"),
             creative_screen: Creative::load(root)?,
+            particle_sets: horizon_client::particles::ParticleSpriteSets::load(root),
+            be_anims: None,
         })
+    }
+
+    fn with_registry(mut self, registry: &horizon_world::registry::BlockRegistry) -> Self {
+        let mut anims = horizon_client::block_entity_anim::BlockEntityAnims::default();
+        anims.classify(registry);
+        self.be_anims = Some(anims);
+        self
     }
 }
 
@@ -17086,7 +17097,11 @@ struct Loaded {
 /// What the background loader publishes: the menu bundle as soon as it is
 /// ready, then the core bundle with a handle to the rest worker.
 enum LoaderMsg {
-    Ui(UiResources, PathBuf),
+    Ui(
+        UiResources,
+        PathBuf,
+        Option<horizon_client::sound_events::SoundRegistry>,
+    ),
     Done(std::result::Result<Loaded, String>),
 }
 
@@ -17776,21 +17791,15 @@ fn load_resources(
         collision,
     } = core;
     let assets = Arc::new(assets);
-    let render = Arc::new(render);
+    let mut render = render;
     let biomes = Arc::new(biomes);
     if let Some(folder) = launch_world {
         world_loading::preload_launch_world(folder, &root, assets.registry, biomes.clone());
     }
     let tables = Arc::new(MeshTables::new(&assets, &render, &facts, visibility)?);
-    let pack = PackResources::assemble(
-        &root,
-        assets.clone(),
-        render,
-        tables,
-        item_renderer,
-        biomes.clone(),
-        Arc::new(light),
-    );
+    // The block entity renderer's face visibility: the meshes' own, whose
+    // shapes already hold their faces, not a second load of the same tables.
+    let visibility = tables.visibility.clone();
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
     if !menu {
@@ -17820,13 +17829,11 @@ fn load_resources(
             started.elapsed().as_millis()
         );
     }
-    // The block entity renderer's face visibility: the meshes' own, whose
-    // shapes already hold their faces, not a second load of the same tables.
-    let visibility = pack.context.tables.visibility.clone();
     // On Android, finish `load_world_rest` (which consumes and drops the ~140 MB
     // `behaviour_json` AST and builds `.horizon-cache/behaviours-v2.bin` on first launch)
-    // BEFORE allocating `prepare_renderer_textures(&pack)` (~100 MB RGBA mipmaps) and
-    // uploading GPU textures on the main thread, preventing unified RAM / 32-bit OOM.
+    // BEFORE allocating `PreparedTextures` (~100 MB RGBA mipmaps), and immediately drop
+    // `render.pixels` (~95 MB) once its mip chains and animations are built so unified
+    // mobile RAM and 32-bit address space never retain duplicate block-sprite pixels.
     if cfg!(target_os = "android") {
         #[cfg(target_os = "android")]
         crate::performance::mark("world_rest_start");
@@ -17855,8 +17862,32 @@ fn load_resources(
             );
         }
         let prepared_at = Instant::now();
-        let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
-        let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
+        let game_cpu = menu
+            .then(|| GameCpuResources::load(&root).map(|c| c.with_registry(assets.registry)))
+            .transpose()?;
+        let forcefield = Arc::new(load_forcefield(&root));
+        let renderer_cpu = menu.then(|| {
+            let prepared = horizon_client::gfx::PreparedTextures::new(
+                &render.pixels,
+                render.sprite_size,
+                render.texture_layers,
+                &render.sprite_mips,
+                (&forcefield.2, forcefield.0),
+            )
+            .with_animations(&render.animations, render.sprite_size, &render.sprite_mips);
+            render.pixels = Vec::new();
+            prepared
+        });
+        let mut pack = PackResources::assemble(
+            &root,
+            assets,
+            Arc::new(render),
+            tables,
+            item_renderer,
+            biomes,
+            Arc::new(light),
+        );
+        pack.forcefield = forcefield;
         horizon_threads::release_free_memory();
         #[cfg(target_os = "android")]
         crate::performance::mark("handoff_cpu_ready");
@@ -17877,10 +17908,21 @@ fn load_resources(
             gui: loaded_gui,
         });
     }
+    let pack = PackResources::assemble(
+        &root,
+        assets.clone(),
+        Arc::new(render),
+        tables,
+        item_renderer,
+        biomes.clone(),
+        Arc::new(light),
+    );
     // Finish fallible CPU preparation before starting the tail, so an error
     // cannot detach a tail worker that races the next pack-loader generation.
     let prepared_at = Instant::now();
-    let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
+    let game_cpu = menu
+        .then(|| GameCpuResources::load(&root).map(|c| c.with_registry(pack.assets.registry)))
+        .transpose()?;
     let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
     horizon_threads::release_free_memory();
     if menu {
@@ -18161,6 +18203,7 @@ fn prepare_renderer_textures(pack: &PackResources) -> horizon_client::gfx::Prepa
         &assets.sprite_mips,
         (&pack.forcefield.2, pack.forcefield.0),
     )
+    .with_animations(&assets.animations, assets.sprite_size, &assets.sprite_mips)
 }
 
 /// Game API selection stays separate from the installer's recovery UI.
@@ -18408,7 +18451,9 @@ fn start_game<'a>(
         game.settings.inactivity_fps_limit = "minimized".into();
         game.options.no_pause = true;
     }
-    game.apply_settings();
+    if !handoff {
+        game.apply_settings();
+    }
     // Benchmarks measure the game alone.
     if game.options.benchmark.is_none() {
         game.mods.dev = game.options.dev_mods.clone();
@@ -18767,12 +18812,17 @@ impl Loading {
     /// The menu bundle arrived: update the loading screen in-place with the
     /// real atlas and title panorama without tearing down the surface or
     /// recompiling pipelines.
-    fn set_ui(&mut self, gui: UiResources, root: PathBuf) {
+    fn set_ui(
+        &mut self,
+        gui: UiResources,
+        root: PathBuf,
+        sounds: Option<horizon_client::sound_events::SoundRegistry>,
+    ) {
         log::info!(
             "Horizon: loading the title artwork after {} ms",
             self.started.elapsed().as_millis()
         );
-        self.menu.set_root(root, &self.settings);
+        self.menu.set_root(root, &self.settings, sounds);
         self.gui = Some(gui);
         horizon_client::ui_theme::reset_atlas();
         if let (Some(renderer), Some(gui)) = (&mut self.renderer, &self.gui) {

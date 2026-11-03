@@ -79,7 +79,14 @@ impl StartupMenu {
         Ok(menu)
     }
 
-    pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
+    pub(super) fn set_root(
+        &mut self,
+        root: PathBuf,
+        settings: &Settings,
+        sounds: Option<horizon_client::sound_events::SoundRegistry>,
+    ) {
+        #[cfg(not(target_os = "android"))]
+        let _ = sounds;
         horizon_client::ui::load_metadata(&root);
         horizon_client::lang::set(horizon_client::lang::Language::load(
             &[&root],
@@ -88,7 +95,9 @@ impl StartupMenu {
         self.root = root;
         #[cfg(target_os = "android")]
         if self.audio.is_none() {
-            self.audio = Some(horizon_client::audio::Audio::new(&self.root));
+            self.audio = Some(horizon_client::audio::Audio::new_with_registry(
+                &self.root, sounds,
+            ));
         }
         if self.title.is_none() {
             let mut title = Title::new(
@@ -109,6 +118,7 @@ impl StartupMenu {
         #[cfg(target_os = "android")]
         {
             game.pad.touch = std::mem::take(&mut self.controls);
+            game.pad.touch_ui = std::mem::take(&mut self.touch);
         }
         #[cfg(target_os = "android")]
         {
@@ -312,7 +322,9 @@ pub(super) fn spawn_loader(
                 false,
                 &progress,
                 &mut |gui, root| {
-                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
+                    let sounds = cfg!(target_os = "android")
+                        .then(|| horizon_client::sound_events::SoundRegistry::load(root));
+                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf(), sounds));
                 },
             )
             .map(|mut loaded| {
@@ -332,7 +344,7 @@ impl Loading {
         if self.loaded.is_none() && !self.delivered {
             loop {
                 match self.receiver.try_recv() {
-                    Ok(LoaderMsg::Ui(gui, root)) => self.set_ui(gui, root),
+                    Ok(LoaderMsg::Ui(gui, root, sounds)) => self.set_ui(gui, root, sounds),
                     Ok(LoaderMsg::Done(result)) => {
                         self.loaded = Some(result);
                         self.delivered = true;
@@ -1394,7 +1406,7 @@ mod tests {
         let worker_root = root.clone();
         let worker = std::thread::spawn(move || {
             sender
-                .send(LoaderMsg::Ui(gui(&worker_root), worker_root))
+                .send(LoaderMsg::Ui(gui(&worker_root), worker_root, None))
                 .unwrap();
             published.send(()).unwrap();
             wait.recv().unwrap();
