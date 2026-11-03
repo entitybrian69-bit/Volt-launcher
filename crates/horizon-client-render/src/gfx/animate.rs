@@ -102,6 +102,7 @@ impl SpriteAnimator {
     /// `textures` are the sprite arrays, `split` layers each, `size` pixels
     /// wide; `animations` hold their frames at that size. `compute`: whether
     /// the device says it runs compute shaders writing storage textures.
+    #[cfg(test)]
     pub fn new(
         device: &wgpu::Device,
         animations: &[SpriteAnimation],

@@ -2,6 +2,7 @@
 //! full resource reload after a change, while playing.
 use super::{
     Game, PackResources, Resources, UiResources, build_renderer, prepare_renderer_textures,
+    rendering_api,
 };
 use horizon_client::{
     assets::Assets,
