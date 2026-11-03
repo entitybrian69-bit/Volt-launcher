@@ -312,6 +312,7 @@ impl Game<'_> {
         let server_flags = flags.clone();
         let thread = std::thread::Builder::new()
             .name("Server thread".into())
+            .stack_size(8 * 1024 * 1024)
             .spawn(move || {
                 // MinecraftServer.spin's Thread.setPriority(8).
                 horizon_threads::favour_current();

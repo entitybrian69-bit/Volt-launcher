@@ -328,6 +328,7 @@ fn loading<T: Send + 'static>(
 ) -> io::Result<std::thread::JoinHandle<T>> {
     std::thread::Builder::new()
         .name("Worldgen loader".into())
+        .stack_size(8 * 1024 * 1024)
         .spawn(load)
 }
 /// A loading thread's result; its panic goes on in this thread.

@@ -619,13 +619,48 @@ impl Launcher {
         }
         Ok(())
     }
+
+    fn run_game_guarded(
+        &mut self,
+        events: &ActiveEventLoop,
+        f: impl FnOnce(&mut game::AndroidGame),
+    ) -> bool {
+        let Some(mut active_game) = self.game.take() else {
+            return false;
+        };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f(&mut active_game);
+            active_game
+        })) {
+            Ok(active_game) => {
+                self.game = Some(active_game);
+                self.restore_launcher(events);
+            }
+            Err(payload) => {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .map(str::to_owned)
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unexpected internal error".into());
+                let full = format!("Minecraft client recovered from internal error: {message}");
+                log::error!("{full}");
+                crate::diagnostics::record_error(&full);
+                let _ = std::fs::write(self.home.join("android-error.txt"), &full);
+                horizon_client::android_runtime::return_to_launcher();
+                self.restore_launcher(events);
+            }
+        }
+        true
+    }
 }
 
 impl ApplicationHandler for Launcher {
     fn resumed(&mut self, events: &ActiveEventLoop) {
         self.configure_screen();
-        if let Some(game) = &mut self.game {
-            return game.resumed(events);
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.resumed(events));
+            return;
         }
         if let Err(error) = self.open(events) {
             self.fail(error);
@@ -634,8 +669,9 @@ impl ApplicationHandler for Launcher {
     }
     fn suspended(&mut self, events: &ActiveEventLoop) {
         crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
-        if let Some(game) = &mut self.game {
-            return game.suspended(events);
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.suspended(events));
+            return;
         }
         self.drag = None;
         self.mouse_down = false;
@@ -655,9 +691,8 @@ impl ApplicationHandler for Launcher {
         if matches!(event, WindowEvent::Focused(true)) {
             self.configure_screen();
         }
-        if let Some(game) = &mut self.game {
-            game.window_event(events, id, event);
-            self.restore_launcher(events);
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.window_event(events, id, event));
             return;
         }
         if !matches!(event, WindowEvent::RedrawRequested) {
@@ -822,8 +857,8 @@ impl ApplicationHandler for Launcher {
         }
     }
     fn device_event(&mut self, events: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
-        if let Some(game) = &mut self.game {
-            game.device_event(events, id, event);
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.device_event(events, id, event));
         } else {
             horizon_client::android_runtime::gamepad_event(
                 winit::platform::android::native_device_id(id),
@@ -832,9 +867,8 @@ impl ApplicationHandler for Launcher {
         }
     }
     fn about_to_wait(&mut self, events: &ActiveEventLoop) {
-        if let Some(game) = &mut self.game {
-            game.about_to_wait(events);
-            self.restore_launcher(events);
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.about_to_wait(events));
             return;
         }
         // Process deferred input activations outside android-activity's InputQueue critical section.

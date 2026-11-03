@@ -273,8 +273,13 @@ impl SpriteAnimator {
 
     /// Whether the jobs can run on the GPU: compute shaders writing a
     /// storage texture and reading two storage buffers (not OpenGL before
-    /// 4.3).
+    /// 4.3, and disabled on Android mobile GPUs so multi-mip 2D-array block
+    /// atlases keep hardware AFBC/UBWC read-only layout and avoid Mali Valhall
+    /// storage-array barrier faults and UI-thread pipeline compile stalls).
     pub fn compute(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
+        if cfg!(target_os = "android") {
+            return false;
+        }
         let limits = device.limits();
         adapter
             .get_downlevel_capabilities()

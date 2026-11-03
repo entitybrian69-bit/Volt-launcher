@@ -321,17 +321,20 @@ impl Resolver {
             return Resolve::Done(None);
         }
         let (key, send) = (key.clone(), self.send.clone());
-        std::thread::spawn(move || {
-            let mut resolved = crate::auth::discovery()
-                .ok()
-                .and_then(|doc| resolve_profile(&key, &doc));
-            if resolved.is_none()
-                && let NameOrId::Name(name) = &key
-            {
-                resolved = resolve_ely_profile_by_name(name);
-            }
-            let _ = send.send((key, resolved));
-        });
+        let _ = std::thread::Builder::new()
+            .name("skin-resolve".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let mut resolved = crate::auth::discovery()
+                    .ok()
+                    .and_then(|doc| resolve_profile(&key, &doc));
+                if resolved.is_none()
+                    && let NameOrId::Name(name) = &key
+                {
+                    resolved = resolve_ely_profile_by_name(name);
+                }
+                let _ = send.send((key, resolved));
+            });
         Resolve::Pending
     }
 }
@@ -1018,22 +1021,25 @@ impl Downloader {
             .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
             .join(&digest);
         let (url, send) = (url.to_owned(), self.send.clone());
-        std::thread::spawn(move || {
-            let bytes = std::fs::read(&file).ok().or_else(|| {
-                let body = http_get(&url)?;
-                let _ = std::fs::create_dir_all(file.parent()?);
-                let _ = std::fs::write(&file, &body);
-                Some(body)
-            });
-            let image = bytes
-                .and_then(|b| crate::hud::decode_bytes(&b).ok())
-                .and_then(|(w, h, rgba)| match kind {
-                    Kind::Skin => process_legacy_skin(w, h, &rgba),
-                    Kind::Cape => process_cape(w, h, &rgba),
-                    Kind::Elytra => Some(rgba),
+        let _ = std::thread::Builder::new()
+            .name("skin-download".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let bytes = std::fs::read(&file).ok().or_else(|| {
+                    let body = http_get(&url)?;
+                    let _ = std::fs::create_dir_all(file.parent()?);
+                    let _ = std::fs::write(&file, &body);
+                    Some(body)
                 });
-            let _ = send.send((key, image));
-        });
+                let image = bytes
+                    .and_then(|b| crate::hud::decode_bytes(&b).ok())
+                    .and_then(|(w, h, rgba)| match kind {
+                        Kind::Skin => process_legacy_skin(w, h, &rgba),
+                        Kind::Cape => process_cape(w, h, &rgba),
+                        Kind::Elytra => Some(rgba),
+                    });
+                let _ = send.send((key, image));
+            });
         Download::Pending
     }
     /// Keeps a decoded skin for `again`, dropping the oldest past the bound.

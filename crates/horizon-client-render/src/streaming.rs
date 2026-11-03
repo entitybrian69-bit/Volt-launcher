@@ -582,6 +582,7 @@ impl Streaming {
                 let light = context.light.clone();
                 thread::Builder::new()
                     .name(format!("horizon-worker-{i}"))
+                    .stack_size(4 * 1024 * 1024)
                     .spawn(move || {
                         // Ticks and frames come first (horizon_threads).
                         horizon_threads::behind_server();

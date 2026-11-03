@@ -43,6 +43,7 @@ struct Channel {
 #[derive(Default)]
 struct Mixer {
     channels: HashMap<ChannelId, Channel>,
+    voices_scratch: Vec<(ChannelId, [f32; 3], f64)>,
     listener: [f64; 3],
     listener_yaw: f32,
     listener_pitch: f32,
@@ -435,8 +436,9 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         forward[0] * up[1] - forward[1] * up[0],
     ];
     let dot = |a: [f64; 3], b: [f64; 3]| (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) as f32;
-    // Gains and pans per source for this buffer.
-    let mut voices: Vec<(ChannelId, [f32; 3], f64)> = Vec::new();
+    // Gains and pans per source for this buffer (reuse scratch Vec so real-time audio callbacks never allocate).
+    let mut voices = std::mem::take(&mut mixer.voices_scratch);
+    voices.clear();
     for (id, c) in &mixer.channels {
         let Some((_, source_rate)) = &c.samples else {
             continue;
@@ -465,7 +467,7 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         let step = f64::from(*source_rate) / f64::from(rate) * f64::from(c.pitch.max(0.0));
         voices.push((*id, [left, right, gain], step));
     }
-    for (id, [left, right, gain], step) in voices {
+    for &(id, [left, right, gain], step) in &voices {
         let Some(c) = mixer.channels.get_mut(&id) else {
             continue;
         };
@@ -495,6 +497,7 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
             c.position += step;
         }
     }
+    mixer.voices_scratch = voices;
     // Limit the whole buffer together, preserving waveform and stereo balance
     // instead of flattening each overloaded sample; release over 200 ms
     // (OpenAL Soft's output limiter, `ALC_OUTPUT_LIMITER_SOFT`, releases
@@ -534,55 +537,100 @@ fn output_disabled(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<S
 fn open_device(
     device: &cpal::Device,
     mixer: Arc<Mutex<Mixer>>,
-) -> Result<(cpal::Stream, cpal::SupportedStreamConfig)> {
+) -> Result<(cpal::Stream, u32, u16, cpal::SampleFormat)> {
     use cpal::SampleFormat as F;
+    // On Android, cpal 0.16's `default_output_config()` invokes 52 unframed `.unwrap()`
+    // JNI calls to `AudioTrack.getMinBufferSize` and picks 192 kHz via `with_max_sample_rate()`.
+    // Opening native AAudio directly with an explicit 48 kHz / 44.1 kHz stereo config makes
+    // zero JNI calls and preserves Android FastTrack low-latency mixing.
+    #[cfg(target_os = "android")]
+    {
+        for rate in [48_000u32, 44_100u32] {
+            let stream_cfg = cpal::StreamConfig {
+                channels: 2,
+                sample_rate: cpal::SampleRate(rate),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            for format in [F::F32, F::I16] {
+                let opened = match format {
+                    F::F32 => build_stream_with_config::<f32>(device, &stream_cfg, mixer.clone()),
+                    F::I16 => build_stream_with_config::<i16>(device, &stream_cfg, mixer.clone()),
+                    _ => unreachable!(),
+                };
+                if let Ok(stream) = opened
+                    && stream.play().is_ok()
+                {
+                    if let Ok(mut m) = mixer.lock() {
+                        m.device_name = "default".into();
+                        m.device_lost = false;
+                    }
+                    return Ok((stream, rate, 2, format));
+                }
+            }
+        }
+    }
     let config = device.default_output_config()?;
-    let stream = match config.sample_format() {
-        F::F32 => build_stream::<f32>(device, &config, mixer.clone()),
-        F::F64 => build_stream::<f64>(device, &config, mixer.clone()),
-        F::I16 => build_stream::<i16>(device, &config, mixer.clone()),
-        F::I32 => build_stream::<i32>(device, &config, mixer.clone()),
-        F::I8 => build_stream::<i8>(device, &config, mixer.clone()),
-        F::U16 => build_stream::<u16>(device, &config, mixer.clone()),
-        F::U32 => build_stream::<u32>(device, &config, mixer.clone()),
-        F::U8 => build_stream::<u8>(device, &config, mixer.clone()),
+    let format = config.sample_format();
+    let stream_cfg = config.config();
+    let stream = match format {
+        F::F32 => build_stream_with_config::<f32>(device, &stream_cfg, mixer.clone()),
+        F::F64 => build_stream_with_config::<f64>(device, &stream_cfg, mixer.clone()),
+        F::I16 => build_stream_with_config::<i16>(device, &stream_cfg, mixer.clone()),
+        F::I32 => build_stream_with_config::<i32>(device, &stream_cfg, mixer.clone()),
+        F::I8 => build_stream_with_config::<i8>(device, &stream_cfg, mixer.clone()),
+        F::U16 => build_stream_with_config::<u16>(device, &stream_cfg, mixer.clone()),
+        F::U32 => build_stream_with_config::<u32>(device, &stream_cfg, mixer.clone()),
+        F::U8 => build_stream_with_config::<u8>(device, &stream_cfg, mixer.clone()),
         other => Err(format!("unsupported sample format {other}").into()),
     }?;
     stream.play()?;
     if let Ok(mut m) = mixer.lock() {
-        m.device_name = device.name().unwrap_or_default();
+        m.device_name = if cfg!(target_os = "android") {
+            "default".into()
+        } else {
+            device.name().unwrap_or_default()
+        };
         m.device_lost = false;
     }
-    Ok((stream, config))
+    Ok((stream, stream_cfg.sample_rate.0, stream_cfg.channels, format))
 }
 /// The name of the system's default output device.
 #[cfg(feature = "audio")]
 fn default_output_name() -> Option<String> {
+    if cfg!(target_os = "android") {
+        return Some("default".into());
+    }
     cpal::default_host()
         .default_output_device()
         .and_then(|d| d.name().ok())
 }
 #[cfg(feature = "audio")]
-fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
+fn build_stream_with_config<T: cpal::SizedSample + cpal::FromSample<f32>>(
     device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
+    config: &cpal::StreamConfig,
     mixer: Arc<Mutex<Mixer>>,
 ) -> Result<cpal::Stream> {
-    let rate = config.sample_rate().0;
-    let channels = config.channels() as usize;
-    let mut scratch = Vec::new();
+    let rate = config.sample_rate.0.max(1);
+    let channels = (config.channels as usize).max(1);
+    let mut scratch = Vec::with_capacity(4096);
     let on_error = mixer.clone();
     let stream = device.build_output_stream(
-        &config.config(),
+        config,
         move |data: &mut [T], _| {
-            scratch.resize(data.len(), 0.0f32);
-            if let Ok(mut m) = mixer.lock() {
-                mix(&mut m, &mut scratch, channels, rate);
-            } else {
-                scratch.fill(0.0);
-            }
-            for (out, s) in data.iter_mut().zip(&scratch) {
-                *out = T::from_sample(*s);
+            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scratch.resize(data.len(), 0.0f32);
+                if let Ok(mut m) = mixer.lock() {
+                    mix(&mut m, &mut scratch, channels, rate);
+                } else {
+                    scratch.fill(0.0);
+                }
+                for (out, s) in data.iter_mut().zip(&scratch) {
+                    *out = T::from_sample(*s);
+                }
+            }));
+            if ok.is_err() {
+                let zero = T::from_sample(0.0f32);
+                data.fill(zero);
             }
         },
         move |e| {
@@ -716,12 +764,9 @@ impl Audio {
                 let name = device.name().unwrap_or_else(|_| "unnamed device".into());
                 if name == target {
                     match open_device(&device, mixer.clone()) {
-                        Ok((stream, config)) => {
+                        Ok((stream, sample_rate, channels, sample_format)) => {
                             log::info!(
-                                "Horizon: audio output {name} ({} Hz, {} channels, {})",
-                                config.sample_rate().0,
-                                config.channels(),
-                                config.sample_format()
+                                "Horizon: audio output {name} ({sample_rate} Hz, {channels} channels, {sample_format})"
                             );
                             return Ok(stream);
                         }
@@ -766,15 +811,16 @@ impl Audio {
         // on Android, cpal's Java AudioDeviceInfo enumeration overflows its 16-slot
         // local JNI frame and can detach a worker thread with a pending exception.
         if let Some(device) = host.default_output_device() {
-            let name = device.name().unwrap_or_else(|_| "unnamed device".into());
+            let name = if cfg!(target_os = "android") {
+                "default".into()
+            } else {
+                device.name().unwrap_or_else(|_| "unnamed device".into())
+            };
             tried.push(name.clone());
             match open_device(&device, mixer.clone()) {
-                Ok((stream, config)) => {
+                Ok((stream, sample_rate, channels, sample_format)) => {
                     log::info!(
-                        "Horizon: audio output {name} ({} Hz, {} channels, {})",
-                        config.sample_rate().0,
-                        config.channels(),
-                        config.sample_format()
+                        "Horizon: audio output {name} ({sample_rate} Hz, {channels} channels, {sample_format})"
                     );
                     return Ok(stream);
                 }
@@ -789,12 +835,9 @@ impl Audio {
                 }
                 tried.push(name.clone());
                 match open_device(&device, mixer.clone()) {
-                    Ok((stream, config)) => {
+                    Ok((stream, sample_rate, channels, sample_format)) => {
                         log::info!(
-                            "Horizon: audio output {name} ({} Hz, {} channels, {})",
-                            config.sample_rate().0,
-                            config.channels(),
-                            config.sample_format()
+                            "Horizon: audio output {name} ({sample_rate} Hz, {channels} channels, {sample_format})"
                         );
                         return Ok(stream);
                     }

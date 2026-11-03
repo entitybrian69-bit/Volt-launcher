@@ -173,13 +173,18 @@ impl MenuBlur {
         size: [u32; 2],
         radius: f32,
     ) {
+        if size[0] == 0 || size[1] == 0 || frame.width() == 0 || frame.height() == 0 {
+            return;
+        }
         self.ensure(device, size);
+        let copy_width = size[0].min(frame.width());
+        let copy_height = size[1].min(frame.height());
         encoder.copy_texture_to_texture(
             frame.as_image_copy(),
             self.targets[0].0.as_image_copy(),
             wgpu::Extent3d {
-                width: size[0],
-                height: size[1],
+                width: copy_width,
+                height: copy_height,
                 depth_or_array_layers: 1,
             },
         );

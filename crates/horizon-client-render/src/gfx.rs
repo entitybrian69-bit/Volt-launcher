@@ -1636,8 +1636,10 @@ impl Renderer {
             }
             config.format = surface_format(&caps.formats, config.format);
             config.view_formats = vec![config.format.remove_srgb_suffix()];
-            // Screenshots copy the presented frame back from the swapchain.
-            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            // Desktop screenshots and menu blur copy from the swapchain; Android
+            // routes both through FrameScale's GPU-local target so SurfaceFlinger
+            // AHardwareBuffer swapchain images stay pure RENDER_ATTACHMENT (AFBC/UBWC).
+            if !cfg!(target_os = "android") && caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
                 config.usage |= wgpu::TextureUsages::COPY_SRC;
             }
             config.present_mode = previous
@@ -3621,10 +3623,6 @@ impl Renderer {
         // Finish any in-flight loading-screen command buffers before replacing the
         // bound terrain sprite arrays on unified mobile GPUs.
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        #[cfg(target_os = "android")]
-        if self.info.backend != wgpu::Backend::Gl && self.surface.is_some() {
-            self.startup = crate::android_runtime::graphics_startup::begin();
-        }
         let split = sprite_split().min(self.device.limits().max_texture_array_layers);
         self.sprite_textures.clear();
         self.pack_atlas = None;
@@ -3805,10 +3803,13 @@ impl Renderer {
         #[cfg(target_os = "android")]
         {
             let size = self.window.inner_size();
-            if size.width == 0 || size.height == 0 {
+            let max = self.device.limits().max_texture_dimension_2d;
+            if !drawable_size(size.width, size.height, max) {
                 self.suspended = true;
                 return Ok(());
             }
+            self.config.width = size.width;
+            self.config.height = size.height;
         }
         // The surface set aside for a replacement that failed, else a new one
         // (Wayland allows only one tearing-control object per window surface,
@@ -3834,6 +3835,7 @@ impl Renderer {
             &self.surface_config(),
             self.hdr.as_ref(),
         );
+        self.depth = Self::depth(&self.device, &self.config);
         self.surface = Some(surface);
         self.suspended = false;
         Ok(())
@@ -4965,7 +4967,9 @@ impl Renderer {
         #[cfg(target_os = "android")]
         let scaled_presentation = surface_frame.as_ref().is_some_and(|f| {
             let physical = [f.texture.width(), f.texture.height()];
-            physical != size
+            frame.menu_blur.is_some()
+                || self.screenshot.is_some()
+                || physical != size
                 || winit::platform::android::native_content_rect(physical)
                     != [0, 0, physical[0], physical[1]]
         });
@@ -5017,7 +5021,7 @@ impl Renderer {
         if let Some(stages) = &mut self.gpu_stages {
             stages.begin_prepare(&mut encoder);
         }
-        if self.animated_textures {
+        if !frame.title && self.animated_textures {
             let step = self.animation_step_ticks.max(1);
             let anim_tick = frame.ticks / step * step;
             if self.last_animated_tick != Some(anim_tick) {
@@ -6935,7 +6939,7 @@ impl Renderer {
         }
         let menu_blur = frame
             .menu_blur
-            .filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC));
+            .filter(|_| target_texture.usage().contains(wgpu::TextureUsages::COPY_SRC));
         let blur_at = menu_blur.map_or(0, |_| frame.hud.blur_at);
         self.hud.draw_range(
             &mut encoder,

@@ -585,8 +585,9 @@ impl Loading {
         use horizon_client::osk::Output;
         if let Some(notice) = crate::documents::poll() {
             if notice.changed {
-                self.menu.options.pack_infos =
-                    packs::pack_infos(&self.options.as_ref().unwrap().resources);
+                if let Some(options) = &self.options {
+                    self.menu.options.pack_infos = packs::pack_infos(&options.resources);
+                }
                 self.menu.options.pack_screen = None;
                 self.settings.shader_packs =
                     horizon_client::shader_pack_list::scan(&Game::shader_packs_dir());
@@ -597,22 +598,24 @@ impl Loading {
             match out {
                 Output::Text(s) => {
                     if self.menu.options_open {
-                        self.menu
-                            .options
-                            .type_text(&self.gui.as_ref().unwrap().atlas, &s);
+                        if let Some(gui) = &self.gui {
+                            self.menu.options.type_text(&gui.atlas, &s);
+                        }
                     } else if let Some(t) = &mut self.menu.title {
                         t.type_text(&s);
                     }
                 }
                 Output::Backspace => {
                     if self.menu.options_open {
-                        let e = self.menu.options.key(
-                            &mut self.settings,
-                            &self.gui.as_ref().unwrap().atlas,
-                            KeyCode::Backspace,
-                            None,
-                        );
-                        self.menu_option_events(e);
+                        if let Some(gui) = &self.gui {
+                            let e = self.menu.options.key(
+                                &mut self.settings,
+                                &gui.atlas,
+                                KeyCode::Backspace,
+                                None,
+                            );
+                            self.menu_option_events(e);
+                        }
                     } else if let Some(t) = &mut self.menu.title {
                         t.backspace();
                     }
@@ -1048,7 +1051,9 @@ impl Loading {
                         .map_or([1280, 720], |r| [r.config.width, r.config.height]);
                     let b = HudBatch::new(size);
                     title.drag(self.menu.cursor, (b.width, b.height));
-                    title.drag_field(&self.gui.as_ref().unwrap().atlas, self.menu.cursor.0);
+                    if let Some(gui) = &self.gui {
+                        title.drag_field(&gui.atlas, self.menu.cursor.0);
+                    }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if self.menu.options_open => {
@@ -1128,8 +1133,11 @@ impl Loading {
                     self.apply_menu_settings();
                     self.save_menu_settings();
                 } else if self.menu.options_open {
+                    let Some(gui) = &self.gui else {
+                        return Ok(());
+                    };
                     let shortcut = self.menu.shortcut(&event);
-                    let atlas = &self.gui.as_ref().unwrap().atlas;
+                    let atlas = &gui.atlas;
                     let handled = shortcut.is_some_and(|s| {
                         self.menu
                             .options
@@ -1180,7 +1188,7 @@ impl Loading {
         } else if let Some((win, frame)) = &mut self.menu.win {
             let now = Instant::now();
             // 20 ticks a second: the startup menu runs no tick rate.
-            let delta_ticks = now.duration_since(*frame).as_secs_f32() * 20.0;
+            let delta_ticks = now.saturating_duration_since(*frame).as_secs_f32() * 20.0;
             *frame = now;
             win.draw(batch, &gui.atlas, delta_ticks, Default::default());
             if win.finished(batch.height) {
@@ -1226,7 +1234,7 @@ impl Loading {
     pub(super) fn tick_menu_audio(&mut self) {
         let now = Instant::now();
         let last = self.menu.audio_tick.get_or_insert(now);
-        if now.duration_since(*last) < Duration::from_millis(50) {
+        if now.saturating_duration_since(*last) < Duration::from_millis(50) {
             return;
         }
         *last = now;

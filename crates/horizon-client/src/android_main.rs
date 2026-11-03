@@ -70,9 +70,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.9.4"
+        "0.9.5"
     } else {
-        "0.9.4-dev"
+        "0.9.5-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -396,9 +396,20 @@ fn android_main(app: AndroidApp) {
         }
     }
     let mut launcher = launcher::Launcher::new(home.clone());
-    let result = android_event_loop()
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
-        .and_then(|events| events.run_app(&mut launcher).map_err(Into::into));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        android_event_loop()
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
+            .and_then(|events| events.run_app(&mut launcher).map_err(Into::into))
+    }))
+    .unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .map(str::to_owned)
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unexpected native panic".into());
+        Err(format!("Android runtime panic: {message}").into())
+    });
     if let Err(error) = result {
         log::error!("Horizon: {error}");
         diagnostics::record_error(&error.to_string());

@@ -207,6 +207,7 @@ impl WorldLoader {
         let worker_upgrade = upgrade.clone();
         let handle = std::thread::Builder::new()
             .name("World initialization".into())
+            .stack_size(8 * 1024 * 1024)
             .spawn(move || {
                 request
                     .prepare(&res, &pack, &options, &settings, &worker_upgrade)
@@ -222,13 +223,24 @@ impl WorldLoader {
     // Wait for construction and disposal off the window thread. Keeping this
     // handle prevents a queued reopen racing the old session lock.
     pub fn cancel(self) -> Self {
-        Self {
-            cancelled: true,
-            upgrade: self.upgrade.clone(),
-            handle: std::thread::spawn(move || {
+        let upgrade = self.upgrade.clone();
+        let handle = std::thread::Builder::new()
+            .name("World cancel".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
                 drop(self.finish());
                 Err("world initialization cancelled".into())
-            }),
+            })
+            .unwrap_or_else(|_| {
+                std::thread::spawn(move || {
+                    drop(self.finish());
+                    Err("world initialization cancelled".into())
+                })
+            });
+        Self {
+            cancelled: true,
+            upgrade,
+            handle,
         }
     }
 
@@ -284,6 +296,7 @@ pub(super) fn preload_world_data(
             let resources = resources.to_owned();
             let spawned = std::thread::Builder::new()
                 .name("World data preload".into())
+                .stack_size(8 * 1024 * 1024)
                 .spawn(move || {
                     horizon_threads::behind_server();
                     // Errors are left for the world opening to report.
@@ -348,6 +361,7 @@ pub(super) fn preload_launch_world(
     let resources = resources.to_owned();
     let spawned = std::thread::Builder::new()
         .name("World data preload".into())
+        .stack_size(8 * 1024 * 1024)
         .spawn(move || {
             // Not behind the server: the world's opening waits for it.
             let started = std::time::Instant::now();
@@ -394,6 +408,7 @@ pub(super) fn preload_server_loot(resources: &std::path::Path) {
     let resources = resources.to_owned();
     let spawned = std::thread::Builder::new()
         .name("Loot preload".into())
+        .stack_size(4 * 1024 * 1024)
         .spawn(move || {
             horizon_threads::behind_server();
             let _ = horizon_client::structure_blocks::loot_data(

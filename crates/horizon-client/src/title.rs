@@ -1259,9 +1259,13 @@ impl Title {
         let (send, receive) = mpsc::channel();
         let saves = self.saves.clone();
         let folder = world.folder.clone();
-        std::thread::spawn(move || {
-            let _ = send.send(world_management::backup(&saves, &folder).map_err(|e| e.to_string()));
-        });
+        let _ = std::thread::Builder::new()
+            .name("world-backup".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let _ = send
+                    .send(world_management::backup(&saves, &folder).map_err(|e| e.to_string()));
+            });
         self.backup_shown.set(false);
         self.backup = Some(receive);
         self.mode = Mode::Backup { world };
@@ -3323,6 +3327,7 @@ impl Title {
             let session = session.clone();
             let spawned = std::thread::Builder::new()
                 .name("Account status".into())
+                .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
                     let _ = STATUS.set(crate::auth::fetch_account_status(&session));
                 });

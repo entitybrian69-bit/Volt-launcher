@@ -126,7 +126,7 @@ impl Game<'_> {
         if self
             .pack_folder
             .as_ref()
-            .is_some_and(|(at, _)| now.duration_since(*at).as_secs_f32() < 1.0)
+            .is_some_and(|(at, _)| now.saturating_duration_since(*at).as_secs_f32() < 1.0)
         {
             return;
         }
@@ -484,7 +484,10 @@ impl Game<'_> {
                 .as_ref()
                 .is_some_and(|w| matches!(w.fullscreen(), Some(Fullscreen::Exclusive(_)))),
             now_ms: self.started.elapsed().as_millis() as i64,
-            latest_input_ms: self.last_input.duration_since(self.started).as_millis() as i64,
+            latest_input_ms: self
+                .last_input
+                .saturating_duration_since(self.started)
+                .as_millis() as i64,
             has_level: self.title.is_none(),
             has_screen: self.title.is_some() || self.screen != super::Screen::Playing,
             has_overlay: false,
@@ -497,8 +500,10 @@ impl Game<'_> {
         if let Some(idle_cap) = self.settings.extras.dynamic_fps.cap_fps() {
             let cap = idle_cap as i32;
             let now_ms = self.started.elapsed().as_millis() as i64;
-            let latest_input_ms =
-                self.last_input.duration_since(self.started).as_millis() as i64;
+            let latest_input_ms = self
+                .last_input
+                .saturating_duration_since(self.started)
+                .as_millis() as i64;
             if !self.focused {
                 limit = limit.min(cap.min(15));
             } else if self.title.is_some() || self.screen != super::Screen::Playing {
@@ -517,12 +522,15 @@ impl Game<'_> {
             return;
         }
         if self.settings.extras.volt_reflex
+            && self.title.is_none()
             && let Some(r) = self.renderer.as_ref()
         {
             r.poll_gpu();
         }
         let limit = self.framerate_limit();
-        let pacing = if self.settings.extras.volt_reflex {
+        let pacing = if cfg!(target_os = "android") && self.title.is_some() {
+            horizon_client::graphics::Pacing::Efficient
+        } else if self.settings.extras.volt_reflex {
             horizon_client::graphics::Pacing::Precise
         } else {
             self.settings.horizon.pacing

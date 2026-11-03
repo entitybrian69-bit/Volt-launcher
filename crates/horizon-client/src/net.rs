@@ -173,6 +173,7 @@ impl Session {
         let (address_owned, name_owned) = (address.to_owned(), name.to_owned());
         let thread = std::thread::Builder::new()
             .name("horizon-net".into())
+            .stack_size(4 * 1024 * 1024)
             .spawn(move || {
                 let result = run(
                     local,

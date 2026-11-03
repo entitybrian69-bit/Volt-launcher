@@ -192,6 +192,9 @@ static RETURN_TO_LAUNCHER: AtomicBool = AtomicBool::new(false);
 pub fn return_to_launcher() {
     RETURN_TO_LAUNCHER.store(true, Ordering::Release);
 }
+pub fn launcher_return_pending() -> bool {
+    RETURN_TO_LAUNCHER.load(Ordering::Acquire)
+}
 pub fn take_launcher_return() -> bool {
     RETURN_TO_LAUNCHER.swap(false, Ordering::AcqRel)
 }

@@ -12628,7 +12628,7 @@ impl Game<'_> {
             self.all_sections_changed();
         }
         self.audio.master = self.settings.master_volume;
-        if self.settings.sound_device != self.audio.device() {
+        if !cfg!(target_os = "android") && self.settings.sound_device != self.audio.device() {
             let _ = self.audio.set_device(&self.settings.sound_device);
         }
         horizon_client::hud::GUI_SCALE.store(
@@ -15070,7 +15070,9 @@ impl ApplicationHandler for Game<'_> {
             use winit::event::TouchPhase;
             self.last_input = Instant::now();
             self.pad.menu.keyboard_focus = false;
-            let size = self.window.as_ref().unwrap().inner_size();
+            let Some(size) = self.window.as_ref().map(|w| w.inner_size()) else {
+                return;
+            };
             self.pad.touch.viewport(size.width, size.height);
             if self.pad.touch.editor.is_some() {
                 if touch.phase == TouchPhase::Cancelled {
@@ -15153,7 +15155,9 @@ impl ApplicationHandler for Game<'_> {
                     return;
                 }
                 self.pad.in_use = true;
-                let size = self.window.as_ref().unwrap().inner_size();
+                let Some(size) = self.window.as_ref().map(|w| w.inner_size()) else {
+                    return;
+                };
                 if touch.phase == TouchPhase::Started {
                     let batch = HudBatch::new([size.width, size.height]);
                     let point = [
@@ -16513,6 +16517,18 @@ impl ApplicationHandler for Game<'_> {
             } else {
                 w.request_redraw();
             }
+        }
+        #[cfg(target_os = "android")]
+        if self.title.is_some()
+            && self.pending_entry.is_none()
+            && self.world_loader.is_none()
+            && self.integrated_starting.is_none()
+            && self.pack_reload.is_none()
+        {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
         }
         event_loop.set_control_flow(ControlFlow::Poll);
     }
@@ -17880,6 +17896,7 @@ fn load_resources(
         let progress = progress.clone();
         let handle = std::thread::Builder::new()
             .name("world-rest-loader".into())
+            .stack_size(8 * 1024 * 1024)
             .spawn(move || {
                 horizon_threads::behind_server();
                 let rest = load_world_rest(
@@ -18599,6 +18616,13 @@ impl Loading {
         if previous.can_replace_world_textures(loaded.pack.render.texture_layers) {
             return Ok(());
         }
+        // Avoid concurrent VkDevice/VkQueue pipeline & staging-buffer submissions while the
+        // main thread is actively presenting the interactive menu on mobile Mali/compatibility GPUs.
+        if horizon_client::android_runtime::compatibility()
+            || previous.info.name.to_ascii_lowercase().contains("mali")
+        {
+            return Ok(());
+        }
         let options = self.options.as_ref().ok_or("loading already finished")?;
         if options.offscreen || previous.info.backend != wgpu::Backend::Vulkan {
             return Ok(());
@@ -18806,7 +18830,7 @@ impl Loading {
         // The loop may run once more after exit(): keep the first error, the
         // one that ended loading.
         if self.error.is_some() {
-            event_loop.exit();
+            crate::game::exit_app(event_loop);
             return;
         }
         if horizon_threads::stop_requests() > 0 {
@@ -18827,7 +18851,7 @@ impl Loading {
             }
         }
         #[cfg(target_os = "android")]
-        if self.loaded.is_none() {
+        if self.loaded.is_none() || self.renderer_job.is_some() {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(16),
             ));
@@ -19013,35 +19037,76 @@ enum App {
     Ready(Box<Game<'static>>),
 }
 #[cfg(target_os = "android")]
-pub(crate) struct AndroidGame(App);
+pub(crate) struct AndroidGame {
+    app: App,
+    pending_touches: std::collections::VecDeque<(WindowId, winit::event::Touch)>,
+}
 #[cfg(target_os = "android")]
 impl AndroidGame {
+    fn new(app: App) -> Self {
+        Self {
+            app,
+            pending_touches: std::collections::VecDeque::with_capacity(32),
+        }
+    }
+
     pub(crate) fn take_android_handoff(&mut self) -> Option<(Arc<Window>, Renderer)> {
-        match &mut self.0 {
+        self.pending_touches.clear();
+        match &mut self.app {
             App::Loading(loading) => Some((loading.window.take()?, loading.renderer.take()?)),
             App::Ready(game) => Some((game.window.take()?, game.renderer.take()?)),
+        }
+    }
+
+    fn drain_pending_touches(&mut self, event_loop: &ActiveEventLoop) {
+        while let Some((id, touch)) = self.pending_touches.pop_front() {
+            if horizon_client::android_runtime::launcher_return_pending() {
+                self.pending_touches.clear();
+                break;
+            }
+            self.app
+                .window_event(event_loop, id, WindowEvent::Touch(touch));
         }
     }
 }
 #[cfg(target_os = "android")]
 impl ApplicationHandler for AndroidGame {
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.suspended(event_loop);
+        self.pending_touches.clear();
+        self.app.suspended(event_loop);
     }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.resumed(event_loop);
+        self.app.resumed(event_loop);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        self.0.window_event(event_loop, id, event);
+        // Defer Android Touch events out of android-activity's InputQueue callback so
+        // AInputQueue_finishEvent completes immediately without re-entrant WindowEvent,
+        // JNI, audio, or world/resource I/O work inside the native input lock.
+        if let WindowEvent::Touch(touch) = event {
+            if self.pending_touches.len() < 256 {
+                self.pending_touches.push_back((id, touch));
+            }
+            return;
+        }
+        self.drain_pending_touches(event_loop);
+        if horizon_client::android_runtime::launcher_return_pending() {
+            return;
+        }
+        self.app.window_event(event_loop, id, event);
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
-        self.0.device_event(event_loop, id, event);
+        self.app.device_event(event_loop, id, event);
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.about_to_wait(event_loop);
+        self.drain_pending_touches(event_loop);
+        if horizon_client::android_runtime::launcher_return_pending() {
+            return;
+        }
+        self.app.about_to_wait(event_loop);
     }
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.exiting(event_loop);
+        self.pending_touches.clear();
+        self.app.exiting(event_loop);
     }
 }
 impl ApplicationHandler for App {
@@ -19231,7 +19296,7 @@ pub(crate) fn android_game(handoff: Option<(Arc<Window>, Renderer)>) -> Result<A
         loading.window = Some(window);
         loading.renderer = Some(renderer);
     }
-    Ok(AndroidGame(app))
+    Ok(AndroidGame::new(app))
 }
 
 fn run_loading(

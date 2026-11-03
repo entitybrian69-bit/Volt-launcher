@@ -456,6 +456,7 @@ impl PackReload {
         let worker = progress.clone();
         let handle = std::thread::Builder::new()
             .name("pack-reload".into())
+            .stack_size(8 * 1024 * 1024)
             .spawn(move || stage(&worker))?;
         Ok(Self {
             progress,
