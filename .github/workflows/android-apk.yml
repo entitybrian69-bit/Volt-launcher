@@ -1007,7 +1007,9 @@ jobs:
           The catalog does **not** implement all original mods, their complete settings
           screens, or all keybindings. Most entries still use placeholder icons.
           Original icons are included for AppleSkin, Armor HUD, Low Fire, Mod Menu,
-          ShulkerBoxTooltip, Language Reload, and FastQuit; see THIRD_PARTY_NOTICES.md.
+          ShulkerBoxTooltip, Language Reload, FastQuit, BetterF3, Better Ping Display,
+          Controlling, Mouse Tweaks, No Fog, FerriteCore, Dynamic FPS, BadOptimizations,
+          and Screenshot to Clipboard; see THIRD_PARTY_NOTICES.md.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

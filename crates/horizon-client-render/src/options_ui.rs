@@ -4583,6 +4583,7 @@ impl OptionsUi {
         let slider = self.dragging.take().is_some();
         let graphics_slider = self.graphics.release();
         let volt_slider = self.volt_glass.release();
+        self.mod_menu.release();
         if slider || graphics_slider || volt_slider {
             vec![Event::ButtonClick, Event::Changed]
         } else {
@@ -4680,7 +4681,7 @@ impl OptionsUi {
             return;
         }
         if self.page() == Page::ModMenu {
-            self.mod_menu.scroll(s, size, amount);
+            self.mod_menu.scroll(s, size, cursor, amount);
             return;
         }
         if self.page() == Page::VoltAtlas {

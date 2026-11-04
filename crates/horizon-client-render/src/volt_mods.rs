@@ -30,6 +30,15 @@ pub fn upstream_icon(id: VoltModId) -> Option<(&'static str, &'static [u8])> {
         VoltModId::ShulkerBoxTooltip => Some(("horizon/mod-icon/shulkerboxtooltip", include_bytes!("../assets/mod_icons/shulkerboxtooltip.png"))),
         VoltModId::LanguageReload => Some(("horizon/mod-icon/language_reload", include_bytes!("../assets/mod_icons/language_reload.png"))),
         VoltModId::FastQuit => Some(("horizon/mod-icon/fast_quit", include_bytes!("../assets/mod_icons/fast_quit.png"))),
+        VoltModId::BetterF3 => Some(("horizon/mod-icon/betterf3", include_bytes!("../assets/mod_icons/betterf3.png"))),
+        VoltModId::BetterPingDisplay => Some(("horizon/mod-icon/better_ping_display", include_bytes!("../assets/mod_icons/better_ping_display.png"))),
+        VoltModId::Controlling => Some(("horizon/mod-icon/controlling", include_bytes!("../assets/mod_icons/controlling.png"))),
+        VoltModId::MouseTweaks => Some(("horizon/mod-icon/mouse_tweaks", include_bytes!("../assets/mod_icons/mouse_tweaks.png"))),
+        VoltModId::NoFog => Some(("horizon/mod-icon/no_fog", include_bytes!("../assets/mod_icons/no_fog.png"))),
+        VoltModId::FerriteCore => Some(("horizon/mod-icon/ferritecore", include_bytes!("../assets/mod_icons/ferritecore.png"))),
+        VoltModId::DynamicFps => Some(("horizon/mod-icon/dynamic_fps", include_bytes!("../assets/mod_icons/dynamic_fps.png"))),
+        VoltModId::BadOptimizations => Some(("horizon/mod-icon/bad_optimizations", include_bytes!("../assets/mod_icons/bad_optimizations.png"))),
+        VoltModId::ScreenshotToClipboard => Some(("horizon/mod-icon/screenshot_clipboard", include_bytes!("../assets/mod_icons/screenshot_clipboard.png"))),
         _ => None,
     }
 }
@@ -1546,6 +1555,9 @@ pub struct VoltModCatalogState {
     /// Controls the native saturation bar and held-food preview independently.
     pub appleskin_saturation: bool,
     pub appleskin_food_preview: bool,
+    pub better_ping_auto_color: bool,
+    pub better_ping_show_bars: bool,
+    pub freelook_toggle: bool,
 }
 
 impl Default for VoltModCatalogState {
@@ -1569,6 +1581,9 @@ impl Default for VoltModCatalogState {
             punchy_intensity: 85,
             appleskin_saturation: true,
             appleskin_food_preview: true,
+            better_ping_auto_color: true,
+            better_ping_show_bars: false,
+            freelook_toggle: false,
         }
     }
 }
@@ -1620,6 +1635,18 @@ impl VoltModCatalogState {
             return true;
         }
         match key {
+            "voltModCfg.freelookToggle" => {
+                self.freelook_toggle = val == "true";
+                true
+            }
+            "voltModCfg.betterPingAutoColor" => {
+                self.better_ping_auto_color = val == "true";
+                true
+            }
+            "voltModCfg.betterPingShowBars" => {
+                self.better_ping_show_bars = val == "true";
+                true
+            }
             "voltModCfg.appleSkinSaturation" => {
                 self.appleskin_saturation = val == "true";
                 true
@@ -1685,6 +1712,9 @@ impl VoltModCatalogState {
                 push(&k, "true");
             }
         }
+        push("voltModCfg.freelookToggle", bool_s(self.freelook_toggle));
+        push("voltModCfg.betterPingAutoColor", bool_s(self.better_ping_auto_color));
+        push("voltModCfg.betterPingShowBars", bool_s(self.better_ping_show_bars));
         push("voltModCfg.appleSkinSaturation", bool_s(self.appleskin_saturation));
         push("voltModCfg.appleSkinFoodPreview", bool_s(self.appleskin_food_preview));
         push("voltModCfg.betterf3Compact", bool_s(self.betterf3_compact));
@@ -1849,6 +1879,8 @@ pub struct ModMenuUi {
     pub filter: ModFilterTab,
     pub selected: VoltModId,
     pub scroll: ui::Scroll,
+    cfg_scroll: f32,
+    cfg_drag_y: Option<f32>,
     pub preset_index: u8,
     // Smooth animation state
     last_frame: Option<Instant>,
@@ -1868,6 +1900,8 @@ impl Default for ModMenuUi {
             filter: ModFilterTab::All,
             selected: VoltModId::ModMenu,
             scroll: ui::Scroll::default(),
+            cfg_scroll: 0.0,
+            cfg_drag_y: None,
             preset_index: 0,
             last_frame: None,
             sel_anim_y: 0.0,
@@ -1891,6 +1925,9 @@ struct MenuLayout {
     detail_card: [f32; 4],
     toggle_bar: [f32; 4],
     fav_btn: [f32; 4],
+    cfg_top: f32,
+    cfg_bottom: f32,
+    cfg_content_h: f32,
     cfg_rows: Vec<([f32; 4], ModCfgKind)>,
     done_btn: [f32; 4],
 }
@@ -1901,6 +1938,9 @@ enum ModCfgKind {
     BetterF3Compact,
     AppleSkinSaturation,
     AppleSkinFoodPreview,
+    BetterPingAutoColor,
+    BetterPingShowBars,
+    FreelookMode,
     InvHudOpacity,
     CoordsBiome,
     DynFpsIdle,
@@ -1940,6 +1980,8 @@ impl ModMenuUi {
         sync_catalog_from_engine(&mut s.extras, &s.horizon);
         self.search.set_value("");
         self.search_focused = false;
+        self.cfg_scroll = 0.0;
+        self.cfg_drag_y = None;
         self.last_frame = None;
         self.open_anim = 0.0;
         self.toggle_anim = if s.extras.mod_catalog.is_on(self.selected) {
@@ -1984,12 +2026,14 @@ impl ModMenuUi {
     fn mod_config_items(id: VoltModId) -> Vec<ModCfgKind> {
         match id {
             VoltModId::AppleSkin => vec![ModCfgKind::AppleSkinSaturation, ModCfgKind::AppleSkinFoodPreview],
+            VoltModId::BetterPingDisplay => vec![ModCfgKind::BetterPingAutoColor, ModCfgKind::BetterPingShowBars],
             VoltModId::Zoomify => vec![
                 ModCfgKind::OpenKeyBinds,
                 ModCfgKind::VoltAct(VoltAct::QolZoomFov),
                 ModCfgKind::VoltAct(VoltAct::QolZoomSmooth),
             ],
-            VoltModId::Freelook | VoltModId::ModMenu => vec![ModCfgKind::OpenKeyBinds],
+            VoltModId::Freelook => vec![ModCfgKind::OpenKeyBinds, ModCfgKind::FreelookMode],
+            VoltModId::ModMenu => vec![ModCfgKind::OpenKeyBinds],
             VoltModId::CustomCrosshair => vec![ModCfgKind::VoltAct(VoltAct::ModCrosshair)],
             VoltModId::BetterF3 => vec![ModCfgKind::BetterF3Compact],
             VoltModId::InventoryHudPlus => vec![ModCfgKind::InvHudOpacity],
@@ -2016,6 +2060,9 @@ impl ModMenuUi {
             ModCfgKind::VoltAct(act) => format!("{}: {}", act.caption(), act.value(&s.extras)),
             ModCfgKind::AppleSkinSaturation => format!("Show saturation overlay: {}", if cat.appleskin_saturation { "ON" } else { "OFF" }),
             ModCfgKind::AppleSkinFoodPreview => format!("Show held food preview: {}", if cat.appleskin_food_preview { "ON" } else { "OFF" }),
+            ModCfgKind::BetterPingAutoColor => format!("Auto-color Ping Text: {}", if cat.better_ping_auto_color { "ON" } else { "OFF" }),
+            ModCfgKind::BetterPingShowBars => format!("Render Ping Bars: {}", if cat.better_ping_show_bars { "ON" } else { "OFF" }),
+            ModCfgKind::FreelookMode => format!("Freelook mode: {}", if cat.freelook_toggle { "Toggle" } else { "Hold" }),
             ModCfgKind::BetterF3Compact => format!(
                 "BetterF3 Layout: {}",
                 if cat.betterf3_compact {
@@ -2094,14 +2141,16 @@ impl ModMenuUi {
         let fav_btn = [dx + dw - 24.0, tab_y + 8.0, 16.0, 16.0];
         let toggle_bar = [dx + 10.0, tab_y + 86.0, dw - 20.0, 22.0];
 
-        let mut cfg_rows = Vec::new();
-        let mut cy = toggle_bar[1] + toggle_bar[3] + 6.0;
-        for kind in Self::mod_config_items(self.selected) {
-            if cy + 18.0 <= detail_card[1] + detail_card[3] - 6.0 {
-                cfg_rows.push(([dx + 10.0, cy, dw - 20.0, 18.0], kind));
-                cy += 21.0;
-            }
-        }
+        let cfg_top = toggle_bar[1] + toggle_bar[3] + 6.0;
+        let cfg_bottom = (detail_card[1] + detail_card[3] - 6.0).max(cfg_top);
+        let config_items = Self::mod_config_items(self.selected);
+        let cfg_content_h = (config_items.len() as f32 * 21.0 - 3.0).max(0.0);
+        self.cfg_scroll = self.cfg_scroll.clamp(0.0, (cfg_content_h - (cfg_bottom - cfg_top)).max(0.0));
+        let cfg_rows = config_items.into_iter().enumerate().filter_map(|(i, kind)| {
+            let cy = cfg_top + i as f32 * 21.0 - self.cfg_scroll;
+            (cy + 18.0 > cfg_top && cy < cfg_bottom)
+                .then_some(([dx + 10.0, cy, dw - 26.0, 18.0], kind))
+        }).collect();
         let _ = s;
         let done_btn = [mx + mw - 86.0, footer_y, 76.0, 18.0];
 
@@ -2119,6 +2168,9 @@ impl ModMenuUi {
             detail_card,
             toggle_bar,
             fav_btn,
+            cfg_top,
+            cfg_bottom,
+            cfg_content_h,
             cfg_rows,
             done_btn,
         }
@@ -2157,6 +2209,7 @@ impl ModMenuUi {
         let mods = self.filtered_mods(s);
         if !mods.is_empty() && !mods.contains(&self.selected) {
             self.selected = mods[0];
+            self.cfg_scroll = 0.0;
         }
         let lay = self.compute_layout(s, w, h, mods.len());
         let sel_idx = mods.iter().position(|&m| m == self.selected).unwrap_or(0);
@@ -2568,7 +2621,8 @@ impl ModMenuUi {
             is_on,
         );
 
-        // Per-mod quick settings rows
+        // The settings viewport scrolls independently of the mod list.
+        let cfg_start = batch.vertices.len();
         for (rect, kind) in &lay.cfg_rows {
             let chov = ui::hovered(cursor, rect[0], rect[1], rect[2], rect[3]);
             batch.fill(
@@ -2594,6 +2648,12 @@ impl ModMenuUi {
                 style::WHITE,
                 true,
             );
+        }
+
+        batch.clip_since(cfg_start, dx + 10.0, lay.cfg_top, dx + dw - 10.0, lay.cfg_bottom);
+        if let Some((ty, th)) = style::scrollbar_thumb(lay.cfg_top, lay.cfg_bottom, lay.cfg_content_h, self.cfg_scroll) {
+            let bx = dx + dw - 15.0;
+            style::scroller(batch, atlas, [bx, lay.cfg_top, 4.0, lay.cfg_bottom - lay.cfg_top], [bx, ty, 4.0, th]);
         }
 
         // Bottom bar: "Esc to go back" + teal "Done" button
@@ -2652,8 +2712,16 @@ impl ModMenuUi {
 
         if drag {
             if self.scroll.held() {
-                self.scroll
-                    .drag(y, lay.list_top, lay.list_bottom, content_h);
+                self.scroll.drag(y, lay.list_top, lay.list_bottom, content_h);
+            }
+            if let Some(last) = self.cfg_drag_y {
+                let view = lay.cfg_bottom - lay.cfg_top;
+                let max_scroll = (lay.cfg_content_h - view).max(0.0);
+                if let Some((_, thumb)) = style::scrollbar_thumb(lay.cfg_top, lay.cfg_bottom, lay.cfg_content_h, self.cfg_scroll) {
+                    let track = (view - thumb).max(1.0);
+                    self.cfg_scroll = (self.cfg_scroll + (y - last) * max_scroll / track).clamp(0.0, max_scroll);
+                }
+                self.cfg_drag_y = Some(y);
             }
             return Vec::new();
         }
@@ -2667,6 +2735,15 @@ impl ModMenuUi {
             lay.list_bottom,
             content_h,
         ) {
+            return Vec::new();
+        }
+
+        let [dx, _, dw, _] = lay.detail_card;
+        if x >= dx + dw - 17.0 && x <= dx + dw - 8.0
+            && y >= lay.cfg_top && y < lay.cfg_bottom
+            && lay.cfg_content_h > lay.cfg_bottom - lay.cfg_top
+        {
+            self.cfg_drag_y = Some(y);
             return Vec::new();
         }
 
@@ -2723,8 +2800,12 @@ impl ModMenuUi {
                     if right || (self.selected == id && x >= lay.list_x + row_w - 28.0) {
                         let next = !s.extras.mod_catalog.is_on(id);
                         apply_mod_to_engine(id, next, &mut s.extras, &mut s.horizon);
+                        if self.selected != id { self.cfg_scroll = 0.0; }
                         self.selected = id;
                         return vec![ModMenuAction::ButtonClick, ModMenuAction::Changed];
+                    }
+                    if self.selected != id {
+                        self.cfg_scroll = 0.0;
                     }
                     self.selected = id;
                     self.toggle_anim = if s.extras.mod_catalog.is_on(id) {
@@ -2754,7 +2835,7 @@ impl ModMenuUi {
         }
 
         for (rect, kind) in lay.cfg_rows {
-            if hit(rect) {
+            if y >= lay.cfg_top && y < lay.cfg_bottom && hit(rect) {
                 return match kind {
                     ModCfgKind::OpenWorldMap => {
                         vec![ModMenuAction::ButtonClick, ModMenuAction::OpenWorldMap]
@@ -2765,6 +2846,18 @@ impl ModMenuUi {
                     ModCfgKind::VoltAct(act) => {
                         act.trigger(&mut s.extras, right);
                         sync_catalog_from_engine(&mut s.extras, &s.horizon);
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::FreelookMode => {
+                        s.extras.mod_catalog.freelook_toggle = !s.extras.mod_catalog.freelook_toggle;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::BetterPingAutoColor => {
+                        s.extras.mod_catalog.better_ping_auto_color = !s.extras.mod_catalog.better_ping_auto_color;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::BetterPingShowBars => {
+                        s.extras.mod_catalog.better_ping_show_bars = !s.extras.mod_catalog.better_ping_show_bars;
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
                     }
                     ModCfgKind::AppleSkinSaturation => {
@@ -2842,14 +2935,20 @@ impl ModMenuUi {
 
     pub fn release(&mut self) {
         self.scroll.release();
+        self.cfg_drag_y = None;
     }
 
-    pub fn scroll(&mut self, s: &Settings, (w, h): (f32, f32), amount: f32) {
+    pub fn scroll(&mut self, s: &Settings, (w, h): (f32, f32), cursor: (f32, f32), amount: f32) {
         let count = self.filtered_mods(s).len();
         let lay = self.compute_layout(s, w, h, count);
-        let content_h = (count as f32 * (ROW_H + ROW_GAP) - ROW_GAP).max(0.0);
-        self.scroll
-            .wheel(amount, 22.0, lay.list_top, lay.list_bottom, content_h);
+        let [dx, _, dw, _] = lay.detail_card;
+        if cursor.0 >= dx && cursor.0 < dx + dw && cursor.1 >= lay.cfg_top && cursor.1 < lay.cfg_bottom {
+            let max_scroll = (lay.cfg_content_h - (lay.cfg_bottom - lay.cfg_top)).max(0.0);
+            self.cfg_scroll = (self.cfg_scroll - amount * 22.0).clamp(0.0, max_scroll);
+        } else {
+            let content_h = (count as f32 * (ROW_H + ROW_GAP) - ROW_GAP).max(0.0);
+            self.scroll.wheel(amount, 22.0, lay.list_top, lay.list_bottom, content_h);
+        }
     }
 
     pub fn type_text(&mut self, text: &str) {
@@ -2905,6 +3004,7 @@ impl ModMenuUi {
                     } else {
                         pos.saturating_sub(1)
                     };
+                    if self.selected != mods[next] { self.cfg_scroll = 0.0; }
                     self.selected = mods[next];
                 }
                 (Vec::new(), true)
@@ -2930,8 +3030,37 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 7);
+        assert_eq!(count, 16);
         assert!(upstream_icon(VoltModId::Zoomify).is_none());
+    }
+
+    #[test]
+    fn short_mod_menu_scrolls_settings_independently() {
+        let settings = Settings::default();
+        let mut menu = ModMenuUi::default();
+        menu.selected = VoltModId::XaerosWorldMap;
+        let layout = menu.compute_layout(&settings, 320.0, 200.0, 50);
+        assert!(layout.cfg_content_h > layout.cfg_bottom - layout.cfg_top);
+        assert!(layout.cfg_rows.iter().any(|(_, kind)| *kind == ModCfgKind::OpenWorldMap));
+        let cursor = (layout.detail_card[0] + 12.0, (layout.cfg_top + layout.cfg_bottom) / 2.0);
+        menu.scroll(&settings, (320.0, 200.0), cursor, -10.0);
+        let scrolled = menu.compute_layout(&settings, 320.0, 200.0, 50);
+        assert!(menu.cfg_scroll > 0.0);
+        assert_eq!(menu.scroll.amount, 0.0);
+        assert!(scrolled.cfg_rows.iter().any(|(_, kind)| *kind == ModCfgKind::VoltAct(VoltAct::QolAtlasGrid)));
+        assert!(style::scrollbar_thumb(scrolled.cfg_top, scrolled.cfg_bottom, scrolled.cfg_content_h, menu.cfg_scroll).is_some());
+    }
+
+    #[test]
+    fn better_ping_settings_persist_with_upstream_defaults() {
+        let mut extras = Extras::default();
+        assert!(extras.mod_catalog.better_ping_auto_color);
+        assert!(!extras.mod_catalog.better_ping_show_bars);
+        extras.mod_catalog.better_ping_auto_color = false;
+        extras.mod_catalog.better_ping_show_bars = true;
+        let parsed = Extras::parse(&extras.serialize());
+        assert!(!parsed.mod_catalog.better_ping_auto_color);
+        assert!(parsed.mod_catalog.better_ping_show_bars);
     }
 
     #[test]

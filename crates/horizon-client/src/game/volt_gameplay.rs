@@ -25,6 +25,7 @@ use winit::keyboard::KeyCode;
 /// Transient per-session runtime state for Volt QoL, Voice, JEI & Mods.
 pub(super) struct VoltRuntime {
     pub freelook_active: bool,
+    freelook_key_was_down: bool,
     pub freelook_yaw: f32,
     pub freelook_pitch: f32,
     pub voice: VoltVoiceRuntime,
@@ -55,6 +56,7 @@ impl Default for VoltRuntime {
     fn default() -> Self {
         Self {
             freelook_active: false,
+            freelook_key_was_down: false,
             freelook_yaw: 0.0,
             freelook_pitch: 0.0,
             voice: VoltVoiceRuntime::default(),
@@ -108,6 +110,16 @@ fn box_wireframe(lines: &mut Vec<Line>, min: [f64; 3], max: [f64; 3], color: u32
             color,
             width,
         });
+    }
+}
+
+fn freelook_next_active(available: bool, toggle: bool, down: bool, was_down: bool, active: bool) -> bool {
+    if !available {
+        false
+    } else if toggle {
+        if down && !was_down { !active } else { active }
+    } else {
+        down
     }
 }
 
@@ -274,21 +286,24 @@ impl Game<'_> {
             self.ui.options.skin_key = cur_skin.map(str::to_owned);
         }
 
-        let alt_down = (self.settings.extras.volt_qol.freelook_enabled
-            || self
-                .settings
-                .extras
-                .mod_catalog
-                .is_on(VoltModId::Freelook))
+        let freelook_available = (self.settings.extras.volt_qol.freelook_enabled
+            || self.settings.extras.mod_catalog.is_on(VoltModId::Freelook))
             && self.screen == Screen::Playing
-            && self.title.is_none()
-            && self.volt_binding_held("key.volt.freelook");
-        if alt_down && !self.extras.volt.freelook_active {
-            self.extras.volt.freelook_active = true;
+            && self.title.is_none();
+        let key_down = freelook_available && self.volt_binding_held("key.volt.freelook");
+        let was_active = self.extras.volt.freelook_active;
+        let active = freelook_next_active(
+            freelook_available,
+            self.settings.extras.mod_catalog.freelook_toggle,
+            key_down,
+            self.extras.volt.freelook_key_was_down,
+            was_active,
+        );
+        self.extras.volt.freelook_key_was_down = key_down;
+        self.extras.volt.freelook_active = active;
+        if active && !was_active {
             self.extras.volt.freelook_yaw = self.yaw;
             self.extras.volt.freelook_pitch = self.pitch;
-        } else if !alt_down {
-            self.extras.volt.freelook_active = false;
         }
 
         let qol = &self.settings.extras.volt_qol;
@@ -1698,5 +1713,21 @@ pub(super) fn enchant_guide_note(line_plain: &str) -> Option<&'static str> {
         Some("  [Max V \u{2022} +Arrow Damage \u{2022} Bow]")
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod freelook_tests {
+    use super::freelook_next_active;
+
+    #[test]
+    fn hold_and_toggle_follow_key_edges_and_close_on_screen_change() {
+        assert!(freelook_next_active(true, false, true, false, false));
+        assert!(!freelook_next_active(true, false, false, true, true));
+        assert!(freelook_next_active(true, true, true, false, false));
+        assert!(freelook_next_active(true, true, true, true, true));
+        assert!(freelook_next_active(true, true, false, true, true));
+        assert!(!freelook_next_active(true, true, true, false, true));
+        assert!(!freelook_next_active(false, true, false, true, true));
     }
 }

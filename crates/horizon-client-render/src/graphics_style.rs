@@ -140,7 +140,8 @@ pub fn scrollbar_thumb(top: f32, bottom: f32, content: f32, scroll: f32) -> Opti
     if content <= view || view < 16.0 {
         return None;
     }
-    let bar = ((view * view) / content).clamp(24.0, view - 6.0).floor();
+    let max_bar = view - 6.0;
+    let bar = ((view * view) / content).clamp(24.0_f32.min(max_bar), max_bar).floor();
     let max_scroll = (content - view).max(1.0);
     let ratio = (scroll / max_scroll).clamp(0.0, 1.0);
     let y = top + ((view - bar) * ratio).floor();
