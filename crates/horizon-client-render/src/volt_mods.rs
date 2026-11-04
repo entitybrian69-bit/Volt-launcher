@@ -18,6 +18,31 @@ use crate::{
 
 pub const TOTAL_VOLT_MODS: usize = 50;
 
+/// Native zoom steps use Zoomify's default 1.5x ratio and ten tiers. This
+/// is independent of the animated camera FOV, which remains owned by the game.
+pub fn zoomify_step_bounds(fov_pct: u16) -> (i32, i32) {
+    let initial = 100.0_f32 / f32::from(fov_pct.clamp(10, 80));
+    let out_steps = (initial.ln() / 1.5_f32.ln()).ceil() as i32;
+    (-out_steps.clamp(0, 10), 10)
+}
+
+pub fn zoomify_factor(fov_pct: u16, steps: i32) -> f32 {
+    let initial = 100.0_f32 / f32::from(fov_pct.clamp(10, 80));
+    let (min, max) = zoomify_step_bounds(fov_pct);
+    (initial * 1.5_f32.powi(steps.clamp(min, max))).clamp(1.0, 500.0)
+}
+
+/// Ease the native zoom's FOV scale independently from vanilla's camera
+/// modifier, which clamps to 0.1 and cannot represent zooms stronger than 10x.
+pub fn zoomify_ease_scale(current: f32, target: f32, seconds: f32, smooth: bool) -> f32 {
+    let target = if target.is_finite() { target.clamp(0.002, 1.0) } else { 1.0 };
+    let current = if current.is_finite() { current.clamp(0.002, 1.0) } else { 1.0 };
+    if !smooth || current == target { return target; }
+    let dt = if seconds.is_finite() { seconds.clamp(0.0, 0.25) } else { 0.0 };
+    let next = current + (target - current) * (1.0 - (-8.0 * dt).exp());
+    if (next - target).abs() < 0.00001 { target } else { next }
+}
+
 /// Original upstream artwork for entries whose source and redistribution terms
 /// have been verified. Other entries retain the built-in fallback artwork.
 /// These are native equivalents, not the original Java mods.
@@ -1565,6 +1590,10 @@ pub struct VoltModCatalogState {
     pub better_ping_auto_color: bool,
     pub better_ping_show_bars: bool,
     pub freelook_toggle: bool,
+    pub zoomify_toggle: bool,
+    pub zoomify_scroll: bool,
+    pub zoomify_retain_steps: bool,
+    pub zoomify_relative_sensitivity: bool,
 }
 
 impl Default for VoltModCatalogState {
@@ -1596,6 +1625,10 @@ impl Default for VoltModCatalogState {
             better_ping_auto_color: true,
             better_ping_show_bars: false,
             freelook_toggle: false,
+            zoomify_toggle: false,
+            zoomify_scroll: true,
+            zoomify_retain_steps: false,
+            zoomify_relative_sensitivity: true,
         }
     }
 }
@@ -1647,6 +1680,10 @@ impl VoltModCatalogState {
             return true;
         }
         match key {
+            "voltModCfg.zoomifyToggle" => { self.zoomify_toggle = val == "true"; true }
+            "voltModCfg.zoomifyScroll" => { self.zoomify_scroll = val == "true"; true }
+            "voltModCfg.zoomifyRetainSteps" => { self.zoomify_retain_steps = val == "true"; true }
+            "voltModCfg.zoomifyRelativeSensitivity" => { self.zoomify_relative_sensitivity = val == "true"; true }
             "voltModCfg.appleSkinTooltip" => { self.appleskin_tooltip = val == "true"; true }
             "voltModCfg.appleSkinTooltipAlways" => { self.appleskin_tooltip_always = val == "true"; true }
             "voltModCfg.appleSkinOffhand" => { self.appleskin_offhand = val == "true"; true }
@@ -1729,6 +1766,10 @@ impl VoltModCatalogState {
                 push(&k, "true");
             }
         }
+        push("voltModCfg.zoomifyToggle", bool_s(self.zoomify_toggle));
+        push("voltModCfg.zoomifyScroll", bool_s(self.zoomify_scroll));
+        push("voltModCfg.zoomifyRetainSteps", bool_s(self.zoomify_retain_steps));
+        push("voltModCfg.zoomifyRelativeSensitivity", bool_s(self.zoomify_relative_sensitivity));
         push("voltModCfg.appleSkinTooltip", bool_s(self.appleskin_tooltip));
         push("voltModCfg.appleSkinTooltipAlways", bool_s(self.appleskin_tooltip_always));
         push("voltModCfg.appleSkinOffhand", bool_s(self.appleskin_offhand));
@@ -1972,6 +2013,10 @@ enum ModCfgKind {
     BetterPingAutoColor,
     BetterPingShowBars,
     FreelookMode,
+    ZoomifyMode,
+    ZoomifyScroll,
+    ZoomifyRetainSteps,
+    ZoomifySensitivity,
     InvHudOpacity,
     CoordsBiome,
     DynFpsIdle,
@@ -2062,6 +2107,10 @@ impl ModMenuUi {
                 ModCfgKind::OpenKeyBinds,
                 ModCfgKind::VoltAct(VoltAct::QolZoomFov),
                 ModCfgKind::VoltAct(VoltAct::QolZoomSmooth),
+                ModCfgKind::ZoomifyMode,
+                ModCfgKind::ZoomifyScroll,
+                ModCfgKind::ZoomifyRetainSteps,
+                ModCfgKind::ZoomifySensitivity,
             ],
             VoltModId::Freelook => vec![ModCfgKind::OpenKeyBinds, ModCfgKind::FreelookMode],
             VoltModId::ModMenu => vec![ModCfgKind::OpenKeyBinds],
@@ -2099,6 +2148,10 @@ impl ModMenuUi {
             ModCfgKind::BetterPingAutoColor => format!("Auto-color Ping Text: {}", if cat.better_ping_auto_color { "ON" } else { "OFF" }),
             ModCfgKind::BetterPingShowBars => format!("Render Ping Bars: {}", if cat.better_ping_show_bars { "ON" } else { "OFF" }),
             ModCfgKind::FreelookMode => format!("Freelook mode: {}", if cat.freelook_toggle { "Toggle" } else { "Hold" }),
+            ModCfgKind::ZoomifyMode => format!("Zoom key behavior: {}", if cat.zoomify_toggle { "Toggle" } else { "Hold" }),
+            ModCfgKind::ZoomifyScroll => format!("Enable Scroll Zoom: {}", if cat.zoomify_scroll { "ON" } else { "OFF" }),
+            ModCfgKind::ZoomifyRetainSteps => format!("Remember Zoom Steps: {}", if cat.zoomify_retain_steps { "ON" } else { "OFF" }),
+            ModCfgKind::ZoomifySensitivity => format!("Relative Sensitivity: {}", if cat.zoomify_relative_sensitivity { "ON" } else { "OFF" }),
             ModCfgKind::BetterF3Compact => format!(
                 "BetterF3 Layout: {}",
                 if cat.betterf3_compact {
@@ -2884,6 +2937,22 @@ impl ModMenuUi {
                         sync_catalog_from_engine(&mut s.extras, &s.horizon);
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
                     }
+                    ModCfgKind::ZoomifyMode => {
+                        s.extras.mod_catalog.zoomify_toggle = !s.extras.mod_catalog.zoomify_toggle;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::ZoomifyScroll => {
+                        s.extras.mod_catalog.zoomify_scroll = !s.extras.mod_catalog.zoomify_scroll;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::ZoomifyRetainSteps => {
+                        s.extras.mod_catalog.zoomify_retain_steps = !s.extras.mod_catalog.zoomify_retain_steps;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::ZoomifySensitivity => {
+                        s.extras.mod_catalog.zoomify_relative_sensitivity = !s.extras.mod_catalog.zoomify_relative_sensitivity;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
                     ModCfgKind::FreelookMode => {
                         s.extras.mod_catalog.freelook_toggle = !s.extras.mod_catalog.freelook_toggle;
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
@@ -3110,6 +3179,37 @@ mod tests {
         menu.scroll(&settings, (320.0, 200.0), cursor, -20.0);
         let appleskin = menu.compute_layout(&settings, 320.0, 200.0, 50);
         assert!(appleskin.cfg_rows.iter().any(|(_, kind)| *kind == ModCfgKind::AppleSkinDebug));
+    }
+
+    #[test]
+    fn zoomify_steps_and_options_are_bounded_and_persistent() {
+        assert_eq!(zoomify_step_bounds(25), (-4, 10));
+        assert!((zoomify_factor(25, 0) - 4.0).abs() < 0.0001);
+        assert!((zoomify_factor(25, 1) - 6.0).abs() < 0.0001);
+        assert_eq!(zoomify_factor(25, -999), 1.0);
+        assert_eq!(zoomify_factor(25, 999), zoomify_factor(25, 10));
+        assert!(zoomify_factor(0, 1000).is_finite());
+        assert!(zoomify_factor(25, 10) > 10.0);
+        let target = 1.0 / zoomify_factor(25, 10);
+        assert_eq!(zoomify_ease_scale(1.0, target, 0.0, false), target);
+        let halfway = zoomify_ease_scale(1.0, target, 0.05, true);
+        assert!(halfway > target && halfway < 1.0);
+        assert_eq!(zoomify_ease_scale(f32::NAN, f32::NAN, 0.1, true), 1.0);
+        let mut extras = Extras::default();
+        assert!(!extras.volt_qol.zoom_enabled);
+        assert!(!extras.volt_qol.freelook_enabled);
+        assert!(!extras.mod_catalog.zoomify_toggle);
+        assert!(extras.mod_catalog.zoomify_scroll);
+        extras.mod_catalog.zoomify_toggle = true;
+        extras.mod_catalog.zoomify_scroll = false;
+        extras.mod_catalog.zoomify_retain_steps = true;
+        extras.mod_catalog.zoomify_relative_sensitivity = false;
+        let parsed = Extras::parse(&extras.serialize());
+        assert!(parsed.mod_catalog.zoomify_toggle);
+        assert!(!parsed.mod_catalog.zoomify_scroll);
+        assert!(parsed.mod_catalog.zoomify_retain_steps);
+        assert!(!parsed.mod_catalog.zoomify_relative_sensitivity);
+        assert_eq!(ModMenuUi::mod_config_items(VoltModId::Zoomify).len(), 7);
     }
 
     #[test]

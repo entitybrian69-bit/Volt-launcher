@@ -176,10 +176,10 @@ pub struct VoltQolConfig {
 impl Default for VoltQolConfig {
     fn default() -> Self {
         Self {
-            zoom_enabled: true,
+            zoom_enabled: false,
             zoom_fov_pct: 28,
             zoom_smooth: true,
-            freelook_enabled: true,
+            freelook_enabled: false,
             world_inspector: false,
             spawn_light_overlay: false,
             blueprint_enabled: false,

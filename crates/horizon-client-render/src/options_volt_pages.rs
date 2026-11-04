@@ -258,7 +258,7 @@ impl VoltAct {
             Self::BoostMeshPool => on_off(e.volt_boost_plus.zero_stutter_mesh_pool).into(),
             Self::BoostOffscreenSkip => on_off(e.volt_boost_plus.offscreen_entity_skip).into(),
             Self::BoostFramePacer => on_off(e.volt_boost_plus.smart_frame_pacer).into(),
-            Self::QolZoom => on_off(e.volt_qol.zoom_enabled).into(),
+            Self::QolZoom => on_off(e.volt_qol.zoom_enabled || e.zoom).into(),
             Self::QolZoomFov => format!("{}% FOV", e.volt_qol.zoom_fov_pct),
             Self::QolZoomSmooth => on_off(e.volt_qol.zoom_smooth).into(),
             Self::QolFreelook => on_off(e.volt_qol.freelook_enabled).into(),
@@ -491,7 +491,11 @@ impl VoltAct {
             Self::BoostFramePacer => {
                 e.volt_boost_plus.smart_frame_pacer = !e.volt_boost_plus.smart_frame_pacer
             }
-            Self::QolZoom => e.volt_qol.zoom_enabled = !e.volt_qol.zoom_enabled,
+            Self::QolZoom => {
+                let on = !(e.volt_qol.zoom_enabled || e.zoom);
+                e.volt_qol.zoom_enabled = on;
+                e.zoom = on;
+            }
             Self::QolZoomFov => {
                 e.volt_qol.zoom_fov_pct = step_u16(e.volt_qol.zoom_fov_pct, 12, 56, 4, back)
             }

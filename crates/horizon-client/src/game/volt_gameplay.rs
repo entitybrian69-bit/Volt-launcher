@@ -26,6 +26,12 @@ use winit::keyboard::KeyCode;
 pub(super) struct VoltRuntime {
     pub freelook_active: bool,
     freelook_key_was_down: bool,
+    zoom_toggle_active: bool,
+    zoom_was_active: bool,
+    zoom_scroll_steps: i32,
+    zoom_scroll_accum: f32,
+    zoom_display_scale: f32,
+    zoom_display_smooth: bool,
     pub freelook_yaw: f32,
     pub freelook_pitch: f32,
     pub voice: VoltVoiceRuntime,
@@ -57,6 +63,12 @@ impl Default for VoltRuntime {
         Self {
             freelook_active: false,
             freelook_key_was_down: false,
+            zoom_toggle_active: false,
+            zoom_was_active: false,
+            zoom_scroll_steps: 0,
+            zoom_scroll_accum: 0.0,
+            zoom_display_scale: 1.0,
+            zoom_display_smooth: true,
             freelook_yaw: 0.0,
             freelook_pitch: 0.0,
             voice: VoltVoiceRuntime::default(),
@@ -144,20 +156,54 @@ impl Game<'_> {
             || keybinds::mouse_button(binding).is_some_and(|button| self.physical_buttons.contains(&button))
     }
 
-    /// Returns `#2` Optic Zoom `(factor, smooth, turn_scale)` while its binding is held.
+    /// Returns the native optic zoom `(factor, smooth, turn_scale)` when active.
     pub(super) fn volt_qol_zoom(&self) -> Option<(f32, bool, f64)> {
         let qol = &self.settings.extras.volt_qol;
-        let zoom_on =
-            qol.zoom_enabled || self.settings.extras.mod_catalog.is_on(VoltModId::Zoomify);
-        if !zoom_on || self.screen != Screen::Playing || self.title.is_some() {
+        let cat = &self.settings.extras.mod_catalog;
+        if !(qol.zoom_enabled || self.settings.extras.zoom || cat.is_on(VoltModId::Zoomify))
+            || self.screen != Screen::Playing || self.title.is_some()
+            || self.screen_over_playing() || !self.focused
+        {
             return None;
         }
-        if !self.volt_binding_held("key.volt.zoom") {
-            return None;
+        let active = if cat.zoomify_toggle {
+            self.extras.volt.zoom_toggle_active
+        } else {
+            self.volt_binding_held("key.volt.zoom")
+        };
+        if !active { return None; }
+        let factor = horizon_client::volt_mods::zoomify_factor(qol.zoom_fov_pct, self.extras.volt.zoom_scroll_steps);
+        let turn = if cat.zoomify_relative_sensitivity { 1.0 / factor } else { 1.0 };
+        Some((factor, qol.zoom_smooth, f64::from(turn)))
+    }
+
+    /// FOV scale for the active optic zoom or its smooth exit transition.
+    pub(super) fn volt_zoom_fov_scale(&self) -> Option<f32> {
+        let state = &self.extras.volt;
+        if let Some((factor, smooth, _)) = self.volt_qol_zoom() {
+            Some(if smooth { state.zoom_display_scale } else { 1.0 / factor })
+        } else if state.zoom_display_scale < 1.0 {
+            Some(state.zoom_display_scale)
+        } else {
+            None
         }
-        let pct = f32::from(qol.zoom_fov_pct.clamp(10, 80));
-        let factor = (100.0 / pct).clamp(1.25, 10.0);
-        Some((factor, qol.zoom_smooth, f64::from(1.0 / factor)))
+    }
+
+    /// While zoomed, take vertical wheel input before it changes the hotbar.
+    /// Fractional touchpad events are accumulated until one full step arrives.
+    pub(super) fn volt_zoom_wheel(&mut self, amount: f32) -> bool {
+        if !self.settings.extras.mod_catalog.zoomify_scroll || self.volt_qol_zoom().is_none()
+            || !amount.is_finite() || amount == 0.0
+        {
+            return false;
+        }
+        let runtime = &mut self.extras.volt;
+        runtime.zoom_scroll_accum = (runtime.zoom_scroll_accum + amount).clamp(-20.0, 20.0);
+        let whole = runtime.zoom_scroll_accum.trunc() as i32;
+        runtime.zoom_scroll_accum -= whole as f32;
+        let (min, max) = horizon_client::volt_mods::zoomify_step_bounds(self.settings.extras.volt_qol.zoom_fov_pct);
+        runtime.zoom_scroll_steps = (runtime.zoom_scroll_steps + whole).clamp(min, max);
+        true
     }
 
     /// Intercepts mouse/touch look deltas when `#2` 360° Freelook is held.
@@ -176,6 +222,15 @@ impl Game<'_> {
     pub(super) fn volt_mod_input(&mut self, name: &str) -> bool {
         if name == "key.keyboard.unknown" || self.screen != Screen::Playing || self.title.is_some() {
             return false;
+        }
+        let cat = &self.settings.extras.mod_catalog;
+        if self.focused && !self.screen_over_playing()
+            && cat.zoomify_toggle
+            && (self.settings.extras.volt_qol.zoom_enabled || self.settings.extras.zoom || cat.is_on(VoltModId::Zoomify))
+            && self.settings.keys.get("key.volt.zoom") == name
+        {
+            self.extras.volt.zoom_toggle_active = !self.extras.volt.zoom_toggle_active;
+            return true;
         }
         if self.settings.keys.get("key.volt.mod_menu") == name
             && self.settings.extras.mod_catalog.is_on(VoltModId::ModMenu)
@@ -285,6 +340,34 @@ impl Game<'_> {
         if self.ui.options.skin_key.as_deref() != cur_skin {
             self.ui.options.skin_key = cur_skin.map(str::to_owned);
         }
+
+        let zoom_available = (self.settings.extras.volt_qol.zoom_enabled
+            || self.settings.extras.zoom
+            || self.settings.extras.mod_catalog.is_on(VoltModId::Zoomify))
+            && self.screen == Screen::Playing && self.title.is_none()
+            && !self.screen_over_playing() && self.focused;
+        if !zoom_available || !self.settings.extras.mod_catalog.zoomify_toggle {
+            self.extras.volt.zoom_toggle_active = false;
+        }
+        let zoom = self.volt_qol_zoom();
+        let zoom_active = zoom.is_some();
+        if let Some((_, smooth, _)) = zoom {
+            self.extras.volt.zoom_display_smooth = smooth;
+        }
+        let target_scale = zoom.map_or(1.0, |(factor, _, _)| 1.0 / factor);
+        self.extras.volt.zoom_display_scale = horizon_client::volt_mods::zoomify_ease_scale(
+            self.extras.volt.zoom_display_scale,
+            target_scale,
+            self.frame_ticks / 20.0,
+            self.extras.volt.zoom_display_smooth,
+        );
+        if !zoom_active && self.extras.volt.zoom_was_active {
+            self.extras.volt.zoom_scroll_accum = 0.0;
+            if !self.settings.extras.mod_catalog.zoomify_retain_steps {
+                self.extras.volt.zoom_scroll_steps = 0;
+            }
+        }
+        self.extras.volt.zoom_was_active = zoom_active;
 
         let freelook_available = (self.settings.extras.volt_qol.freelook_enabled
             || self.settings.extras.mod_catalog.is_on(VoltModId::Freelook))

@@ -15748,6 +15748,7 @@ impl ApplicationHandler for Game<'_> {
                         && !self.screen_over_playing()
                         && self.sleeping.is_none()
                         && self.player.is_some()
+                        && !self.volt_zoom_wheel(d)
                         && !self.native_wheel_event(d)
                         && !self.mod_wheel(d)
                         && let Some((wheel, (_, vertical_steps))) =

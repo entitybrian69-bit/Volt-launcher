@@ -766,12 +766,20 @@ impl Game<'_> {
         })
     }
     pub(super) fn zoomed_fov_target(&self, vanilla: f32) -> f32 {
+        // The native optic zoom is applied after the vanilla camera's 0.1
+        // modifier clamp, so high zoom factors remain visible.
+        if self.volt_zoom_fov_scale().is_some() {
+            return vanilla;
+        }
         match self.zoom_now() {
             (factor, true, _) => fov_target(vanilla, factor),
             _ => vanilla,
         }
     }
     pub(super) fn zoomed_fov_degrees(&self, fov: f32) -> f32 {
+        if let Some(scale) = self.volt_zoom_fov_scale() {
+            return fov * scale;
+        }
         match self.zoom_now() {
             (factor, false, _) => fov / factor,
             _ => fov,
