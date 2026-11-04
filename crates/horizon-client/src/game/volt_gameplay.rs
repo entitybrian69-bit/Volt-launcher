@@ -1362,7 +1362,7 @@ impl Game<'_> {
         let Some(expr) = message.trim().strip_prefix('=') else {
             return false;
         };
-        if let Some(ans) = eval_chat_math(expr) {
+        if let Some(ans) = eval_chat_math(message) {
             let stacks = (ans.abs() / 64.0).floor() as i64;
             let rem = (ans.abs() as i64) % 64;
             let stack_hint = if ans.fract().abs() < 1e-6 && ans >= 64.0 {

@@ -253,6 +253,8 @@ jobs:
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_cosmetics"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_qol"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
           ]
