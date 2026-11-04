@@ -194,6 +194,11 @@ fn has_active_toggle_anims() -> bool {
     })
 }
 
+#[inline]
+fn point_in(p: (f32, f32), r: [f32; 4]) -> bool {
+    p.0 >= r[0] && p.0 <= r[0] + r[2] && p.1 >= r[1] && p.1 <= r[1] + r[3]
+}
+
 fn styled_button(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,

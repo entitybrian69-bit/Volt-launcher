@@ -1159,7 +1159,7 @@ impl Game<'_> {
             .extras
             .mod_catalog
             .is_on(horizon_client::volt_mods::VoltModId::ChatHeads)
-            || (focused && self.ui.chat.abilities.any_restriction())
+            || self.settings.chat_visibility != 0
         {
             self.ui
                 .chat
