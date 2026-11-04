@@ -119,7 +119,7 @@ impl Game<'_> {
             return;
         }
         if self.screen == Screen::Stats && self.stats_typing() {
-            let _ = self.stats_key(winit::keyboard::KeyCode::F24, Some(&text));
+            self.stats_key(Some(&text), false);
             return;
         }
         if self.title.is_some() {

@@ -5336,7 +5336,7 @@ impl Game<'_> {
                 .settings
                 .extras
                 .mod_catalog
-                .is_on(horizon_client::volt_mods::VoltModId::BetterAnimationsCollection);
+                .is_on(horizon_client::volt_mods::VoltModId::BetterAnimations);
             let nea_on = self
                 .settings
                 .extras

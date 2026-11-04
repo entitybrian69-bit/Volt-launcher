@@ -196,7 +196,7 @@ impl Game<'_> {
         self.settings
             .extras
             .mod_catalog
-            .is_on(horizon_client::volt_mods::VoltModId::BetterStatisticsScreen)
+            .is_on(horizon_client::volt_mods::VoltModId::BetterStats)
     }
     pub(super) fn stats_typing(&self) -> bool {
         self.stats_better_on() && self.stats_ui.search_focused

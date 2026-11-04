@@ -666,6 +666,10 @@ impl Default for VoltSettingsUi {
 }
 
 impl VoltSettingsUi {
+    pub fn reset(&mut self) {
+        self.open(self.tab);
+    }
+
     pub fn open(&mut self, tab: VoltTab) {
         *self = Self {
             tab,
