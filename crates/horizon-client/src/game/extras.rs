@@ -27,10 +27,10 @@ use std::time::Duration;
 use winit::{event::MouseButton, keyboard::KeyCode};
 
 pub(super) struct ExtrasState {
-    fps: FpsCounter,
+    pub(super) fps: FpsCounter,
     /// Left and right mouse buttons: held, and their clicks.
-    mouse: [bool; 2],
-    cps: [Cps; 2],
+    pub(super) mouse: [bool; 2],
+    pub(super) cps: [Cps; 2],
     minimap: Minimap,
     /// The dimension and terrain mode the minimap's tiles belong to.
     minimap_dim: Option<(Dim, MinimapTerrainMode)>,

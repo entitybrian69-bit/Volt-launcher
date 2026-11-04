@@ -210,10 +210,10 @@ impl Game<'_> {
             || id == "minecraft:bow"
             || id == "minecraft:crossbow"
             || id == "minecraft:elytra";
-        if !is_tool || stack.damage <= 0 {
+        if !is_tool || stack.damage == 0 {
             return false;
         }
-        let max_dur: i32 = if id.contains("netherite") {
+        let max_dur: u32 = if id.contains("netherite") {
             2031
         } else if id.contains("diamond") {
             1561
@@ -228,7 +228,7 @@ impl Game<'_> {
         } else {
             384
         };
-        let remaining = max_dur - stack.damage;
+        let remaining = max_dur.saturating_sub(stack.damage);
         if (1..=3).contains(&remaining) {
             self.titles.set_overlay(
                 Text::literal(format!(
@@ -915,8 +915,8 @@ impl Game<'_> {
             pill_parts.push(format!("{} FPS ({:.1}ms)", r.fps, self.extras.ema_frame_ms));
         }
         if mods.cps_hud {
-            let lcps = self.extras.cps[0].count(now);
-            let rcps = self.extras.cps[1].count(now);
+            let lcps = self.extras.cps[0].per_second(now);
+            let rcps = self.extras.cps[1].per_second(now);
             pill_parts.push(format!("CPS {lcps} | {rcps}"));
         }
         if mods.reach_hud {
@@ -952,7 +952,7 @@ impl Game<'_> {
             for (slot, label) in self.armor.iter().zip(names) {
                 if let Some(st) = slot {
                     let max_d = estimate_armor_max_dur(&st.item);
-                    let rem = (max_d - st.damage).max(0);
+                    let rem = max_d.saturating_sub(st.damage);
                     eq_lines.push((
                         format!("{label}: {rem}/{max_d}"),
                         if rem * 5 < max_d {
@@ -1070,7 +1070,7 @@ impl Game<'_> {
             let bx = p.position.x.floor() as i32;
             let by = p.position.y.floor() as i32;
             let bz = p.position.z.floor() as i32;
-            let is_slime = is_slime_chunk(bx >> 4, bz >> 4, self.seed);
+            let is_slime = is_slime_chunk(bx >> 4, bz >> 4, self.level.seed);
             let light = self.world.light(bx, by, bz);
             let txt = format!(
                 "Chunk ({}, {}) \u{2022} {} \u{2022} L:{}/{}",
@@ -1109,23 +1109,23 @@ impl Game<'_> {
             };
             match mods.custom_crosshair {
                 CrosshairStyle::Vanilla => {}
-                CrosshairStyle::CrispDot => {
+                CrosshairStyle::PrecisionDot => {
                     batch.fill(atlas, cx - 1.5, cy - 1.5, 3.0, 3.0, col);
                 }
-                CrosshairStyle::TacticalCross => {
+                CrosshairStyle::CrispPlus => {
                     batch.fill(atlas, cx - 5.0, cy - 0.5, 3.5, 1.0, col);
                     batch.fill(atlas, cx + 1.5, cy - 0.5, 3.5, 1.0, col);
                     batch.fill(atlas, cx - 0.5, cy - 5.0, 1.0, 3.5, col);
                     batch.fill(atlas, cx - 0.5, cy + 1.5, 1.0, 3.5, col);
                 }
-                CrosshairStyle::CircleDot => {
+                CrosshairStyle::CircleRing => {
                     batch.fill(atlas, cx - 1.0, cy - 1.0, 2.0, 2.0, col);
                     batch.fill(atlas, cx - 4.0, cy - 4.0, 8.0, 1.0, col);
                     batch.fill(atlas, cx - 4.0, cy + 3.0, 8.0, 1.0, col);
                     batch.fill(atlas, cx - 4.0, cy - 3.0, 1.0, 6.0, col);
                     batch.fill(atlas, cx + 3.0, cy - 3.0, 1.0, 6.0, col);
                 }
-                CrosshairStyle::Chevron => {
+                CrosshairStyle::PvpChevron => {
                     batch.fill(atlas, cx - 3.0, cy + 1.0, 3.0, 1.2, col);
                     batch.fill(atlas, cx, cy + 1.0, 3.0, 1.2, col);
                     batch.fill(atlas, cx - 1.0, cy - 1.0, 2.0, 2.0, col);
@@ -1456,7 +1456,7 @@ fn recommended_tool_tag(raw_block: &str) -> &'static str {
     }
 }
 
-fn estimate_armor_max_dur(item: &str) -> i32 {
+fn estimate_armor_max_dur(item: &str) -> u32 {
     if item.contains("netherite") {
         481
     } else if item.contains("diamond") {
