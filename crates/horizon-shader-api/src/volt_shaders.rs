@@ -1823,8 +1823,8 @@ fn sky(input: SkyInput) -> vec4<f32> {
             } else {
                 // High-altitude feathery Cirrus Wisps
                 let warp = volt_noise2(base_uv * 1.6);
-                let streak = volt_fbm3(vec2<f32>(base_uv.x * 2.8 + warp * 0.9, base_uv.y * 0.85));
-                density = smoothstep(0.54, 0.86, streak + cov_shift * 0.6) * 0.55;
+                let cirrus_streak = volt_fbm3(vec2<f32>(base_uv.x * 2.8 + warp * 0.9, base_uv.y * 0.85));
+                density = smoothstep(0.54, 0.86, cirrus_streak + cov_shift * 0.6) * 0.55;
                 lit_top = 0.78;
             }
 
@@ -1945,10 +1945,10 @@ fn material(input: MaterialInput) -> Surface {
     if cloud_shadows && frame.dimension == 0 && sunny > 0.04 && sky_l > 0.55 {
         let c_uv = (world_xz - frame.sun_direction.xz * 22.0) * 0.011 + vec2<f32>(frame.time * 0.016, frame.time * 0.007);
         let c_n = volt_fbm3(c_uv);
-        let patch = smoothstep(0.47, 0.72, c_n + (cloud_coverage - 1.0) * 0.20);
+        let cloud_patch = smoothstep(0.47, 0.72, c_n + (cloud_coverage - 1.0) * 0.20);
         let outdoor_mask = smoothstep(0.55, 0.94, sky_l) * sunny * (1.0 - block_l * 0.65);
-        cloud_sun = 1.0 - patch * outdoor_mask * 0.22;
-        lit *= mix(vec3<f32>(1.0), vec3<f32>(0.78, 0.84, 0.95), patch * outdoor_mask * 0.75);
+        cloud_sun = 1.0 - cloud_patch * outdoor_mask * 0.22;
+        lit *= mix(vec3<f32>(1.0), vec3<f32>(0.78, 0.84, 0.95), cloud_patch * outdoor_mask * 0.75);
     }
 
     if sun_shading && frame.dimension == 0 && !is_water {
@@ -1990,31 +1990,31 @@ fn material(input: MaterialInput) -> Surface {
     }
 
     if is_emissive && emissive_glow > 0.001 {
-        let tex_luma = volt_luma(input.albedo.rgb);
-        let hot = smoothstep(0.24, 0.84, tex_luma);
+        let emit_luma = volt_luma(input.albedo.rgb);
+        let hot = smoothstep(0.24, 0.84, emit_luma);
         rgb *= 1.0 + hot * emissive_glow * 0.78;
     }
 
     // Integrated Auto-PBR Specular & Fresnel on Metals, Gems, Ice, Polished Blocks & Crystal Glass
     if auto_pbr && (is_pbr_metal || is_glass || is_ore) && dist < 56.0 {
         let fade_pbr = clamp(1.0 - dist * (1.0 / 56.0), 0.0, 1.0);
-        let grazing = pow(max(1.0 - abs(view_dir.y), 0.0001), 3.2);
+        let pbr_grazing = pow(max(1.0 - abs(view_dir.y), 0.0001), 3.2);
         let env_col = max(frame.sky_color * 0.90 + frame.fog_color * 0.30, vec3<f32>(0.06, 0.07, 0.10));
         if is_glass {
-            let glass_refl = clamp((0.12 + grazing * 0.55) * fade_pbr * max(sky_l, 0.25), 0.0, 0.52);
+            let glass_refl = clamp((0.12 + pbr_grazing * 0.55) * fade_pbr * max(sky_l, 0.25), 0.0, 0.52);
             rgb = mix(rgb, env_col * 1.15, glass_refl);
             alpha = clamp(alpha + glass_refl * 0.28, 0.0, 0.92);
         } else if is_pbr_metal {
             let tex_gloss = smoothstep(0.25, 0.82, volt_luma(input.albedo.rgb));
-            let sheen = grazing * tex_gloss * fade_pbr * 0.26 * max(sky_l, block_l * 0.7);
+            let sheen = pbr_grazing * tex_gloss * fade_pbr * 0.26 * max(sky_l, block_l * 0.7);
             rgb = mix(rgb, mix(env_col, input.albedo.rgb * 1.35, 0.55), sheen);
         }
         if sunny > 0.05 && sky_l > 0.60 {
-            let h_raw = -view_dir + frame.sun_direction;
-            let h_len = length(h_raw);
-            if h_len > 0.001 {
-                let h = h_raw / h_len;
-                let spec_up = pow(max(h.y, 0.0001), 40.0) * sunny * cloud_sun * fade_pbr * smoothstep(0.60, 0.95, sky_l);
+            let pbr_h_raw = -view_dir + frame.sun_direction;
+            let pbr_h_len = length(pbr_h_raw);
+            if pbr_h_len > 0.001 {
+                let pbr_h = pbr_h_raw / pbr_h_len;
+                let spec_up = pow(max(pbr_h.y, 0.0001), 40.0) * sunny * cloud_sun * fade_pbr * smoothstep(0.60, 0.95, sky_l);
                 rgb += vec3<f32>(1.10, 1.00, 0.86) * (spec_up * 0.42);
                 if is_glass {
                     alpha = clamp(alpha + spec_up * 0.35, 0.0, 0.95);

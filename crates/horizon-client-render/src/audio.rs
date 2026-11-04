@@ -1132,6 +1132,29 @@ impl Audio {
                                 opened_stream = Some(st);
                                 break;
                             }
+                            let sink_f32 = sink.clone();
+                            if let Ok(st) = dev.build_input_stream(
+                                &cfg,
+                                move |data: &[f32], _| {
+                                    if let Ok(mut q) = sink_f32.lock() {
+                                        for frame in data.chunks(ch_usize * step) {
+                                            if q.len() < 3200
+                                                && let Some(&s) = frame.first()
+                                            {
+                                                let pcm =
+                                                    (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+                                                q.push_back(pcm);
+                                            }
+                                        }
+                                    }
+                                },
+                                |err| log::warn!("Volt Voice mic error: {err}"),
+                                None,
+                            ) && st.play().is_ok()
+                            {
+                                opened_stream = Some(st);
+                                break;
+                            }
                         }
                         if opened_stream.is_some() {
                             break;
