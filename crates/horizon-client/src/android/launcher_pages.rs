@@ -2284,10 +2284,12 @@ impl DrawCtx<'_> {
                 9.0,
                 hex(spec.primary, if is_on { 190 } else { 95 }),
             );
+            let has_upstream_icon = horizon_client::volt_mods::upstream_icon(m.id)
+                .is_some_and(|(name, _)| ui.atlas_sprite(name, lx, ly, logo_sz, logo_sz));
             let cell = logo_sz / 8.0;
             let pri_col = hex(spec.primary, 255);
             let acc_col = hex(spec.accent, 255);
-            for (ry_i, row_str) in spec.rows.iter().enumerate() {
+            for (ry_i, row_str) in spec.rows.iter().enumerate().filter(|_| !has_upstream_icon) {
                 let bytes = row_str.as_bytes();
                 let mut rx_i = 0usize;
                 while rx_i < bytes.len().min(8) {

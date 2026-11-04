@@ -264,6 +264,11 @@ impl Game<'_> {
             if down && self.screenshot_shortcut(key, false) {
                 continue;
             }
+            if down && horizon_client::keybinds::key_name(key)
+                .is_some_and(|name| self.volt_mod_input(name))
+            {
+                continue;
+            }
             self.mod_key(key, down, false);
             self.native_key_event(key, down, false);
             let action = if down {

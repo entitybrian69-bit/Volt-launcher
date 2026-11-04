@@ -18,6 +18,22 @@ use crate::{
 
 pub const TOTAL_VOLT_MODS: usize = 50;
 
+/// Original upstream artwork for entries whose source and redistribution terms
+/// have been verified. Other entries retain the built-in fallback artwork.
+/// These are native equivalents, not the original Java mods.
+pub fn upstream_icon(id: VoltModId) -> Option<(&'static str, &'static [u8])> {
+    match id {
+        VoltModId::AppleSkin => Some(("horizon/mod-icon/appleskin", include_bytes!("../assets/mod_icons/appleskin.png"))),
+        VoltModId::ArmorHud => Some(("horizon/mod-icon/armor_hud", include_bytes!("../assets/mod_icons/armor_hud.png"))),
+        VoltModId::LowFire => Some(("horizon/mod-icon/low_fire", include_bytes!("../assets/mod_icons/low_fire.png"))),
+        VoltModId::ModMenu => Some(("horizon/mod-icon/mod_menu", include_bytes!("../assets/mod_icons/mod_menu.png"))),
+        VoltModId::ShulkerBoxTooltip => Some(("horizon/mod-icon/shulkerboxtooltip", include_bytes!("../assets/mod_icons/shulkerboxtooltip.png"))),
+        VoltModId::LanguageReload => Some(("horizon/mod-icon/language_reload", include_bytes!("../assets/mod_icons/language_reload.png"))),
+        VoltModId::FastQuit => Some(("horizon/mod-icon/fast_quit", include_bytes!("../assets/mod_icons/fast_quit.png"))),
+        _ => None,
+    }
+}
+
 /// Categories organizing all 50 native Rust mods in both the Launcher `Mods` tab
 /// and the in-game `Mod Menu`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1485,6 +1501,12 @@ pub fn draw_mod_logo_hud(
     y: f32,
     size: f32,
 ) {
+    if let Some((name, _)) = upstream_icon(id)
+        && atlas.sprites.contains_key(name)
+    {
+        batch.sprite_scaled(atlas, name, x, y, size, size, u32::MAX);
+        return;
+    }
     let spec = mod_logo_spec(id);
     let bg = rgb_to_hud(spec.bg, 255);
     let pri = rgb_to_hud(spec.primary, 255);
@@ -1521,6 +1543,9 @@ pub struct VoltModCatalogState {
     pub mouse_tweaks_rmb: bool,
     pub item_scroller_wheel: bool,
     pub punchy_intensity: u8,
+    /// Controls the native saturation bar and held-food preview independently.
+    pub appleskin_saturation: bool,
+    pub appleskin_food_preview: bool,
 }
 
 impl Default for VoltModCatalogState {
@@ -1542,6 +1567,8 @@ impl Default for VoltModCatalogState {
             mouse_tweaks_rmb: true,
             item_scroller_wheel: true,
             punchy_intensity: 85,
+            appleskin_saturation: true,
+            appleskin_food_preview: true,
         }
     }
 }
@@ -1593,6 +1620,14 @@ impl VoltModCatalogState {
             return true;
         }
         match key {
+            "voltModCfg.appleSkinSaturation" => {
+                self.appleskin_saturation = val == "true";
+                true
+            }
+            "voltModCfg.appleSkinFoodPreview" => {
+                self.appleskin_food_preview = val == "true";
+                true
+            }
             "voltModCfg.betterf3Compact" => {
                 self.betterf3_compact = val == "true";
                 true
@@ -1650,6 +1685,8 @@ impl VoltModCatalogState {
                 push(&k, "true");
             }
         }
+        push("voltModCfg.appleSkinSaturation", bool_s(self.appleskin_saturation));
+        push("voltModCfg.appleSkinFoodPreview", bool_s(self.appleskin_food_preview));
         push("voltModCfg.betterf3Compact", bool_s(self.betterf3_compact));
         push(
             "voltModCfg.invHudOpacity",
@@ -1862,6 +1899,8 @@ struct MenuLayout {
 enum ModCfgKind {
     VoltAct(VoltAct),
     BetterF3Compact,
+    AppleSkinSaturation,
+    AppleSkinFoodPreview,
     InvHudOpacity,
     CoordsBiome,
     DynFpsIdle,
@@ -1944,10 +1983,13 @@ impl ModMenuUi {
 
     fn mod_config_items(id: VoltModId) -> Vec<ModCfgKind> {
         match id {
+            VoltModId::AppleSkin => vec![ModCfgKind::AppleSkinSaturation, ModCfgKind::AppleSkinFoodPreview],
             VoltModId::Zoomify => vec![
+                ModCfgKind::OpenKeyBinds,
                 ModCfgKind::VoltAct(VoltAct::QolZoomFov),
                 ModCfgKind::VoltAct(VoltAct::QolZoomSmooth),
             ],
+            VoltModId::Freelook | VoltModId::ModMenu => vec![ModCfgKind::OpenKeyBinds],
             VoltModId::CustomCrosshair => vec![ModCfgKind::VoltAct(VoltAct::ModCrosshair)],
             VoltModId::BetterF3 => vec![ModCfgKind::BetterF3Compact],
             VoltModId::InventoryHudPlus => vec![ModCfgKind::InvHudOpacity],
@@ -1958,9 +2000,10 @@ impl ModMenuUi {
             VoltModId::ItemScroller => vec![ModCfgKind::ItemScrollerWheel],
             VoltModId::Punchy => vec![ModCfgKind::PunchyIntensity],
             VoltModId::XaerosWorldMap => vec![
+                ModCfgKind::OpenWorldMap,
+                ModCfgKind::OpenKeyBinds,
                 ModCfgKind::VoltAct(VoltAct::QolAtlasMode),
                 ModCfgKind::VoltAct(VoltAct::QolAtlasGrid),
-                ModCfgKind::OpenWorldMap,
             ],
             VoltModId::Controlling => vec![ModCfgKind::OpenKeyBinds],
             _ => Vec::new(),
@@ -1971,6 +2014,8 @@ impl ModMenuUi {
         let cat = &s.extras.mod_catalog;
         match kind {
             ModCfgKind::VoltAct(act) => format!("{}: {}", act.caption(), act.value(&s.extras)),
+            ModCfgKind::AppleSkinSaturation => format!("Show saturation overlay: {}", if cat.appleskin_saturation { "ON" } else { "OFF" }),
+            ModCfgKind::AppleSkinFoodPreview => format!("Show held food preview: {}", if cat.appleskin_food_preview { "ON" } else { "OFF" }),
             ModCfgKind::BetterF3Compact => format!(
                 "BetterF3 Layout: {}",
                 if cat.betterf3_compact {
@@ -2004,7 +2049,7 @@ impl ModMenuUi {
                 format!("Swing Snappiness: {}%", cat.punchy_intensity)
             }
             ModCfgKind::OpenWorldMap => "Open Xaero's World Map...".to_owned(),
-            ModCfgKind::OpenKeyBinds => "Open Key Binds (Controlling)...".to_owned(),
+            ModCfgKind::OpenKeyBinds => "Open Key Binds...".to_owned(),
         }
     }
 
@@ -2722,6 +2767,14 @@ impl ModMenuUi {
                         sync_catalog_from_engine(&mut s.extras, &s.horizon);
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
                     }
+                    ModCfgKind::AppleSkinSaturation => {
+                        s.extras.mod_catalog.appleskin_saturation = !s.extras.mod_catalog.appleskin_saturation;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::AppleSkinFoodPreview => {
+                        s.extras.mod_catalog.appleskin_food_preview = !s.extras.mod_catalog.appleskin_food_preview;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
                     ModCfgKind::BetterF3Compact => {
                         s.extras.mod_catalog.betterf3_compact =
                             !s.extras.mod_catalog.betterf3_compact;
@@ -2864,6 +2917,45 @@ impl ModMenuUi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verified_upstream_icons_decode_and_are_available_in_full_atlas() {
+        let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/volt-mod-icons-test")).unwrap();
+        let mut count = 0;
+        for id in VoltModId::ALL {
+            if let Some((name, bytes)) = upstream_icon(id) {
+                let (w, h, pixels) = crate::hud::decode_bytes(bytes).unwrap();
+                assert_eq!((w, h, pixels.len()), (64, 64, 64 * 64 * 4));
+                assert!(atlas.sprites.contains_key(name));
+                count += 1;
+            }
+        }
+        assert_eq!(count, 7);
+        assert!(upstream_icon(VoltModId::Zoomify).is_none());
+    }
+
+    #[test]
+    fn mod_keybindings_survive_options_round_trip() {
+        let mut settings = Settings::default();
+        settings.keys.set("key.volt.zoom", "key.keyboard.v");
+        settings.keys.set("key.volt.freelook", "key.mouse.4");
+        let restored = Settings::parse(&settings.serialize());
+        assert_eq!(restored.keys.get("key.volt.zoom"), "key.keyboard.v");
+        assert_eq!(restored.keys.get("key.volt.freelook"), "key.mouse.4");
+    }
+
+    #[test]
+    fn appleskin_preview_options_persist() {
+        let mut extras = Extras::default();
+        assert!(extras.mod_catalog.appleskin_saturation);
+        assert!(extras.mod_catalog.appleskin_food_preview);
+        extras.mod_catalog.appleskin_saturation = false;
+        extras.mod_catalog.appleskin_food_preview = false;
+        let parsed = Extras::parse(&extras.serialize());
+        assert!(!parsed.mod_catalog.appleskin_saturation);
+        assert!(!parsed.mod_catalog.appleskin_food_preview);
+        assert_eq!(ModMenuUi::mod_config_items(VoltModId::AppleSkin).len(), 2);
+    }
 
     #[test]
     fn all_fifty_mods_have_exact_category_counts_unique_slugs_and_logos() {

@@ -254,5 +254,10 @@
   "volt.mod_menu.tooltip": "Split-pane Mod Menu with custom logos, live ON/OFF switches, search, All/On/Off/Fav filters & per-mod settings.",
   "volt.atlas.open": "Xaero's World Map (J)...",
   "volt.atlas.title": "Volt World Atlas — Interactive Chunk Map",
-  "volt.atlas.tooltip": "Full-screen persistent world map with Surface, Relief, Lush Biome & Slime Chunk modes plus 1-tap waypoint pinning."
+  "volt.atlas.tooltip": "Full-screen persistent world map with Surface, Relief, Lush Biome & Slime Chunk modes plus 1-tap waypoint pinning.",
+  "key.category.minecraft.volt_mods": "Volt Mods",
+  "key.volt.mod_menu": "Open Mod Menu",
+  "key.volt.freelook": "Activate Freelook",
+  "key.volt.zoom": "Zoom (Hold)",
+  "key.volt.world_map": "Open World Map"
 }

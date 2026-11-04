@@ -250,6 +250,7 @@ jobs:
           cmds = [
               ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
               ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
+              ["cargo", "test", "-p", "horizon-client-input", "--lib", "keybinds"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
@@ -999,15 +1000,14 @@ jobs:
           PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
-          cat > "$NOTES_FILE" <<EOF
-          ### What's New in Volt Launcher 0.9.7
-          - **In-Game Performance-First Native WGSL "Volt Shaders" (`Options... -> Volt Shaders`)**:
-            - Added **Volt Shaders** directly above **Video Settings...** in the in-game Options menu (100% pure native Rust + WGSL on `wgpu` Vulkan)
-            - **`Enable Shaders`** master toggle (`OFF` by default): when `OFF`, zero shader passes run and all profiles/customization controls stay completely hidden; toggling `ON` reveals the full Volt Shaders suite
-            - **6 Mobile-Tuned Shader Profiles**: **`Potato`**, **`Low`**, **`Medium`**, **`High`**, **`Ultra`**, and **`Custom`** — `Potato`/`Low`/`Medium` use a **Zero-Post Direct TBDR** `[sky] + [material]` topology (`StoreOp::Discard` depth, zero off-screen resolve passes); `High`/`Ultra` use a **Single-Pass Post** topology with **0 bytes** of intermediate ping-pong `RGBA16F` targets and WGSL `override` dead-code elimination
-            - **Zero-Remesh Moving Vegetation & Water**: root-anchored waving grass, tall plants, flowers & crops, phase-coherent waving leaves & vines, ceiling-anchored hanging foliage, storm wind boost, and gentle still-water vertex motion within 56 blocks
-            - **35 Live Shader Controls**: directional sun/sky bounce shading, sunlit foliage subsurface translucency, torchlight color styles (`Vanilla`, `Warm Amber`, `Cozy Gold`, `Soul Cool`), emissive block glow, rain wet sheen, dual-wave water ripples & sun/moon glint, clear water & underwater wave refraction, Rayleigh/Mie atmospheric sky, sun/moon corona, night aurora (`Subtle`/`Medium`/`Vibrant`), distance haze, ACES/Neutral/Cinema tonemapping, single-pass bloom, crepuscular sun rays, vignette, vibrance, saturation, contrast, exposure, and color warmth
-          - **Zero-Freeze Main Menu Handoff & Mali-G57 Hardening (`0.9.5`–`0.9.6`)**: `MipMajor` sprite streaming, background asset preparation, dedicated `"volt-audio-stream"` NDK `AAudio` thread, GPU-local `MenuBlur` target, Controls Studio presets, and Volt Boost optimizations
+          cat > "$NOTES_FILE" <<'EOF'
+          ### Development build
+
+          This APK includes selected native Volt features inspired by third-party mods.
+          The catalog does **not** implement all original mods, their complete settings
+          screens, or all keybindings. Most entries still use placeholder icons.
+          Original icons are included for AppleSkin, Armor HUD, Low Fire, Mod Menu,
+          ShulkerBoxTooltip, Language Reload, and FastQuit; see THIRD_PARTY_NOTICES.md.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

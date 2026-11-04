@@ -693,6 +693,15 @@ impl HudAtlas {
         images.push(("horizon/white".into(), 4, 4, vec![255; 64]));
         if full {
             Self::slots(&mut images, crate::trims::slot_size(root));
+            // Embedded, attributed upstream mod artwork; no network access or
+            // per-frame image decoding is needed in either UI.
+            for id in crate::volt_mods::VoltModId::ALL {
+                if let Some((name, bytes)) = crate::volt_mods::upstream_icon(id)
+                    && let Ok((w, h, pixels)) = decode_bytes(bytes)
+                {
+                    images.push((name.to_owned(), w, h, pixels));
+                }
+            }
         }
         #[cfg(target_os = "android")]
         let atlas_limit = crate::android_runtime::atlas_limit().min(MAX_ATLAS_SIZE);

@@ -545,6 +545,20 @@ impl<'a> Ui<'a> {
         self.corners(x0, y0, x1, y1, r, true, color);
     }
 
+    /// Draw an atlas sprite in launcher dp coordinates. Returns false when it
+    /// is unavailable so callers can use their own fallback.
+    pub fn atlas_sprite(&mut self, name: &str, x: f32, y: f32, w: f32, h: f32) -> bool {
+        let Some(rect) = self.atlas.sprites.get(name).copied() else {
+            return false;
+        };
+        let (x0, y0, x1, y1) = (self.px_x(x), self.px_y(y), self.px_x(x + w), self.px_y(y + h));
+        if x1 > x0 && y1 > y0 {
+            let s = self.scale;
+            self.batch.rect_uv(x0 / s, y0 / s, (x1 - x0) / s, (y1 - y0) / s, rect, u32::MAX);
+        }
+        true
+    }
+
     pub fn volt_logo(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let Some(rect) = with_cache(self.atlas, |c| c.volt_logo(self.atlas)) else {
             return;

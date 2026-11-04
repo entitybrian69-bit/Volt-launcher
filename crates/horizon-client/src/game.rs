@@ -15920,6 +15920,9 @@ impl ApplicationHandler for Game<'_> {
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     let pressed = state == ElementState::Pressed;
+                    if pressed && self.volt_mod_input(&horizon_client::keybinds::mouse_name(button)) {
+                        return Ok(());
+                    }
                     if matches!(self.screen, Screen::Inventory | Screen::Creative)
                         && let Some(key) = self
                             .settings
@@ -16289,6 +16292,13 @@ impl ApplicationHandler for Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
+                    if event.state == ElementState::Pressed
+                        && !event.repeat
+                        && horizon_client::keybinds::key_name(key)
+                            .is_some_and(|name| self.volt_mod_input(name))
+                    {
+                        return Ok(());
+                    }
                     self.mod_key(key, event.state == ElementState::Pressed, event.repeat);
                     self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
                     // Screen.keyPressed sees the physical key, repeats included.

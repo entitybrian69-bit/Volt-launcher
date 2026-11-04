@@ -9,6 +9,7 @@ use horizon_client::{
     extras::Corner,
     extras_hud::Corners,
     gizmos::Line,
+    keybinds,
     hud::{HudBatch, rgba},
     text::{self, Text},
     volt_features::project_waypoint,
@@ -124,7 +125,14 @@ impl Game<'_> {
             && self.title.is_none()
     }
 
-    /// Returns `#2` Optic Zoom `(factor, smooth, turn_scale)` when `C` is held.
+    /// Read mod holds from physical inputs, not vanilla's translated key set.
+    fn volt_binding_held(&self, mapping: &str) -> bool {
+        let binding = self.settings.keys.get(mapping);
+        keybinds::key_code(binding).is_some_and(|key| self.physical_keys.contains(&key))
+            || keybinds::mouse_button(binding).is_some_and(|button| self.physical_buttons.contains(&button))
+    }
+
+    /// Returns `#2` Optic Zoom `(factor, smooth, turn_scale)` while its binding is held.
     pub(super) fn volt_qol_zoom(&self) -> Option<(f32, bool, f64)> {
         let qol = &self.settings.extras.volt_qol;
         let zoom_on =
@@ -132,7 +140,7 @@ impl Game<'_> {
         if !zoom_on || self.screen != Screen::Playing || self.title.is_some() {
             return None;
         }
-        if !self.keys.contains(&KeyCode::KeyC) {
+        if !self.volt_binding_held("key.volt.zoom") {
             return None;
         }
         let pct = f32::from(qol.zoom_fov_pct.clamp(10, 80));
@@ -152,57 +160,34 @@ impl Game<'_> {
         true
     }
 
-    /// Handles hotkeys for Mod Menu (`M`), World Map (`J`), Toggle Sprint, and Freelook (`Alt`).
-    pub(super) fn volt_gameplay_key(&mut self, key: KeyCode, pressed: bool) -> bool {
-        if pressed {
-            self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
-        }
-        if matches!(key, KeyCode::AltLeft | KeyCode::AltRight)
-            && (self.settings.extras.volt_qol.freelook_enabled
-                || self
-                    .settings
-                    .extras
-                    .mod_catalog
-                    .is_on(VoltModId::Freelook))
-        {
-            if pressed && !self.extras.volt.freelook_active && self.screen == Screen::Playing {
-                self.extras.volt.freelook_active = true;
-                self.extras.volt.freelook_yaw = self.yaw;
-                self.extras.volt.freelook_pitch = self.pitch;
-            } else if !pressed {
-                self.extras.volt.freelook_active = false;
-            }
-        }
-        if !pressed || self.screen != Screen::Playing || self.title.is_some() {
+    /// Open native mod screens from a physical key or mouse binding.
+    pub(super) fn volt_mod_input(&mut self, name: &str) -> bool {
+        if name == "key.keyboard.unknown" || self.screen != Screen::Playing || self.title.is_some() {
             return false;
         }
-        if key == KeyCode::KeyM {
-            if self.settings.extras.mod_catalog.is_on(VoltModId::ModMenu) {
-                self.open_options_at(false, horizon_client::options_ui::Page::ModMenu);
-                return true;
-            } else if self.settings.extras.volt_qol.atlas_enabled
-                || self
-                    .settings
-                    .extras
-                    .mod_catalog
-                    .is_on(VoltModId::XaerosWorldMap)
-            {
-                self.sync_waypoint_ui_context();
-                self.open_options_at(false, horizon_client::options_ui::Page::VoltAtlas);
-                return true;
-            }
+        if self.settings.keys.get("key.volt.mod_menu") == name
+            && self.settings.extras.mod_catalog.is_on(VoltModId::ModMenu)
+        {
+            self.open_options_at(false, horizon_client::options_ui::Page::ModMenu);
+            return true;
         }
-        if key == KeyCode::KeyJ
+        if self.settings.keys.get("key.volt.world_map") == name
             && (self.settings.extras.volt_qol.atlas_enabled
-                || self
-                    .settings
-                    .extras
-                    .mod_catalog
-                    .is_on(VoltModId::XaerosWorldMap))
+                || self.settings.extras.mod_catalog.is_on(VoltModId::XaerosWorldMap))
         {
             self.sync_waypoint_ui_context();
             self.open_options_at(false, horizon_client::options_ui::Page::VoltAtlas);
             return true;
+        }
+        false
+    }
+
+    pub(super) fn volt_gameplay_key(&mut self, key: KeyCode, pressed: bool) -> bool {
+        if pressed {
+            self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
+        }
+        if !pressed || self.screen != Screen::Playing || self.title.is_some() {
+            return false;
         }
         if key == KeyCode::ControlLeft && self.settings.extras.volt_mods.toggle_sprint {
             self.extras.volt.toggle_sprint_latched = !self.extras.volt.toggle_sprint_latched;
@@ -297,7 +282,7 @@ impl Game<'_> {
                 .is_on(VoltModId::Freelook))
             && self.screen == Screen::Playing
             && self.title.is_none()
-            && (self.keys.contains(&KeyCode::AltLeft) || self.keys.contains(&KeyCode::AltRight));
+            && self.volt_binding_held("key.volt.freelook");
         if alt_down && !self.extras.volt.freelook_active {
             self.extras.volt.freelook_active = true;
             self.extras.volt.freelook_yaw = self.yaw;
@@ -1146,10 +1131,11 @@ impl Game<'_> {
             let bar_w = (sat / 20.0 * 81.0).round();
             let hx = (w * 0.5).floor() + 10.0;
             let hy = h - 41.0;
-            if bar_w > 0.5 {
+            if cat.appleskin_saturation && bar_w > 0.5 {
                 batch.fill(atlas, hx, hy, bar_w, 2.0, rgba(255, 212, 64, 225));
             }
-            if let Some(held) = self.held()
+            if cat.appleskin_food_preview
+                && let Some(held) = self.held()
                 && let Some((food_pts, sat_pts)) = food_restore_points(&held.item)
             {
                 let txt = format!("+{food_pts} Food  +{sat_pts:.1} Sat");
