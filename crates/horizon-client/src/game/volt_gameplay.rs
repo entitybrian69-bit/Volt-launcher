@@ -15,8 +15,8 @@ use horizon_client::{
     volt_cosmetics,
     volt_features::project_waypoint,
     volt_qol::{
-        BlueprintPreset, CrosshairStyle, JEI_RECIPES, TimeWeatherOverride, VoltVoiceRuntime,
-        blueprint_blocks, eval_chat_math, slime_chunk_check,
+        AtlasChunkTile, ClientTimeWeather, CrosshairStyle, JEI_RECIPES, VoltChatConfig,
+        VoltVoiceRuntime, eval_chat_math, is_slime_chunk, preset_blueprint_blocks,
     },
 };
 use std::collections::{HashMap, VecDeque};
@@ -30,7 +30,6 @@ pub(super) struct VoltRuntime {
     pub voice: VoltVoiceRuntime,
     pub voice_ptt_touch_held: bool,
     pub voice_mic_scratch: Vec<i16>,
-    pub voice_out_scratch: VecDeque<[f32; 2]>,
     pub blueprint_anchor: Option<[i32; 3]>,
     pub blueprint_dim: String,
     pub atlas_scope_dim: Option<(String, String)>,
@@ -38,7 +37,7 @@ pub(super) struct VoltRuntime {
     pub jei_selected: usize,
     pub jei_scroll: usize,
     pub replay_ring: VecDeque<([f64; 3], f32, f32)>,
-    pub last_mob_hp: HashMap<u64, f32>,
+    pub last_mob_hp: HashMap<u32, f32>,
     pub damage_popups: Vec<DamagePopup>,
     pub last_hit_dist: Option<(f32, f64)>,
     pub toggle_sprint_latched: bool,
@@ -61,7 +60,6 @@ impl Default for VoltRuntime {
             voice: VoltVoiceRuntime::default(),
             voice_ptt_touch_held: false,
             voice_mic_scratch: Vec::with_capacity(320),
-            voice_out_scratch: VecDeque::with_capacity(2048),
             blueprint_anchor: None,
             blueprint_dim: String::new(),
             atlas_scope_dim: None,
@@ -148,7 +146,7 @@ impl Game<'_> {
         true
     }
 
-    /// Handles hotkeys for World Atlas (`M`), Toggle Sprint, and Blueprint re-anchoring (`B`).
+    /// Handles hotkeys for World Atlas (`M`), Toggle Sprint, and Freelook (`Alt`).
     pub(super) fn volt_gameplay_key(&mut self, key: KeyCode, pressed: bool) -> bool {
         if pressed {
             self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
@@ -186,12 +184,11 @@ impl Game<'_> {
         thunder: f32,
     ) -> (i64, f32, f32) {
         match self.settings.extras.volt_mods.time_weather {
-            TimeWeatherOverride::Server => (day_time, rain, thunder),
-            TimeWeatherOverride::DayNoon => (6000, 0.0, 0.0),
-            TimeWeatherOverride::SunsetGold => (12650, 0.0, 0.0),
-            TimeWeatherOverride::Midnight => (18000, 0.0, 0.0),
-            TimeWeatherOverride::ClearWeather => (day_time, 0.0, 0.0),
-            TimeWeatherOverride::CozyRain => (day_time, 1.0, 0.0),
+            ClientTimeWeather::ServerLive => (day_time, rain, thunder),
+            ClientTimeWeather::SunnyNoon => (6000, 0.0, 0.0),
+            ClientTimeWeather::GoldenSunset => (12650, 0.0, 0.0),
+            ClientTimeWeather::StarryMidnight => (18000, 0.0, 0.0),
+            ClientTimeWeather::CozyRain => (day_time, 1.0, 0.0),
         }
     }
 
@@ -246,16 +243,18 @@ impl Game<'_> {
     }
 
     /// Per-frame background tick for World Atlas, Sound Physics Lite, 3D Voice,
-    /// Damage Popups, Replay Buffer, and Cosmetics skin arm sync.
+    /// Damage Popups, Replay Buffer, and Cosmetics skin sync.
     pub(super) fn tick_volt_frame(&mut self, underwater: bool) {
         let now = self.started.elapsed().as_secs_f64();
         if self.extras.mouse[0] || self.extras.mouse[1] {
             self.extras.volt.last_input_at = now;
         }
-        self.ui.options.skin_slim = self
-            .player_model
-            .as_ref()
-            .is_some_and(|m| m.extra.slim);
+        self.ui.options.skin_slim = self.player_model.as_ref().is_some_and(|m| m.slim);
+        let cur_skin = self.player_model.as_ref().and_then(|m| m.skin.as_deref());
+        if self.ui.options.skin_key.as_deref() != cur_skin {
+            self.ui.options.skin_key = cur_skin.map(str::to_owned);
+        }
+
         let alt_down = self.settings.extras.volt_qol.freelook_enabled
             && self.screen == Screen::Playing
             && self.title.is_none()
@@ -330,7 +329,7 @@ impl Game<'_> {
             let uname = self.player_display_name().plain();
             let uid = horizon_core::random::java_string_hash(uname.encode_utf16()) as u64;
             let mic_slice = std::mem::take(&mut self.extras.volt.voice_mic_scratch);
-            let mut out_q = std::mem::take(&mut self.extras.volt.voice_out_scratch);
+            self.extras.volt.voice.ptt_held = ptt_held;
             self.extras.volt.voice.tick(
                 chat_cfg,
                 uid ^ 0x564F_4C54,
@@ -338,17 +337,19 @@ impl Game<'_> {
                 listener_pos,
                 self.yaw,
                 in_cave,
-                ptt_held,
                 relay_host.as_deref(),
                 &mic_slice,
-                48_000,
-                &mut out_q,
+                now as f32,
             );
-            self.audio.push_voice_frames(&mut out_q);
+            self.audio
+                .push_voice_frames(&mut self.extras.volt.voice.mixed_pcm_out);
             self.extras.volt.voice_mic_scratch = mic_slice;
-            self.extras.volt.voice_out_scratch = out_q;
         } else {
-            self.extras.volt.voice.shutdown();
+            let off_cfg = VoltChatConfig::default();
+            self.extras
+                .volt
+                .voice
+                .tick(&off_cfg, 0, "", [0.0; 3], 0.0, false, None, &[], now as f32);
         }
 
         if self.title.is_some() {
@@ -369,7 +370,8 @@ impl Game<'_> {
             ];
             self.ui.options.world_atlas.player_yaw = self.yaw;
             if self.extras.volt.atlas_scope_dim.as_ref() != Some(&(scope.clone(), dim.clone())) {
-                self.ui.options.world_atlas.clear();
+                self.ui.options.world_atlas.tiles.clear();
+                self.ui.options.world_atlas.center_on_player();
                 self.extras.volt.atlas_scope_dim = Some((scope, dim));
             }
             let pcx = pos[0] >> 4;
@@ -378,48 +380,49 @@ impl Game<'_> {
             self.extras.volt.atlas_scan_cursor = self.extras.volt.atlas_scan_cursor.wrapping_add(1);
             let cx = pcx + (idx % 9) - 4;
             let cz = pcz + (idx / 9) - 4;
-            if !self.ui.options.world_atlas.chunks.contains_key(&(cx, cz))
+            if !self.ui.options.world_atlas.tiles.contains_key(&(cx, cz))
                 && let Some(chunk) = self.world.chunks.get(&(cx, cz))
             {
-                let mut colors = [0u32; 16];
+                let mut rgb_cells = [[58u8, 110, 58]; 16];
                 let mut heights = [64i16; 16];
-                for sx in 0..4 {
-                    for sz in 0..4 {
+                for sx in 0i32..4 {
+                    for sz in 0i32..4 {
                         let wx = cx * 16 + sx * 4 + 2;
                         let wz = cz * 16 + sz * 4 + 2;
                         let mut top_y = (pos[1] + 48).min(319);
                         let min_y = (pos[1] - 64).max(-64);
-                        let mut rgb = 0xFF3A_6E3Au32;
+                        let mut cell_rgb = [58u8, 110, 58];
                         while top_y >= min_y {
-                            let st = chunk.get(wx & 15, top_y, wz & 15);
+                            let st = chunk.block(wx & 15, top_y, wz & 15);
                             let facts = self.res.facts().get(st);
                             let nm = facts.name.as_ref();
                             if nm != "minecraft:air"
                                 && nm != "minecraft:cave_air"
                                 && nm != "minecraft:void_air"
                             {
-                                rgb = classify_atlas_block_abgr(nm);
+                                cell_rgb = classify_atlas_block_rgb(nm);
                                 break;
                             }
                             top_y -= 2;
                         }
                         let cell = (sz * 4 + sx) as usize;
-                        colors[cell] = rgb;
+                        rgb_cells[cell] = cell_rgb;
                         heights[cell] = top_y as i16;
                     }
                 }
-                self.ui.options.world_atlas.record_chunk(
+                self.ui.options.world_atlas.record_tile(
                     cx,
                     cz,
-                    colors,
-                    heights,
-                    slime_chunk_check(cx, cz),
+                    AtlasChunkTile {
+                        rgb: rgb_cells,
+                        height: heights,
+                    },
                 );
             }
         }
 
         // 4. #8 Blueprint anchor management
-        if qol.blueprint_enabled && qol.blueprint_preset != BlueprintPreset::Off {
+        if qol.blueprint_enabled {
             if self.extras.volt.blueprint_anchor.is_none()
                 || self.extras.volt.blueprint_dim != self.dim.id()
             {
@@ -436,7 +439,7 @@ impl Game<'_> {
             self.extras.volt.blueprint_anchor = None;
         }
 
-        // 5. #9 Keyframe Replay Ring (10 Hz sample)
+        // 5. #9 Keyframe Replay Ring (movement-sampled)
         if qol.replay_buffer
             && let Some(p) = self.player.as_ref()
         {
@@ -520,14 +523,14 @@ impl Game<'_> {
             let px = p.position.x.floor() as i32;
             let py = p.position.y.floor() as i32;
             let pz = p.position.z.floor() as i32;
-            for dx in -9..=9 {
-                for dz in -9..=9 {
+            for dx in -9i32..=9 {
+                for dz in -9i32..=9 {
                     if dx * dx + dz * dz > 85 {
                         continue;
                     }
                     let wx = px + dx;
                     let wz = pz + dz;
-                    for dy in -3..=3 {
+                    for dy in -3i32..=3 {
                         let wy = py + dy;
                         let ground = self.world.block(wx, wy - 1, wz);
                         let air = self.world.block(wx, wy, wz);
@@ -568,17 +571,18 @@ impl Game<'_> {
         if qol.blueprint_enabled
             && let Some([ax, ay, az]) = self.extras.volt.blueprint_anchor
         {
-            for blk in blueprint_blocks(qol.blueprint_preset) {
-                if qol.blueprint_layer >= 0 && i16::from(blk.dy) != qol.blueprint_layer {
+            for blk in preset_blueprint_blocks(qol.blueprint_preset) {
+                if qol.blueprint_layer >= 0 && blk.rel[1] != i32::from(qol.blueprint_layer) {
                     continue;
                 }
-                let wx = ax + i32::from(blk.dx);
-                let wy = ay + i32::from(blk.dy);
-                let wz = az + i32::from(blk.dz);
+                let wx = ax + blk.rel[0];
+                let wy = ay + blk.rel[1];
+                let wz = az + blk.rel[2];
                 let cur_name = self.res.facts().get(self.world.block(wx, wy, wz)).name.as_ref();
-                let color = if cur_name == blk.block_id {
+                let cur_short = cur_name.trim_start_matches("minecraft:");
+                let color = if cur_short == blk.block_key {
                     0x9032_E678 // Placed & matching (Emerald)
-                } else if cur_name == "minecraft:air" || cur_name == "minecraft:cave_air" {
+                } else if cur_short == "air" || cur_short == "cave_air" || cur_short == "void_air" {
                     0xB848_B4FF // Ghost block to place (Sky Cyan)
                 } else {
                     0xE0FF_3848 // Wrong block warning (Crimson)
@@ -626,7 +630,7 @@ impl Game<'_> {
                 let mut vy = -pr.sin() * speed;
                 let mut vz = yr.cos() * pr.cos() * speed;
                 let mut cur = [eye[0], eye[1] - 0.1, eye[2]];
-                for step in 0..42 {
+                for step in 0i32..42 {
                     let next = [cur[0] + vx, cur[1] + vy, cur[2] + vz];
                     let col = if step % 2 == 0 {
                         0xE046_F0B4
@@ -673,8 +677,8 @@ impl Game<'_> {
                 if dx * dx + dz * dz > 24.0 * 24.0 {
                     continue;
                 }
-                let hw = 0.35;
-                let hh = 1.8;
+                let hw = mob.kind.width * 0.5;
+                let hh = mob.kind.height;
                 let col = if mob.hurt_time > 0 {
                     0xFFFF_384C
                 } else {
@@ -693,7 +697,7 @@ impl Game<'_> {
                 );
                 let yr = f64::from(mob.head_yaw.to_radians());
                 let pr = f64::from(mob.head_pitch.to_radians());
-                let eye = [mob.position.x, mob.position.y + 1.52, mob.position.z];
+                let eye = [mob.position.x, mob.position.y + mob.kind.eye_height, mob.position.z];
                 lines.push(Line {
                     start: eye,
                     end: [
@@ -719,34 +723,34 @@ impl Game<'_> {
 
         // 0. 3rd-Person / Freelook 3D Animated Volt Cosmetics on the local player!
         if (self.own_body_in_view() || self.freelook_active())
-            && self.settings.extras.volt_cosmetics.show_in_third_person
+            && self.settings.extras.volt_cosmetics.show_in_world
             && self.settings.extras.volt_cosmetics.any_equipped()
             && let (Some(p), Some((cam_pos, cam_yaw, cam_pitch, cam_fov))) =
                 (self.player.as_ref(), self.locator_camera)
         {
-            let body_center = [p.position.x, p.position.y + 0.92, p.position.z];
-            let proj = project_waypoint(cam_pos, cam_yaw, cam_pitch, cam_fov, w, h, body_center);
-            if !proj.behind && proj.distance > 0.35 && proj.distance < 32.0 {
-                let fov_rad = cam_fov.to_radians().max(0.35);
-                let px_per_block = (h * 0.5) / ((proj.distance as f32) * (fov_rad * 0.5).tan());
-                let px_per_unit = px_per_block / 16.0;
-                let rel_yaw = self.yaw - cam_yaw + 180.0;
-                let walk_amp = ((p.velocity.x * p.velocity.x + p.velocity.z * p.velocity.z).sqrt()
-                    as f32
-                    * 4.0)
-                    .clamp(0.0, 1.0);
-                volt_cosmetics::draw_world_player_cosmetics(
-                    batch,
-                    atlas,
-                    &self.settings.extras.volt_cosmetics,
-                    proj.screen,
-                    px_per_unit,
-                    rel_yaw,
-                    cam_pitch * 0.5,
-                    now as f32,
-                    walk_amp,
-                );
-            }
+            let vp = (glam::Mat4::perspective_rh(
+                cam_fov.to_radians().max(0.35),
+                w / h.max(1.0),
+                0.05,
+                256.0,
+            ) * horizon_client::camera::view_matrix(cam_yaw, cam_pitch))
+            .to_cols_array_2d();
+            let walk_amp = ((p.velocity.x * p.velocity.x + p.velocity.z * p.velocity.z).sqrt()
+                as f32
+                * 4.0)
+                .clamp(0.0, 1.0);
+            volt_cosmetics::draw_world_player_cosmetics(
+                batch,
+                atlas,
+                &self.settings.extras.volt_cosmetics,
+                &vp,
+                cam_pos,
+                [p.position.x, p.position.y, p.position.z],
+                self.yaw,
+                walk_amp,
+                p.shift_key_down,
+                now as f32,
+            );
         }
 
         let qol = &self.settings.extras.volt_qol;
@@ -772,7 +776,7 @@ impl Game<'_> {
                 let st = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
                 let facts = self.res.facts().get(st);
                 let raw = facts.name.trim_start_matches("minecraft:");
-                if raw != "air" && raw != "cave_air" {
+                if raw != "air" && raw != "cave_air" && raw != "void_air" {
                     title_str = Some(capitalize_words(&raw.replace('_', " ")));
                     let light = self.world.light(hit.pos[0], hit.pos[1] + 1, hit.pos[2]);
                     let tool = recommended_tool_tag(raw);
@@ -794,21 +798,21 @@ impl Game<'_> {
                 let cy = 6.0;
                 batch.fill(atlas, cx, cy, cw, 24.0, rgba(12, 14, 22, 215));
                 batch.fill(atlas, cx, cy, cw, 1.5, rgba(224, 48, 68, 245));
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     &title,
                     cx + 7.0,
                     cy + 4.0,
                     rgba(250, 250, 255, 255),
+                    true,
                 );
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     &sub_str,
                     cx + 7.0,
                     cy + 14.0,
                     rgba(175, 215, 245, 255),
+                    true,
                 );
             }
         }
@@ -820,16 +824,16 @@ impl Game<'_> {
         {
             let mut missing: HashMap<&'static str, u32> = HashMap::new();
             let mut done = 0u32;
-            let blocks = blueprint_blocks(qol.blueprint_preset);
+            let blocks = preset_blueprint_blocks(qol.blueprint_preset);
             for blk in &blocks {
-                let wx = ax + i32::from(blk.dx);
-                let wy = ay + i32::from(blk.dy);
-                let wz = az + i32::from(blk.dz);
+                let wx = ax + blk.rel[0];
+                let wy = ay + blk.rel[1];
+                let wz = az + blk.rel[2];
                 let cur = self.res.facts().get(self.world.block(wx, wy, wz)).name.as_ref();
-                if cur == blk.block_id {
+                if cur.trim_start_matches("minecraft:") == blk.block_key {
                     done += 1;
                 } else {
-                    *missing.entry(blk.block_id).or_insert(0) += 1;
+                    *missing.entry(blk.block_key).or_insert(0) += 1;
                 }
             }
             let rows_n = missing.len().min(4) + 1;
@@ -837,8 +841,7 @@ impl Game<'_> {
             let (bx, by) = corners.place(Corner::TopLeft, 138.0, bh);
             batch.fill(atlas, bx, by, 138.0, bh, rgba(12, 16, 24, 200));
             batch.fill(atlas, bx, by, 2.0, bh, rgba(72, 180, 255, 245));
-            atlas.font.draw_shadow(
-                batch,
+            batch.text(
                 atlas,
                 &format!(
                     "Blueprint: {done}/{} ({}%)",
@@ -848,18 +851,19 @@ impl Game<'_> {
                 bx + 6.0,
                 by + 3.0,
                 rgba(110, 230, 255, 255),
+                true,
             );
             let mut list: Vec<(&str, u32)> = missing.into_iter().collect();
             list.sort_by(|a, b| b.1.cmp(&a.1));
             for (i, (id, cnt)) in list.into_iter().take(4).enumerate() {
-                let clean = id.trim_start_matches("minecraft:").replace('_', " ");
-                atlas.font.draw_shadow(
-                    batch,
+                let clean = id.replace('_', " ");
+                batch.text(
                     atlas,
                     &format!("{}x {}", cnt, capitalize_words(&clean)),
                     bx + 6.0,
                     by + 14.0 + i as f32 * 10.0,
                     rgba(235, 238, 248, 255),
+                    true,
                 );
             }
         }
@@ -877,13 +881,13 @@ impl Game<'_> {
                 batch.fill(atlas, vx, vy, vw, vh, bg);
                 batch.fill(atlas, vx, vy, vw, 1.2, rgba(224, 52, 72, 240));
                 let lbl = if active { "MIC ON" } else { "MIC [V]" };
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     lbl,
                     vx + 5.0,
                     vy + 5.0,
                     rgba(250, 252, 255, 255),
+                    true,
                 );
             }
             if !self.extras.volt.voice.peers.is_empty() {
@@ -891,14 +895,14 @@ impl Game<'_> {
                 let bh = 4.0 + n as f32 * 11.0;
                 let (px, py) = corners.place(Corner::BottomLeft, 120.0, bh);
                 batch.fill(atlas, px, py, 120.0, bh, rgba(12, 18, 24, 195));
-                for (i, peer) in self.extras.volt.voice.peers.iter().take(4).enumerate() {
-                    atlas.font.draw_shadow(
-                        batch,
+                for (i, peer) in self.extras.volt.voice.peers.values().take(4).enumerate() {
+                    batch.text(
                         atlas,
-                        &format!("\u{25cf} {} ({:.0}m)", peer.name, peer.distance),
+                        &format!("\u{25cf} {} ({:.0}m)", peer.name, peer.distance_m),
                         px + 5.0,
                         py + 3.0 + i as f32 * 11.0,
                         rgba(96, 245, 152, 255),
+                        true,
                     );
                 }
             }
@@ -931,13 +935,13 @@ impl Game<'_> {
             let (px, py) = corners.place(Corner::TopLeft, pw, 14.0);
             batch.fill(atlas, px, py, pw, 14.0, rgba(12, 14, 22, 195));
             batch.fill(atlas, px, py, 2.0, 14.0, rgba(224, 48, 68, 245));
-            atlas.font.draw_shadow(
-                batch,
+            batch.text(
                 atlas,
                 &joined,
                 px + 5.0,
                 py + 3.0,
                 rgba(246, 248, 255, 255),
+                true,
             );
         }
 
@@ -972,9 +976,7 @@ impl Game<'_> {
                 let (ax, ay) = corners.place(Corner::BottomRight, 98.0, bh);
                 batch.fill(atlas, ax, ay, 98.0, bh, rgba(12, 14, 22, 185));
                 for (i, (txt, col)) in eq_lines.iter().enumerate() {
-                    atlas
-                        .font
-                        .draw_shadow(batch, atlas, txt, ax + 5.0, ay + 3.0 + i as f32 * 10.0, *col);
+                    batch.text(atlas, txt, ax + 5.0, ay + 3.0 + i as f32 * 10.0, *col, true);
                 }
             }
         }
@@ -995,13 +997,13 @@ impl Game<'_> {
                     secs / 60,
                     secs % 60
                 );
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     &line,
                     ex + 4.0,
                     ey + 3.0 + i as f32 * 10.0,
                     rgba(185, 230, 255, 255),
+                    true,
                 );
             }
         }
@@ -1022,13 +1024,13 @@ impl Game<'_> {
                     rgba(16, 18, 26, 185)
                 };
                 batch.fill(atlas, kx + ox, ky + oy, kw, 18.0, bg);
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     lbl,
                     kx + ox + 6.0,
                     ky + oy + 5.0,
                     rgba(250, 250, 255, 255),
+                    true,
                 );
             }
         }
@@ -1050,13 +1052,13 @@ impl Game<'_> {
                 && let Some((food_pts, sat_pts)) = food_restore_points(&held.item)
             {
                 let txt = format!("+{food_pts} Food  +{sat_pts:.1} Sat");
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     &txt,
                     hx,
                     hy - 10.0,
                     rgba(255, 232, 125, 255),
+                    true,
                 );
             }
         }
@@ -1068,7 +1070,7 @@ impl Game<'_> {
             let bx = p.position.x.floor() as i32;
             let by = p.position.y.floor() as i32;
             let bz = p.position.z.floor() as i32;
-            let is_slime = slime_chunk_check(bx >> 4, bz >> 4);
+            let is_slime = is_slime_chunk(bx >> 4, bz >> 4, self.seed);
             let light = self.world.light(bx, by, bz);
             let txt = format!(
                 "Chunk ({}, {}) \u{2022} {} \u{2022} L:{}/{}",
@@ -1081,8 +1083,7 @@ impl Game<'_> {
             let tw = atlas.font.width(&txt) + 10.0;
             let (tx, ty) = corners.place(Corner::BottomRight, tw, 13.0);
             batch.fill(atlas, tx, ty, tw, 13.0, rgba(12, 16, 22, 195));
-            atlas.font.draw_shadow(
-                batch,
+            batch.text(
                 atlas,
                 &txt,
                 tx + 5.0,
@@ -1092,6 +1093,7 @@ impl Game<'_> {
                 } else {
                     rgba(215, 225, 240, 255)
                 },
+                true,
             );
         }
 
@@ -1153,13 +1155,13 @@ impl Game<'_> {
                 let proj = project_waypoint(cam_pos, cam_yaw, cam_pitch, cam_fov, w, h, world_pt);
                 if !proj.behind && proj.distance < 36.0 {
                     let txt = format!("-{:.1}", pop.amount);
-                    atlas.font.draw_shadow(
-                        batch,
+                    batch.text(
                         atlas,
                         &txt,
                         proj.screen[0] - 8.0,
                         proj.screen[1] - 4.0,
                         rgba(255, 86, 96, 255),
+                        true,
                     );
                 }
             }
@@ -1184,13 +1186,13 @@ impl Game<'_> {
             batch.fill(atlas, 0.0, 0.0, w, h, rgba(0, 0, 0, 215));
             let msg = "Volt OLED Saver Active \u{2014} Touch or Move to Wake";
             let mw = atlas.font.width(msg);
-            atlas.font.draw_shadow(
-                batch,
+            batch.text(
                 atlas,
                 msg,
                 (w - mw) * 0.5,
                 h * 0.5 - 4.0,
                 rgba(160, 170, 190, 200),
+                true,
             );
         }
     }
@@ -1199,7 +1201,7 @@ impl Game<'_> {
         [(w - 58.0).max(4.0), (h * 0.52).floor(), 52.0, 18.0]
     }
 
-    /// Handles touch/mouse press on the HUD Push-to-Talk `[MIC]` button or Minimap-to-Atlas tap.
+    /// Handles touch/mouse press on the HUD Push-to-Talk `[MIC]` button.
     pub(super) fn try_click_volt_hud(&mut self, cursor: (f32, f32), pressed: bool) -> bool {
         self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
         if !pressed {
@@ -1240,13 +1242,13 @@ impl Game<'_> {
 
         batch.fill(atlas, px, py, panel_w, ph, rgba(14, 16, 24, 228));
         batch.fill(atlas, px, py, panel_w, 1.5, rgba(224, 48, 68, 245));
-        atlas.font.draw_shadow(
-            batch,
+        batch.text(
             atlas,
             "Volt JEI Recipes",
             px + 6.0,
             py + 4.0,
             rgba(255, 220, 130, 255),
+            true,
         );
 
         let sel = self.extras.volt.jei_selected.min(JEI_RECIPES.len() - 1);
@@ -1254,29 +1256,29 @@ impl Game<'_> {
         // Selected 3x3 crafting recipe preview card at top
         let card_y = py + 15.0;
         batch.fill(atlas, px + 4.0, card_y, panel_w - 8.0, 56.0, rgba(22, 26, 38, 235));
-        atlas.font.draw_shadow(
-            batch,
+        batch.text(
             atlas,
-            &format!("{} (x{})", rec.name, rec.count),
+            &format!("{} (x{})", rec.title, rec.count),
             px + 7.0,
             card_y + 3.0,
             rgba(120, 240, 185, 255),
+            true,
         );
-        for row in 0..3 {
-            for col in 0..3 {
+        for row in 0usize..3 {
+            for col in 0usize..3 {
                 let cell = rec.grid[row * 3 + col];
                 let gx = px + 8.0 + col as f32 * 33.0;
                 let gy = card_y + 14.0 + row as f32 * 13.0;
                 batch.fill(atlas, gx, gy, 31.0, 11.5, rgba(34, 38, 54, 245));
                 if !cell.is_empty() {
                     let short: String = cell.chars().take(5).collect();
-                    atlas.font.draw_shadow(
-                        batch,
+                    batch.text(
                         atlas,
                         &short,
                         gx + 2.0,
                         gy + 2.0,
                         rgba(240, 242, 252, 255),
+                        true,
                     );
                 }
             }
@@ -1305,13 +1307,13 @@ impl Game<'_> {
                     rgba(24, 28, 40, 200)
                 },
             );
-            atlas.font.draw_shadow(
-                batch,
+            batch.text(
                 atlas,
-                JEI_RECIPES[idx].name,
+                JEI_RECIPES[idx].title,
                 px + 7.0,
                 ry + 2.0,
                 rgba(245, 247, 255, 255),
+                true,
             );
         }
     }
@@ -1397,27 +1399,27 @@ impl TextCleanExt for Text {
     }
 }
 
-fn classify_atlas_block_abgr(name: &str) -> u32 {
+fn classify_atlas_block_rgb(name: &str) -> [u8; 3] {
     if name.contains("water") || name.contains("kelp") || name.contains("seagrass") {
-        rgba(46, 108, 214, 255)
+        [46, 108, 214]
     } else if name.contains("lava") || name.contains("magma") {
-        rgba(238, 96, 32, 255)
+        [238, 96, 32]
     } else if name.contains("sand") || name.contains("sandstone") {
-        rgba(222, 206, 148, 255)
+        [222, 206, 148]
     } else if name.contains("snow") || name.contains("ice") {
-        rgba(232, 244, 255, 255)
+        [232, 244, 255]
     } else if name.contains("leaves") || name.contains("vine") || name.contains("bamboo") {
-        rgba(52, 138, 58, 255)
+        [52, 138, 58]
     } else if name.contains("grass") || name.contains("moss") {
-        rgba(84, 168, 72, 255)
+        [84, 168, 72]
     } else if name.contains("planks") || name.contains("log") || name.contains("wood") {
-        rgba(148, 108, 66, 255)
+        [148, 108, 66]
     } else if name.contains("netherrack") || name.contains("crimson") {
-        rgba(136, 46, 48, 255)
+        [136, 46, 48]
     } else if name.contains("end_stone") {
-        rgba(218, 222, 164, 255)
+        [218, 222, 164]
     } else {
-        rgba(128, 132, 140, 255)
+        [128, 132, 140]
     }
 }
 
@@ -1487,7 +1489,11 @@ pub(super) fn enchant_guide_note(line_plain: &str) -> Option<&'static str> {
     let low = line_plain.to_lowercase();
     if low.contains("sharpness") {
         Some("  [Max V \u{2022} +Melee Damage \u{2022} Sword/Axe]")
-    } else if low.contains("protection") && !low.contains("blast") && !low.contains("fire") && !low.contains("projectile") {
+    } else if low.contains("protection")
+        && !low.contains("blast")
+        && !low.contains("fire")
+        && !low.contains("projectile")
+    {
         Some("  [Max IV \u{2022} All-Damage Reduction \u{2022} Armor]")
     } else if low.contains("efficiency") {
         Some("  [Max V \u{2022} Mining Speed \u{2022} Tools]")

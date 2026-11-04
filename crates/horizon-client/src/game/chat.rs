@@ -1238,13 +1238,13 @@ impl Game<'_> {
                     1.0,
                     horizon_client::hud::rgba(224, 48, 68, 240),
                 );
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     lbl,
                     bx + 5.0,
                     by + 2.5,
                     horizon_client::hud::rgba(245, 247, 255, 255),
+                    true,
                 );
             }
         }

@@ -1010,7 +1010,7 @@ impl WorldAtlasState {
             if wx >= map_x + 4.0 && wx <= map_x + map_w - 4.0 && wz >= map_y + 4.0 && wz <= map_y + map_h - 4.0 {
                 batch.fill(atlas, wx - 3.5, wz - 3.5, 7.0, 7.0, hud::rgba(0, 0, 0, 220));
                 batch.fill(atlas, wx - 2.5, wz - 2.5, 5.0, 5.0, hud::rgba(col[0], col[1], col[2], 255));
-                atlas.font.draw_shadow(batch, atlas, name, wx + 5.0, wz - 4.0, hud::rgba(255, 255, 255, 240));
+                batch.text(atlas, name, wx + 5.0, wz - 4.0, hud::rgba(255, 255, 255, 240), true);
             }
         }
 
@@ -1040,13 +1040,13 @@ impl WorldAtlasState {
             hc_z,
             slime_tag
         );
-        atlas.font.draw_shadow(
-            batch,
+        batch.text(
             atlas,
             &info,
             map_x + 4.0,
             map_y + 4.0,
             hud::rgba(244, 246, 255, 245),
+            true,
         );
 
         // Bottom mini toolbar buttons (`Mode`, `Zoom -`, `Zoom +`, `Center`, `+ Pin Center`)
@@ -1056,13 +1056,13 @@ impl WorldAtlasState {
             batch.fill(atlas, bx, btn_y, 60.0, 18.0, hud::rgba(32, 36, 52, 235));
             batch.fill(atlas, bx, btn_y, 60.0, 1.0, hud::rgba(218, 48, 68, 220));
             let tw = atlas.font.width(lbl);
-            atlas.font.draw_shadow(
-                batch,
+            batch.text(
                 atlas,
                 lbl,
                 bx + (60.0 - tw) * 0.5,
                 btn_y + 5.0,
                 hud::rgba(250, 250, 255, 255),
+                true,
             );
         }
     }
@@ -1207,9 +1207,9 @@ pub fn preset_blueprint_blocks(preset: BlueprintPreset) -> Vec<BlueprintBlock> {
             }
         }
         BlueprintPreset::Watchtower => {
-            for y in 0..9 {
-                for z in -2..=2 {
-                    for x in -2..=2 {
+            for y in 0i32..9 {
+                for z in -2i32..=2 {
+                    for x in -2i32..=2 {
                         let edge = x.abs() == 2 || z.abs() == 2;
                         if y == 0 || y == 7 {
                             out.push(BlueprintBlock { rel: [x, y, z], block_key: "stone_bricks", color: [148, 152, 158] });
@@ -1223,8 +1223,8 @@ pub fn preset_blueprint_blocks(preset: BlueprintPreset) -> Vec<BlueprintBlock> {
             }
         }
         BlueprintPreset::CropFarm9x9 => {
-            for z in -4..=4 {
-                for x in -4..=4 {
+            for z in -4i32..=4 {
+                for x in -4i32..=4 {
                     if x == 0 && z == 0 {
                         out.push(BlueprintBlock { rel: [x, 0, z], block_key: "water", color: [52, 148, 248] });
                     } else {
@@ -1235,8 +1235,8 @@ pub fn preset_blueprint_blocks(preset: BlueprintPreset) -> Vec<BlueprintBlock> {
             }
         }
         BlueprintPreset::PortalShrine => {
-            for y in 0..5 {
-                for x in -1..=2 {
+            for y in 0i32..5 {
+                for x in -1i32..=2 {
                     if y == 0 || y == 4 || x == -1 || x == 2 {
                         out.push(BlueprintBlock { rel: [x, y, 0], block_key: "obsidian", color: [68, 38, 108] });
                     }
@@ -1244,8 +1244,8 @@ pub fn preset_blueprint_blocks(preset: BlueprintPreset) -> Vec<BlueprintBlock> {
             }
         }
         BlueprintPreset::MobFarmDeck | BlueprintPreset::WorldClipboard => {
-            for z in -4..=4 {
-                for x in -4..=4 {
+            for z in -4i32..=4 {
+                for x in -4i32..=4 {
                     if x.abs() <= 1 && z.abs() <= 1 {
                         continue; // Drop chute
                     }

@@ -1771,6 +1771,8 @@ pub struct OptionsUi {
     pub world_atlas: crate::volt_qol::WorldAtlasState,
     /// Whether the active local player skin uses slim (3px Alex) arms.
     pub skin_slim: bool,
+    /// Active local player skin sprite key in `HudAtlas`, if loaded.
+    pub skin_key: Option<String>,
 }
 impl Default for OptionsUi {
     fn default() -> Self {
@@ -1813,6 +1815,7 @@ impl Default for OptionsUi {
             cosmetics_studio: Default::default(),
             world_atlas: Default::default(),
             skin_slim: false,
+            skin_key: None,
         }
     }
 }
@@ -3709,14 +3712,15 @@ impl OptionsUi {
                 u32::MAX,
                 true,
             );
-            crate::volt_cosmetics::draw_studio(
+            self.cosmetics_studio.step_time_live();
+            let now_s = self.cosmetics_studio.elapsed_s();
+            crate::volt_cosmetics::draw_cosmetics_studio(
                 batch,
                 atlas,
-                (w, h),
-                cursor,
-                &mut self.cosmetics_studio,
+                &self.cosmetics_studio,
                 &s.extras.volt_cosmetics,
-                self.skin_slim,
+                self.skin_key.as_deref(),
+                now_s,
             );
             ui::button(
                 batch,
@@ -3742,8 +3746,26 @@ impl OptionsUi {
                 u32::MAX,
                 true,
             );
+            let wp_list: Vec<(String, [f64; 3], [u8; 3])> = s
+                .volt_waypoints
+                .entries
+                .iter()
+                .filter(|wp| {
+                    wp.enabled
+                        && self.waypoint_context.as_ref().is_none_or(|(sc, dm, _)| {
+                            wp.scope == *sc && wp.dimension == *dm
+                        })
+                })
+                .map(|wp| {
+                    (
+                        wp.name.clone(),
+                        [f64::from(wp.x), f64::from(wp.y), f64::from(wp.z)],
+                        wp.color.rgb(),
+                    )
+                })
+                .collect();
             self.world_atlas
-                .draw_screen(batch, atlas, (w, h), &s.extras.volt_qol, &s.volt_waypoints);
+                .draw_screen(batch, atlas, &s.extras.volt_qol, &wp_list);
             ui::button(
                 batch,
                 atlas,
@@ -4074,7 +4096,7 @@ impl OptionsUi {
         }
         if self.page() == Page::VoltCosmetics {
             if drag {
-                crate::volt_cosmetics::pointer_move(&mut self.cosmetics_studio, (x, y));
+                crate::volt_cosmetics::pointer_move(&mut self.cosmetics_studio, size, (x, y));
                 return Vec::new();
             }
             if !right && ui::hovered((x, y), size.0 - 122.0, size.1 - 24.0, 110.0, 18.0) {
@@ -4099,7 +4121,7 @@ impl OptionsUi {
         }
         if self.page() == Page::VoltAtlas {
             if drag {
-                self.world_atlas.pointer_move((x, y));
+                self.world_atlas.pointer_move(size, (x, y));
                 return Vec::new();
             }
             if !right && ui::hovered((x, y), size.0 - 110.0, size.1 - 24.0, 98.0, 18.0) {
@@ -4522,7 +4544,7 @@ impl OptionsUi {
             return;
         }
         if self.page() == Page::VoltCosmetics {
-            crate::volt_cosmetics::scroll(&mut self.cosmetics_studio, size, amount);
+            crate::volt_cosmetics::scroll_wheel(&mut self.cosmetics_studio, size, amount);
             return;
         }
         if self.page() == Page::VoltAtlas {

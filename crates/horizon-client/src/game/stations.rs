@@ -2153,7 +2153,7 @@ impl Game<'_> {
                 && !data.container.is_empty()
             {
                 let mut shown = 0usize;
-                for item in data.container.iter().flatten() {
+                for (_, item) in &data.container {
                     if item.count > 0 && shown < 18 {
                         push(
                             &mut lines,

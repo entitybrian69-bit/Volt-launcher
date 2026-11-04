@@ -308,6 +308,7 @@ pub struct CosmeticsStudioState {
     pub list_drag_start_y: f32,
     pub list_drag_moved: bool,
     pub last_time: f32,
+    pub epoch: std::time::Instant,
 }
 
 impl Default for CosmeticsStudioState {
@@ -325,11 +326,21 @@ impl Default for CosmeticsStudioState {
             list_drag_start_y: 0.0,
             list_drag_moved: false,
             last_time: 0.0,
+            epoch: std::time::Instant::now(),
         }
     }
 }
 
 impl CosmeticsStudioState {
+    pub fn elapsed_s(&self) -> f32 {
+        self.epoch.elapsed().as_secs_f32()
+    }
+
+    pub fn step_time_live(&mut self) {
+        let now = self.elapsed_s();
+        self.step_time(now);
+    }
+
     pub fn step_time(&mut self, time_s: f32) {
         let dt = if self.last_time > 0.0 {
             (time_s - self.last_time).clamp(0.0, 0.1)
@@ -1361,23 +1372,23 @@ pub fn draw_cosmetics_studio(
 
     draw_studio_character(batch, atlas, skin_rect, lay.model_box, studio, loadout, time_s);
 
-    atlas.font.draw_shadow(
-        batch,
+    batch.text(
         atlas,
         "Drag 360\u{00b0}",
         mx + 4.0,
         my + 4.0,
         hud::rgba(196, 204, 224, 210),
+        true,
     );
     let eq_badge = format!("{}/7 Active", loadout.equipped_count());
     let eq_w = atlas.font.width(&eq_badge);
-    atlas.font.draw_shadow(
-        batch,
+    batch.text(
         atlas,
         &eq_badge,
         (mx + mw - eq_w - 4.0).max(mx + 4.0),
         my + 4.0,
         hud::rgba(255, 208, 92, 240),
+        true,
     );
 
     let draw_mini_btn = |batch: &mut HudBatch, r: [f32; 4], label: &str, active: bool| {
@@ -1393,13 +1404,13 @@ pub fn draw_cosmetics_studio(
         };
         draw_framed(batch, r, bg, brd);
         let tw = atlas.font.width(label);
-        atlas.font.draw_shadow(
-            batch,
+        batch.text(
             atlas,
             label,
             r[0] + (r[2] - tw) * 0.5,
             r[1] + (r[3] - 8.0) * 0.5,
             hud::rgba(248, 248, 252, 255),
+            true,
         );
     };
     draw_mini_btn(batch, lay.btn_front, "Front", false);
@@ -1430,24 +1441,24 @@ pub fn draw_cosmetics_studio(
         draw_framed(batch, tr, bg, brd);
         let lbl = cat.short_label();
         let tw = atlas.font.width(lbl);
-        atlas.font.draw_shadow(
-            batch,
+        batch.text(
             atlas,
             lbl,
             tr[0] + (tr[2] - tw) * 0.5,
             tr[1] + 5.0,
             hud::rgba(250, 250, 254, 255),
+            true,
         );
     }
 
     let [lx, ly, lw, lh] = lay.list_box;
-    atlas.font.draw_shadow(
-        batch,
+    batch.text(
         atlas,
         studio.category.title(),
         lx + 2.0,
         ly - 12.0,
         hud::rgba(255, 214, 108, 255),
+        true,
     );
     draw_framed(batch, lay.list_box, inner_bg, hud::rgba(64, 70, 92, 180));
 
@@ -1489,13 +1500,13 @@ pub fn draw_cosmetics_studio(
         if ry >= ly && ry + 21.0 <= ly + lh {
             if row == 0 {
                 batch.fill(atlas, lx + 7.0, ry + 4.0, 14.0, 14.0, hud::rgba(68, 72, 88, 255));
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     "None (Unequipped)",
                     lx + 26.0,
                     ry + 7.0,
                     hud::rgba(210, 214, 228, 255),
+                    true,
                 );
             } else {
                 let def = &items[row - 1];
@@ -1517,33 +1528,33 @@ pub fn draw_cosmetics_studio(
                     7.0,
                     hud::rgba(def.secondary[0], def.secondary[1], def.secondary[2], 255),
                 );
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     def.name,
                     lx + 27.0,
                     ry + 3.0,
                     hud::rgba(250, 250, 255, 255),
+                    true,
                 );
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     def.subtitle,
                     lx + 27.0,
                     ry + 12.5,
                     hud::rgba(162, 172, 196, 235),
+                    true,
                 );
             }
             if is_eq {
                 let tag = "ON";
                 let tw = atlas.font.width(tag);
-                atlas.font.draw_shadow(
-                    batch,
+                batch.text(
                     atlas,
                     tag,
                     lx + lw - tw - 13.0,
                     ry + 7.0,
                     hud::rgba(112, 248, 148, 255),
+                    true,
                 );
             }
         }
