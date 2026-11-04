@@ -1,9 +1,8 @@
-//! Live in-world & HUD runtime hooks for **Volt Settings 0.9.8**:
+//! Live in-world & HUD runtime hooks for **Volt Settings 0.9.9**:
 //! - **`Volt QoL` (`#2`, `#3`, `#8`, `#9`, `#15`, `#17`, `#18`, `#25`)**
 //! - **`Volt Chat` (`#21` 3D UDP Proximity Voice + Chat Suite)**
 //! - **`Volt Visuals` (`#19` Connected Glass, Better Grass, 3D Dropped Items)**
-//! - **`Volt Cosmetics` (`#7` 3rd-person & Freelook 3D animated world overlay)**
-//! - **`Volt Mods` (All 24 built-in pure-Rust native mods)**
+//! - **`Volt 50-Mod Catalog` (`volt_mods` pure-Rust HUDs & gameplay mechanics)**
 
 use super::{Dim, Game, Screen};
 use horizon_client::{
@@ -12,8 +11,8 @@ use horizon_client::{
     gizmos::Line,
     hud::{HudBatch, rgba},
     text::{self, Text},
-    volt_cosmetics,
     volt_features::project_waypoint,
+    volt_mods::VoltModId,
     volt_qol::{
         AtlasChunkTile, ClientTimeWeather, CrosshairStyle, JEI_RECIPES, VoltChatConfig,
         VoltVoiceRuntime, eval_chat_math, is_slime_chunk, preset_blueprint_blocks,
@@ -115,7 +114,12 @@ impl Game<'_> {
     /// Returns true while `#2` 360° Freelook is actively orbiting the player.
     pub(super) fn freelook_active(&self) -> bool {
         self.extras.volt.freelook_active
-            && self.settings.extras.volt_qol.freelook_enabled
+            && (self.settings.extras.volt_qol.freelook_enabled
+                || self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(VoltModId::Freelook))
             && self.screen == Screen::Playing
             && self.title.is_none()
     }
@@ -123,7 +127,9 @@ impl Game<'_> {
     /// Returns `#2` Optic Zoom `(factor, smooth, turn_scale)` when `C` is held.
     pub(super) fn volt_qol_zoom(&self) -> Option<(f32, bool, f64)> {
         let qol = &self.settings.extras.volt_qol;
-        if !qol.zoom_enabled || self.screen != Screen::Playing || self.title.is_some() {
+        let zoom_on =
+            qol.zoom_enabled || self.settings.extras.mod_catalog.is_on(VoltModId::Zoomify);
+        if !zoom_on || self.screen != Screen::Playing || self.title.is_some() {
             return None;
         }
         if !self.keys.contains(&KeyCode::KeyC) {
@@ -146,13 +152,18 @@ impl Game<'_> {
         true
     }
 
-    /// Handles hotkeys for World Atlas (`M`), Toggle Sprint, and Freelook (`Alt`).
+    /// Handles hotkeys for Mod Menu (`M`), World Map (`J`), Toggle Sprint, and Freelook (`Alt`).
     pub(super) fn volt_gameplay_key(&mut self, key: KeyCode, pressed: bool) -> bool {
         if pressed {
             self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
         }
         if matches!(key, KeyCode::AltLeft | KeyCode::AltRight)
-            && self.settings.extras.volt_qol.freelook_enabled
+            && (self.settings.extras.volt_qol.freelook_enabled
+                || self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(VoltModId::Freelook))
         {
             if pressed && !self.extras.volt.freelook_active && self.screen == Screen::Playing {
                 self.extras.volt.freelook_active = true;
@@ -165,7 +176,30 @@ impl Game<'_> {
         if !pressed || self.screen != Screen::Playing || self.title.is_some() {
             return false;
         }
-        if key == KeyCode::KeyM && self.settings.extras.volt_qol.atlas_enabled {
+        if key == KeyCode::KeyM {
+            if self.settings.extras.mod_catalog.is_on(VoltModId::ModMenu) {
+                self.open_options_at(false, horizon_client::options_ui::Page::ModMenu);
+                return true;
+            } else if self.settings.extras.volt_qol.atlas_enabled
+                || self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(VoltModId::XaerosWorldMap)
+            {
+                self.sync_waypoint_ui_context();
+                self.open_options_at(false, horizon_client::options_ui::Page::VoltAtlas);
+                return true;
+            }
+        }
+        if key == KeyCode::KeyJ
+            && (self.settings.extras.volt_qol.atlas_enabled
+                || self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(VoltModId::XaerosWorldMap))
+        {
             self.sync_waypoint_ui_context();
             self.open_options_at(false, horizon_client::options_ui::Page::VoltAtlas);
             return true;
@@ -255,7 +289,12 @@ impl Game<'_> {
             self.ui.options.skin_key = cur_skin.map(str::to_owned);
         }
 
-        let alt_down = self.settings.extras.volt_qol.freelook_enabled
+        let alt_down = (self.settings.extras.volt_qol.freelook_enabled
+            || self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(VoltModId::Freelook))
             && self.screen == Screen::Playing
             && self.title.is_none()
             && (self.keys.contains(&KeyCode::AltLeft) || self.keys.contains(&KeyCode::AltRight));
@@ -359,8 +398,13 @@ impl Game<'_> {
             return;
         }
 
-        // 3. #17 Interactive World Atlas incremental chunk sampling (1 chunk/frame -> 0 stutter!)
-        if qol.atlas_enabled
+        // 3. #17 Interactive World Atlas / Xaero's World Map incremental chunk sampling (1 chunk/frame -> 0 stutter!)
+        if (qol.atlas_enabled
+            || self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(VoltModId::XaerosWorldMap))
             && let Some((scope, dim, pos)) = self.current_waypoint_context()
         {
             self.ui.options.world_atlas.player_pos = [
@@ -712,49 +756,28 @@ impl Game<'_> {
         }
     }
 
-    /// Draws all active Volt QoL, Volt Voice, 3rd-Person Volt Cosmetics, and 24 Volt Mods HUDs!
+    /// Draws all active Volt QoL, Volt Voice, and 50-Mod Catalog HUDs!
     pub(super) fn draw_volt_all_huds(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
         if self.title.is_some() || self.ui.hide_gui {
             return;
         }
         let now = self.started.elapsed().as_secs_f64();
         let (w, h) = (batch.width, batch.height);
+        let my_name = self.options.player_name();
+        let local_ping_ms: i32 = self
+            .remote_tab_players()
+            .and_then(|(players, _, _)| {
+                players
+                    .into_iter()
+                    .find(|p| p.name == my_name)
+                    .map(|p| p.latency.max(0))
+            })
+            .unwrap_or(0);
         let atlas = &self.gui.atlas;
-
-        // 0. 3rd-Person / Freelook 3D Animated Volt Cosmetics on the local player!
-        if (self.own_body_in_view() || self.freelook_active())
-            && self.settings.extras.volt_cosmetics.show_in_world
-            && self.settings.extras.volt_cosmetics.any_equipped()
-            && let (Some(p), Some((cam_pos, cam_yaw, cam_pitch, cam_fov))) =
-                (self.player.as_ref(), self.locator_camera)
-        {
-            let vp = (glam::Mat4::perspective_rh(
-                cam_fov.to_radians().max(0.35),
-                w / h.max(1.0),
-                0.05,
-                256.0,
-            ) * horizon_client::camera::view_matrix(cam_yaw, cam_pitch))
-            .to_cols_array_2d();
-            let walk_amp = ((p.velocity.x * p.velocity.x + p.velocity.z * p.velocity.z).sqrt()
-                as f32
-                * 4.0)
-                .clamp(0.0, 1.0);
-            volt_cosmetics::draw_world_player_cosmetics(
-                batch,
-                atlas,
-                &self.settings.extras.volt_cosmetics,
-                &vp,
-                cam_pos,
-                [p.position.x, p.position.y, p.position.z],
-                self.yaw,
-                walk_amp,
-                p.shift_key_down,
-                now as f32,
-            );
-        }
 
         let qol = &self.settings.extras.volt_qol;
         let mods = &self.settings.extras.volt_mods;
+        let cat = &self.settings.extras.mod_catalog;
         let chat_cfg = &self.settings.extras.volt_chat;
 
         // 1. #3 World Inspector (Jade / WTHIT Top-Center Card)
@@ -908,16 +931,19 @@ impl Game<'_> {
             }
         }
 
-        // 4. Volt Mods HUDs (CPS, Reach, FPS Pill, Armor, Potions, Keystrokes, ToggleSprint, Slime/Tech)
+        // 4. Volt Mods HUDs (CPS, Ping, Coordinates, Reach, FPS Pill, Armor, Durability, Potions, Inventory HUD+)
         let mut pill_parts: Vec<String> = Vec::new();
         if mods.fps_ping_pill {
             let r = self.extras.fps.reading();
             pill_parts.push(format!("{} FPS ({:.1}ms)", r.fps, self.extras.ema_frame_ms));
         }
-        if mods.cps_hud {
+        if mods.cps_hud || cat.is_on(VoltModId::CpsDisplay) {
             let lcps = self.extras.cps[0].per_second(now);
             let rcps = self.extras.cps[1].per_second(now);
             pill_parts.push(format!("CPS {lcps} | {rcps}"));
+        }
+        if cat.is_on(VoltModId::PingDisplay) {
+            pill_parts.push(format!("{local_ping_ms} ms"));
         }
         if mods.reach_hud {
             let txt = match self.extras.volt.last_hit_dist {
@@ -945,13 +971,59 @@ impl Game<'_> {
             );
         }
 
+        // Coordinates HUD (`VoltModId::CoordinatesHud`)
+        if cat.is_on(VoltModId::CoordinatesHud)
+            && let Some(p) = self.player.as_ref()
+        {
+            let bx = p.position.x.floor() as i32;
+            let by = p.position.y.floor() as i32;
+            let bz = p.position.z.floor() as i32;
+            let dir = match (((self.yaw.rem_euclid(360.0) + 45.0) / 90.0).floor() as i32) & 3 {
+                0 => "S (+Z)",
+                1 => "W (-X)",
+                2 => "N (-Z)",
+                _ => "E (+X)",
+            };
+            let mut coord_txt = format!("XYZ: {bx}, {by}, {bz}  [{dir}]");
+            if cat.coords_show_biome
+                && let Some(chunk) = self.world.chunks.get(&(bx >> 4, bz >> 4))
+            {
+                let bname = self
+                    .res
+                    .biomes()
+                    .get(chunk.biome(bx, by, bz))
+                    .name
+                    .trim_start_matches("minecraft:")
+                    .replace('_', " ");
+                coord_txt.push_str(&format!("  \u{2022}  {}", capitalize_words(&bname)));
+            }
+            let cw = atlas.font.width(&coord_txt) + 12.0;
+            let (cx, cy) = corners.place(Corner::TopLeft, cw, 14.0);
+            batch.fill(atlas, cx, cy, cw, 14.0, rgba(12, 16, 24, 198));
+            batch.fill(atlas, cx, cy, 2.0, 14.0, rgba(88, 212, 245, 245));
+            batch.text(
+                atlas,
+                &coord_txt,
+                cx + 5.0,
+                cy + 3.0,
+                rgba(235, 246, 255, 255),
+                true,
+            );
+        }
+
         // Armor & Durability HUD
-        if mods.armor_hud {
+        if mods.armor_hud || cat.is_on(VoltModId::ArmorHud) {
             let names = ["Helm", "Chest", "Legs", "Boots"];
             let mut eq_lines = Vec::new();
             for (slot, label) in self.armor.iter().zip(names) {
                 if let Some(st) = slot {
-                    let max_d = estimate_armor_max_dur(&st.item);
+                    let max_d = self
+                        .res
+                        .items()
+                        .get(&st.item)
+                        .map(|i| i.max_damage)
+                        .filter(|&m| m > 0)
+                        .unwrap_or_else(|| estimate_armor_max_dur(&st.item));
                     let rem = max_d.saturating_sub(st.damage);
                     eq_lines.push((
                         format!("{label}: {rem}/{max_d}"),
@@ -963,26 +1035,55 @@ impl Game<'_> {
                     ));
                 }
             }
-            if let Some(main) = self.held()
-                && main.damage > 0
-            {
-                eq_lines.push((
-                    format!("Hand dmg: -{}", main.damage),
-                    rgba(245, 220, 140, 255),
-                ));
-            }
             if !eq_lines.is_empty() {
                 let bh = 4.0 + eq_lines.len() as f32 * 10.0;
-                let (ax, ay) = corners.place(Corner::BottomRight, 98.0, bh);
-                batch.fill(atlas, ax, ay, 98.0, bh, rgba(12, 14, 22, 185));
+                let (ax, ay) = corners.place(Corner::BottomRight, 102.0, bh);
+                batch.fill(atlas, ax, ay, 102.0, bh, rgba(12, 14, 22, 185));
                 for (i, (txt, col)) in eq_lines.iter().enumerate() {
                     batch.text(atlas, txt, ax + 5.0, ay + 3.0 + i as f32 * 10.0, *col, true);
                 }
             }
         }
 
-        // Compact Potion Timers HUD
-        if mods.potion_hud && !self.potions.effects.list.is_empty() {
+        // Durability Display (`VoltModId::DurabilityDisplay`) for Mainhand & Offhand
+        if cat.is_on(VoltModId::DurabilityDisplay) {
+            let mut dur_lines = Vec::new();
+            for (tag, stack_opt) in [("Main", self.held()), ("Off", self.offhand.as_ref())] {
+                if let Some(st) = stack_opt
+                    && let Some(max_d) = self
+                        .res
+                        .items()
+                        .get(&st.item)
+                        .map(|i| i.max_damage)
+                        .filter(|&m| m > 0)
+                {
+                    let rem = max_d.saturating_sub(st.damage);
+                    let pct = (rem * 100) / max_d.max(1);
+                    let col = if pct <= 15 {
+                        rgba(255, 84, 84, 255)
+                    } else if pct <= 40 {
+                        rgba(255, 206, 84, 255)
+                    } else {
+                        rgba(120, 245, 175, 255)
+                    };
+                    dur_lines.push((format!("{tag}: {rem}/{max_d} ({pct}%)"), col));
+                }
+            }
+            if !dur_lines.is_empty() {
+                let bh = 4.0 + dur_lines.len() as f32 * 10.0;
+                let (dx, dy) = corners.place(Corner::BottomRight, 118.0, bh);
+                batch.fill(atlas, dx, dy, 118.0, bh, rgba(12, 14, 22, 190));
+                batch.fill(atlas, dx, dy, 2.0, bh, rgba(120, 245, 175, 235));
+                for (i, (txt, col)) in dur_lines.iter().enumerate() {
+                    batch.text(atlas, txt, dx + 5.0, dy + 3.0 + i as f32 * 10.0, *col, true);
+                }
+            }
+        }
+
+        // Compact Potion Timers HUD (`Status Effect Timer`)
+        if (mods.potion_hud || cat.is_on(VoltModId::StatusEffectTimer))
+            && !self.potions.effects.list.is_empty()
+        {
             let n = self.potions.effects.list.len().min(5);
             let bh = 4.0 + n as f32 * 10.0;
             let (ex, ey) = corners.place(Corner::TopRight, 112.0, bh);
@@ -1036,7 +1137,7 @@ impl Game<'_> {
         }
 
         // AppleSkin Food & Saturation Preview above hunger bar
-        if mods.appleskin_hud
+        if (mods.appleskin_hud || cat.is_on(VoltModId::AppleSkin))
             && let Some(p) = self.player.as_ref()
             && !self.creative
             && !self.spectator()
@@ -1181,6 +1282,38 @@ impl Game<'_> {
             batch.fill(atlas, 0.0, h - bar, w, bar, rgba(0, 0, 0, 235));
         }
 
+        // Dynamic Crosshair (`VoltModId::DynamicCrosshair`) — reactive target brackets & swing bloom
+        if cat.is_on(VoltModId::DynamicCrosshair) && self.screen == Screen::Playing {
+            let cx = (w * 0.5).floor();
+            let cy = (h * 0.5).floor();
+            let hit_mob = self.mob_hit().filter(|(_, d)| *d <= 4.5);
+            let hit_blk = self.pick().is_some();
+            let swing_gap = if self.swing.current.is_some() {
+                3.5
+            } else {
+                0.0
+            };
+            let (col, show_brackets) = if hit_mob.is_some() {
+                (rgba(255, 64, 88, 240), true)
+            } else if hit_blk {
+                (rgba(250, 210, 96, 195), true)
+            } else {
+                (rgba(200, 235, 255, 130), swing_gap > 0.0)
+            };
+            if show_brackets {
+                let r = 6.0 + swing_gap;
+                // 4 crisp corner brackets around reticle
+                batch.fill(atlas, cx - r, cy - r, 3.0, 1.0, col);
+                batch.fill(atlas, cx - r, cy - r, 1.0, 3.0, col);
+                batch.fill(atlas, cx + r - 2.0, cy - r, 3.0, 1.0, col);
+                batch.fill(atlas, cx + r, cy - r, 1.0, 3.0, col);
+                batch.fill(atlas, cx - r, cy + r, 3.0, 1.0, col);
+                batch.fill(atlas, cx - r, cy + r - 2.0, 1.0, 3.0, col);
+                batch.fill(atlas, cx + r - 2.0, cy + r, 3.0, 1.0, col);
+                batch.fill(atlas, cx + r, cy + r - 2.0, 1.0, 3.0, col);
+            }
+        }
+
         // #24 OLED AFK Power Saver (dims screen cleanly after 90s idle)
         if mods.oled_afk_saver && now - self.extras.volt.last_input_at > 90.0 {
             batch.fill(atlas, 0.0, 0.0, w, h, rgba(0, 0, 0, 215));
@@ -1194,6 +1327,72 @@ impl Game<'_> {
                 rgba(160, 170, 190, 200),
                 true,
             );
+        }
+
+        // Inventory HUD+ (`VoltModId::InventoryHudPlus`) — live 9x3 main-inventory mini-grid
+        if self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(VoltModId::InventoryHudPlus)
+            && self.screen == Screen::Playing
+        {
+            let op_pct = self
+                .settings
+                .extras
+                .mod_catalog
+                .inventory_hud_opacity
+                .clamp(20, 100);
+            let bg_a = ((u32::from(op_pct) * 210) / 100) as u8;
+            let cell = 18.0;
+            let gw = cell * 9.0 + 4.0;
+            let gh = cell * 3.0 + 4.0;
+            let (gx, gy) = corners.place(Corner::BottomLeft, gw, gh);
+            batch.fill(
+                &self.gui.atlas,
+                gx,
+                gy,
+                gw,
+                gh,
+                rgba(10, 13, 20, bg_a),
+            );
+            batch.fill(
+                &self.gui.atlas,
+                gx,
+                gy,
+                gw,
+                1.0,
+                rgba(45, 212, 191, bg_a),
+            );
+            for slot_idx in 9usize..36 {
+                let r = (slot_idx - 9) / 9;
+                let c = (slot_idx - 9) % 9;
+                let sx = gx + 2.0 + c as f32 * cell;
+                let sy = gy + 2.0 + r as f32 * cell;
+                batch.fill(
+                    &self.gui.atlas,
+                    sx + 0.5,
+                    sy + 0.5,
+                    17.0,
+                    17.0,
+                    rgba(22, 28, 40, bg_a.saturating_sub(30)),
+                );
+                if let Some(st) = self.inventory[slot_idx].clone() {
+                    self.draw_item(batch, &st, sx + 1.0, sy + 1.0);
+                    if st.count > 1 {
+                        let cnt = st.count.to_string();
+                        let tw = HudBatch::text_width(&self.gui.atlas, &cnt);
+                        batch.text(
+                            &self.gui.atlas,
+                            &cnt,
+                            sx + 17.0 - tw,
+                            sy + 9.0,
+                            u32::MAX,
+                            true,
+                        );
+                    }
+                }
+            }
         }
     }
 

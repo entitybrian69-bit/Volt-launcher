@@ -1567,7 +1567,10 @@ pub enum Page {
     VoltQol,
     VoltChat,
     VoltMods,
-    VoltCosmetics,
+    /// Image 1 split-pane frosted-glass Volt Settings hub (`volt_settings_ui`).
+    VoltGlass,
+    /// Image 2 split-pane 50-mod pure-Rust Mod Menu (`volt_mods`).
+    ModMenu,
     VoltAtlas,
     /// CreditsAndAttributionScreen.
     Credits,
@@ -1763,10 +1766,12 @@ pub struct OptionsUi {
     /// Scroll the selected language into the middle on the next layout.
     center_language: bool,
     pub graphics: crate::graphics_ui::GraphicsUi,
+    pub volt_glass: crate::volt_settings_ui::VoltSettingsUi,
+    pub mod_menu: crate::volt_mods::ModMenuUi,
+    /// `Controlling` mod filter on Key Binds (`0 = All`, `1 = Conflicts`, `2 = Unbound`).
+    pub keybind_filter: u8,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
-    /// `#7` 3D Rotatable Cosmetics Studio state.
-    pub cosmetics_studio: crate::volt_cosmetics::CosmeticsStudioState,
     /// `#17` Interactive Full-Screen World Atlas state.
     pub world_atlas: crate::volt_qol::WorldAtlasState,
     /// Whether the active local player skin uses slim (3px Alex) arms.
@@ -1811,8 +1816,10 @@ impl Default for OptionsUi {
             in_world: false,
             center_language: false,
             graphics: Default::default(),
+            volt_glass: Default::default(),
+            mod_menu: Default::default(),
+            keybind_filter: 0,
             agent_status: Vec::new(),
-            cosmetics_studio: Default::default(),
             world_atlas: Default::default(),
             skin_slim: false,
             skin_key: None,
@@ -1876,14 +1883,14 @@ fn option_widget(s: &Settings, opt: Opt, x: f32, y: f32, w: f32) -> Widget {
 /// What a button opening one of Volt's pages says on hover.
 fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
-        Page::Horizon => "horizon.pages.settings.tooltip",
+        Page::Horizon | Page::VoltGlass => "horizon.pages.settings.tooltip",
+        Page::ModMenu => "volt.mod_menu.tooltip",
         Page::VoltBoost => "volt.boost.tooltip",
         Page::VoltShaders => "volt.shaders.tooltip",
         Page::VoltVisuals => "volt.visuals.tooltip",
         Page::VoltQol => "volt.qol.tooltip",
         Page::VoltChat => "volt.chat.tooltip",
         Page::VoltMods => "volt.mods.tooltip",
-        Page::VoltCosmetics => "volt.cosmetics.tooltip",
         Page::VoltAtlas => "volt.atlas.tooltip",
         Page::Waypoints => "horizon.pages.waypoints.tooltip",
         Page::Minimap => "horizon.pages.minimap.tooltip",
@@ -1955,12 +1962,15 @@ impl OptionsUi {
         match self.page() {
             Page::Video
             | Page::Controls
-            | Page::KeyBinds
             | Page::VoltBoost
             | Page::VoltQol
             | Page::VoltChat
             | Page::VoltVisuals
             | Page::VoltMods => true,
+            Page::KeyBinds => s
+                .extras
+                .mod_catalog
+                .is_on(crate::volt_mods::VoltModId::Controlling),
             Page::VoltShaders => s.extras.volt_shaders.enabled,
             _ => false,
         }
@@ -1982,6 +1992,18 @@ impl OptionsUi {
     }
     fn waypoint_name_active(&self) -> bool {
         self.waypoint_name.focused && self.page() == Page::Waypoints
+    }
+    pub fn typing(&self) -> bool {
+        if Self::graphics_level(self.page()).is_some() {
+            return self.graphics.typing();
+        }
+        match self.page() {
+            Page::VoltGlass => self.volt_glass.typing(),
+            Page::ModMenu => self.mod_menu.typing(),
+            Page::Language => self.language_search.focused,
+            Page::Waypoints => self.waypoint_name.focused,
+            _ => self.settings_search_active(),
+        }
     }
     fn extra_section_rows(
         &self,
@@ -2058,7 +2080,13 @@ impl OptionsUi {
         {
             return pack.android_edit_value(&crate::screen_draw::Measure(&atlas.font));
         }
-        let edit = if self.page() == Page::Language {
+        let edit = if Self::graphics_level(self.page()).is_some() {
+            &mut self.graphics.search
+        } else if self.page() == Page::VoltGlass {
+            &mut self.volt_glass.search
+        } else if self.page() == Page::ModMenu {
+            &mut self.mod_menu.search
+        } else if self.page() == Page::Language {
             &mut self.language_search
         } else if self.page() == Page::Waypoints {
             &mut self.waypoint_name
@@ -2162,6 +2190,9 @@ impl OptionsUi {
             self.settings_search.set_value("");
             self.settings_search.focused = false;
         }
+        if page == Page::KeyBinds {
+            self.keybind_filter = 0;
+        }
         if page == Page::VoltAtlas {
             self.world_atlas.center_on_player();
         }
@@ -2176,11 +2207,16 @@ impl OptionsUi {
         if page == Page::Packs {
             self.pack_screen = None;
         }
-        if matches!(
-            page,
-            Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr
-        ) {
-            self.graphics.reset();
+        if let Some(level) = Self::graphics_level(page) {
+            self.graphics.open_level(level);
+        }
+        if page == Page::VoltGlass {
+            self.volt_glass.reset();
+        }
+        if page == Page::ModMenu {
+            self.mod_menu.search.set_value("");
+            self.mod_menu.search_focused = false;
+            self.mod_menu.scroll.amount = 0.0;
         }
     }
     /// The graphics screen level of `page`, if it is one.
@@ -2222,7 +2258,8 @@ impl OptionsUi {
             Page::VoltQol => "volt.qol.title",
             Page::VoltChat => "volt.chat.title",
             Page::VoltMods => "volt.mods.title",
-            Page::VoltCosmetics => "volt.cosmetics.title",
+            Page::VoltGlass => "horizon.pages.settings",
+            Page::ModMenu => "volt.mod_menu.title",
             Page::VoltAtlas => "volt.atlas.title",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
@@ -2545,7 +2582,7 @@ impl OptionsUi {
                     ),
                     Row::Buttons(
                         open("volt.mods.button", Page::VoltMods),
-                        Some(open("volt.cosmetics.button", Page::VoltCosmetics)),
+                        Some(open("volt.mod_menu.button", Page::ModMenu)),
                     ),
                     Row::Header("World Navigation & Maps"),
                     Row::Buttons(
@@ -3100,13 +3137,14 @@ impl OptionsUi {
                 let entries = [
                     ("options.skinCustomisation", Some(Page::Skin)),
                     ("options.sounds", Some(Page::Sound)),
-                    ("options.video", Some(Page::Video)),
+                    ("options.video", Some(Page::Graphics)),
                     ("options.controls", Some(Page::Controls)),
                     ("options.language", Some(Page::Language)),
                     ("options.chat", Some(Page::Chat)),
                     ("options.resourcepack", Some(Page::Packs)),
                     ("options.accessibility", Some(Page::Accessibility)),
-                    ("horizon.pages.open.horizon_settings", Some(Page::Horizon)),
+                    ("volt.mod_menu.button", Some(Page::ModMenu)),
+                    ("horizon.pages.open.horizon_settings", Some(Page::VoltGlass)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
                 let rows = entries.len().div_ceil(2) as f32;
@@ -3204,9 +3242,58 @@ impl OptionsUi {
                 } else {
                     MAPPINGS.iter().map(|(n, _, c)| (*n, *c)).collect()
                 };
-                let query = self.settings_search.value.to_lowercase();
+                let query = self.settings_search.value.trim().to_lowercase();
+                let controlling_on = s
+                    .extras
+                    .mod_catalog
+                    .is_on(crate::volt_mods::VoltModId::Controlling);
+                let kb_filter = if controlling_on {
+                    self.keybind_filter
+                } else {
+                    0
+                };
                 mappings.retain(|(name, _)| {
-                    query.is_empty() || label(name).to_lowercase().contains(&query)
+                    let bound = if keypad {
+                        s.keypad
+                            .keys(name)
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "key.keyboard.unknown".into())
+                    } else {
+                        s.keys.get(name).to_owned()
+                    };
+                    if kb_filter == 1 {
+                        let has_conflict = if keypad {
+                            crate::keypad::ACTIONS.iter().any(|a| {
+                                a.0 != *name
+                                    && s.keypad.keys(a.0).contains(&bound)
+                                    && bound != "key.keyboard.unknown"
+                            })
+                        } else {
+                            !s.keys.conflicts(name).is_empty()
+                        };
+                        if !has_conflict {
+                            return false;
+                        }
+                    } else if kb_filter == 2 && bound != "key.keyboard.unknown" {
+                        return false;
+                    }
+                    if query.is_empty() {
+                        return true;
+                    }
+                    if let Some(kq) = query.strip_prefix("key:") {
+                        let kq = kq.trim();
+                        return keybinds::display_name(&bound)
+                            .plain()
+                            .to_lowercase()
+                            .contains(kq);
+                    }
+                    label(name).to_lowercase().contains(&query)
+                        || (controlling_on
+                            && keybinds::display_name(&bound)
+                                .plain()
+                                .to_lowercase()
+                                .contains(&query))
                 });
                 mappings.sort_by(|a, b| {
                     let ca = CATEGORIES.iter().position(|c| *c == a.1).unwrap_or(99);
@@ -3701,38 +3788,13 @@ impl OptionsUi {
                 .draw(level, s, batch, atlas, cursor, self.in_world);
             return;
         }
-        if self.page() == Page::VoltCosmetics {
-            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
-            let title_t = tr(Self::title(Page::VoltCosmetics));
-            batch.text_styled(
-                atlas,
-                &title_t,
-                ((w - atlas.font.width_text(&title_t)) / 2.0).floor(),
-                10.0,
-                u32::MAX,
-                true,
-            );
-            self.cosmetics_studio.step_time_live();
-            let now_s = self.cosmetics_studio.elapsed_s();
-            crate::volt_cosmetics::draw_cosmetics_studio(
-                batch,
-                atlas,
-                &self.cosmetics_studio,
-                &s.extras.volt_cosmetics,
-                self.skin_key.as_deref(),
-                now_s,
-            );
-            ui::button(
-                batch,
-                atlas,
-                w - 122.0,
-                h - 24.0,
-                110.0,
-                18.0,
-                &tr("gui.done"),
-                true,
-                ui::hovered(cursor, w - 122.0, h - 24.0, 110.0, 18.0),
-            );
+        if self.page() == Page::VoltGlass {
+            self.volt_glass.binding = self.selected_key;
+            self.volt_glass.draw(s, batch, atlas, cursor, self.in_world);
+            return;
+        }
+        if self.page() == Page::ModMenu {
+            self.mod_menu.draw(s, batch, atlas, cursor, self.in_world);
             return;
         }
         if self.page() == Page::VoltAtlas {
@@ -4012,6 +4074,28 @@ impl OptionsUi {
                 );
             }
             self.settings_search = search;
+            if self.page() == Page::KeyBinds {
+                let fx = (w / 2.0).floor() + 106.0;
+                let fy = 15.0;
+                let fw = 84.0;
+                let fh = 18.0;
+                let flabel = match self.keybind_filter {
+                    1 => Text::literal("Show: Conflicts").with_color(text::YELLOW),
+                    2 => Text::literal("Show: Unbound").with_color(text::AQUA),
+                    _ => Text::literal("Show: All"),
+                };
+                ui::button(
+                    batch,
+                    atlas,
+                    fx,
+                    fy,
+                    fw,
+                    fh,
+                    &flabel,
+                    true,
+                    ui::hovered(cursor, fx, fy, fw, fh),
+                );
+            }
         }
         if self.page() == Page::Waypoints {
             let mut name_box = self.waypoint_name.clone();
@@ -4094,30 +4178,58 @@ impl OptionsUi {
             }
             return events;
         }
-        if self.page() == Page::VoltCosmetics {
-            if drag {
-                crate::volt_cosmetics::pointer_move(&mut self.cosmetics_studio, size, (x, y));
-                return Vec::new();
+        if self.page() == Page::VoltGlass {
+            use crate::volt_settings_ui::VoltUiAction;
+            if self.selected_key.is_some() && !drag {
+                let button = if right {
+                    winit::event::MouseButton::Right
+                } else {
+                    winit::event::MouseButton::Left
+                };
+                return self.bind_mouse(s, button);
             }
-            if !right && ui::hovered((x, y), size.0 - 122.0, size.1 - 24.0, 110.0, 18.0) {
-                let mut ev = vec![Event::ButtonClick];
-                ev.extend(self.back(s));
-                return ev;
+            let mut events = Vec::new();
+            for action in self
+                .volt_glass
+                .click(s, (x, y), size, framebuffer, drag, right)
+            {
+                match action {
+                    VoltUiAction::ButtonClick => events.push(Event::ButtonClick),
+                    VoltUiAction::Changed => events.push(Event::Changed),
+                    VoltUiAction::SliderDrag => events.push(Event::SliderDrag),
+                    VoltUiAction::BindKey(name) => self.selected_key = Some(name),
+                    VoltUiAction::OpenModMenu => {
+                        self.push(Page::ModMenu);
+                    }
+                    VoltUiAction::OpenShaderPacks => {
+                        self.push(Page::ShaderPacks);
+                        events.push(Event::ListShaderPacks);
+                    }
+                    VoltUiAction::OpenWaypoints => self.push(Page::Waypoints),
+                    VoltUiAction::OpenWorldAtlas => self.push(Page::VoltAtlas),
+                    VoltUiAction::OpenPadBinds => self.push(Page::PadBinds),
+                    VoltUiAction::OpenAgent => self.push(Page::Agent),
+                    #[cfg(target_os = "android")]
+                    VoltUiAction::TouchControls => events.push(Event::TouchControls),
+                    VoltUiAction::Done => events.extend(self.back(s)),
+                }
             }
-            let (changed, sfx) = crate::volt_cosmetics::pointer_down(
-                &mut self.cosmetics_studio,
-                &mut s.extras.volt_cosmetics,
-                size,
-                (x, y),
-            );
-            let mut ev = Vec::new();
-            if sfx {
-                ev.push(Event::ButtonClick);
+            return events;
+        }
+        if self.page() == Page::ModMenu {
+            use crate::volt_mods::ModMenuAction;
+            let mut events = Vec::new();
+            for action in self.mod_menu.click(s, atlas, (x, y), size, drag, right) {
+                match action {
+                    ModMenuAction::ButtonClick => events.push(Event::ButtonClick),
+                    ModMenuAction::Changed => events.push(Event::Changed),
+                    ModMenuAction::OpenFolder => events.push(Event::OpenModFolder),
+                    ModMenuAction::OpenWorldMap => self.push(Page::VoltAtlas),
+                    ModMenuAction::OpenKeyBinds => self.push(Page::KeyBinds),
+                    ModMenuAction::Done => events.extend(self.back(s)),
+                }
             }
-            if changed {
-                ev.push(Event::Changed);
-            }
-            return ev;
+            return events;
         }
         if self.page() == Page::VoltAtlas {
             if drag {
@@ -4185,6 +4297,19 @@ impl OptionsUi {
         let (widgets, top, bottom, content) = self.layout(s, size.0, size.1);
         let mut events = Vec::new();
         if !drag && self.has_settings_search(s) {
+            if self.page() == Page::KeyBinds {
+                let fx = (size.0 / 2.0).floor() + 106.0;
+                if ui::hovered((x, y), fx, 15.0, 84.0, 18.0) {
+                    self.keybind_filter = if right {
+                        (self.keybind_filter + 2) % 3
+                    } else {
+                        (self.keybind_filter + 1) % 3
+                    };
+                    self.scroll = 0.0;
+                    events.push(Event::ButtonClick);
+                    return events;
+                }
+            }
             let search = &mut self.settings_search;
             search.focused = ui::hovered((x, y), search.x, search.y, search.width, search.height);
             if search.focused {
@@ -4442,8 +4567,6 @@ impl OptionsUi {
     }
     pub fn release(&mut self) -> Vec<Event> {
         self.scrollbar_drag_y = None;
-        self.cosmetics_studio.dragging_model = false;
-        self.cosmetics_studio.dragging_list = false;
         self.world_atlas.dragging = false;
         if let Some(p) = &mut self.pack_screen {
             p.release();
@@ -4452,7 +4575,8 @@ impl OptionsUi {
         // release, even if the pointer has left the widget or its value stayed.
         let slider = self.dragging.take().is_some();
         let graphics_slider = self.graphics.release();
-        if slider || graphics_slider {
+        let volt_slider = self.volt_glass.release();
+        if slider || graphics_slider || volt_slider {
             vec![Event::ButtonClick, Event::Changed]
         } else {
             Vec::new()
@@ -4507,6 +4631,7 @@ impl OptionsUi {
     ) -> Vec<Event> {
         let plain = self.resource_error.is_none()
             && Self::graphics_level(self.page()).is_none()
+            && !matches!(self.page(), Page::VoltGlass | Page::ModMenu)
             && !(self.pack_screen.is_some() && self.stack.last() == Some(&Page::Packs));
         if !plain {
             self.scroll_at(s, size, cursor, amount);
@@ -4539,12 +4664,16 @@ impl OptionsUi {
         if self.resource_error.is_some() {
             return;
         }
-        if let Some(level) = Self::graphics_level(self.page()) {
-            self.graphics.scroll(level, s, size.1, amount);
+        if Self::graphics_level(self.page()).is_some() {
+            self.graphics.scroll_sized(s, size, amount);
             return;
         }
-        if self.page() == Page::VoltCosmetics {
-            crate::volt_cosmetics::scroll_wheel(&mut self.cosmetics_studio, size, amount);
+        if self.page() == Page::VoltGlass {
+            self.volt_glass.scroll(s, size, amount);
+            return;
+        }
+        if self.page() == Page::ModMenu {
+            self.mod_menu.scroll(s, size, amount);
             return;
         }
         if self.page() == Page::VoltAtlas {
@@ -4660,9 +4789,21 @@ impl OptionsUi {
         }
         events
     }
-    /// Typed text (the language search box).
+    /// Typed text (the language or settings/mod search box).
     pub fn type_text(&mut self, atlas: &HudAtlas, text: &str) {
         if self.resource_error.is_some() {
+            return;
+        }
+        if Self::graphics_level(self.page()).is_some() {
+            self.graphics.type_text(text);
+            return;
+        }
+        if self.page() == Page::VoltGlass {
+            self.volt_glass.type_text(text);
+            return;
+        }
+        if self.page() == Page::ModMenu {
+            self.mod_menu.type_text(text);
             return;
         }
         if self.page() == Page::Packs
@@ -4691,6 +4832,18 @@ impl OptionsUi {
     ) -> bool {
         if self.resource_error.is_some() || self.selected_key.is_some() {
             return false;
+        }
+        if Self::graphics_level(self.page()).is_some() && self.graphics.typing() {
+            let _ = self.graphics.search.shortcut(shortcut, clipboard);
+            return true;
+        }
+        if self.page() == Page::VoltGlass && self.volt_glass.typing() {
+            let _ = self.volt_glass.search.shortcut(shortcut, clipboard);
+            return true;
+        }
+        if self.page() == Page::ModMenu && self.mod_menu.typing() {
+            let _ = self.mod_menu.search.shortcut(shortcut, clipboard);
+            return true;
         }
         if self.page() == Page::Packs
             && let Some(p) = &mut self.pack_screen
@@ -4798,6 +4951,78 @@ impl OptionsUi {
                     .to_owned()
             };
             return self.bind_key(s, value);
+        }
+        if Self::graphics_level(self.page()).is_some() {
+            use crate::graphics_ui::Action;
+            let (actions, consumed) = self.graphics.key(s, key, text, false);
+            let mut events = Vec::new();
+            for action in actions {
+                match action {
+                    Action::ButtonClick => events.push(Event::ButtonClick),
+                    Action::Changed => events.push(Event::Changed),
+                    Action::SliderDrag => events.push(Event::SliderDrag),
+                    Action::OpenAdvanced => self.push(Page::GraphicsAdvanced),
+                    Action::OpenHdr => self.push(Page::GraphicsHdr),
+                    Action::BindKey(name) => self.selected_key = Some(name),
+                    Action::OpenSimple => {
+                        self.stack.pop();
+                        self.push(Page::Graphics);
+                    }
+                    Action::Done => events.extend(self.back(s)),
+                }
+            }
+            if !consumed && key == K::Escape {
+                events.extend(self.back(s));
+            }
+            return events;
+        }
+        if self.page() == Page::VoltGlass {
+            use crate::volt_settings_ui::VoltUiAction;
+            let (actions, consumed) = self.volt_glass.key(s, key, text, false);
+            let mut events = Vec::new();
+            for action in actions {
+                match action {
+                    VoltUiAction::ButtonClick => events.push(Event::ButtonClick),
+                    VoltUiAction::Changed => events.push(Event::Changed),
+                    VoltUiAction::SliderDrag => events.push(Event::SliderDrag),
+                    VoltUiAction::BindKey(name) => self.selected_key = Some(name),
+                    VoltUiAction::OpenModMenu => self.push(Page::ModMenu),
+                    VoltUiAction::OpenShaderPacks => {
+                        self.push(Page::ShaderPacks);
+                        events.push(Event::ListShaderPacks);
+                    }
+                    VoltUiAction::OpenWaypoints => self.push(Page::Waypoints),
+                    VoltUiAction::OpenWorldAtlas => self.push(Page::VoltAtlas),
+                    VoltUiAction::OpenPadBinds => self.push(Page::PadBinds),
+                    VoltUiAction::OpenAgent => self.push(Page::Agent),
+                    #[cfg(target_os = "android")]
+                    VoltUiAction::TouchControls => events.push(Event::TouchControls),
+                    VoltUiAction::Done => events.extend(self.back(s)),
+                }
+            }
+            if !consumed && key == K::Escape {
+                events.extend(self.back(s));
+            }
+            return events;
+        }
+        if self.page() == Page::ModMenu {
+            use crate::volt_mods::ModMenuAction;
+            let (actions, consumed) = self.mod_menu.key(s, key, text, false);
+            let mut events = Vec::new();
+            for action in actions {
+                match action {
+                    ModMenuAction::ButtonClick => events.push(Event::ButtonClick),
+                    ModMenuAction::Changed => events.push(Event::Changed),
+                    ModMenuAction::OpenFolder => events.push(Event::OpenModFolder),
+                    ModMenuAction::OpenWorldMap => self.push(Page::VoltAtlas),
+                    ModMenuAction::OpenKeyBinds => self.push(Page::KeyBinds),
+                    ModMenuAction::Done => events.extend(self.back(s)),
+                }
+            }
+            if !consumed && key == K::Escape {
+                events.extend(self.back(s));
+            }
+            return events;
         }
         if key == K::Escape {
             return self.back(s);
@@ -5710,13 +5935,18 @@ mod tests {
                 false,
             )
         };
-        for page in [Page::Horizon, Page::Extras] {
-            assert_eq!(
-                click(&mut ui, &mut s, Act::Push(page)),
-                vec![Event::ButtonClick]
-            );
-            assert_eq!(ui.page(), page);
-        }
+        assert_eq!(
+            click(&mut ui, &mut s, Act::Push(Page::VoltGlass)),
+            vec![Event::ButtonClick]
+        );
+        assert_eq!(ui.page(), Page::VoltGlass);
+        let _ = ui.stack.pop();
+        ui.push(Page::Horizon);
+        assert_eq!(
+            click(&mut ui, &mut s, Act::Push(Page::Extras)),
+            vec![Event::ButtonClick]
+        );
+        assert_eq!(ui.page(), Page::Extras);
         let (widgets, _, _, _) = ui.layout(&s, size.0, size.1);
         assert_eq!(
             widgets
@@ -6519,10 +6749,13 @@ mod tests {
                 })
                 .collect()
         };
-        // Vanilla's Options keeps Volt Settings as the single hub for all Volt & Horizon features,
-        // followed by Credits & Attribution.
+        // Vanilla's Options surfaces Mod Menu, Volt Settings (frosted-glass hub), and Credits.
         let main = pushes(&mut ui);
-        assert_eq!(&main[main.len() - 2..], [Page::Horizon, Page::Credits]);
+        assert!(main.contains(&Page::Graphics));
+        assert_eq!(
+            &main[main.len() - 3..],
+            [Page::ModMenu, Page::VoltGlass, Page::Credits]
+        );
         ui.push(Page::Horizon);
         assert_eq!(
             pushes(&mut ui),
@@ -6532,7 +6765,7 @@ mod tests {
                 Page::VoltQol,
                 Page::VoltChat,
                 Page::VoltMods,
-                Page::VoltCosmetics,
+                Page::ModMenu,
                 Page::Waypoints,
                 Page::Minimap,
                 Page::VoltAtlas,

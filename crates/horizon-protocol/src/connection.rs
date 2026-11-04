@@ -280,7 +280,7 @@ impl Connection {
         Ok(Self {
             reader: ConnReader {
                 stream,
-                buffer: Vec::new(),
+                buffer: Vec::with_capacity(64 * 1024),
                 decrypt: None,
                 threshold: None,
                 counters: counters.clone(),

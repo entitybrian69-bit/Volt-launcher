@@ -929,7 +929,7 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.9.8".into()
+    "0.9.9".into()
 }
 
 pub fn play_click_sound() {

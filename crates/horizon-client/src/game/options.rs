@@ -157,6 +157,10 @@ impl Game<'_> {
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
         self.watch_pack_folder();
         self.sync_waypoint_ui_context();
+        horizon_client::volt_mods::sync_catalog_from_engine(
+            &mut self.settings.extras,
+            &self.settings.horizon,
+        );
         let mut ui = std::mem::take(&mut self.ui.options);
         ui.draw(&self.settings, batch, &self.gui.atlas, self.cursor);
         self.ui.options = ui;
@@ -177,6 +181,7 @@ impl Game<'_> {
         let framebuffer = self.renderer.as_ref().map_or([1280, 720], |r| {
             [r.config.width as i32, r.config.height as i32]
         });
+        let was_typing = self.ui.options.typing();
         let mut ui = std::mem::take(&mut self.ui.options);
         let events = ui.click(
             &mut self.settings,
@@ -188,7 +193,13 @@ impl Game<'_> {
             false,
             right,
         );
+        let now_typing = ui.typing();
         self.ui.options = ui;
+        #[cfg(target_os = "android")]
+        if !was_typing && now_typing {
+            self.android_show_keyboard();
+        }
+        let _ = (was_typing, now_typing);
         self.handle_option_events(events)
     }
     pub(super) fn options_drag(&mut self) -> Result<()> {
@@ -510,6 +521,30 @@ impl Game<'_> {
                 limit = limit.min(cap);
             } else if now_ms.saturating_sub(latest_input_ms) > 45_000 {
                 limit = limit.min(cap);
+            }
+        }
+        if self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::DynamicFps)
+        {
+            let cap = i32::from(
+                self.settings
+                    .extras
+                    .mod_catalog
+                    .dynamic_fps_idle_cap
+                    .clamp(5, 60),
+            );
+            let now_ms = self.started.elapsed().as_millis() as i64;
+            let latest_input_ms = self
+                .last_input
+                .saturating_duration_since(self.started)
+                .as_millis() as i64;
+            if !self.focused {
+                limit = limit.min(cap);
+            } else if now_ms.saturating_sub(latest_input_ms) > 35_000 {
+                limit = limit.min(cap.max(15));
             }
         }
         limit

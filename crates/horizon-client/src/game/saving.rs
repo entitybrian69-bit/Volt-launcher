@@ -45,8 +45,32 @@ impl Game<'_> {
             });
             return Ok(());
         }
-        if let Some(integrated) = &self.integrated {
-            integrated.request_stop();
+        if self.integrated.is_some() {
+            if !quit
+                && self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(horizon_client::volt_mods::VoltModId::FastQuit)
+                && let Some(server) = self.integrated.take()
+            {
+                server.request_stop();
+                let lock = self.session_lock.take();
+                let _ = std::thread::Builder::new()
+                    .name("volt-fastquit".into())
+                    .spawn(move || {
+                        let _ = server.stop();
+                        drop(lock);
+                    });
+                self.leave_server(None)?;
+                if let Some(title) = &mut self.title {
+                    title.mode = horizon_client::title::Mode::Main;
+                }
+                return Ok(());
+            }
+            if let Some(integrated) = &self.integrated {
+                integrated.request_stop();
+            }
             self.pending_save = Some(ClosingSave {
                 quit,
                 close: true,

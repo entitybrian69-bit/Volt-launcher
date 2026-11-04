@@ -195,8 +195,8 @@ pub struct Extras {
     pub volt_boost_plus: crate::volt_qol::VoltBoostPlusConfig,
     /// Built-in 24 pure-Rust native Volt Mods (all OFF by default).
     pub volt_mods: crate::volt_qol::VoltModsConfig,
-    /// Built-in 3D Animated Volt Cosmetics loadout (`#7`).
-    pub volt_cosmetics: crate::volt_cosmetics::VoltCosmeticsLoadout,
+    /// Built-in 50 pure-Rust native Volt 0.9.9 Mod Catalog state (synced between Launcher & Mod Menu).
+    pub mod_catalog: crate::volt_mods::VoltModCatalogState,
 }
 
 impl Default for Extras {
@@ -296,7 +296,7 @@ impl Default for Extras {
             volt_visuals: crate::volt_qol::VoltVisualsConfig::default(),
             volt_boost_plus: crate::volt_qol::VoltBoostPlusConfig::default(),
             volt_mods: crate::volt_qol::VoltModsConfig::default(),
-            volt_cosmetics: crate::volt_cosmetics::VoltCosmeticsLoadout::default(),
+            mod_catalog: crate::volt_mods::VoltModCatalogState::default(),
         }
     }
 }
@@ -949,53 +949,9 @@ impl Extras {
                     }
                 }
                 "voltModOledAfk" => e.volt_mods.oled_afk_saver = flag(e.volt_mods.oled_afk_saver),
-                // --- Volt Cosmetics (#7) ---
-                "voltCosCape" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::Capes, v);
-                    }
+                _ => {
+                    let _ = e.mod_catalog.parse_entry(key, value);
                 }
-                "voltCosWings" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::Wings, v);
-                    }
-                }
-                "voltCosHat" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::CrownsHats, v);
-                    }
-                }
-                "voltCosHalo" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::HalosHorns, v);
-                    }
-                }
-                "voltCosEarsTail" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::EarsTails, v);
-                    }
-                }
-                "voltCosPet" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::ShoulderPets, v);
-                    }
-                }
-                "voltCosAura" => {
-                    if let Ok(v) = value.parse::<u8>() {
-                        e.volt_cosmetics
-                            .set(crate::volt_cosmetics::CosmeticCategory::AurasTrails, v);
-                    }
-                }
-                "voltCosWorldVis" => {
-                    e.volt_cosmetics.show_in_world = flag(e.volt_cosmetics.show_in_world)
-                }
-                _ => {}
             }
         }
         e
@@ -1476,21 +1432,7 @@ impl Extras {
         );
         push("voltModTimeWeather", self.volt_mods.time_weather.as_str());
         push("voltModOledAfk", bool_text(self.volt_mods.oled_afk_saver));
-        // Volt Cosmetics
-        push("voltCosCape", &self.volt_cosmetics.cape.to_string());
-        push("voltCosWings", &self.volt_cosmetics.wings.to_string());
-        push("voltCosHat", &self.volt_cosmetics.hat.to_string());
-        push("voltCosHalo", &self.volt_cosmetics.halo.to_string());
-        push(
-            "voltCosEarsTail",
-            &self.volt_cosmetics.ears_tail.to_string(),
-        );
-        push("voltCosPet", &self.volt_cosmetics.pet.to_string());
-        push("voltCosAura", &self.volt_cosmetics.aura.to_string());
-        push(
-            "voltCosWorldVis",
-            bool_text(self.volt_cosmetics.show_in_world),
-        );
+        self.mod_catalog.serialize_into(&mut push);
         s
     }
 

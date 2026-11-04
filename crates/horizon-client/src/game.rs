@@ -7484,6 +7484,11 @@ impl Game<'_> {
                 && !spectator
                 && let Some(p) = &mut self.player
             {
+                let better_mount_hud = self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(horizon_client::volt_mods::VoltModId::BetterMountHud);
                 let atlas = &self.gui.atlas;
                 let width = |s: &str| HudBatch::text_width(atlas, s) as i32;
                 let draws = hud_layout::experience(
@@ -7491,10 +7496,23 @@ impl Game<'_> {
                     hi,
                     self.experience.progress,
                     self.experience.level,
-                    contextual == ContextualBar::Experience,
+                    contextual == ContextualBar::Experience
+                        || (better_mount_hud
+                            && vehicle_hearts > 0
+                            && contextual != ContextualBar::JumpableVehicle),
                     &width,
                 );
                 hud_layout::paint(&mut batch, atlas, &draws);
+                if better_mount_hud
+                    && vehicle_hearts > 0
+                    && contextual == ContextualBar::JumpableVehicle
+                    && self.experience.level > 0
+                {
+                    let lvl_txt = self.experience.level.to_string();
+                    let lx = ((wi as f32 - HudBatch::text_width(atlas, &lvl_txt)) * 0.5).floor();
+                    let ly = hi as f32 - 35.0;
+                    batch.text(atlas, &lvl_txt, lx, ly, 0xFF20_FF80, true);
+                }
                 let effects = &self.potions.effects;
                 let kind = if effects.get("poison").is_some() {
                     hud_layout::HeartKind::Poisoned
@@ -7542,6 +7560,25 @@ impl Game<'_> {
                 // A fresh borrow: the hook ran with all of `self`.
                 let atlas = &self.gui.atlas;
                 hud_layout::paint(&mut batch, atlas, &draws);
+                if better_mount_hud && vehicle_hearts > 0 {
+                    let mount_rows_px = 10 * ((vehicle_hearts + 9) / 10);
+                    let mut food_inputs = inputs;
+                    food_inputs.vehicle_hearts = 0;
+                    let mut food_hud = horizon_client::hud_layout::HealthHud::default();
+                    let food_draws: Vec<_> = food_hud
+                        .layout(&food_inputs, wi, hi - mount_rows_px)
+                        .into_iter()
+                        .filter(|d| {
+                            matches!(
+                                d,
+                                hud_layout::GuiDraw::Sprite { sprite, .. }
+                                    if sprite.contains("food_")
+                            )
+                        })
+                        .collect();
+                    let atlas = &self.gui.atlas;
+                    hud_layout::paint(&mut batch, atlas, &food_draws);
+                }
                 bar_height = self
                     .health_hud
                     .left_height
@@ -10578,7 +10615,7 @@ impl Game<'_> {
             Action::Quit => crate::game::exit_app(event_loop),
             Action::Options => self.open_options(true),
             Action::VoltBoost => {
-                self.open_options_at(true, horizon_client::options_ui::Page::Horizon)
+                self.open_options_at(true, horizon_client::options_ui::Page::VoltGlass)
             }
             Action::Accessibility => {
                 self.open_options_at(true, horizon_client::options_ui::Page::Accessibility)
@@ -12540,6 +12577,23 @@ impl Game<'_> {
             };
             let mut local_pose =
                 horizon_client::first_person::item_pose(left, inverse_height, eff_attack, pose);
+            if eff_attack > 0.0
+                && self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(horizon_client::volt_mods::VoltModId::Punchy)
+            {
+                let punch = (eff_attack * std::f32::consts::PI).sin()
+                    * (f32::from(self.settings.extras.mod_catalog.punchy_intensity) / 100.0);
+                let sign = if left { -1.0 } else { 1.0 };
+                local_pose = glam::Mat4::from_translation(glam::Vec3::new(
+                    -0.015 * sign * punch,
+                    0.026 * punch,
+                    -0.058 * punch,
+                )) * local_pose
+                    * glam::Mat4::from_rotation_x((-9.5 * punch).to_radians());
+            }
             if vm_cfg.viewmodel_custom {
                 let sign = if left { -1.0 } else { 1.0 };
                 let ox = f32::from(vm_cfg.vm_offset_x) * 0.008 * sign;
@@ -14081,10 +14135,30 @@ impl Game<'_> {
                 .sprites
                 .get("environment/end_sky")
                 .map(|r| [r.u0, r.v0, r.u1, r.v1]),
-            environment_fog: (self.dim == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
+            environment_fog: (self.dim == Dim::Nether
+                && !self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(horizon_client::volt_mods::VoltModId::NoFog))
+            .then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
             water_fog,
-            fog: Some(self.frame_fog(camera, &sky, biome, water_fog)),
+            fog: Some({
+                let mut f = self.frame_fog(camera, &sky, biome, water_fog);
+                if self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(horizon_client::volt_mods::VoltModId::NoFog)
+                {
+                    f.environmental_start = 8192.0;
+                    f.environmental_end = 16384.0;
+                    f.render_distance_start = 8192.0;
+                    f.render_distance_end = 16384.0;
+                }
+                f
+            }),
             dark_disc: self.dark_disc(camera),
             outline,
             outline_after_terrain,
@@ -14101,15 +14175,38 @@ impl Game<'_> {
                 && horizon_client::clouds::visible(&self.settings.clouds, sky.cloud_color[3]))
             .then(|| self.gui.atlas.sprites.get("horizon/white"))
             .flatten()
-            .map(|white| horizon_client::clouds::Input {
-                texture: &self.pack.clouds,
-                uv: [(white.u0 + white.u1) / 2.0, (white.v0 + white.v1) / 2.0],
-                camera,
-                time: self.world.game_time,
-                partial_tick: alpha,
-                range: self.settings.cloud_range,
-                fast: self.settings.clouds == "fast",
-                color: sky.cloud_color,
+            .map(|white| {
+                let better_clouds = self
+                    .settings
+                    .extras
+                    .mod_catalog
+                    .is_on(horizon_client::volt_mods::VoltModId::BetterClouds);
+                let density = self.settings.extras.mod_catalog.better_clouds_density;
+                let mut c = sky.cloud_color;
+                if better_clouds {
+                    let alpha_scale = match density {
+                        0 => 0.72,
+                        2 => 1.0,
+                        _ => 0.88,
+                    };
+                    c[0] = (c[0] * 1.03).min(1.0);
+                    c[2] = (c[2] * 1.04).min(1.0);
+                    c[3] = (c[3] * alpha_scale).clamp(0.1, 1.0);
+                }
+                horizon_client::clouds::Input {
+                    texture: &self.pack.clouds,
+                    uv: [(white.u0 + white.u1) / 2.0, (white.v0 + white.v1) / 2.0],
+                    camera,
+                    time: self.world.game_time,
+                    partial_tick: alpha,
+                    range: if better_clouds {
+                        (self.settings.cloud_range * 3 / 2).clamp(8, 128)
+                    } else {
+                        self.settings.cloud_range
+                    },
+                    fast: !better_clouds && self.settings.clouds == "fast",
+                    color: c,
+                }
             }),
             entities: &entities,
             entity_spans: &entity_spans,
@@ -16081,6 +16178,15 @@ impl ApplicationHandler for Game<'_> {
                         let backspace = event.physical_key == PhysicalKey::Code(KeyCode::Backspace);
                         self.station_text(event.text.as_deref(), backspace);
                     }
+                }
+                WindowEvent::KeyboardInput { event, .. }
+                    if self.screen == Screen::Stats
+                        && self.stats_typing()
+                        && event.state == ElementState::Pressed
+                        && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
+                {
+                    let backspace = event.physical_key == PhysicalKey::Code(KeyCode::Backspace);
+                    self.stats_key(event.text.as_deref(), backspace);
                 }
                 WindowEvent::KeyboardInput { event, .. }
                     if self.screen == Screen::WorldOptions

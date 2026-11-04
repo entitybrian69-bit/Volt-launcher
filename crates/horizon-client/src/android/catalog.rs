@@ -202,7 +202,7 @@ impl Page {
         }
     }
     pub fn is_catalog(self) -> bool {
-        matches!(self, Self::Packs | Self::Mods | Self::Shaders)
+        matches!(self, Self::Packs | Self::Shaders)
     }
 }
 #[derive(Clone)]
@@ -230,6 +230,8 @@ pub struct Catalog {
     pub status: String,
     pub offset: usize,
     pub scroll: f32,
+    pub mod_filter: u8,
+    pub mod_born: std::time::Instant,
     pub volt_boost_modal: bool,
     pub volt_modal_scroll: f32,
     pub extras: horizon_client::extras::Extras,
@@ -281,6 +283,8 @@ impl Catalog {
             status: String::new(),
             offset: 0,
             scroll: 0.0,
+            mod_filter: 0,
+            mod_born: std::time::Instant::now(),
             volt_boost_modal: false,
             volt_modal_scroll: 0.0,
             extras: horizon_client::extras::Extras::default(),

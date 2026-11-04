@@ -247,12 +247,12 @@
   "volt.chat.title": "Volt Chat — 3D Proximity Voice & Chat Suite",
   "volt.chat.tooltip": "Built-in 3D Positional Proximity Voice Chat, Push-to-Talk, VAD, Cave Muffle, Chat Timestamps, Spam Stacker & Quick-Chat Bar.",
   "volt.mods.button": "Volt Mods...",
-  "volt.mods.title": "Volt Mods — 24 Built-In Pure-Rust Mods",
-  "volt.mods.tooltip": "24 zero-lag pure-Rust native mods: Combat HUDs, AppleSkin, Shulker Peek, Tool Shield, Trajectory Arc, Damage Popups, OLED Saver & more.",
-  "volt.cosmetics.button": "Volt Cosmetics...",
-  "volt.cosmetics.title": "Volt Cosmetics — 3D Animated Wardrobe (86 Items)",
-  "volt.cosmetics.tooltip": "Smoothly rotatable 3D player preview on the left and 86 zero-lag animated 3D Capes, Wings, Hats, Backpacks, Auras, Shoulders & Belts on the right.",
-  "volt.atlas.open": "Interactive World Atlas (M)...",
+  "volt.mods.title": "Volt Mods — 50 Built-In Pure-Rust Mods",
+  "volt.mods.tooltip": "50 zero-lag pure-Rust native mods across PvP & Utility, PvP HUD & Display, Visuals, Performance & Additional QoL.",
+  "volt.mod_menu.button": "Mod Menu...",
+  "volt.mod_menu.title": "Mod Menu — 50 Native Rust Mods",
+  "volt.mod_menu.tooltip": "Split-pane Mod Menu with custom logos, live ON/OFF switches, search, All/On/Off/Fav filters & per-mod settings.",
+  "volt.atlas.open": "Xaero's World Map (J)...",
   "volt.atlas.title": "Volt World Atlas — Interactive Chunk Map",
   "volt.atlas.tooltip": "Full-screen persistent world map with Surface, Relief, Lush Biome & Slime Chunk modes plus 1-tap waypoint pinning."
 }

@@ -5322,7 +5322,28 @@ impl Game<'_> {
                 continue;
             }
             drawn_count += 1;
-            let mob_alpha = if throttle_distant && d_sq > 24.0 * 24.0 {
+            let emf_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::EntityModelFeatures);
+            let etf_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::EntityTextureFeatures);
+            let better_anim_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::BetterAnimationsCollection);
+            let nea_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::NotEnoughAnimations);
+            let smooth_cutoff = if emf_on { 40.0 * 40.0 } else { 24.0 * 24.0 };
+            let mob_alpha = if throttle_distant && d_sq > smooth_cutoff {
                 0.0
             } else {
                 alpha
@@ -5336,6 +5357,22 @@ impl Game<'_> {
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             if mob.fire_ticks > 0 || matches!(mob.species(), Species::Blaze | Species::MagmaCube) {
                 packed = (15 * 16) | ((15 * 16) << 8);
+            } else if etf_on {
+                let id_s = mob.kind.id.as_str();
+                if id_s.ends_with("allay")
+                    || id_s.ends_with("vex")
+                    || id_s.ends_with("warden")
+                    || id_s.ends_with("enderman")
+                    || id_s.ends_with("phantom")
+                    || id_s.ends_with("breeze")
+                    || id_s.ends_with("drowned")
+                {
+                    let min_blk = 11u32 * 16;
+                    let cur_blk = (packed >> 8) & 0xFF;
+                    if cur_blk < min_blk {
+                        packed = (packed & 0xFF) | (min_blk << 8);
+                    }
+                }
             }
             // GlowSquidRenderer.getBlockLightLevel: the body brightens as the
             // dark ticks run out (the block light is the second byte).
@@ -5376,6 +5413,20 @@ impl Game<'_> {
                 &armor,
                 out,
             );
+            if d_sq < 32.0 * 32.0 && ((is_player && nea_on) || (!is_player && better_anim_on)) {
+                let foot_y = (mob.position.y - f64::from(camera[1])) as f32;
+                let phase = (self.world.game_time as f32 + alpha as f32) * 0.14
+                    + (mob.id as u32 as f32) * 0.73;
+                let breath = phase.sin() * 0.014;
+                let sway = (phase * 0.5).cos() * 0.008;
+                for v in &mut out[entity_start..] {
+                    let dy = (v.pos[1] - foot_y).max(0.0);
+                    if dy > 0.25 {
+                        v.pos[1] += dy * breath;
+                        v.pos[0] += (dy - 0.25) * sway;
+                    }
+                }
+            }
             if is_player {
                 // PlayerRenderer's CapeLayer, WingsLayer and SpinAttackEffectLayer.
                 // Only the cape hides with the body; WingsLayer and

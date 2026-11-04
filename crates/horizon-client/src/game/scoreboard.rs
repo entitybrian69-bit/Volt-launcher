@@ -746,6 +746,40 @@ impl Game<'_> {
         };
         let draws = self.tab_list.layout(&inputs, &self.gui.atlas.font);
         horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
+        if self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::BetterPingDisplay)
+        {
+            let sorted = tab_list::sorted_players(&players, board);
+            let ping_slots: Vec<(i32, i32)> = draws
+                .iter()
+                .filter_map(|d| match d {
+                    horizon_client::hud_layout::GuiDraw::Sprite { sprite, x, y, .. }
+                        if sprite.contains("icon/ping_") =>
+                    {
+                        Some((*x, *y))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let atlas = &self.gui.atlas;
+            for (p, (px, py)) in sorted.into_iter().zip(ping_slots) {
+                if p.latency < 0 {
+                    continue;
+                }
+                let label = format!("{}ms", p.latency);
+                let col = match p.latency {
+                    0..=59 => 0xFF80_DE4A,   // Mint green
+                    60..=139 => 0xFF35_DCFA, // Crisp yellow
+                    140..=249 => 0xFF3C_92FB, // Amber orange
+                    _ => 0xFF68_70F0,        // Coral red
+                };
+                let tw = HudBatch::text_width(atlas, &label);
+                batch.text(atlas, &label, px as f32 - tw - 2.0, py as f32, col, true);
+            }
+        }
     }
 }
 

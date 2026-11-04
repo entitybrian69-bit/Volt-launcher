@@ -14,6 +14,12 @@ impl Game<'_> {
         if self.dialog_open() {
             return self.dialog_has_text_field();
         }
+        if self.screen == Screen::Options && self.ui.options.typing() {
+            return true;
+        }
+        if self.screen == Screen::Stats && self.stats_typing() {
+            return true;
+        }
         if let Some(title) = self.title.as_mut() {
             return title.focused_field().is_some();
         }
@@ -100,6 +106,20 @@ impl Game<'_> {
             return;
         }
         if self.dialog_type(&text) {
+            return;
+        }
+        if self.screen == Screen::Options && self.ui.options.typing() {
+            let ev = self.ui.options.key(
+                &mut self.settings,
+                &self.gui.atlas,
+                winit::keyboard::KeyCode::F24,
+                Some(&text),
+            );
+            let _ = self.handle_option_events(ev);
+            return;
+        }
+        if self.screen == Screen::Stats && self.stats_typing() {
+            let _ = self.stats_key(winit::keyboard::KeyCode::F24, Some(&text));
             return;
         }
         if self.title.is_some() {

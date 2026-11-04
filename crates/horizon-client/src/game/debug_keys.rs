@@ -160,6 +160,22 @@ impl Game<'_> {
         if !pressed {
             return false;
         }
+        if modifier_was_down
+            && key == KeyCode::KeyJ
+            && self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::LanguageReload)
+        {
+            self.debug_keys.used_debug_key_as_modifier = true;
+            let code = self.settings.language.clone();
+            self.load_language(&code);
+            self.debug_feedback(Text::literal(format!(
+                "Reloaded language '{code}' (Language Reload)"
+            )));
+            return true;
+        }
         // The debug modifier does nothing else.
         if name == binds.get("key.debug.modifier") || name == binds.get("key.debug.overlay") {
             return true;
@@ -477,7 +493,22 @@ impl Game<'_> {
         }
         let (left, right) = d.columns(&self.debug_chart_lines());
         let atlas = &self.gui.atlas;
-        let mut draws = debug_overlay::draw(&atlas.font, [&left, &right], scale, width);
+        let mut draws = if self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::BetterF3)
+        {
+            debug_overlay::draw_styled(
+                &atlas.font,
+                [&left, &right],
+                scale,
+                width,
+                self.settings.extras.mod_catalog.betterf3_compact,
+            )
+        } else {
+            debug_overlay::draw(&atlas.font, [&left, &right], scale, width)
+        };
         let charts = self.debug_charts.draw(
             &atlas.font,
             width,

@@ -272,6 +272,109 @@ pub fn draw(font: &Font, columns: [&[String]; 2], scale: f32, width: i32) -> Vec
     out
 }
 
+/// `BetterF3` styled debug overlay renderer: color-coded telemetry sections,
+/// dark translucent pill cards with 2px left/right category accent bars, and
+/// optional compact mode filtering verbose boilerplate lines.
+pub fn draw_styled(
+    font: &Font,
+    columns: [&[String]; 2],
+    scale: f32,
+    width: i32,
+    compact: bool,
+) -> Vec<GuiDraw> {
+    fn line_theme(line: &str) -> (u32, u32) {
+        if line.contains(" fps") || line.starts_with("FPS") || line.contains("frame") {
+            (0xFF7A_E88A, 0xFF45_C27A) // Mint green
+        } else if line.starts_with("XYZ:")
+            || line.starts_with("Block:")
+            || line.starts_with("Facing:")
+            || line.starts_with("Looking at")
+        {
+            (0xFFF5_D458, 0xFFE6_B432) // Sky cyan
+        } else if line.starts_with("Chunk:")
+            || line.starts_with("Section")
+            || line.starts_with("Biome:")
+            || line.starts_with("Client Light:")
+            || line.starts_with("Local Difficulty:")
+        {
+            (0xFFFF_A2B8, 0xFFFF_869A) // Soft lavender
+        } else if line.starts_with("Mem:")
+            || line.starts_with("Allocated:")
+            || line.starts_with("CPU:")
+            || line.starts_with("Display:")
+            || line.contains("Vulkan")
+            || line.starts_with("Shader")
+        {
+            (0xFF62_C8F8, 0xFF3A_A8F0) // Warm gold
+        } else if line.starts_with("Minecraft ") || line.contains("Volt") {
+            (0xFF8C_78FF, 0xFF52_3CE6) // Volt crimson-coral
+        } else {
+            (0xFFF2_EEF0, 0xFF9A_86FF)
+        }
+    }
+
+    let skip_compact = |l: &str| {
+        compact
+            && (l.starts_with("Section-relative:")
+                || l.starts_with("Filtering:")
+                || l.starts_with("Terrain Rendering:")
+                || l.starts_with("Java:"))
+    };
+
+    let mut out = vec![GuiDraw::Push(vec![PoseOp::Scale(scale, scale)])];
+    for (lines, align_left) in [(columns[0], true), (columns[1], false)] {
+        let mut row = 0i32;
+        let mut placed: Vec<(&String, i32, i32, i32, u32, u32)> = Vec::new();
+        for l in lines {
+            if l.is_empty() {
+                if !compact {
+                    row += 1;
+                }
+                continue;
+            }
+            if skip_compact(l) {
+                continue;
+            }
+            let w = font.width(l) as i32;
+            let left = if align_left { 4 } else { width - 4 - w };
+            let (fg, bar) = line_theme(l);
+            placed.push((l, left, 3 + LINE_HEIGHT * row, w, fg, bar));
+            row += 1;
+        }
+        for (_, left, top, w, _, bar) in &placed {
+            out.push(fill(
+                left - 3,
+                top - 1,
+                left + w + 3,
+                top + LINE_HEIGHT - 1,
+                0xB418_1110,
+            ));
+            if align_left {
+                out.push(fill(left - 3, top - 1, left - 1, top + LINE_HEIGHT - 1, *bar));
+            } else {
+                out.push(fill(
+                    left + w + 1,
+                    top - 1,
+                    left + w + 3,
+                    top + LINE_HEIGHT - 1,
+                    *bar,
+                ));
+            }
+        }
+        for (line, left, top, _, fg, _) in placed {
+            out.push(GuiDraw::Text {
+                text: Text::literal(line.clone()),
+                x: left,
+                y: top,
+                color: fg,
+                shadow: true,
+            });
+        }
+    }
+    out.push(GuiDraw::Pop);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

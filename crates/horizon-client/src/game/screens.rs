@@ -277,7 +277,7 @@ impl Game<'_> {
             }
             Some(1) => self.open_options(false),
             Some(14) => {
-                self.open_options_at(false, horizon_client::options_ui::Page::Horizon)
+                self.open_options_at(false, horizon_client::options_ui::Page::VoltGlass)
             }
             Some(3) => self.open_stats(),
             Some(4) => self.open_advancements(true),

@@ -1154,9 +1154,74 @@ impl Game<'_> {
         if self.ui.hide_gui && !focused {
             return;
         }
-        self.ui
-            .chat
-            .draw(batch, &self.gui.atlas, self.ticks, focused);
+        if !self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::ChatHeads)
+            || (focused && self.ui.chat.abilities.any_restriction())
+        {
+            self.ui
+                .chat
+                .draw(batch, &self.gui.atlas, self.ticks, focused);
+            return;
+        }
+        let mut skin_lookup: Vec<(String, String, bool)> = Vec::new();
+        if let Some((players, _, upside_down)) = self.remote_tab_players() {
+            for p in players {
+                let skin = self.face_skin(p.uuid, &p.skin);
+                let flip = upside_down.contains(&p.uuid);
+                skin_lookup.push((p.name, skin, flip));
+            }
+        } else {
+            let my_name = self.options.player_name();
+            let my_skin = self
+                .player_model
+                .as_ref()
+                .and_then(|m| m.skin.clone())
+                .unwrap_or_else(|| "entity/player/wide/steve".into());
+            let flip = my_name == "Dinnerbone" || my_name == "Grumm";
+            skin_lookup.push((my_name, my_skin, flip));
+        }
+        let mut draws = self.ui.chat.layout(batch.height as i32, self.ticks, focused);
+        let mut faces = Vec::new();
+        for d in &mut draws {
+            if let horizon_client::hud_layout::GuiDraw::Text {
+                text, x, y, color, ..
+            } = d
+            {
+                let plain = text.plain();
+                let trimmed = plain.trim_start();
+                let matched = skin_lookup.iter().find(|(name, _, _)| {
+                    !name.is_empty()
+                        && (trimmed.starts_with(&format!("<{name}>"))
+                            || trimmed.starts_with(&format!("[{name}]"))
+                            || trimmed.starts_with(&format!("{name}:"))
+                            || trimmed.starts_with(&format!("{name} ")))
+                });
+                if let Some((_, skin, flip)) = matched {
+                    *x += 10;
+                    horizon_client::tab_list::face(
+                        &mut faces,
+                        skin,
+                        0,
+                        *y,
+                        8,
+                        true,
+                        *flip,
+                        *color,
+                    );
+                }
+            }
+        }
+        if !faces.is_empty()
+            && let Some(pop_idx) = draws
+                .iter()
+                .rposition(|d| matches!(d, horizon_client::hud_layout::GuiDraw::Pop))
+        {
+            draws.splice(pop_idx..pop_idx, faces);
+        }
+        horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
     }
     /// `HoverEvent.EntityTooltipInfo.getTooltipLines`: the name when the
     /// event has one, the entity type and the UUID.
@@ -1538,10 +1603,27 @@ impl Game<'_> {
         let Some(path) = self.ui.screenshot_message.take() else {
             return;
         };
+        let copy_clip = result.is_ok()
+            && self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::ScreenshotToClipboard);
+        if copy_clip {
+            horizon_client::clipboard::Clipboard::set(
+                &mut self.clipboard,
+                &path.display().to_string(),
+            );
+        }
         #[cfg(target_os = "android")]
         if result.is_ok() {
             if let Err(error) = crate::gallery::save(&path) {
                 self.system_message(Text::literal(error));
+            } else if copy_clip {
+                self.system_message(
+                    Text::literal("Screenshot saved & copied to clipboard")
+                        .with_color(horizon_client::text::GREEN),
+                );
             }
             return;
         }
@@ -1557,7 +1639,15 @@ impl Game<'_> {
                         ..Style::default()
                     },
                 );
-                Text::translate("screenshot.success", &[link])
+                let base = Text::translate("screenshot.success", &[link]);
+                if copy_clip {
+                    base.append(
+                        Text::literal(" [Copied to clipboard]")
+                            .with_color(horizon_client::text::GREEN),
+                    )
+                } else {
+                    base
+                }
             }
             Err(e) => Text::translate("screenshot.failure", &[Text::literal(e.clone())]),
         };
