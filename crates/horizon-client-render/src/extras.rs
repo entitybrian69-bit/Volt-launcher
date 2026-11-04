@@ -185,6 +185,18 @@ pub struct Extras {
     pub purge_ram_requested: bool,
     /// Built-in native WGSL Volt Shaders configuration (`enabled: false` by default).
     pub volt_shaders: horizon_shader_api::volt_shaders::VoltShadersConfig,
+    /// Built-in Volt QoL suite (`#2, #3, #8, #9, #15, #17, #18, #25`).
+    pub volt_qol: crate::volt_qol::VoltQolConfig,
+    /// Built-in Volt Chat & 3D Proximity Voice Chat (`#21`).
+    pub volt_chat: crate::volt_qol::VoltChatConfig,
+    /// Built-in Volt Visuals (`#19` Connected Textures, Better Grass & 3D Items).
+    pub volt_visuals: crate::volt_qol::VoltVisualsConfig,
+    /// Built-in Volt Boost+ Vulkan passes (`#6` Greedy Quad Merge, Cave Culling, Mesh Pool).
+    pub volt_boost_plus: crate::volt_qol::VoltBoostPlusConfig,
+    /// Built-in 24 pure-Rust native Volt Mods (all OFF by default).
+    pub volt_mods: crate::volt_qol::VoltModsConfig,
+    /// Built-in 3D Animated Volt Cosmetics loadout (`#7`).
+    pub volt_cosmetics: crate::volt_cosmetics::VoltCosmeticsLoadout,
 }
 
 impl Default for Extras {
@@ -279,6 +291,12 @@ impl Default for Extras {
             particle_frustum_cull: false,
             purge_ram_requested: false,
             volt_shaders: horizon_shader_api::volt_shaders::VoltShadersConfig::default(),
+            volt_qol: crate::volt_qol::VoltQolConfig::default(),
+            volt_chat: crate::volt_qol::VoltChatConfig::default(),
+            volt_visuals: crate::volt_qol::VoltVisualsConfig::default(),
+            volt_boost_plus: crate::volt_qol::VoltBoostPlusConfig::default(),
+            volt_mods: crate::volt_qol::VoltModsConfig::default(),
+            volt_cosmetics: crate::volt_cosmetics::VoltCosmeticsLoadout::default(),
         }
     }
 }
@@ -639,6 +657,344 @@ impl Extras {
                         e.volt_shaders.vignette = v;
                     }
                 }
+                "voltShaderStyle" => {
+                    if let Some(v) =
+                        horizon_shader_api::volt_shaders::ShaderVisualStyle::parse(value)
+                    {
+                        e.volt_shaders.style = v;
+                    }
+                }
+                "voltShaderCloudShadows" => {
+                    e.volt_shaders.cloud_shadows = flag(e.volt_shaders.cloud_shadows)
+                }
+                "voltShaderGlowingOres" => {
+                    e.volt_shaders.glowing_ores = flag(e.volt_shaders.glowing_ores)
+                }
+                "voltShaderOreGlow" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.ore_glow = v.clamp(25, 200);
+                    }
+                }
+                "voltShaderAutoPbr" => e.volt_shaders.auto_pbr = flag(e.volt_shaders.auto_pbr),
+                "voltShaderWaterFoam" => {
+                    e.volt_shaders.water_foam = flag(e.volt_shaders.water_foam)
+                }
+                "voltShaderCloudsMode" => {
+                    if let Some(v) = horizon_shader_api::volt_shaders::CloudMode::parse(value) {
+                        e.volt_shaders.clouds_mode = v;
+                    }
+                }
+                "voltShaderCloudCoverage" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_shaders.cloud_coverage = v.clamp(30, 160);
+                    }
+                }
+                "voltShaderNightSkyPlus" => {
+                    e.volt_shaders.night_sky_plus = flag(e.volt_shaders.night_sky_plus)
+                }
+                "voltShaderRainbow" => {
+                    e.volt_shaders.post_rain_rainbow = flag(e.volt_shaders.post_rain_rainbow)
+                }
+                "voltShaderEyeComfort" => {
+                    e.volt_shaders.eye_comfort = flag(e.volt_shaders.eye_comfort)
+                }
+                // --- Volt Visuals (#19) & Volt Boost+ (#6) ---
+                "voltCtmGlass" => {
+                    e.volt_visuals.connected_glass = flag(e.volt_visuals.connected_glass)
+                }
+                "voltBetterGrass" => {
+                    e.volt_visuals.better_grass_sides = flag(e.volt_visuals.better_grass_sides)
+                }
+                "voltDroppedItems3d" => {
+                    e.volt_visuals.dropped_items_3d = flag(e.volt_visuals.dropped_items_3d)
+                }
+                "voltGreedyQuadMerge" => {
+                    e.volt_boost_plus.greedy_quad_merge = flag(e.volt_boost_plus.greedy_quad_merge)
+                }
+                "voltCaveOcclusion" => {
+                    e.volt_boost_plus.cave_chunk_occlusion =
+                        flag(e.volt_boost_plus.cave_chunk_occlusion)
+                }
+                "voltZeroStutterPool" => {
+                    e.volt_boost_plus.zero_stutter_mesh_pool =
+                        flag(e.volt_boost_plus.zero_stutter_mesh_pool)
+                }
+                "voltOffscreenEntitySkip" => {
+                    e.volt_boost_plus.offscreen_entity_skip =
+                        flag(e.volt_boost_plus.offscreen_entity_skip)
+                }
+                "voltSmartFramePacer" => {
+                    e.volt_boost_plus.smart_frame_pacer = flag(e.volt_boost_plus.smart_frame_pacer)
+                }
+                // --- Volt QoL (#2, #3, #8, #9, #15, #17, #18, #25) ---
+                "voltQolZoom" => e.volt_qol.zoom_enabled = flag(e.volt_qol.zoom_enabled),
+                "voltQolZoomFov" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.zoom_fov_pct = v.clamp(10, 60);
+                    }
+                }
+                "voltQolZoomSmooth" => e.volt_qol.zoom_smooth = flag(e.volt_qol.zoom_smooth),
+                "voltQolFreelook" => {
+                    e.volt_qol.freelook_enabled = flag(e.volt_qol.freelook_enabled)
+                }
+                "voltQolInspector" => {
+                    e.volt_qol.world_inspector = flag(e.volt_qol.world_inspector)
+                }
+                "voltQolSpawnLight" => {
+                    e.volt_qol.spawn_light_overlay = flag(e.volt_qol.spawn_light_overlay)
+                }
+                "voltQolBlueprint" => {
+                    e.volt_qol.blueprint_enabled = flag(e.volt_qol.blueprint_enabled)
+                }
+                "voltQolBlueprintPreset" => {
+                    if let Some(p) = crate::volt_qol::BlueprintPreset::parse(value) {
+                        e.volt_qol.blueprint_preset = p;
+                    }
+                }
+                "voltQolBlueprintLayer" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_qol.blueprint_layer = v.clamp(-1, 15);
+                    }
+                }
+                "voltQolBlueprintChecklist" => {
+                    e.volt_qol.blueprint_checklist = flag(e.volt_qol.blueprint_checklist)
+                }
+                "voltQolPhotoOverlays" => {
+                    e.volt_qol.photo_mode_overlays = flag(e.volt_qol.photo_mode_overlays)
+                }
+                "voltQolCamRoll" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_qol.cam_roll_deg = v.clamp(-45, 45);
+                    }
+                }
+                "voltQolLetterbox" => e.volt_qol.cam_letterbox = flag(e.volt_qol.cam_letterbox),
+                "voltQolReplay" => e.volt_qol.replay_buffer = flag(e.volt_qol.replay_buffer),
+                "voltQolCaveReverb" => {
+                    e.volt_qol.sound_cave_reverb = flag(e.volt_qol.sound_cave_reverb)
+                }
+                "voltQolUnderwaterLpf" => {
+                    e.volt_qol.sound_underwater_lpf = flag(e.volt_qol.sound_underwater_lpf)
+                }
+                "voltQolWallOcclusion" => {
+                    e.volt_qol.sound_wall_occlusion = flag(e.volt_qol.sound_wall_occlusion)
+                }
+                "voltQolMufflePortal" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.muffle_portal_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolMufflePiston" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.muffle_piston_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolMuffleMinecart" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.muffle_minecart_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolMuffleExplosion" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.muffle_explosion_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolMuffleRain" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.muffle_rain_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolAtlas" => e.volt_qol.atlas_enabled = flag(e.volt_qol.atlas_enabled),
+                "voltQolAtlasMode" => {
+                    if let Some(m) = crate::volt_qol::AtlasViewMode::parse(value) {
+                        e.volt_qol.atlas_mode = m;
+                    }
+                }
+                "voltQolAtlasGrid" => e.volt_qol.atlas_grid = flag(e.volt_qol.atlas_grid),
+                "voltQolJei" => e.volt_qol.jei_enabled = flag(e.volt_qol.jei_enabled),
+                "voltQolVmCustom" => {
+                    e.volt_qol.viewmodel_custom = flag(e.volt_qol.viewmodel_custom)
+                }
+                "voltQolVmX" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_qol.vm_offset_x = v.clamp(-100, 100);
+                    }
+                }
+                "voltQolVmY" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_qol.vm_offset_y = v.clamp(-100, 100);
+                    }
+                }
+                "voltQolVmZ" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_qol.vm_offset_z = v.clamp(-100, 100);
+                    }
+                }
+                "voltQolVmScale" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.vm_scale_pct = v.clamp(40, 180);
+                    }
+                }
+                "voltQolVmRoll" => {
+                    if let Ok(v) = value.parse::<i16>() {
+                        e.volt_qol.vm_roll_deg = v.clamp(-45, 45);
+                    }
+                }
+                "voltQolVmSwing" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.vm_swing_speed_pct = v.clamp(40, 200);
+                    }
+                }
+                "voltQolVmClassic" => {
+                    e.volt_qol.vm_classic_animations = flag(e.volt_qol.vm_classic_animations)
+                }
+                "voltQolVmTotem" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.vm_totem_scale_pct = v.clamp(25, 120);
+                    }
+                }
+                // --- Volt Chat & Voice (#21) ---
+                "voltVoiceEnabled" => e.volt_chat.voice_enabled = flag(e.volt_chat.voice_enabled),
+                "voltVoicePtt" => e.volt_chat.voice_ptt_mode = flag(e.volt_chat.voice_ptt_mode),
+                "voltVoiceVad" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_chat.voice_vad_threshold = v.clamp(5, 80);
+                    }
+                }
+                "voltVoiceMicGain" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_chat.voice_mic_gain_pct = v.clamp(0, 200);
+                    }
+                }
+                "voltVoiceOutGain" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_chat.voice_output_gain_pct = v.clamp(0, 200);
+                    }
+                }
+                "voltVoiceDist" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_chat.voice_distance_blocks = v.clamp(12, 96);
+                    }
+                }
+                "voltVoiceCaveMuffle" => {
+                    e.volt_chat.voice_cave_muffle = flag(e.volt_chat.voice_cave_muffle)
+                }
+                "voltVoiceHudBtn" => {
+                    e.volt_chat.voice_hud_button = flag(e.volt_chat.voice_hud_button)
+                }
+                "voltVoiceLoopback" => {
+                    e.volt_chat.voice_loopback_test = flag(e.volt_chat.voice_loopback_test)
+                }
+                "voltChatTimestamps" => {
+                    e.volt_chat.chat_timestamps = flag(e.volt_chat.chat_timestamps)
+                }
+                "voltChatCompact" => {
+                    e.volt_chat.chat_compact_spam = flag(e.volt_chat.chat_compact_spam)
+                }
+                "voltChatMention" => {
+                    e.volt_chat.chat_mention_ping = flag(e.volt_chat.chat_mention_ping)
+                }
+                "voltChatQuickBar" => e.volt_chat.chat_quick_bar = flag(e.volt_chat.chat_quick_bar),
+                // --- Volt Mods (24 Built-in Mods) ---
+                "voltModArmorHud" => e.volt_mods.armor_hud = flag(e.volt_mods.armor_hud),
+                "voltModPotionHud" => e.volt_mods.potion_hud = flag(e.volt_mods.potion_hud),
+                "voltModCpsHud" => e.volt_mods.cps_hud = flag(e.volt_mods.cps_hud),
+                "voltModReachHud" => e.volt_mods.reach_hud = flag(e.volt_mods.reach_hud),
+                "voltModFpsPill" => e.volt_mods.fps_ping_pill = flag(e.volt_mods.fps_ping_pill),
+                "voltModKeystrokes" => {
+                    e.volt_mods.keystrokes_hud = flag(e.volt_mods.keystrokes_hud)
+                }
+                "voltModCrosshair" => {
+                    if let Some(c) = crate::volt_qol::CrosshairStyle::parse(value) {
+                        e.volt_mods.custom_crosshair = c;
+                    }
+                }
+                "voltModLowShieldFire" => {
+                    e.volt_mods.low_shield_fire = flag(e.volt_mods.low_shield_fire)
+                }
+                "voltModNoHurtcam" => e.volt_mods.no_hurtcam = flag(e.volt_mods.no_hurtcam),
+                "voltModToggleSprint" => {
+                    e.volt_mods.toggle_sprint = flag(e.volt_mods.toggle_sprint)
+                }
+                "voltModAppleSkin" => e.volt_mods.appleskin_hud = flag(e.volt_mods.appleskin_hud),
+                "voltModShulkerPreview" => {
+                    e.volt_mods.shulker_preview = flag(e.volt_mods.shulker_preview)
+                }
+                "voltModToolShield" => {
+                    e.volt_mods.tool_break_shield = flag(e.volt_mods.tool_break_shield)
+                }
+                "voltModAutoTool" => e.volt_mods.auto_tool_hint = flag(e.volt_mods.auto_tool_hint),
+                "voltModTrajectory" => {
+                    e.volt_mods.trajectory_arc = flag(e.volt_mods.trajectory_arc)
+                }
+                "voltModDamagePopups" => {
+                    e.volt_mods.damage_popups = flag(e.volt_mods.damage_popups)
+                }
+                "voltModHitboxPlus" => e.volt_mods.hitbox_plus = flag(e.volt_mods.hitbox_plus),
+                "voltModDamageDir" => {
+                    e.volt_mods.damage_direction_hud = flag(e.volt_mods.damage_direction_hud)
+                }
+                "voltModChatCalc" => {
+                    e.volt_mods.chat_calculator = flag(e.volt_mods.chat_calculator)
+                }
+                "voltModEnchantGuide" => {
+                    e.volt_mods.enchant_guide = flag(e.volt_mods.enchant_guide)
+                }
+                "voltModSlimeTech" => e.volt_mods.slime_tech_hud = flag(e.volt_mods.slime_tech_hud),
+                "voltModDeathTracker" => {
+                    e.volt_mods.death_tracker = flag(e.volt_mods.death_tracker)
+                }
+                "voltModTimeWeather" => {
+                    if let Some(tw) = crate::volt_qol::ClientTimeWeather::parse(value) {
+                        e.volt_mods.time_weather = tw;
+                    }
+                }
+                "voltModOledAfk" => e.volt_mods.oled_afk_saver = flag(e.volt_mods.oled_afk_saver),
+                // --- Volt Cosmetics (#7) ---
+                "voltCosCape" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::Capes, v);
+                    }
+                }
+                "voltCosWings" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::Wings, v);
+                    }
+                }
+                "voltCosHat" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::CrownsHats, v);
+                    }
+                }
+                "voltCosHalo" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::HalosHorns, v);
+                    }
+                }
+                "voltCosEarsTail" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::EarsTails, v);
+                    }
+                }
+                "voltCosPet" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::ShoulderPets, v);
+                    }
+                }
+                "voltCosAura" => {
+                    if let Ok(v) = value.parse::<u8>() {
+                        e.volt_cosmetics
+                            .set(crate::volt_cosmetics::CosmeticCategory::AurasTrails, v);
+                    }
+                }
+                "voltCosWorldVis" => {
+                    e.volt_cosmetics.show_in_world = flag(e.volt_cosmetics.show_in_world)
+                }
                 _ => {}
             }
         }
@@ -863,6 +1219,278 @@ impl Extras {
         );
         push("voltShaderWarmth", &self.volt_shaders.warmth.to_string());
         push("voltShaderVignette", self.volt_shaders.vignette.as_str());
+        push("voltShaderStyle", self.volt_shaders.style.as_str());
+        push(
+            "voltShaderCloudShadows",
+            bool_text(self.volt_shaders.cloud_shadows),
+        );
+        push(
+            "voltShaderGlowingOres",
+            bool_text(self.volt_shaders.glowing_ores),
+        );
+        push("voltShaderOreGlow", &self.volt_shaders.ore_glow.to_string());
+        push("voltShaderAutoPbr", bool_text(self.volt_shaders.auto_pbr));
+        push(
+            "voltShaderWaterFoam",
+            bool_text(self.volt_shaders.water_foam),
+        );
+        push(
+            "voltShaderCloudsMode",
+            self.volt_shaders.clouds_mode.as_str(),
+        );
+        push(
+            "voltShaderCloudCoverage",
+            &self.volt_shaders.cloud_coverage.to_string(),
+        );
+        push(
+            "voltShaderNightSkyPlus",
+            bool_text(self.volt_shaders.night_sky_plus),
+        );
+        push(
+            "voltShaderRainbow",
+            bool_text(self.volt_shaders.post_rain_rainbow),
+        );
+        push(
+            "voltShaderEyeComfort",
+            bool_text(self.volt_shaders.eye_comfort),
+        );
+        // Volt Visuals & Volt Boost+
+        push("voltCtmGlass", bool_text(self.volt_visuals.connected_glass));
+        push(
+            "voltBetterGrass",
+            bool_text(self.volt_visuals.better_grass_sides),
+        );
+        push(
+            "voltDroppedItems3d",
+            bool_text(self.volt_visuals.dropped_items_3d),
+        );
+        push(
+            "voltGreedyQuadMerge",
+            bool_text(self.volt_boost_plus.greedy_quad_merge),
+        );
+        push(
+            "voltCaveOcclusion",
+            bool_text(self.volt_boost_plus.cave_chunk_occlusion),
+        );
+        push(
+            "voltZeroStutterPool",
+            bool_text(self.volt_boost_plus.zero_stutter_mesh_pool),
+        );
+        push(
+            "voltOffscreenEntitySkip",
+            bool_text(self.volt_boost_plus.offscreen_entity_skip),
+        );
+        push(
+            "voltSmartFramePacer",
+            bool_text(self.volt_boost_plus.smart_frame_pacer),
+        );
+        // Volt QoL
+        push("voltQolZoom", bool_text(self.volt_qol.zoom_enabled));
+        push("voltQolZoomFov", &self.volt_qol.zoom_fov_pct.to_string());
+        push("voltQolZoomSmooth", bool_text(self.volt_qol.zoom_smooth));
+        push("voltQolFreelook", bool_text(self.volt_qol.freelook_enabled));
+        push(
+            "voltQolInspector",
+            bool_text(self.volt_qol.world_inspector),
+        );
+        push(
+            "voltQolSpawnLight",
+            bool_text(self.volt_qol.spawn_light_overlay),
+        );
+        push(
+            "voltQolBlueprint",
+            bool_text(self.volt_qol.blueprint_enabled),
+        );
+        push(
+            "voltQolBlueprintPreset",
+            self.volt_qol.blueprint_preset.as_str(),
+        );
+        push(
+            "voltQolBlueprintLayer",
+            &self.volt_qol.blueprint_layer.to_string(),
+        );
+        push(
+            "voltQolBlueprintChecklist",
+            bool_text(self.volt_qol.blueprint_checklist),
+        );
+        push(
+            "voltQolPhotoOverlays",
+            bool_text(self.volt_qol.photo_mode_overlays),
+        );
+        push("voltQolCamRoll", &self.volt_qol.cam_roll_deg.to_string());
+        push("voltQolLetterbox", bool_text(self.volt_qol.cam_letterbox));
+        push("voltQolReplay", bool_text(self.volt_qol.replay_buffer));
+        push(
+            "voltQolCaveReverb",
+            bool_text(self.volt_qol.sound_cave_reverb),
+        );
+        push(
+            "voltQolUnderwaterLpf",
+            bool_text(self.volt_qol.sound_underwater_lpf),
+        );
+        push(
+            "voltQolWallOcclusion",
+            bool_text(self.volt_qol.sound_wall_occlusion),
+        );
+        push(
+            "voltQolMufflePortal",
+            &self.volt_qol.muffle_portal_pct.to_string(),
+        );
+        push(
+            "voltQolMufflePiston",
+            &self.volt_qol.muffle_piston_pct.to_string(),
+        );
+        push(
+            "voltQolMuffleMinecart",
+            &self.volt_qol.muffle_minecart_pct.to_string(),
+        );
+        push(
+            "voltQolMuffleExplosion",
+            &self.volt_qol.muffle_explosion_pct.to_string(),
+        );
+        push(
+            "voltQolMuffleRain",
+            &self.volt_qol.muffle_rain_pct.to_string(),
+        );
+        push("voltQolAtlas", bool_text(self.volt_qol.atlas_enabled));
+        push("voltQolAtlasMode", self.volt_qol.atlas_mode.as_str());
+        push("voltQolAtlasGrid", bool_text(self.volt_qol.atlas_grid));
+        push("voltQolJei", bool_text(self.volt_qol.jei_enabled));
+        push("voltQolVmCustom", bool_text(self.volt_qol.viewmodel_custom));
+        push("voltQolVmX", &self.volt_qol.vm_offset_x.to_string());
+        push("voltQolVmY", &self.volt_qol.vm_offset_y.to_string());
+        push("voltQolVmZ", &self.volt_qol.vm_offset_z.to_string());
+        push("voltQolVmScale", &self.volt_qol.vm_scale_pct.to_string());
+        push("voltQolVmRoll", &self.volt_qol.vm_roll_deg.to_string());
+        push(
+            "voltQolVmSwing",
+            &self.volt_qol.vm_swing_speed_pct.to_string(),
+        );
+        push(
+            "voltQolVmClassic",
+            bool_text(self.volt_qol.vm_classic_animations),
+        );
+        push(
+            "voltQolVmTotem",
+            &self.volt_qol.vm_totem_scale_pct.to_string(),
+        );
+        // Volt Chat & Voice
+        push("voltVoiceEnabled", bool_text(self.volt_chat.voice_enabled));
+        push("voltVoicePtt", bool_text(self.volt_chat.voice_ptt_mode));
+        push(
+            "voltVoiceVad",
+            &self.volt_chat.voice_vad_threshold.to_string(),
+        );
+        push(
+            "voltVoiceMicGain",
+            &self.volt_chat.voice_mic_gain_pct.to_string(),
+        );
+        push(
+            "voltVoiceOutGain",
+            &self.volt_chat.voice_output_gain_pct.to_string(),
+        );
+        push(
+            "voltVoiceDist",
+            &self.volt_chat.voice_distance_blocks.to_string(),
+        );
+        push(
+            "voltVoiceCaveMuffle",
+            bool_text(self.volt_chat.voice_cave_muffle),
+        );
+        push(
+            "voltVoiceHudBtn",
+            bool_text(self.volt_chat.voice_hud_button),
+        );
+        push(
+            "voltVoiceLoopback",
+            bool_text(self.volt_chat.voice_loopback_test),
+        );
+        push(
+            "voltChatTimestamps",
+            bool_text(self.volt_chat.chat_timestamps),
+        );
+        push(
+            "voltChatCompact",
+            bool_text(self.volt_chat.chat_compact_spam),
+        );
+        push(
+            "voltChatMention",
+            bool_text(self.volt_chat.chat_mention_ping),
+        );
+        push("voltChatQuickBar", bool_text(self.volt_chat.chat_quick_bar));
+        // Volt Mods
+        push("voltModArmorHud", bool_text(self.volt_mods.armor_hud));
+        push("voltModPotionHud", bool_text(self.volt_mods.potion_hud));
+        push("voltModCpsHud", bool_text(self.volt_mods.cps_hud));
+        push("voltModReachHud", bool_text(self.volt_mods.reach_hud));
+        push("voltModFpsPill", bool_text(self.volt_mods.fps_ping_pill));
+        push("voltModKeystrokes", bool_text(self.volt_mods.keystrokes_hud));
+        push("voltModCrosshair", self.volt_mods.custom_crosshair.as_str());
+        push(
+            "voltModLowShieldFire",
+            bool_text(self.volt_mods.low_shield_fire),
+        );
+        push("voltModNoHurtcam", bool_text(self.volt_mods.no_hurtcam));
+        push(
+            "voltModToggleSprint",
+            bool_text(self.volt_mods.toggle_sprint),
+        );
+        push("voltModAppleSkin", bool_text(self.volt_mods.appleskin_hud));
+        push(
+            "voltModShulkerPreview",
+            bool_text(self.volt_mods.shulker_preview),
+        );
+        push(
+            "voltModToolShield",
+            bool_text(self.volt_mods.tool_break_shield),
+        );
+        push("voltModAutoTool", bool_text(self.volt_mods.auto_tool_hint));
+        push(
+            "voltModTrajectory",
+            bool_text(self.volt_mods.trajectory_arc),
+        );
+        push(
+            "voltModDamagePopups",
+            bool_text(self.volt_mods.damage_popups),
+        );
+        push("voltModHitboxPlus", bool_text(self.volt_mods.hitbox_plus));
+        push(
+            "voltModDamageDir",
+            bool_text(self.volt_mods.damage_direction_hud),
+        );
+        push(
+            "voltModChatCalc",
+            bool_text(self.volt_mods.chat_calculator),
+        );
+        push(
+            "voltModEnchantGuide",
+            bool_text(self.volt_mods.enchant_guide),
+        );
+        push(
+            "voltModSlimeTech",
+            bool_text(self.volt_mods.slime_tech_hud),
+        );
+        push(
+            "voltModDeathTracker",
+            bool_text(self.volt_mods.death_tracker),
+        );
+        push("voltModTimeWeather", self.volt_mods.time_weather.as_str());
+        push("voltModOledAfk", bool_text(self.volt_mods.oled_afk_saver));
+        // Volt Cosmetics
+        push("voltCosCape", &self.volt_cosmetics.cape.to_string());
+        push("voltCosWings", &self.volt_cosmetics.wings.to_string());
+        push("voltCosHat", &self.volt_cosmetics.hat.to_string());
+        push("voltCosHalo", &self.volt_cosmetics.halo.to_string());
+        push(
+            "voltCosEarsTail",
+            &self.volt_cosmetics.ears_tail.to_string(),
+        );
+        push("voltCosPet", &self.volt_cosmetics.pet.to_string());
+        push("voltCosAura", &self.volt_cosmetics.aura.to_string());
+        push(
+            "voltCosWorldVis",
+            bool_text(self.volt_cosmetics.show_in_world),
+        );
         s
     }
 
@@ -900,6 +1528,11 @@ impl Extras {
             self.lookahead_stream,
             self.fast_translucency,
             self.particle_frustum_cull,
+            self.volt_boost_plus.greedy_quad_merge,
+            self.volt_boost_plus.cave_chunk_occlusion,
+            self.volt_boost_plus.zero_stutter_mesh_pool,
+            self.volt_boost_plus.offscreen_entity_skip,
+            self.volt_boost_plus.smart_frame_pacer,
         ] {
             if b {
                 n += 1;
@@ -908,10 +1541,16 @@ impl Extras {
         n
     }
 
-    /// Applies a full **Volt Boost** profile across Tier 1, Tier 2, and Tier 3 settings.
+    /// Applies a full **Volt Boost** profile across Tier 1, Tier 2, Tier 3, and Vulkan Engine+ settings.
     /// Note: LOD (`distant_lod_boost`) is kept OFF in every Volt Boost profile.
     pub fn apply_volt_preset(&mut self, preset: VoltBoostPreset) {
         self.volt_preset = preset;
+        let enable_plus = preset != VoltBoostPreset::Off;
+        self.volt_boost_plus.greedy_quad_merge = enable_plus;
+        self.volt_boost_plus.cave_chunk_occlusion = enable_plus;
+        self.volt_boost_plus.zero_stutter_mesh_pool = enable_plus;
+        self.volt_boost_plus.offscreen_entity_skip = enable_plus;
+        self.volt_boost_plus.smart_frame_pacer = enable_plus;
         match preset {
             VoltBoostPreset::Off => {
                 self.cull_leaves = false;

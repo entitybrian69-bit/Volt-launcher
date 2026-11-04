@@ -47,6 +47,7 @@ pub(super) struct ExtrasState {
     pub(super) cached_rss_mib: (f64, u64),
     pub(super) last_mem_trim_at: f64,
     pub(super) drawn_entities: std::sync::atomic::AtomicU32,
+    pub(super) volt: super::volt_gameplay::VoltRuntime,
 }
 
 impl Default for ExtrasState {
@@ -67,6 +68,7 @@ impl Default for ExtrasState {
             cached_rss_mib: (-10.0, 0),
             last_mem_trim_at: 0.0,
             drawn_entities: std::sync::atomic::AtomicU32::new(0),
+            volt: Default::default(),
         }
     }
 }
@@ -753,6 +755,9 @@ impl Game<'_> {
     }
 
     fn zoom_now(&self) -> (f32, bool, f64) {
+        if let Some(z) = self.volt_qol_zoom() {
+            return z;
+        }
         if let Some(z) = self.native_zoom_now() {
             return (z.factor, z.smooth, f64::from(z.turn));
         }
@@ -875,6 +880,7 @@ impl Game<'_> {
             self.draw_mod_panels(batch, &mut corners);
         }
         self.native_hud(batch, &mut corners);
+        self.draw_volt_all_huds(batch, &mut corners);
     }
 
     fn effect_rows_height(&self) -> f32 {

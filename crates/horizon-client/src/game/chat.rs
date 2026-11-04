@@ -728,9 +728,39 @@ impl Game<'_> {
     }
     /// A line on the window's own chat when the Chat option lets `source`
     /// through; running mods hear it.
-    fn local_chat_line(&mut self, text: Text, indicator: Option<u32>, source: ChatSource) {
+    fn local_chat_line(&mut self, mut text: Text, indicator: Option<u32>, source: ChatSource) {
         if !self.ui.chat.shows(source) {
             return;
+        }
+        let plain = text.plain();
+        if self.settings.extras.volt_chat.chat_mention_ping && source == ChatSource::Player {
+            let me = self.player_display_name().plain();
+            if !me.is_empty() && plain.to_lowercase().contains(&me.to_lowercase()) {
+                self.audio.play_button_click();
+            }
+        }
+        if self.settings.extras.volt_chat.chat_compact_spam {
+            let count = match &mut self.extras.volt.last_chat_line {
+                Some((prev, n)) if *prev == plain => {
+                    *n = n.saturating_add(1);
+                    Some(*n)
+                }
+                slot => {
+                    *slot = Some((plain.clone(), 1));
+                    None
+                }
+            };
+            if let Some(n) = count {
+                text = text.append(
+                    Text::literal(format!(" (x{n})")).with_color(horizon_client::text::GRAY),
+                );
+            }
+        }
+        if self.settings.extras.volt_chat.chat_timestamps {
+            let secs = (self.started.elapsed().as_secs()) % 3600;
+            text = Text::literal(format!("[{:02}:{:02}] ", secs / 60, secs % 60))
+                .with_color(horizon_client::text::DARK_GRAY)
+                .append(text);
         }
         let focused = self.screen == Screen::Chat;
         let heard = self.mods.running().then(|| text.plain());
@@ -865,6 +895,10 @@ impl Game<'_> {
     /// The Chat option's restrictions stop the message here too, so a
     /// control-socket `chat` cannot send what the player's setting hides.
     pub(super) fn handle_chat_input(&mut self, message: &str) {
+        if self.try_volt_chat_calculator(message) {
+            self.ui.chat.add_recent(message);
+            return;
+        }
         if !self.chat_abilities().allows(message) {
             return;
         }
@@ -942,6 +976,40 @@ impl Game<'_> {
             if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
                 self.wake_up();
                 return;
+            }
+        }
+        if self.settings.extras.volt_chat.chat_quick_bar {
+            let by = height - 30.0;
+            for (i, kind) in [0usize, 1, 2, 3].into_iter().enumerate() {
+                let bx = 4.0 + i as f32 * 56.0;
+                if cursor.0 >= bx
+                    && cursor.0 <= bx + 52.0
+                    && cursor.1 >= by
+                    && cursor.1 <= by + 13.0
+                {
+                    let msg = match kind {
+                        0 => "gg".to_owned(),
+                        1 => {
+                            if let Some(p) = self.player.as_ref() {
+                                format!(
+                                    "My XYZ: {}, {}, {} [{}]",
+                                    p.position.x.floor() as i32,
+                                    p.position.y.floor() as i32,
+                                    p.position.z.floor() as i32,
+                                    self.dim.id()
+                                )
+                            } else {
+                                "On my way!".to_owned()
+                            }
+                        }
+                        2 => "On my way!".to_owned(),
+                        _ => "Need backup here!".to_owned(),
+                    };
+                    self.audio.play_button_click();
+                    self.handle_chat_input(&msg);
+                    self.close_chat(ChatExit::Intentional);
+                    return;
+                }
             }
         }
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -1149,6 +1217,37 @@ impl Game<'_> {
         let draws = screen.draw(&m, mouse, blink, background);
         horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
         self.ui.chat_screen = Some(screen);
+        if self.settings.extras.volt_chat.chat_quick_bar {
+            let by = batch.height - 30.0;
+            let atlas = &self.gui.atlas;
+            for (i, lbl) in ["GG", "Share XYZ", "OMW!", "Backup!"].iter().enumerate() {
+                let bx = 4.0 + i as f32 * 56.0;
+                batch.fill(
+                    atlas,
+                    bx,
+                    by,
+                    52.0,
+                    13.0,
+                    horizon_client::hud::rgba(20, 24, 36, 220),
+                );
+                batch.fill(
+                    atlas,
+                    bx,
+                    by,
+                    52.0,
+                    1.0,
+                    horizon_client::hud::rgba(224, 48, 68, 240),
+                );
+                atlas.font.draw_shadow(
+                    batch,
+                    atlas,
+                    lbl,
+                    bx + 5.0,
+                    by + 2.5,
+                    horizon_client::hud::rgba(245, 247, 255, 255),
+                );
+            }
+        }
         if self.ui.in_bed_chat && self.sleeping.is_some() {
             let (x, y, w, h) = Self::leave_bed_button(batch.width, batch.height);
             let label = Text::literal(horizon_client::lang::get_or(

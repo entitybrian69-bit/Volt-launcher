@@ -154,8 +154,17 @@ impl Game<'_> {
                 self.avatar.interpolated_bob(partial),
             )),
         };
-        let tilt = self.settings.file.double("damageTiltStrength");
-        glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m)
+        let mut tilt = self.settings.file.double("damageTiltStrength");
+        if self.settings.extras.volt_mods.no_hurtcam {
+            tilt *= 0.15;
+        }
+        let mut mat =
+            glam::Mat4::from_cols_array(&bob_matrix(&state, tilt, self.settings.view_bobbing).m);
+        let roll_deg = self.settings.extras.volt_qol.cam_roll_deg;
+        if roll_deg != 0 {
+            mat = glam::Mat4::from_rotation_z(f32::from(roll_deg).to_radians()) * mat;
+        }
+        mat
     }
     /// `AbstractClientPlayer.tick` and `aiStep` (`ClientAvatarState.tick`,
     /// `updateBob`), `rideTick`'s `resetBob` and `LocalPlayer.move`'s walked

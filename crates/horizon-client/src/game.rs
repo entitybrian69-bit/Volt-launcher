@@ -268,6 +268,7 @@ mod text_displays;
 mod titles;
 mod tnt;
 mod totem;
+mod volt_gameplay;
 mod trading;
 mod transient_blocks;
 mod trial_spawner;
@@ -6882,7 +6883,9 @@ impl Game<'_> {
         {
             self.tutorial.mouse(xo, yo);
             let zoom = self.zoom_turn_scale();
-            self.turn_player(xo * zoom, yo * zoom);
+            if !self.try_freelook_turn(xo * zoom, yo * zoom) {
+                self.turn_player(xo * zoom, yo * zoom);
+            }
         }
     }
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
@@ -7623,6 +7626,7 @@ impl Game<'_> {
             Screen::Inventory => {
                 self.draw_inventory(&mut batch);
                 self.draw_mod_browser(&mut batch);
+                self.draw_volt_jei_sidebar(&mut batch);
             }
             Screen::Creative => {
                 self.draw_creative(&mut batch);
@@ -10574,7 +10578,7 @@ impl Game<'_> {
             Action::Quit => crate::game::exit_app(event_loop),
             Action::Options => self.open_options(true),
             Action::VoltBoost => {
-                self.open_options_at(true, horizon_client::options_ui::Page::VoltBoost)
+                self.open_options_at(true, horizon_client::options_ui::Page::Horizon)
             }
             Action::Accessibility => {
                 self.open_options_at(true, horizon_client::options_ui::Page::Accessibility)
@@ -12528,8 +12532,41 @@ impl Game<'_> {
                 }
                 _ => ItemPose::Swing,
             };
-            let m = to_world
-                * horizon_client::first_person::item_pose(left, inverse_height, attack, pose);
+            let vm_cfg = &self.settings.extras.volt_qol;
+            let eff_attack = if vm_cfg.viewmodel_custom && vm_cfg.vm_swing_speed_pct != 100 {
+                (attack * (f32::from(vm_cfg.vm_swing_speed_pct) / 100.0)).clamp(0.0, 1.0)
+            } else {
+                attack
+            };
+            let mut local_pose =
+                horizon_client::first_person::item_pose(left, inverse_height, eff_attack, pose);
+            if vm_cfg.viewmodel_custom {
+                let sign = if left { -1.0 } else { 1.0 };
+                let ox = f32::from(vm_cfg.vm_offset_x) * 0.008 * sign;
+                let oy = f32::from(vm_cfg.vm_offset_y) * 0.008;
+                let oz = f32::from(vm_cfg.vm_offset_z) * 0.008;
+                let sc = f32::from(vm_cfg.vm_scale_pct) / 100.0;
+                let roll = f32::from(vm_cfg.vm_roll_deg).to_radians() * sign;
+                local_pose = glam::Mat4::from_translation(glam::Vec3::new(ox, oy, oz))
+                    * local_pose
+                    * glam::Mat4::from_rotation_z(roll)
+                    * glam::Mat4::from_scale(glam::Vec3::splat(sc));
+                if vm_cfg.vm_classic_animations && using {
+                    local_pose = glam::Mat4::from_translation(glam::Vec3::new(
+                        -0.08 * sign,
+                        0.06,
+                        0.04,
+                    )) * local_pose
+                        * glam::Mat4::from_rotation_y((-18.0 * sign).to_radians());
+                }
+            }
+            if self.settings.extras.volt_mods.low_shield_fire
+                && stack.item.as_ref() == "minecraft:shield"
+            {
+                local_pose =
+                    glam::Mat4::from_translation(glam::Vec3::new(0.0, -0.18, 0.0)) * local_pose;
+            }
+            let m = to_world * local_pose;
             // Seeded by the player id plus the context ordinal.
             let (context, seed) = if left {
                 (
@@ -12614,16 +12651,28 @@ impl Game<'_> {
             s.smooth_lighting,
             s.cutout_leaves,
             s.extras.cull_leaves,
+            s.extras.volt_visuals.connected_glass,
+            s.extras.volt_visuals.better_grass_sides,
+            s.extras.volt_boost_plus.greedy_quad_merge,
+            s.extras.volt_boost_plus.cave_chunk_occlusion,
         ) != (
             st.biome_blend,
             st.smooth_lighting,
             st.cutout_leaves,
             st.cull_leaves,
+            st.ctm_glass,
+            st.better_grass,
+            st.greedy_coalesce,
+            st.cave_occlusion,
         );
         self.streaming.biome_blend = self.settings.biome_blend;
         self.streaming.smooth_lighting = self.settings.smooth_lighting;
         self.streaming.cutout_leaves = self.settings.cutout_leaves;
         self.streaming.cull_leaves = self.settings.extras.cull_leaves;
+        self.streaming.ctm_glass = self.settings.extras.volt_visuals.connected_glass;
+        self.streaming.better_grass = self.settings.extras.volt_visuals.better_grass_sides;
+        self.streaming.greedy_coalesce = self.settings.extras.volt_boost_plus.greedy_quad_merge;
+        self.streaming.cave_occlusion = self.settings.extras.volt_boost_plus.cave_chunk_occlusion;
         if remesh {
             self.all_sections_changed();
         }
@@ -13662,6 +13711,7 @@ impl Game<'_> {
         let (view_yaw, view_pitch) = self.shaken_view(view_yaw, view_pitch);
         self.audio
             .set_listener([camera.x, camera.y, camera.z], view_yaw, view_pitch);
+        self.tick_volt_frame(underwater);
         let block = [
             camera.x.floor() as i32,
             camera.y.floor() as i32,
@@ -13718,12 +13768,14 @@ impl Game<'_> {
         );
         // visual/water_fog_color: no dimension sets it, its default is #050533.
         let water_fog = blend(|b| Some(b.water_fog), [0.0; 3]);
-        let mut sky = environment.sample(self.world.day_time, Some(biome_sky), Some(biome_fog));
-        let (rain, thunder) = if self.dim == Dim::Overworld {
+        let (raw_rain, raw_thunder) = if self.dim == Dim::Overworld {
             self.world.weather.levels(alpha as f32)
         } else {
             (0.0, 0.0)
         };
+        let (eff_day_time, rain, thunder) =
+            self.volt_effective_time_weather(self.world.day_time, raw_rain, raw_thunder);
+        let mut sky = environment.sample(eff_day_time, Some(biome_sky), Some(biome_fog));
         horizon_client::environment::apply_weather(&mut sky, rain, thunder);
         self.end_flash_sky(&mut sky, alpha);
         if self.flash > 0 && !self.settings.file.bool("hideLightningFlashes") {
@@ -13739,6 +13791,7 @@ impl Game<'_> {
         let mut lines = self.fishing_line(alpha, size);
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
+        self.append_volt_world_gizmos(&mut lines);
         let on_top = g.on_top;
         let view = horizon_client::camera::view_matrix(view_yaw, view_pitch);
         let at = camera.to_array();
@@ -13929,7 +13982,7 @@ impl Game<'_> {
         } else {
             (Vec::new(), None)
         };
-        let mut hand = if title || self.scoping() {
+        let mut hand = if title || self.scoping() || self.freelook_active() {
             Vec::new()
         } else {
             self.hand_geometry(camera_alpha)
@@ -14290,7 +14343,11 @@ impl Game<'_> {
         if self.screen == Screen::Mod && self.mod_screen_key(key) {
             return Ok(());
         }
-        if self.sort_key_press(key) || self.hdr_key_press(key) || self.volt_key_press(key) {
+        if self.volt_gameplay_key(key, true)
+            || self.sort_key_press(key)
+            || self.hdr_key_press(key)
+            || self.volt_key_press(key)
+        {
             return Ok(());
         }
         if self.remote.is_some() && self.remote_key(key)? {
@@ -14479,6 +14536,9 @@ impl Game<'_> {
             if pressed {
                 self.spectator_action_key();
             }
+            return Ok(());
+        }
+        if pressed && button == MouseButton::Left && self.blocks_tool_break() {
             return Ok(());
         }
         if self.remote.is_some() {
@@ -15829,6 +15889,9 @@ impl ApplicationHandler for Game<'_> {
                             }
                         }
                         Screen::Inventory if pressed => {
+                            if button == MouseButton::Left && self.try_click_volt_jei(self.cursor) {
+                                return Ok(());
+                            }
                             self.inventory_press(button == MouseButton::Right);
                             if let Some(key) = self.container {
                                 self.container_changed(key);

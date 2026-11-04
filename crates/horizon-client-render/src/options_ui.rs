@@ -1563,10 +1563,15 @@ pub enum Page {
     Minimap,
     VoltBoost,
     VoltShaders,
+    VoltVisuals,
+    VoltQol,
+    VoltChat,
+    VoltMods,
+    VoltCosmetics,
+    VoltAtlas,
     /// CreditsAndAttributionScreen.
     Credits,
-    /// Volt Settings: every page Volt adds, as a mod's settings
-    /// screen hangs off vanilla's Options.
+    /// Volt Settings: every page Volt or Horizon adds, consolidated into one hub.
     Horizon,
     /// AI Agent: agent control on or off, whether an agent is connected, the connection details.
     Agent,
@@ -1582,6 +1587,7 @@ enum Act {
     Done,
     Cycle(Opt),
     Extra(crate::extras::Item),
+    VoltCustom(crate::options_volt_pages::VoltAct),
     Key(&'static str),
     ResetKey(&'static str),
     ResetKeys,
@@ -1759,6 +1765,12 @@ pub struct OptionsUi {
     pub graphics: crate::graphics_ui::GraphicsUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
+    /// `#7` 3D Rotatable Cosmetics Studio state.
+    pub cosmetics_studio: crate::volt_cosmetics::CosmeticsStudioState,
+    /// `#17` Interactive Full-Screen World Atlas state.
+    pub world_atlas: crate::volt_qol::WorldAtlasState,
+    /// Whether the active local player skin uses slim (3px Alex) arms.
+    pub skin_slim: bool,
 }
 impl Default for OptionsUi {
     fn default() -> Self {
@@ -1798,6 +1810,9 @@ impl Default for OptionsUi {
             center_language: false,
             graphics: Default::default(),
             agent_status: Vec::new(),
+            cosmetics_studio: Default::default(),
+            world_atlas: Default::default(),
+            skin_slim: false,
         }
     }
 }
@@ -1861,6 +1876,12 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
         Page::Horizon => "horizon.pages.settings.tooltip",
         Page::VoltBoost => "volt.boost.tooltip",
         Page::VoltShaders => "volt.shaders.tooltip",
+        Page::VoltVisuals => "volt.visuals.tooltip",
+        Page::VoltQol => "volt.qol.tooltip",
+        Page::VoltChat => "volt.chat.tooltip",
+        Page::VoltMods => "volt.mods.tooltip",
+        Page::VoltCosmetics => "volt.cosmetics.tooltip",
+        Page::VoltAtlas => "volt.atlas.tooltip",
         Page::Waypoints => "horizon.pages.waypoints.tooltip",
         Page::Minimap => "horizon.pages.minimap.tooltip",
         Page::Graphics => "horizon.pages.graphics.tooltip",
@@ -1894,9 +1915,49 @@ impl OptionsUi {
         let label = format!("{}: {}", item.caption(), item.value(&s.extras));
         button(0.0, 0.0, 150.0, Text::literal(label), Act::Extra(item))
     }
+    fn volt_custom_button(&self, s: &Settings, act: crate::options_volt_pages::VoltAct) -> Widget {
+        let label = format!("{}: {}", act.caption(), act.value(&s.extras));
+        button(0.0, 0.0, 150.0, Text::literal(label), Act::VoltCustom(act))
+    }
+    fn volt_custom_sections(
+        &self,
+        s: &Settings,
+        sections: &[(&'static str, &[crate::options_volt_pages::VoltAct])],
+    ) -> Vec<Row> {
+        let query = self.settings_search.value.trim().to_lowercase();
+        let mut out = Vec::new();
+        for &(header, items) in sections {
+            let mut matched = Vec::new();
+            for &act in items {
+                if !query.is_empty()
+                    && !act.caption().to_lowercase().contains(&query)
+                    && !act.description().to_lowercase().contains(&query)
+                    && !act.value(&s.extras).to_lowercase().contains(&query)
+                {
+                    continue;
+                }
+                matched.push(self.volt_custom_button(s, act));
+            }
+            if !matched.is_empty() {
+                out.push(Row::Header(header));
+                let mut iter = matched.into_iter();
+                while let Some(left) = iter.next() {
+                    out.push(Row::Buttons(left, iter.next()));
+                }
+            }
+        }
+        out
+    }
     fn has_settings_search(&self, s: &Settings) -> bool {
         match self.page() {
-            Page::Video | Page::Controls | Page::KeyBinds | Page::VoltBoost => true,
+            Page::Video
+            | Page::Controls
+            | Page::KeyBinds
+            | Page::VoltBoost
+            | Page::VoltQol
+            | Page::VoltChat
+            | Page::VoltVisuals
+            | Page::VoltMods => true,
             Page::VoltShaders => s.extras.volt_shaders.enabled,
             _ => false,
         }
@@ -1910,6 +1971,10 @@ impl OptionsUi {
                     | Page::KeyBinds
                     | Page::VoltBoost
                     | Page::VoltShaders
+                    | Page::VoltQol
+                    | Page::VoltChat
+                    | Page::VoltVisuals
+                    | Page::VoltMods
             )
     }
     fn waypoint_name_active(&self) -> bool {
@@ -2086,9 +2151,16 @@ impl OptionsUi {
                 | Page::KeyBinds
                 | Page::VoltBoost
                 | Page::VoltShaders
+                | Page::VoltQol
+                | Page::VoltChat
+                | Page::VoltVisuals
+                | Page::VoltMods
         ) {
             self.settings_search.set_value("");
             self.settings_search.focused = false;
+        }
+        if page == Page::VoltAtlas {
+            self.world_atlas.center_on_player();
         }
         if page == Page::Waypoints {
             self.waypoint_name.focused = false;
@@ -2143,6 +2215,12 @@ impl OptionsUi {
             Page::Minimap => "horizon.pages.minimap",
             Page::VoltBoost => "volt.boost.title",
             Page::VoltShaders => "volt.shaders.title",
+            Page::VoltVisuals => "volt.visuals.title",
+            Page::VoltQol => "volt.qol.title",
+            Page::VoltChat => "volt.chat.title",
+            Page::VoltMods => "volt.mods.title",
+            Page::VoltCosmetics => "volt.cosmetics.title",
+            Page::VoltAtlas => "volt.atlas.title",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "horizon.pages.settings",
@@ -2240,10 +2318,117 @@ impl OptionsUi {
             Page::Minimap => self.extra_section_rows(s, crate::extras::minimap_rows()),
             Page::VoltBoost => {
                 let mut rows = vec![Row::Big(Opt::VoltResolutionScale)];
+                rows.extend(self.volt_custom_sections(
+                    s,
+                    &[(
+                        "Vulkan FPS Engine+ (#6)",
+                        crate::options_volt_pages::BOOST_PLUS_ITEMS,
+                    )],
+                ));
                 rows.extend(self.extra_section_rows(s, crate::extras::volt_boost_rows()));
                 rows
             }
             Page::VoltShaders => self.volt_shader_rows(s),
+            Page::VoltVisuals => {
+                use crate::options_volt_pages::VoltAct;
+                let open =
+                    |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
+                let mut rows = vec![
+                    Row::Header("Shaders & Render Pipeline"),
+                    Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("volt.shaders.button"),
+                            Act::Push(Page::VoltShaders),
+                        ),
+                        None,
+                    ),
+                    Row::Buttons(
+                        open("horizon.pages.open.graphics", Page::Graphics),
+                        Some(open(
+                            "horizon.pages.open.graphics_advanced",
+                            Page::GraphicsAdvanced,
+                        )),
+                    ),
+                    Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("horizon.pages.open.shader_packs"),
+                            Act::Push(Page::ShaderPacks),
+                        ),
+                        None,
+                    ),
+                ];
+                rows.extend(self.volt_custom_sections(
+                    s,
+                    &[(
+                        "Connected Textures & 3D Items (#19)",
+                        &[
+                            VoltAct::VisualsCtmGlass,
+                            VoltAct::VisualsBetterGrass,
+                            VoltAct::VisualsDroppedItems3d,
+                        ],
+                    )],
+                ));
+                rows.push(Row::Header("World Lighting"));
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::Fullbright),
+                    Some(self.extra_button(s, crate::extras::Item::DynamicLights)),
+                ));
+                rows
+            }
+            Page::VoltQol => {
+                let mut rows = vec![Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("volt.atlas.open"),
+                        Act::Push(Page::VoltAtlas),
+                    ),
+                    None,
+                )];
+                rows.extend(
+                    self.volt_custom_sections(s, crate::options_volt_pages::QOL_SECTIONS),
+                );
+                rows
+            }
+            Page::VoltChat => {
+                let mut rows = vec![Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("options.chat"),
+                        Act::Push(Page::Chat),
+                    ),
+                    None,
+                )];
+                rows.extend(
+                    self.volt_custom_sections(s, crate::options_volt_pages::CHAT_SECTIONS),
+                );
+                rows
+            }
+            Page::VoltMods => {
+                let mut rows = vec![Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("horizon.pages.open.mods"),
+                        Act::Push(Page::Mods),
+                    ),
+                    None,
+                )];
+                rows.extend(
+                    self.volt_custom_sections(s, crate::options_volt_pages::MODS_SECTIONS),
+                );
+                rows
+            }
             Page::Waypoints => {
                 let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
                 rows.push(Row::Header("Saved Waypoints"));
@@ -2343,22 +2528,23 @@ impl OptionsUi {
                 rows
             }
             Page::Horizon => {
-                // Two to a row, as vanilla's OptionsList.addSmall lays out
-                // buttons; each opens a page built from vanilla's widgets.
                 let open =
                     |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
                 vec![
+                    Row::Header("Volt Core Suites"),
                     Row::Buttons(
-                        button(0.0, 0.0, 310.0, tr("volt.boost.button"), Act::Push(Page::VoltBoost)),
-                        None,
+                        open("volt.boost.button", Page::VoltBoost),
+                        Some(open("volt.visuals.button", Page::VoltVisuals)),
                     ),
                     Row::Buttons(
-                        open("horizon.pages.open.graphics", Page::Graphics),
-                        Some(open(
-                            "horizon.pages.open.graphics_advanced",
-                            Page::GraphicsAdvanced,
-                        )),
+                        open("volt.qol.button", Page::VoltQol),
+                        Some(open("volt.chat.button", Page::VoltChat)),
                     ),
+                    Row::Buttons(
+                        open("volt.mods.button", Page::VoltMods),
+                        Some(open("volt.cosmetics.button", Page::VoltCosmetics)),
+                    ),
+                    Row::Header("World Navigation & Maps"),
                     Row::Buttons(
                         open("horizon.pages.open.waypoints", Page::Waypoints),
                         Some(open("horizon.pages.open.minimap", Page::Minimap)),
@@ -2368,14 +2554,32 @@ impl OptionsUi {
                             0.0,
                             0.0,
                             310.0,
-                            tr("horizon.pages.open.extras"),
-                            Act::Push(Page::Extras),
+                            tr("volt.atlas.open"),
+                            Act::Push(Page::VoltAtlas),
                         ),
                         None,
+                    ),
+                    Row::Header("Graphics, Input & Horizon Engine"),
+                    Row::Buttons(
+                        open("horizon.pages.open.graphics", Page::Graphics),
+                        Some(open(
+                            "horizon.pages.open.graphics_advanced",
+                            Page::GraphicsAdvanced,
+                        )),
                     ),
                     Row::Buttons(
                         open("horizon.pages.open.shader_packs", Page::ShaderPacks),
                         Some(open("horizon.pages.open.controller", Page::Controller)),
+                    ),
+                    Row::Buttons(
+                        open("horizon.pages.open.extras", Page::Extras),
+                        Some(button(
+                            0.0,
+                            0.0,
+                            150.0,
+                            Text::literal("Touch Controls..."),
+                            Act::Push(Page::Touch),
+                        )),
                     ),
                     Row::Buttons(
                         open("horizon.pages.open.mods", Page::Mods),
@@ -2407,24 +2611,7 @@ impl OptionsUi {
                 rows
             }
             Page::Video => {
-                // Horizon's graphics screens, Simple and Advanced.
-                let mut rows = vec![Row::Buttons(
-                    button(
-                        0.0,
-                        0.0,
-                        150.0,
-                        tr("horizon.pages.open.horizon_graphics"),
-                        Act::Push(Page::Graphics),
-                    ),
-                    Some(button(
-                        0.0,
-                        0.0,
-                        150.0,
-                        tr("horizon.pages.open.graphics_advanced"),
-                        Act::Push(Page::GraphicsAdvanced),
-                    )),
-                )];
-                rows.push(Row::Header("options.video.display.header"));
+                let mut rows = vec![Row::Header("options.video.display.header")];
                 rows.push(Row::Big(Opt::ExclusiveMode));
                 rows.extend(pairs(&[
                     Opt::MaxFps,
@@ -2520,35 +2707,6 @@ impl OptionsUi {
                     controls
                 };
                 rows.extend(pairs(&controls));
-                rows.push(Row::Buttons(
-                    button(
-                        0.0,
-                        0.0,
-                        if cfg!(target_os = "android") {
-                            150.0
-                        } else {
-                            310.0
-                        },
-                        Text::literal("Controller Settings..."),
-                        Act::Push(Page::Controller),
-                    ),
-                    {
-                        #[cfg(target_os = "android")]
-                        {
-                            Some(button(
-                                0.0,
-                                0.0,
-                                150.0,
-                                Text::literal("Touch Controls..."),
-                                Act::Push(Page::Touch),
-                            ))
-                        }
-                        #[cfg(not(target_os = "android"))]
-                        {
-                            None
-                        }
-                    },
-                ));
                 self.filter_option_rows(rows)
             }
             Page::Touch => {
@@ -2721,9 +2879,11 @@ impl OptionsUi {
 
     fn volt_shader_rows(&self, s: &Settings) -> Vec<Row> {
         use crate::extras::Item;
+        use crate::options_volt_pages::VoltAct;
         #[derive(Clone, Copy)]
         enum Entry {
             Item(Item),
+            Volt(VoltAct),
             Slider(Opt),
             BigSlider(Opt),
         }
@@ -2756,6 +2916,11 @@ impl OptionsUi {
                         || item.description().to_lowercase().contains(&query)
                         || item.value(&s.extras).to_lowercase().contains(&query)
                 }
+                Entry::Volt(act) => {
+                    act.caption().to_lowercase().contains(&query)
+                        || act.description().to_lowercase().contains(&query)
+                        || act.value(&s.extras).to_lowercase().contains(&query)
+                }
                 Entry::Slider(opt) | Entry::BigSlider(opt) => {
                     lang::get(opt.caption()).to_lowercase().contains(&query)
                         || lang::get(&opt.tooltip_key(s))
@@ -2774,6 +2939,31 @@ impl OptionsUi {
             ));
         }
         let sections: &[(&str, &[Entry])] = &[
+            (
+                "BSL & Complementary Style & Comfort",
+                &[
+                    Entry::Volt(VoltAct::ShaderStyle),
+                    Entry::Volt(VoltAct::ShaderEyeComfort),
+                    Entry::Volt(VoltAct::ShaderAutoPbr),
+                    Entry::Volt(VoltAct::ShaderGlowingOres),
+                    Entry::Volt(VoltAct::ShaderOreGlow),
+                    Entry::Volt(VoltAct::ShaderCloudShadows),
+                ],
+            ),
+            (
+                "3D Clouds, Milky Way & Atmosphere",
+                &[
+                    Entry::Volt(VoltAct::ShaderCloudsMode),
+                    Entry::Volt(VoltAct::ShaderCloudCoverage),
+                    Entry::Item(Item::VoltShaderCustomSky),
+                    Entry::Item(Item::VoltShaderSunHalo),
+                    Entry::Item(Item::VoltShaderAurora),
+                    Entry::Volt(VoltAct::ShaderNightSkyPlus),
+                    Entry::Volt(VoltAct::ShaderRainbow),
+                    Entry::Item(Item::VoltShaderDepthHaze),
+                    Entry::BigSlider(Opt::VoltShaderSunsetGlow),
+                ],
+            ),
             (
                 "Moving Vegetation & Wind",
                 &[
@@ -2798,23 +2988,14 @@ impl OptionsUi {
                 ],
             ),
             (
-                "Water & Reflections",
+                "Water, Foam & Reflections",
                 &[
                     Entry::Item(Item::VoltShaderWaterRipples),
+                    Entry::Volt(VoltAct::ShaderWaterFoam),
                     Entry::Item(Item::VoltShaderWaterGlint),
                     Entry::Item(Item::VoltShaderClearWater),
                     Entry::Item(Item::VoltShaderUnderwaterRefract),
                     Entry::BigSlider(Opt::VoltShaderWaterReflection),
-                ],
-            ),
-            (
-                "Sky & Atmosphere",
-                &[
-                    Entry::Item(Item::VoltShaderCustomSky),
-                    Entry::Item(Item::VoltShaderSunHalo),
-                    Entry::Item(Item::VoltShaderAurora),
-                    Entry::Item(Item::VoltShaderDepthHaze),
-                    Entry::BigSlider(Opt::VoltShaderSunsetGlow),
                 ],
             ),
             (
@@ -2835,6 +3016,7 @@ impl OptionsUi {
         let to_half_widget = |entry: Entry| -> Widget {
             match entry {
                 Entry::Item(item) => self.extra_button(s, item),
+                Entry::Volt(act) => self.volt_custom_button(s, act),
                 Entry::Slider(opt) | Entry::BigSlider(opt) => {
                     option_widget(s, opt, 0.0, 0.0, 150.0)
                 }
@@ -2915,18 +3097,13 @@ impl OptionsUi {
                 let entries = [
                     ("options.skinCustomisation", Some(Page::Skin)),
                     ("options.sounds", Some(Page::Sound)),
-                    ("volt.shaders.button", Some(Page::VoltShaders)),
-                    ("options.controls", Some(Page::Controls)),
                     ("options.video", Some(Page::Video)),
+                    ("options.controls", Some(Page::Controls)),
                     ("options.language", Some(Page::Language)),
                     ("options.chat", Some(Page::Chat)),
                     ("options.resourcepack", Some(Page::Packs)),
                     ("options.accessibility", Some(Page::Accessibility)),
-                    // Vanilla's Telemetry Data and Credits slots: Horizon's
-                    // settings and its mods, as a mod adds its button here.
-                    // Credits & Attribution (WinScreen's credits) follows them.
                     ("horizon.pages.open.horizon_settings", Some(Page::Horizon)),
-                    ("horizon.pages.open.mods", Some(Page::Mods)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
                 let rows = entries.len().div_ceil(2) as f32;
@@ -3521,6 +3698,65 @@ impl OptionsUi {
                 .draw(level, s, batch, atlas, cursor, self.in_world);
             return;
         }
+        if self.page() == Page::VoltCosmetics {
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
+            let title_t = tr(Self::title(Page::VoltCosmetics));
+            batch.text_styled(
+                atlas,
+                &title_t,
+                ((w - atlas.font.width_text(&title_t)) / 2.0).floor(),
+                10.0,
+                u32::MAX,
+                true,
+            );
+            crate::volt_cosmetics::draw_studio(
+                batch,
+                atlas,
+                (w, h),
+                cursor,
+                &mut self.cosmetics_studio,
+                &s.extras.volt_cosmetics,
+                self.skin_slim,
+            );
+            ui::button(
+                batch,
+                atlas,
+                w - 122.0,
+                h - 24.0,
+                110.0,
+                18.0,
+                &tr("gui.done"),
+                true,
+                ui::hovered(cursor, w - 122.0, h - 24.0, 110.0, 18.0),
+            );
+            return;
+        }
+        if self.page() == Page::VoltAtlas {
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
+            let title_t = tr(Self::title(Page::VoltAtlas));
+            batch.text_styled(
+                atlas,
+                &title_t,
+                ((w - atlas.font.width_text(&title_t)) / 2.0).floor(),
+                10.0,
+                u32::MAX,
+                true,
+            );
+            self.world_atlas
+                .draw_screen(batch, atlas, (w, h), &s.extras.volt_qol, &s.volt_waypoints);
+            ui::button(
+                batch,
+                atlas,
+                w - 110.0,
+                h - 24.0,
+                98.0,
+                18.0,
+                &tr("gui.done"),
+                true,
+                ui::hovered(cursor, w - 110.0, h - 24.0, 98.0, 18.0),
+            );
+            return;
+        }
         if self.page() == Page::Packs {
             self.watch_data_packs(atlas, (w, h));
             ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
@@ -3556,6 +3792,13 @@ impl OptionsUi {
                 } = &wd.kind
                 {
                     tooltip = Some(atlas.font.split(&Text::literal(item.description()), 170.0));
+                }
+                if let WKind::Button {
+                    act: Act::VoltCustom(vact),
+                    ..
+                } = &wd.kind
+                {
+                    tooltip = Some(atlas.font.split(&Text::literal(vact.description()), 170.0));
                 }
                 if let WKind::Button {
                     act: Act::Push(page),
@@ -3829,6 +4072,65 @@ impl OptionsUi {
             }
             return events;
         }
+        if self.page() == Page::VoltCosmetics {
+            if drag {
+                crate::volt_cosmetics::pointer_move(&mut self.cosmetics_studio, (x, y));
+                return Vec::new();
+            }
+            if !right && ui::hovered((x, y), size.0 - 122.0, size.1 - 24.0, 110.0, 18.0) {
+                let mut ev = vec![Event::ButtonClick];
+                ev.extend(self.back(s));
+                return ev;
+            }
+            let (changed, sfx) = crate::volt_cosmetics::pointer_down(
+                &mut self.cosmetics_studio,
+                &mut s.extras.volt_cosmetics,
+                size,
+                (x, y),
+            );
+            let mut ev = Vec::new();
+            if sfx {
+                ev.push(Event::ButtonClick);
+            }
+            if changed {
+                ev.push(Event::Changed);
+            }
+            return ev;
+        }
+        if self.page() == Page::VoltAtlas {
+            if drag {
+                self.world_atlas.pointer_move((x, y));
+                return Vec::new();
+            }
+            if !right && ui::hovered((x, y), size.0 - 110.0, size.1 - 24.0, 98.0, 18.0) {
+                let mut ev = vec![Event::ButtonClick];
+                ev.extend(self.back(s));
+                return ev;
+            }
+            let (mut changed, sfx) =
+                self.world_atlas
+                    .pointer_down(&mut s.extras.volt_qol, size, (x, y));
+            if let Some(pos) = self.world_atlas.pending_waypoint.take()
+                && let Some((scope, dim, _)) = &self.waypoint_context
+            {
+                s.volt_waypoints.add(
+                    scope,
+                    &format!("Atlas ({}, {})", pos[0], pos[2]),
+                    dim,
+                    pos,
+                    s.extras.waypoint_new_color,
+                );
+                changed = true;
+            }
+            let mut ev = Vec::new();
+            if sfx {
+                ev.push(Event::ButtonClick);
+            }
+            if changed {
+                ev.push(Event::Changed);
+            }
+            return ev;
+        }
         if self.page() == Page::Packs {
             let mut events = Vec::new();
             if drag {
@@ -3978,6 +4280,10 @@ impl OptionsUi {
                                 events.push(Event::Changed);
                             }
                         }
+                        Act::VoltCustom(vact) => {
+                            vact.trigger(&mut s.extras, right);
+                            events.push(Event::Changed);
+                        }
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::KeyboardProfile => {
                             s.keypad.enabled = !s.keypad.enabled;
@@ -4114,6 +4420,9 @@ impl OptionsUi {
     }
     pub fn release(&mut self) -> Vec<Event> {
         self.scrollbar_drag_y = None;
+        self.cosmetics_studio.dragging_model = false;
+        self.cosmetics_studio.dragging_list = false;
+        self.world_atlas.dragging = false;
         if let Some(p) = &mut self.pack_screen {
             p.release();
         }
@@ -4210,6 +4519,14 @@ impl OptionsUi {
         }
         if let Some(level) = Self::graphics_level(self.page()) {
             self.graphics.scroll(level, s, size.1, amount);
+            return;
+        }
+        if self.page() == Page::VoltCosmetics {
+            crate::volt_cosmetics::scroll(&mut self.cosmetics_studio, size, amount);
+            return;
+        }
+        if self.page() == Page::VoltAtlas {
+            self.world_atlas.scroll(amount);
             return;
         }
         match &mut self.pack_screen {
@@ -4763,6 +5080,7 @@ mod tests {
         let mut s = Settings::default();
         let mut ui = OptionsUi::default();
         let size = (480.0, 240.0);
+        ui.push(Page::Horizon);
         assert!(ui.layout(&s, size.0, size.1).0.iter().any(|w| {
             matches!(
                 w.kind,
@@ -6177,25 +6495,29 @@ mod tests {
                 })
                 .collect()
         };
-        // Vanilla's Options buttons, Horizon's two in the Telemetry and Credits slots, then
-        // Credits & Attribution (WinScreen's credits).
+        // Vanilla's Options keeps Volt Settings as the single hub for all Volt & Horizon features,
+        // followed by Credits & Attribution.
         let main = pushes(&mut ui);
-        assert_eq!(
-            &main[main.len() - 3..],
-            [Page::Horizon, Page::Mods, Page::Credits]
-        );
+        assert_eq!(&main[main.len() - 2..], [Page::Horizon, Page::Credits]);
         ui.push(Page::Horizon);
         assert_eq!(
             pushes(&mut ui),
             [
                 Page::VoltBoost,
-                Page::Graphics,
-                Page::GraphicsAdvanced,
+                Page::VoltVisuals,
+                Page::VoltQol,
+                Page::VoltChat,
+                Page::VoltMods,
+                Page::VoltCosmetics,
                 Page::Waypoints,
                 Page::Minimap,
-                Page::Extras,
+                Page::VoltAtlas,
+                Page::Graphics,
+                Page::GraphicsAdvanced,
                 Page::ShaderPacks,
                 Page::Controller,
+                Page::Extras,
+                Page::Touch,
                 Page::Mods,
                 Page::Agent,
             ]
@@ -6261,14 +6583,21 @@ mod tests {
             .collect();
         assert!(acts.contains(&&Act::Extra(crate::extras::Item::AgentControl)));
         assert!(acts.contains(&&Act::CopyAgentDetails));
-        // Vanilla's own pages keep the Horizon pages they had.
+        // Vanilla Video & Controls stay clean while Volt Visuals & Volt Settings house all external pages.
         ui.stack = vec![Page::Main, Page::Video];
         let video = pushes(&mut ui);
-        for page in [Page::Graphics, Page::GraphicsAdvanced] {
-            assert!(video.contains(&page), "{page:?}");
+        assert!(!video.contains(&Page::Graphics));
+        assert!(!video.contains(&Page::GraphicsAdvanced));
+        ui.stack = vec![Page::Main, Page::Horizon, Page::VoltVisuals];
+        let visuals = pushes(&mut ui);
+        for page in [
+            Page::VoltShaders,
+            Page::Graphics,
+            Page::GraphicsAdvanced,
+            Page::ShaderPacks,
+        ] {
+            assert!(visuals.contains(&page), "{page:?}");
         }
-        ui.stack = vec![Page::Main, Page::Controls];
-        assert!(pushes(&mut ui).contains(&Page::Controller));
     }
     #[test]
     fn touch_options_cycle_four_schemes_and_adjust_circle_and_sensitivity() {
@@ -6347,41 +6676,34 @@ mod tests {
     }
 
     #[test]
-    fn volt_shaders_sits_above_video_and_hides_all_customization_when_disabled() {
+    fn volt_shaders_lives_inside_volt_visuals_and_hides_all_customization_when_disabled() {
         let mut s = Settings::default();
         assert!(!s.extras.volt_shaders.enabled);
         let mut ui = OptionsUi::default();
         let (main_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
-        let shaders_btn = main_widgets
-            .iter()
-            .find(|w| {
-                matches!(
-                    &w.kind,
-                    WKind::Button {
-                        act: Act::Push(Page::VoltShaders),
-                        active: true,
-                        ..
-                    }
-                )
-            })
-            .expect("Volt Shaders button on Options main page");
-        let video_btn = main_widgets
-            .iter()
-            .find(|w| {
-                matches!(
-                    &w.kind,
-                    WKind::Button {
-                        act: Act::Push(Page::Video),
-                        active: true,
-                        ..
-                    }
-                )
-            })
-            .expect("Video Settings button on Options main page");
-        assert_eq!(shaders_btn.x, video_btn.x, "same left column as Video");
         assert!(
-            shaders_btn.y < video_btn.y,
-            "Volt Shaders must sit directly above Video Settings"
+            !main_widgets.iter().any(|w| matches!(
+                &w.kind,
+                WKind::Button {
+                    act: Act::Push(Page::VoltShaders),
+                    ..
+                }
+            )),
+            "Volt Shaders lives inside Volt Settings -> Volt Visuals"
+        );
+        ui.push(Page::Horizon);
+        ui.push(Page::VoltVisuals);
+        let (vis_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        assert!(
+            vis_widgets.iter().any(|w| matches!(
+                &w.kind,
+                WKind::Button {
+                    act: Act::Push(Page::VoltShaders),
+                    active: true,
+                    ..
+                }
+            )),
+            "Volt Shaders button must appear inside Volt Visuals"
         );
 
         ui.push(Page::VoltShaders);

@@ -175,6 +175,10 @@ struct MeshSettings {
     smooth_lighting: bool,
     cutout_leaves: bool,
     cull_leaves: bool,
+    ctm_glass: bool,
+    better_grass: bool,
+    greedy_coalesce: bool,
+    cave_occlusion: bool,
 }
 enum Job {
     Generate(i32, i32),
@@ -248,8 +252,8 @@ struct MeshPool {
     bytes: usize,
 }
 impl MeshPool {
-    const BYTES: usize = 16 << 20;
-    const COUNT: usize = 128;
+    const BYTES: usize = 24 << 20;
+    const COUNT: usize = 256;
     fn take(&mut self) -> SectionMesh {
         let mesh = self.meshes.pop().unwrap_or_default();
         self.bytes -= mesh.capacity_bytes();
@@ -376,10 +380,14 @@ pub struct Streaming {
     /// `BiomeManager`'s zoom seed (the hashed world seed) and `biomeBlendRadius`.
     pub biome_zoom: BiomeZoom,
     pub biome_blend: i32,
-    /// The `ao` and `cutoutLeaves` options, plus Volt Boost Smart Leaf Culling.
+    /// The `ao` and `cutoutLeaves` options, plus Volt Boost & Volt Visuals mesher flags.
     pub smooth_lighting: bool,
     pub cutout_leaves: bool,
     pub cull_leaves: bool,
+    pub ctm_glass: bool,
+    pub better_grass: bool,
+    pub greedy_coalesce: bool,
+    pub cave_occlusion: bool,
     /// Optional normalized XZ movement/camera lookahead vector for streaming priority.
     pub lookahead_dir: Option<[f32; 2]>,
     /// Incremental relighting of block edits on lit chunks (see `light::relight`).
@@ -715,12 +723,18 @@ impl Streaming {
                                         visibility,
                                     };
                                     let recycled = shared.meshes.lock().unwrap().take();
-                                    let mut mesh = mesher.mesh_reusing_with_leaf_cull(
+                                    let mut mesh = mesher.mesh_reusing_with_volt_opts(
                                         &borrow(&region),
                                         sy,
                                         recycled,
                                         &mut mesh_scratch,
-                                        settings.cull_leaves,
+                                        crate::mesher::VoltMeshOpts {
+                                            cull_leaves: settings.cull_leaves,
+                                            ctm_glass: settings.ctm_glass,
+                                            better_grass: settings.better_grass,
+                                            greedy_coalesce: settings.greedy_coalesce,
+                                            cave_occlusion: settings.cave_occlusion,
+                                        },
                                     );
                                     mesh.sort_solid();
                                     faces = Some((context.tables.clone(), mesher.visibility));
@@ -784,6 +798,10 @@ impl Streaming {
             smooth_lighting: true,
             cutout_leaves: true,
             cull_leaves: false,
+            ctm_glass: false,
+            better_grass: false,
+            greedy_coalesce: false,
+            cave_occlusion: false,
             lookahead_dir: None,
             light_tables,
             light_log: Vec::new(),
@@ -1602,6 +1620,10 @@ impl Streaming {
                             smooth_lighting: self.smooth_lighting,
                             cutout_leaves: self.cutout_leaves,
                             cull_leaves: self.cull_leaves,
+                            ctm_glass: self.ctm_glass,
+                            better_grass: self.better_grass,
+                            greedy_coalesce: self.greedy_coalesce,
+                            cave_occlusion: self.cave_occlusion,
                         },
                     ),
                 );

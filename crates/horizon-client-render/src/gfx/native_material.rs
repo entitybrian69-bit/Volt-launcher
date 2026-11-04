@@ -63,11 +63,17 @@ fn horizon_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color
         let kind = horizon_material_layer_kind(layer);
         let emission = 15u - (u32(round(color.a * 255.0)) & 15u);
         if kind == 5u || kind == 6u {
-            mat_tag = 0.25;
+            mat_tag = 0.125;
+        } else if kind == 9u {
+            mat_tag = 0.28;
         } else if kind >= 1u && kind <= 4u {
-            mat_tag = 0.50;
+            mat_tag = 0.44;
+        } else if kind == 7u {
+            mat_tag = 0.60;
         } else if emission > 0u {
-            mat_tag = 0.75;
+            mat_tag = 0.76;
+        } else if kind == 8u {
+            mat_tag = 0.90;
         }
         if kind >= 1u && kind <= 5u {
             let dist_fade = clamp(1.0 - length(pos) * (1.0 / 56.0), 0.0, 1.0);

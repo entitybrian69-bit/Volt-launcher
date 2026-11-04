@@ -274,6 +274,9 @@ impl Game<'_> {
             if self.debug_key(key, action) {
                 continue;
             }
+            if self.volt_gameplay_key(key, down) {
+                continue;
+            }
             if down
                 && (self.sort_key_press(key)
                     || self.hdr_key_press(key)
@@ -457,9 +460,13 @@ impl Game<'_> {
         let size = self.window.as_ref().unwrap().inner_size();
         let b = HudBatch::new([size.width, size.height]);
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
+        if matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+            let _ = self.try_click_volt_hud((p[0], p[1]), false);
+        }
         if !self.pad_in_menu()
             && t.phase == TouchPhase::Started
-            && self.try_click_waypoint_hud_button((p[0], p[1]))
+            && (self.try_click_waypoint_hud_button((p[0], p[1]))
+                || self.try_click_volt_hud((p[0], p[1]), true))
         {
             self.pad.touch.clear();
             self.pad.touch.ignore(t.id);

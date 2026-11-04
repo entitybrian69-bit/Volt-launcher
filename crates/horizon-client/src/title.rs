@@ -1445,7 +1445,7 @@ impl Title {
                         cx - 100.0,
                         y + 120.0,
                         200.0,
-                        &lang::get_or("volt.boost.button", "Volt Boost"),
+                        &lang::get_or("volt.settings.button", "Volt Settings"),
                         true,
                         8,
                     ),

@@ -244,7 +244,7 @@ impl Game<'_> {
     pub(super) fn camera_view(&mut self, partial: f32) -> Option<(glam::DVec3, f32, f32)> {
         // Minecraft.cameraEntity: a server's spectator camera on a mob or
         // another player.
-        let (entity, descending) = match self.camera_mob() {
+        let (mut entity, descending) = match self.camera_mob() {
             Some(m) => (super::remote_camera::mob_camera_entity(m), false),
             None => (
                 self.player_camera_entity()?,
@@ -252,10 +252,18 @@ impl Game<'_> {
             ),
         };
         let mut view = self.view;
-        let kind = match self.camera_type {
-            CameraType::FirstPerson => horizon_client::camera::CameraType::FirstPerson,
-            CameraType::ThirdPersonBack => horizon_client::camera::CameraType::ThirdPersonBack,
-            CameraType::ThirdPersonFront => horizon_client::camera::CameraType::ThirdPersonFront,
+        let kind = if self.freelook_active() {
+            entity.y_rot = self.extras.volt.freelook_yaw;
+            entity.y_rot_o = self.extras.volt.freelook_yaw;
+            entity.x_rot = self.extras.volt.freelook_pitch;
+            entity.x_rot_o = self.extras.volt.freelook_pitch;
+            horizon_client::camera::CameraType::ThirdPersonBack
+        } else {
+            match self.camera_type {
+                CameraType::FirstPerson => horizon_client::camera::CameraType::FirstPerson,
+                CameraType::ThirdPersonBack => horizon_client::camera::CameraType::ThirdPersonBack,
+                CameraType::ThirdPersonFront => horizon_client::camera::CameraType::ThirdPersonFront,
+            }
         };
         let context = CollisionContext::for_entity(
             CollisionEntity {
@@ -595,7 +603,7 @@ impl Game<'_> {
     /// `LevelExtractor`'s skip of the camera entity: the player's own body
     /// is drawn unless the camera is in first person, or while it sleeps.
     pub(super) fn own_body_in_view(&self) -> bool {
-        !self.camera_type.first_person() || self.sleeping.is_some()
+        !self.camera_type.first_person() || self.sleeping.is_some() || self.freelook_active()
     }
     /// Whether the player's own model shows in the world view (its body or,
     /// while invisible, only its armour and held items).

@@ -499,9 +499,33 @@ impl Game<'_> {
             } else {
                 item_render::item_spin(age, item.bob_offset)
             };
-            let pose = glam::Mat4::from_translation(pos.as_vec3())
-                * glam::Mat4::from_translation(glam::Vec3::new(0.0, bob + min_offset_y, 0.0))
-                * glam::Mat4::from_rotation_y(spin);
+            let pose = if self.settings.extras.volt_visuals.dropped_items_3d {
+                let (_, hi) = state.bounding_box();
+                let airborne = (item.position.y - item.previous.y).abs() > 0.006
+                    || (item.position.x - item.previous.x).abs()
+                        + (item.position.z - item.previous.z).abs()
+                        > 0.012;
+                if airborne {
+                    glam::Mat4::from_translation(pos.as_vec3())
+                        * glam::Mat4::from_translation(glam::Vec3::new(0.0, min_offset_y + 0.08, 0.0))
+                        * glam::Mat4::from_rotation_y(spin * 1.6)
+                        * glam::Mat4::from_rotation_x(age * 0.32)
+                        * glam::Mat4::from_rotation_z(age * 0.19)
+                } else if (hi.z - lo.z) < 0.24 {
+                    glam::Mat4::from_translation(pos.as_vec3())
+                        * glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.032, 0.0))
+                        * glam::Mat4::from_rotation_y(item.bob_offset * 3.7)
+                        * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
+                } else {
+                    glam::Mat4::from_translation(pos.as_vec3())
+                        * glam::Mat4::from_translation(glam::Vec3::new(0.0, min_offset_y * 0.65, 0.0))
+                        * glam::Mat4::from_rotation_y(item.bob_offset * 2.9)
+                }
+            } else {
+                glam::Mat4::from_translation(pos.as_vec3())
+                    * glam::Mat4::from_translation(glam::Vec3::new(0.0, bob + min_offset_y, 0.0))
+                    * glam::Mat4::from_rotation_y(spin)
+            };
             let packed = self.world.light(
                 q.x.floor() as i32,
                 (q.y + 0.1).floor() as i32,

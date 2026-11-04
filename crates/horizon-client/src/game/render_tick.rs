@@ -290,18 +290,27 @@ impl Game<'_> {
         let mut scope = self.scope_scale;
         let gui_overlays =
             hud_overlays::camera_overlays(size[0] as i32, size[1] as i32, &overlays, &mut scope);
-        self.screen_fx.build(&ScreenInputs {
+        let on_fire = self.camera_type.first_person()
+            && !self.spectator()
+            && self.player.as_ref().is_some_and(|p| p.fire_ticks > 0);
+        let mut quads = self.screen_fx.build(&ScreenInputs {
             sprites: &self.gui.atlas.sprites,
             flags: &self.gui.atlas.flags,
             aspect: size[0] as f32 / size[1].max(1) as f32,
             partial,
             block_overlay,
             water,
-            on_fire: self.camera_type.first_person()
-                && !self.spectator()
-                && self.player.as_ref().is_some_and(|p| p.fire_ticks > 0),
+            on_fire,
             gui_overlays: &gui_overlays,
-        })
+        });
+        if on_fire && self.settings.extras.volt_mods.low_shield_fire {
+            for q in &mut quads {
+                for v in &mut q.vertices {
+                    v.pos[1] -= 0.24;
+                }
+            }
+        }
+        quads
     }
     /// `Lightmap.getBrightness(getMaxLocalRawBrightness(eye))`.
     fn eye_brightness(&self, eye: [f64; 3]) -> f32 {
