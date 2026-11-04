@@ -544,13 +544,59 @@ fn tab_groups(s: &Settings) -> Vec<(VoltTab, Vec<(&'static str, Vec<VoltEntry>)>
     ]
 }
 
+fn opt_fallback_caption(opt: Opt) -> Option<&'static str> {
+    Some(match opt {
+        Opt::VoltResolutionScale => "Resolution Scaler",
+        Opt::TouchPreset => "Controls Studio Preset",
+        Opt::VoltShaderWindSpeed => "Vegetation Wind Speed",
+        Opt::VoltShaderWindStrength => "Vegetation Wind Strength",
+        Opt::VoltShaderShadowRichness => "Shadow Richness",
+        Opt::VoltShaderTorchIntensity => "Warm Torch Glow",
+        Opt::VoltShaderEmissiveGlow => "Emissive Block Glow",
+        Opt::VoltShaderWaterReflection => "Water Sky Reflection",
+        Opt::VoltShaderSunsetGlow => "Golden Hour Horizon",
+        Opt::VoltShaderVibrance => "Color Vibrance",
+        Opt::VoltShaderSaturation => "Saturation",
+        Opt::VoltShaderContrast => "Filmic Contrast",
+        Opt::VoltShaderExposure => "Exposure",
+        Opt::VoltShaderWarmth => "Sunlight Warmth",
+        Opt::PadEnabled => "Controller Input",
+        Opt::PadVibration => "Controller Vibration",
+        Opt::PadLookSensitivity => "Stick Look Sensitivity",
+        Opt::PadMoveDeadzone => "Move Stick Deadzone",
+        Opt::PadLookDeadzone => "Look Stick Deadzone",
+        _ => return None,
+    })
+}
+
 fn entry_parts(kind: VoltRowKind, s: &Settings, binding: Option<&'static str>) -> (String, Option<String>) {
     match kind {
         VoltRowKind::Opt(opt) => {
             let lbl = opt.label(s).plain();
             match lbl.split_once(": ") {
-                Some((n, v)) => (n.to_owned(), Some(v.to_owned())),
-                None => (lbl, None),
+                Some((n, v)) => {
+                    let clean_n = if n.contains('.') {
+                        opt_fallback_caption(opt).unwrap_or(n)
+                    } else {
+                        n
+                    };
+                    (clean_n.to_owned(), Some(v.to_owned()))
+                }
+                None => {
+                    let clean = if lbl.contains('.') {
+                        opt_fallback_caption(opt)
+                            .map(str::to_owned)
+                            .unwrap_or(lbl)
+                    } else {
+                        lbl
+                    };
+                    let val = if opt == Opt::VoltResolutionScale {
+                        Some(format!("{}%", s.horizon.resolution_scale.clamp(25, 200)))
+                    } else {
+                        None
+                    };
+                    (clean, val)
+                }
             }
         }
         VoltRowKind::Extra(item) => {
