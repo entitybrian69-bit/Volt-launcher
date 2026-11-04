@@ -13,6 +13,7 @@ use crate::{
     chunk::{Chunk, MIN_Y},
     models::catalog::BakedFace,
 };
+use horizon_assets::model::Direction as ModelDir;
 use horizon_core::{
     biome::BiomeZoom, geometry::Direction, position::BlockPos, random::position_seed,
 };
@@ -1087,19 +1088,16 @@ impl Mesher<'_> {
         let pad = &scratch.padded;
         out.visibility = visibility_reusing(pad, &self.tables.info, &mut scratch.visibility);
         let base_y = center.min_y() + sy * 16;
-        // #6 Volt Boost+ Sealed Underground Chunk Occlusion: if all 6 chunk-section boundary
-        // portals are completely sealed by solid stone/deepslate (`Sides::NONE`) and no block
-        // in the section emits light, unseen buried cavities cannot be seen from outside.
-        if volt.cave_occlusion && out.visibility == Sides::NONE && base_y < 48 {
-            let info_slice = &self.tables.info;
-            let has_light_or_be = own.iter().any(|&bid| {
-                let st = &info_slice[bid as usize];
+        // #6 Volt Boost+ Sealed Underground Chunk Occlusion: when `out.visibility == 0`,
+        // all 6 boundary shells of this section are 100% opaque solid blocks, so any buried
+        // cavity strictly inside `1..15`^3 cannot be seen from outside this section.
+        let skip_sealed_interior = volt.cave_occlusion
+            && out.visibility == 0
+            && base_y < 48
+            && !own.iter().any(|&bid| {
+                let st = &self.tables.info[bid as usize];
                 st.emission > 0 || st.block_entity
             });
-            if !has_light_or_be {
-                return out;
-            }
-        }
         let mut tints = Tints::new(
             region,
             self.biomes,
@@ -1114,6 +1112,13 @@ impl Mesher<'_> {
             for z in 0..16 {
                 let row = pi(0, y, z);
                 for x in 0..16 {
+                    if skip_sealed_interior
+                        && (1..15).contains(&x)
+                        && (1..15).contains(&y)
+                        && (1..15).contains(&z)
+                    {
+                        continue;
+                    }
                     let idx = row + x as usize;
                     let id = pad.blocks[idx];
                     if id == 0 {
@@ -1269,7 +1274,7 @@ impl Mesher<'_> {
             && let Some(top_layer) = self.tables.grass_top
             && matches!(
                 q.facing,
-                Direction::North | Direction::South | Direction::East | Direction::West
+                ModelDir::North | ModelDir::South | ModelDir::East | ModelDir::West
             )
         {
             let [nx, ny, nz] = lighting::step(pos, q.facing);
@@ -1287,31 +1292,31 @@ impl Mesher<'_> {
         if volt.ctm_glass && state.glass && q.cull.is_some() {
             let [x, y, z] = pos;
             let (u_neg_same, u_pos_same, v_neg_same, v_pos_same) = match q.facing {
-                Direction::North => (
+                ModelDir::North => (
                     pad.blocks[pi(x + 1, y, z)] == block_id,
                     pad.blocks[pi(x - 1, y, z)] == block_id,
                     pad.blocks[pi(x, y + 1, z)] == block_id,
                     pad.blocks[pi(x, y - 1, z)] == block_id,
                 ),
-                Direction::South => (
+                ModelDir::South => (
                     pad.blocks[pi(x - 1, y, z)] == block_id,
                     pad.blocks[pi(x + 1, y, z)] == block_id,
                     pad.blocks[pi(x, y + 1, z)] == block_id,
                     pad.blocks[pi(x, y - 1, z)] == block_id,
                 ),
-                Direction::East => (
+                ModelDir::East => (
                     pad.blocks[pi(x, y, z + 1)] == block_id,
                     pad.blocks[pi(x, y, z - 1)] == block_id,
                     pad.blocks[pi(x, y + 1, z)] == block_id,
                     pad.blocks[pi(x, y - 1, z)] == block_id,
                 ),
-                Direction::West => (
+                ModelDir::West => (
                     pad.blocks[pi(x, y, z - 1)] == block_id,
                     pad.blocks[pi(x, y, z + 1)] == block_id,
                     pad.blocks[pi(x, y + 1, z)] == block_id,
                     pad.blocks[pi(x, y - 1, z)] == block_id,
                 ),
-                Direction::Up | Direction::Down => (
+                ModelDir::Up | ModelDir::Down => (
                     pad.blocks[pi(x - 1, y, z)] == block_id,
                     pad.blocks[pi(x + 1, y, z)] == block_id,
                     pad.blocks[pi(x, y, z - 1)] == block_id,
