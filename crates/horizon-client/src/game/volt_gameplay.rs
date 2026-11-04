@@ -1153,13 +1153,13 @@ impl Game<'_> {
                 let age = (now - pop.born_at) as f32;
                 let world_pt = [pop.pos[0], pop.pos[1] + f64::from(age * 0.65), pop.pos[2]];
                 let proj = project_waypoint(cam_pos, cam_yaw, cam_pitch, cam_fov, w, h, world_pt);
-                if !proj.behind && proj.distance < 36.0 {
+                if proj.in_front && proj.on_screen && proj.distance < 36.0 {
                     let txt = format!("-{:.1}", pop.amount);
                     batch.text(
                         atlas,
                         &txt,
-                        proj.screen[0] - 8.0,
-                        proj.screen[1] - 4.0,
+                        proj.screen_x - 8.0,
+                        proj.screen_y - 4.0,
                         rgba(255, 86, 96, 255),
                         true,
                     );

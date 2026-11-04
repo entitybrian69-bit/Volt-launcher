@@ -1048,6 +1048,7 @@ impl Mesher<'_> {
         self.mesh_reusing_with_volt_opts(region, sy, out, scratch, VoltMeshOpts::default())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn mesh_reusing_with_leaf_cull(
         &mut self,
         region: &[[Option<&Chunk>; 3]; 3],
