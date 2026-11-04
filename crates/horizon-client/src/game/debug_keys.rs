@@ -491,6 +491,19 @@ impl Game<'_> {
                 ));
             }
         }
+        let apple = &self.settings.extras.mod_catalog;
+        if (apple.is_on(horizon_client::volt_mods::VoltModId::AppleSkin) || self.settings.extras.volt_mods.appleskin_hud)
+            && apple.appleskin_debug
+            && let Some(player) = &self.player
+        {
+            let food = &player.health.food;
+            let exhaustion = if self.remote.is_none() {
+                format!(", exhaustion {:.2}", food.exhaustion)
+            } else {
+                String::new() // Vanilla servers do not send exhaustion to clients.
+            };
+            d.group("food", [format!("Food {}, saturation {:.1}{exhaustion}", food.food, food.saturation)]);
+        }
         let (left, right) = d.columns(&self.debug_chart_lines());
         let atlas = &self.gui.atlas;
         let mut draws = if self

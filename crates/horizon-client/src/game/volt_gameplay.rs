@@ -1149,10 +1149,17 @@ impl Game<'_> {
             if cat.appleskin_saturation && bar_w > 0.5 {
                 batch.fill(atlas, hx, hy, bar_w, 2.0, rgba(255, 212, 64, 225));
             }
-            if cat.appleskin_food_preview
-                && let Some(held) = self.held()
-                && let Some((food_pts, sat_pts)) = food_restore_points(&held.item)
-            {
+            if cat.appleskin_exhaustion && self.remote.is_none() {
+                let exhausted = (p.health.food.exhaustion / 4.0).clamp(0.0, 1.0);
+                if exhausted > 0.0 {
+                    batch.fill(atlas, hx, hy + 3.0, (exhausted * 81.0).round(), 2.0, rgba(235, 90, 70, 210));
+                }
+            }
+            let food = self.stack_in(self.selected).and_then(|held| self.items().get(&held.item).and_then(|item| item.food))
+                .or_else(|| if cat.appleskin_offhand {
+                    self.offhand.as_ref().and_then(|held| self.items().get(&held.item).and_then(|item| item.food))
+                } else { None });
+            if cat.appleskin_food_preview && let Some((food_pts, sat_pts)) = food {
                 let txt = format!("+{food_pts} Food  +{sat_pts:.1} Sat");
                 batch.text(
                     atlas,
@@ -1668,20 +1675,6 @@ fn estimate_armor_max_dur(item: &str) -> u32 {
     } else {
         165
     }
-}
-
-fn food_restore_points(item: &str) -> Option<(u8, f32)> {
-    Some(match item {
-        "minecraft:golden_carrot" => (6, 14.4),
-        "minecraft:cooked_beef" | "minecraft:cooked_porkchop" => (8, 12.8),
-        "minecraft:golden_apple" | "minecraft:enchanted_golden_apple" => (4, 9.6),
-        "minecraft:cooked_mutton" | "minecraft:cooked_salmon" => (6, 9.6),
-        "minecraft:bread" | "minecraft:baked_potato" | "minecraft:cooked_cod" => (5, 6.0),
-        "minecraft:cooked_chicken" => (6, 7.2),
-        "minecraft:apple" => (4, 2.4),
-        "minecraft:sweet_berries" | "minecraft:melon_slice" => (2, 1.2),
-        _ => return None,
-    })
 }
 
 /// Returns concise enchantment max-level & target gear note (`Volt Mods` -> `Enchantment Max Guide`).

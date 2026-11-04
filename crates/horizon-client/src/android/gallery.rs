@@ -21,6 +21,7 @@ struct Request {
     legacy_dir: Option<PathBuf>,
     file: PathBuf,
     report: bool,
+    copy_image: bool,
 }
 fn permission(env: &mut JNIEnv<'_>, activity: &JObject<'_>) -> jni::errors::Result<bool> {
     let name = JObject::from(env.new_string("android.permission.WRITE_EXTERNAL_STORAGE")?);
@@ -34,10 +35,10 @@ fn permission(env: &mut JNIEnv<'_>, activity: &JObject<'_>) -> jni::errors::Resu
         .i()?
         == 0)
 }
-pub fn save(file: &Path) -> std::result::Result<(), String> {
-    save_file(file, false)
+pub fn save(file: &Path, copy_image: bool) -> std::result::Result<(), String> {
+    save_file(file, false, copy_image)
 }
-fn save_file(file: &Path, report: bool) -> std::result::Result<(), String> {
+fn save_file(file: &Path, report: bool, copy_image: bool) -> std::result::Result<(), String> {
     let request = crate::platform::with_context(|env, activity| {
         let sdk = env
             .get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?
@@ -94,6 +95,7 @@ fn save_file(file: &Path, report: bool) -> std::result::Result<(), String> {
             legacy_dir,
             file: file.to_owned(),
             report,
+            copy_image: copy_image && !report,
         })
     });
     let Some(request) = request else {
@@ -159,6 +161,21 @@ fn pending(env: &mut JNIEnv<'_>, values: &JObject<'_>, value: i32) -> jni::error
     )?;
     Ok(())
 }
+/// Clipboard receives a MediaStore content URI, not the app-private file path.
+/// Android grants the pasted content URI to the receiving application.
+fn copy_image_uri(env: &mut JNIEnv<'_>, activity: &JObject<'_>, resolver: &JObject<'_>, uri: &JObject<'_>) -> jni::errors::Result<()> {
+    let label = JObject::from(env.new_string("Screenshot")?);
+    let clip = env.call_static_method(
+        "android/content/ClipData", "newUri",
+        "(Landroid/content/ContentResolver;Ljava/lang/CharSequence;Landroid/net/Uri;)Landroid/content/ClipData;",
+        &[JValue::Object(resolver), JValue::Object(&label), JValue::Object(uri)],
+    )?.l()?;
+    let service_name = JObject::from(env.new_string("clipboard")?);
+    let clipboard = env.call_method(activity, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[JValue::Object(&service_name)])?.l()?;
+    env.call_method(clipboard, "setPrimaryClip", "(Landroid/content/ClipData;)V", &[JValue::Object(&clip)])?;
+    Ok(())
+}
+
 fn write(request: Request) -> Result<String> {
     use std::os::fd::FromRawFd;
     let mut env = request.vm.attach_current_thread()?;
@@ -299,8 +316,20 @@ fn write(request: Request) -> Result<String> {
             pending(&mut env, &published, 0)?;
             env.call_method(request.resolver.as_obj(),"update","(Landroid/net/Uri;Landroid/content/ContentValues;Ljava/lang/String;[Ljava/lang/String;)I",&[JValue::Object(&row),JValue::Object(&published),JValue::Object(&JObject::null()),JValue::Object(&JObject::null())])?;
         }
+        let clipboard_status = if request.copy_image {
+            match copy_image_uri(&mut env, request.activity.as_obj(), request.resolver.as_obj(), &row) {
+                Ok(()) => "; image copied to clipboard",
+                Err(e) => {
+                    let _ = env.exception_clear();
+                    log::warn!("Screenshot clipboard: {e}");
+                    "; could not copy image to clipboard"
+                }
+            }
+        } else {
+            ""
+        };
         Ok(format!(
-            "{} saved to {}/HorizonAndroid/{name}",
+            "{} saved to {}/HorizonAndroid/{name}{clipboard_status}",
             if request.report {
                 "Performance report"
             } else {

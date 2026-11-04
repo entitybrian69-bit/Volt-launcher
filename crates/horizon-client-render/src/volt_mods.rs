@@ -39,6 +39,8 @@ pub fn upstream_icon(id: VoltModId) -> Option<(&'static str, &'static [u8])> {
         VoltModId::DynamicFps => Some(("horizon/mod-icon/dynamic_fps", include_bytes!("../assets/mod_icons/dynamic_fps.png"))),
         VoltModId::BadOptimizations => Some(("horizon/mod-icon/bad_optimizations", include_bytes!("../assets/mod_icons/bad_optimizations.png"))),
         VoltModId::ScreenshotToClipboard => Some(("horizon/mod-icon/screenshot_clipboard", include_bytes!("../assets/mod_icons/screenshot_clipboard.png"))),
+        VoltModId::ChatHeads => Some(("horizon/mod-icon/chat_heads", include_bytes!("../assets/mod_icons/chat_heads.png"))),
+        VoltModId::BetterClouds => Some(("horizon/mod-icon/better_clouds", include_bytes!("../assets/mod_icons/better_clouds.png"))),
         _ => None,
     }
 }
@@ -1555,6 +1557,11 @@ pub struct VoltModCatalogState {
     /// Controls the native saturation bar and held-food preview independently.
     pub appleskin_saturation: bool,
     pub appleskin_food_preview: bool,
+    pub appleskin_tooltip: bool,
+    pub appleskin_tooltip_always: bool,
+    pub appleskin_offhand: bool,
+    pub appleskin_exhaustion: bool,
+    pub appleskin_debug: bool,
     pub better_ping_auto_color: bool,
     pub better_ping_show_bars: bool,
     pub freelook_toggle: bool,
@@ -1581,6 +1588,11 @@ impl Default for VoltModCatalogState {
             punchy_intensity: 85,
             appleskin_saturation: true,
             appleskin_food_preview: true,
+            appleskin_tooltip: true,
+            appleskin_tooltip_always: true,
+            appleskin_offhand: true,
+            appleskin_exhaustion: true,
+            appleskin_debug: true,
             better_ping_auto_color: true,
             better_ping_show_bars: false,
             freelook_toggle: false,
@@ -1635,6 +1647,11 @@ impl VoltModCatalogState {
             return true;
         }
         match key {
+            "voltModCfg.appleSkinTooltip" => { self.appleskin_tooltip = val == "true"; true }
+            "voltModCfg.appleSkinTooltipAlways" => { self.appleskin_tooltip_always = val == "true"; true }
+            "voltModCfg.appleSkinOffhand" => { self.appleskin_offhand = val == "true"; true }
+            "voltModCfg.appleSkinExhaustion" => { self.appleskin_exhaustion = val == "true"; true }
+            "voltModCfg.appleSkinDebug" => { self.appleskin_debug = val == "true"; true }
             "voltModCfg.freelookToggle" => {
                 self.freelook_toggle = val == "true";
                 true
@@ -1712,6 +1729,11 @@ impl VoltModCatalogState {
                 push(&k, "true");
             }
         }
+        push("voltModCfg.appleSkinTooltip", bool_s(self.appleskin_tooltip));
+        push("voltModCfg.appleSkinTooltipAlways", bool_s(self.appleskin_tooltip_always));
+        push("voltModCfg.appleSkinOffhand", bool_s(self.appleskin_offhand));
+        push("voltModCfg.appleSkinExhaustion", bool_s(self.appleskin_exhaustion));
+        push("voltModCfg.appleSkinDebug", bool_s(self.appleskin_debug));
         push("voltModCfg.freelookToggle", bool_s(self.freelook_toggle));
         push("voltModCfg.betterPingAutoColor", bool_s(self.better_ping_auto_color));
         push("voltModCfg.betterPingShowBars", bool_s(self.better_ping_show_bars));
@@ -1750,7 +1772,9 @@ pub fn apply_mod_to_engine(id: VoltModId, on: bool, extras: &mut Extras, horizon
     match id {
         VoltModId::AppleSkin => extras.volt_mods.appleskin_hud = on,
         VoltModId::MouseTweaks => extras.mouse_tweaks = on,
-        VoltModId::ItemScroller => extras.mouse_tweaks_wheel = on,
+        // Item Scroller has its own catalog switch and wheel option. Do not
+        // overwrite Mouse Tweaks' independently configured wheel behavior.
+        VoltModId::ItemScroller => {},
         VoltModId::ShulkerBoxTooltip => extras.volt_mods.shulker_preview = on,
         VoltModId::Freelook => extras.volt_qol.freelook_enabled = on,
         VoltModId::Zoomify => {
@@ -1797,9 +1821,7 @@ pub fn sync_catalog_from_engine(extras: &mut Extras, horizon: &Graphics) {
     extras
         .mod_catalog
         .set(VoltModId::AppleSkin, extras.volt_mods.appleskin_hud);
-    if extras.mouse_tweaks {
-        extras.mod_catalog.set(VoltModId::MouseTweaks, true);
-    }
+    extras.mod_catalog.set(VoltModId::MouseTweaks, extras.mouse_tweaks);
     extras
         .mod_catalog
         .set(VoltModId::ShulkerBoxTooltip, extras.volt_mods.shulker_preview);
@@ -1844,6 +1866,10 @@ pub fn sync_catalog_from_engine(extras: &mut Extras, horizon: &Graphics) {
     extras
         .mod_catalog
         .set(VoltModId::XaerosMinimap, extras.minimap);
+    extras.mod_catalog.set(VoltModId::XaerosWorldMap, extras.volt_qol.atlas_enabled);
+    extras.mod_catalog.set(VoltModId::EntityCulling, horizon.entity_culling);
+    extras.mod_catalog.set(VoltModId::MoreCulling, extras.cull_leaves);
+    extras.mod_catalog.set(VoltModId::FerriteCore, extras.volt_boost_plus.zero_stutter_mesh_pool);
 }
 
 // ============================================================================
@@ -1938,6 +1964,11 @@ enum ModCfgKind {
     BetterF3Compact,
     AppleSkinSaturation,
     AppleSkinFoodPreview,
+    AppleSkinTooltip,
+    AppleSkinTooltipAlways,
+    AppleSkinOffhand,
+    AppleSkinExhaustion,
+    AppleSkinDebug,
     BetterPingAutoColor,
     BetterPingShowBars,
     FreelookMode,
@@ -2025,7 +2056,7 @@ impl ModMenuUi {
 
     fn mod_config_items(id: VoltModId) -> Vec<ModCfgKind> {
         match id {
-            VoltModId::AppleSkin => vec![ModCfgKind::AppleSkinSaturation, ModCfgKind::AppleSkinFoodPreview],
+            VoltModId::AppleSkin => vec![ModCfgKind::AppleSkinSaturation, ModCfgKind::AppleSkinFoodPreview, ModCfgKind::AppleSkinOffhand, ModCfgKind::AppleSkinTooltip, ModCfgKind::AppleSkinTooltipAlways, ModCfgKind::AppleSkinExhaustion, ModCfgKind::AppleSkinDebug],
             VoltModId::BetterPingDisplay => vec![ModCfgKind::BetterPingAutoColor, ModCfgKind::BetterPingShowBars],
             VoltModId::Zoomify => vec![
                 ModCfgKind::OpenKeyBinds,
@@ -2060,6 +2091,11 @@ impl ModMenuUi {
             ModCfgKind::VoltAct(act) => format!("{}: {}", act.caption(), act.value(&s.extras)),
             ModCfgKind::AppleSkinSaturation => format!("Show saturation overlay: {}", if cat.appleskin_saturation { "ON" } else { "OFF" }),
             ModCfgKind::AppleSkinFoodPreview => format!("Show held food preview: {}", if cat.appleskin_food_preview { "ON" } else { "OFF" }),
+            ModCfgKind::AppleSkinTooltip => format!("Food values in tooltip: {}", if cat.appleskin_tooltip { "ON" } else { "OFF" }),
+            ModCfgKind::AppleSkinTooltipAlways => format!("Always show food values: {}", if cat.appleskin_tooltip_always { "ON" } else { "OFF" }),
+            ModCfgKind::AppleSkinOffhand => format!("Offhand food preview: {}", if cat.appleskin_offhand { "ON" } else { "OFF" }),
+            ModCfgKind::AppleSkinExhaustion => format!("Show exhaustion (local): {}", if cat.appleskin_exhaustion { "ON" } else { "OFF" }),
+            ModCfgKind::AppleSkinDebug => format!("Food info in debug: {}", if cat.appleskin_debug { "ON" } else { "OFF" }),
             ModCfgKind::BetterPingAutoColor => format!("Auto-color Ping Text: {}", if cat.better_ping_auto_color { "ON" } else { "OFF" }),
             ModCfgKind::BetterPingShowBars => format!("Render Ping Bars: {}", if cat.better_ping_show_bars { "ON" } else { "OFF" }),
             ModCfgKind::FreelookMode => format!("Freelook mode: {}", if cat.freelook_toggle { "Toggle" } else { "Hold" }),
@@ -2860,6 +2896,26 @@ impl ModMenuUi {
                         s.extras.mod_catalog.better_ping_show_bars = !s.extras.mod_catalog.better_ping_show_bars;
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
                     }
+                    ModCfgKind::AppleSkinTooltip => {
+                        s.extras.mod_catalog.appleskin_tooltip = !s.extras.mod_catalog.appleskin_tooltip;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::AppleSkinTooltipAlways => {
+                        s.extras.mod_catalog.appleskin_tooltip_always = !s.extras.mod_catalog.appleskin_tooltip_always;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::AppleSkinOffhand => {
+                        s.extras.mod_catalog.appleskin_offhand = !s.extras.mod_catalog.appleskin_offhand;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::AppleSkinExhaustion => {
+                        s.extras.mod_catalog.appleskin_exhaustion = !s.extras.mod_catalog.appleskin_exhaustion;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
+                    ModCfgKind::AppleSkinDebug => {
+                        s.extras.mod_catalog.appleskin_debug = !s.extras.mod_catalog.appleskin_debug;
+                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
+                    }
                     ModCfgKind::AppleSkinSaturation => {
                         s.extras.mod_catalog.appleskin_saturation = !s.extras.mod_catalog.appleskin_saturation;
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
@@ -3030,7 +3086,7 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 16);
+        assert_eq!(count, 18);
         assert!(upstream_icon(VoltModId::Zoomify).is_none());
     }
 
@@ -3049,6 +3105,29 @@ mod tests {
         assert_eq!(menu.scroll.amount, 0.0);
         assert!(scrolled.cfg_rows.iter().any(|(_, kind)| *kind == ModCfgKind::VoltAct(VoltAct::QolAtlasGrid)));
         assert!(style::scrollbar_thumb(scrolled.cfg_top, scrolled.cfg_bottom, scrolled.cfg_content_h, menu.cfg_scroll).is_some());
+        menu.selected = VoltModId::AppleSkin;
+        menu.cfg_scroll = 0.0;
+        menu.scroll(&settings, (320.0, 200.0), cursor, -20.0);
+        let appleskin = menu.compute_layout(&settings, 320.0, 200.0, 50);
+        assert!(appleskin.cfg_rows.iter().any(|(_, kind)| *kind == ModCfgKind::AppleSkinDebug));
+    }
+
+    #[test]
+    fn appleskin_options_persist() {
+        let mut extras = Extras::default();
+        assert!(extras.mod_catalog.appleskin_tooltip && extras.mod_catalog.appleskin_tooltip_always);
+        assert!(extras.mod_catalog.appleskin_offhand && extras.mod_catalog.appleskin_exhaustion && extras.mod_catalog.appleskin_debug);
+        extras.mod_catalog.appleskin_tooltip = false;
+        extras.mod_catalog.appleskin_tooltip_always = false;
+        extras.mod_catalog.appleskin_offhand = false;
+        extras.mod_catalog.appleskin_exhaustion = false;
+        extras.mod_catalog.appleskin_debug = false;
+        let parsed = Extras::parse(&extras.serialize());
+        assert!(!parsed.mod_catalog.appleskin_tooltip);
+        assert!(!parsed.mod_catalog.appleskin_tooltip_always);
+        assert!(!parsed.mod_catalog.appleskin_offhand);
+        assert!(!parsed.mod_catalog.appleskin_exhaustion);
+        assert!(!parsed.mod_catalog.appleskin_debug);
     }
 
     #[test]
@@ -3083,7 +3162,7 @@ mod tests {
         let parsed = Extras::parse(&extras.serialize());
         assert!(!parsed.mod_catalog.appleskin_saturation);
         assert!(!parsed.mod_catalog.appleskin_food_preview);
-        assert_eq!(ModMenuUi::mod_config_items(VoltModId::AppleSkin).len(), 2);
+        assert_eq!(ModMenuUi::mod_config_items(VoltModId::AppleSkin).len(), 7);
     }
 
     #[test]
@@ -3115,6 +3194,34 @@ mod tests {
             for r in logo.rows {
                 assert_eq!(r.len(), 8, "logo row width for {}", m.slug);
             }
+        }
+    }
+
+    #[test]
+    fn independent_wheel_options_and_engine_edits_stay_in_sync() {
+        let mut s = Settings::default();
+        apply_mod_to_engine(VoltModId::MouseTweaks, true, &mut s.extras, &mut s.horizon);
+        assert!(s.extras.mouse_tweaks_wheel);
+        apply_mod_to_engine(VoltModId::ItemScroller, true, &mut s.extras, &mut s.horizon);
+        apply_mod_to_engine(VoltModId::ItemScroller, false, &mut s.extras, &mut s.horizon);
+        assert!(s.extras.mouse_tweaks_wheel, "disabling Item Scroller must not change Mouse Tweaks' wheel setting");
+        s.extras.mouse_tweaks = false;
+        s.extras.volt_qol.atlas_enabled = true;
+        s.extras.cull_leaves = true;
+        s.extras.volt_boost_plus.zero_stutter_mesh_pool = true;
+        s.horizon.entity_culling = true;
+        sync_catalog_from_engine(&mut s.extras, &s.horizon);
+        assert!(!s.extras.mod_catalog.is_on(VoltModId::MouseTweaks));
+        for id in [VoltModId::XaerosWorldMap, VoltModId::MoreCulling, VoltModId::FerriteCore, VoltModId::EntityCulling] {
+            assert!(s.extras.mod_catalog.is_on(id));
+        }
+        s.extras.volt_qol.atlas_enabled = false;
+        s.extras.cull_leaves = false;
+        s.extras.volt_boost_plus.zero_stutter_mesh_pool = false;
+        s.horizon.entity_culling = false;
+        sync_catalog_from_engine(&mut s.extras, &s.horizon);
+        for id in [VoltModId::XaerosWorldMap, VoltModId::MoreCulling, VoltModId::FerriteCore, VoltModId::EntityCulling] {
+            assert!(!s.extras.mod_catalog.is_on(id));
         }
     }
 

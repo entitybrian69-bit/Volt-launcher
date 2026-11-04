@@ -1609,21 +1609,12 @@ impl Game<'_> {
                 .extras
                 .mod_catalog
                 .is_on(horizon_client::volt_mods::VoltModId::ScreenshotToClipboard);
-        if copy_clip {
-            horizon_client::clipboard::Clipboard::set(
-                &mut self.clipboard,
-                &path.display().to_string(),
-            );
-        }
         #[cfg(target_os = "android")]
         if result.is_ok() {
-            if let Err(error) = crate::gallery::save(&path) {
+            // Publishing is asynchronous; gallery reports whether the image URI
+            // was actually copied after MediaStore finishes writing it.
+            if let Err(error) = crate::gallery::save(&path, copy_clip) {
                 self.system_message(Text::literal(error));
-            } else if copy_clip {
-                self.system_message(
-                    Text::literal("Screenshot saved & copied to clipboard")
-                        .with_color(horizon_client::text::GREEN),
-                );
             }
             return;
         }
@@ -1642,8 +1633,8 @@ impl Game<'_> {
                 let base = Text::translate("screenshot.success", &[link]);
                 if copy_clip {
                     base.append(
-                        Text::literal(" [Copied to clipboard]")
-                            .with_color(horizon_client::text::GREEN),
+                        Text::literal(" [Image clipboard unavailable on this platform]")
+                            .with_color(horizon_client::text::RED),
                     )
                 } else {
                     base

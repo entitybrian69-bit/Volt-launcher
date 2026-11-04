@@ -2508,6 +2508,17 @@ impl Game<'_> {
                 ));
             }
         }
+        // Read the same food values used by consumption, including items that
+        // are not in a hard-coded vanilla list.
+        let apple = &self.settings.extras.mod_catalog;
+        if !nested && !lines.is_empty()
+            && (apple.is_on(horizon_client::volt_mods::VoltModId::AppleSkin) || self.settings.extras.volt_mods.appleskin_hud)
+            && apple.appleskin_tooltip
+            && (apple.appleskin_tooltip_always || self.has_shift_down())
+            && let Some((nutrition, saturation)) = item_info.and_then(|i| i.food)
+        {
+            lines.push((horizon_client::text::Text::literal(format!("Food: +{nutrition}   Saturation: +{saturation:.1}")), rgba(255, 220, 100, 255)));
+        }
         // Native mods last, once getTooltipLines has built every line; a
         // tooltip the stack hides stays hidden.
         if !nested && !lines.is_empty() {

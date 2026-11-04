@@ -1009,7 +1009,7 @@ jobs:
           Original icons are included for AppleSkin, Armor HUD, Low Fire, Mod Menu,
           ShulkerBoxTooltip, Language Reload, FastQuit, BetterF3, Better Ping Display,
           Controlling, Mouse Tweaks, No Fog, FerriteCore, Dynamic FPS, BadOptimizations,
-          and Screenshot to Clipboard; see THIRD_PARTY_NOTICES.md.
+          Screenshot to Clipboard, Chat Heads, and Better Clouds; see THIRD_PARTY_NOTICES.md.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then

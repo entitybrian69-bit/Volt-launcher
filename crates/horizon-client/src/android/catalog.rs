@@ -335,6 +335,7 @@ impl Catalog {
         let on = horizon_client::mod_list::ModList::load(&game);
         let settings = horizon_client::settings::Settings::load(&game.join("options.txt"));
         self.extras = settings.extras.clone();
+        horizon_client::volt_mods::sync_catalog_from_engine(&mut self.extras, &settings.horizon);
         horizon_threads::set_thread_boost(self.extras.thread_boost);
         self.local.clear();
         for kind in horizon_client::content_files::Kind::ALL {
