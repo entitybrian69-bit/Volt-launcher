@@ -981,7 +981,6 @@ impl Default for GraphicsUi {
         let mut search = ui::EditBox::new(0.0, 0.0, 0.0, 8.0);
         search.bordered = false;
         search.focused = false;
-        search.message = lang::get("Search options");
         Self {
             scroll: ui::Scroll::default(),
             dragging: None,
@@ -1422,7 +1421,7 @@ impl GraphicsUi {
         if self.search.value.is_empty() && !focused {
             batch.text_styled(
                 atlas,
-                &Text::literal(&self.search.message),
+                &Text::literal(&lang::get("Search options")),
                 x + 5.0,
                 self.search.y,
                 style::MUTED,

@@ -4201,16 +4201,23 @@ impl OptionsUi {
                     VoltUiAction::OpenModMenu => {
                         self.push(Page::ModMenu);
                     }
+                    VoltUiAction::OpenVideoSettings => {
+                        self.push(Page::Graphics);
+                    }
                     VoltUiAction::OpenShaderPacks => {
                         self.push(Page::ShaderPacks);
                         events.push(Event::ListShaderPacks);
                     }
-                    VoltUiAction::OpenWaypoints => self.push(Page::Waypoints),
-                    VoltUiAction::OpenWorldAtlas => self.push(Page::VoltAtlas),
+                    VoltUiAction::OpenWaypointsManager => self.push(Page::Waypoints),
+                    VoltUiAction::OpenWorldMap => self.push(Page::VoltAtlas),
                     VoltUiAction::OpenPadBinds => self.push(Page::PadBinds),
                     VoltUiAction::OpenAgent => self.push(Page::Agent),
-                    #[cfg(target_os = "android")]
-                    VoltUiAction::TouchControls => events.push(Event::TouchControls),
+                    VoltUiAction::OpenTouchEditor => {
+                        #[cfg(target_os = "android")]
+                        events.push(Event::TouchControls);
+                        #[cfg(not(target_os = "android"))]
+                        self.push(Page::Touch);
+                    }
                     VoltUiAction::Done => events.extend(self.back(s)),
                 }
             }
@@ -4987,16 +4994,21 @@ impl OptionsUi {
                     VoltUiAction::SliderDrag => events.push(Event::SliderDrag),
                     VoltUiAction::BindKey(name) => self.selected_key = Some(name),
                     VoltUiAction::OpenModMenu => self.push(Page::ModMenu),
+                    VoltUiAction::OpenVideoSettings => self.push(Page::Graphics),
                     VoltUiAction::OpenShaderPacks => {
                         self.push(Page::ShaderPacks);
                         events.push(Event::ListShaderPacks);
                     }
-                    VoltUiAction::OpenWaypoints => self.push(Page::Waypoints),
-                    VoltUiAction::OpenWorldAtlas => self.push(Page::VoltAtlas),
+                    VoltUiAction::OpenWaypointsManager => self.push(Page::Waypoints),
+                    VoltUiAction::OpenWorldMap => self.push(Page::VoltAtlas),
                     VoltUiAction::OpenPadBinds => self.push(Page::PadBinds),
                     VoltUiAction::OpenAgent => self.push(Page::Agent),
-                    #[cfg(target_os = "android")]
-                    VoltUiAction::TouchControls => events.push(Event::TouchControls),
+                    VoltUiAction::OpenTouchEditor => {
+                        #[cfg(target_os = "android")]
+                        events.push(Event::TouchControls);
+                        #[cfg(not(target_os = "android"))]
+                        self.push(Page::Touch);
+                    }
                     VoltUiAction::Done => events.extend(self.back(s)),
                 }
             }

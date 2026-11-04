@@ -1825,7 +1825,6 @@ impl Default for ModMenuUi {
         let mut search = ui::EditBox::new(0.0, 0.0, 120.0, 8.0);
         search.bordered = false;
         search.focused = false;
-        search.message = "Search mods...".to_owned();
         Self {
             search,
             search_focused: false,

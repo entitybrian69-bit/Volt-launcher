@@ -187,8 +187,8 @@ fn tab_groups(s: &Settings) -> Vec<(VoltTab, Vec<(&'static str, Vec<VoltEntry>)>
                     "Internal 3D world resolution scale (25%..=200%) while keeping HUD crisp.",
                 ),
                 e_ext(ExtraItem::VoltPreset, Saves),
-                e_ext(ExtraItem::PerfHud, None),
-                e_ext(ExtraItem::PerfHudCorner, None),
+                e_ext(ExtraItem::VoltPerfHud, None),
+                e_ext(ExtraItem::VoltPerfHudCorner, None),
             ],
         ),
         (
@@ -219,7 +219,7 @@ fn tab_groups(s: &Settings) -> Vec<(VoltTab, Vec<(&'static str, Vec<VoltEntry>)>
         if let Ok(item) = r
             && !matches!(
                 item,
-                ExtraItem::VoltPreset | ExtraItem::PerfHud | ExtraItem::PerfHudCorner
+                ExtraItem::VoltPreset | ExtraItem::VoltPerfHud | ExtraItem::VoltPerfHudCorner
             )
         {
             tier_rows.push(e_ext(item, Saves));
@@ -647,7 +647,6 @@ impl Default for VoltSettingsUi {
         let mut search = ui::EditBox::new(0.0, 0.0, 0.0, 8.0);
         search.bordered = false;
         search.focused = false;
-        search.message = lang::get("Search options");
         Self {
             scroll: ui::Scroll::default(),
             dragging: None,
@@ -950,7 +949,7 @@ impl VoltSettingsUi {
         if self.search.value.is_empty() && !sfocus {
             batch.text_styled(
                 atlas,
-                &Text::literal(&self.search.message),
+                &Text::literal(&lang::get("Search options")),
                 srect[0] + 5.0,
                 self.search.y,
                 style::MUTED,
@@ -1503,9 +1502,9 @@ mod tests {
         let mut ui = VoltSettingsUi::default();
         ui.search.set_value("Resolution Scaler");
         let (_, rows, _) = ui.layout(&s, 854.0, 480.0);
-        assert!(rows.iter().any(|r| matches!(
-            r.kind,
-            LayoutKind::Entry(e) if e.kind == VoltRowKind::Opt(Opt::VoltResolutionScale)
-        )));
+        assert!(rows.iter().any(|r| {
+            r.entry
+                .is_some_and(|e| e.kind == VoltRowKind::Opt(Opt::VoltResolutionScale))
+        }));
     }
 }
