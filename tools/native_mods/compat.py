@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -167,6 +168,29 @@ def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
             raise Rejected("named hook unavailable")
     return True
 
+def extract_source_archive(archive: Path, source: Path) -> None:
+    """Extract a git archive without symlinks or paths outside the workspace."""
+    with tarfile.open(archive) as tar:
+        for member in tar:
+            path = PurePosixPath(member.name)
+            if not member.name or "\\" in member.name or path.is_absolute() or ".." in path.parts:
+                raise Rejected("unsafe path in Volt source archive")
+            if member.issym():
+                continue
+            if not (member.isfile() or member.isdir()):
+                raise Rejected("unsupported member in Volt source archive")
+            out = source.joinpath(*path.parts)
+            if member.isdir():
+                out.mkdir(parents=True, exist_ok=True)
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            src = tar.extractfile(member)
+            if src is None:
+                raise Rejected("unreadable Volt source archive member")
+            with src, out.open("xb") as dst:
+                shutil.copyfileobj(src, dst)
+            out.chmod(member.mode & 0o777)
+
 def sanitized_env() -> dict:
     # The job must still run in an ephemeral, secret-free runner. Removing env
     # credentials is defense in depth, not isolation or a security sandbox.
@@ -210,11 +234,7 @@ def run_probe(args) -> dict:
         archive = work / "source.tar"
         with archive.open("wb") as f:
             subprocess.run(["git", "archive", rev], cwd=ROOT, stdout=f, check=True)
-        with tarfile.open(archive) as tar:
-            members = tar.getmembers()
-            if any(not (m.isfile() or m.isdir() or m.issym()) for m in members):
-                raise Rejected("unsupported member in Volt source archive")
-            tar.extractall(source, members=[m for m in members if not m.issym()], filter="data")
+        extract_source_archive(archive, source)
         (source / ".horizon-revision").write_text(rev + "\n", encoding="utf-8")
         stage = work / "stage"
         env = sanitized_env()

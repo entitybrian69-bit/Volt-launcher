@@ -1,4 +1,6 @@
 import hashlib
+import io
+import tarfile
 import json
 from pathlib import Path
 import tempfile
@@ -72,6 +74,23 @@ class CompatibilityTests(unittest.TestCase):
         data['meta']['hooks'] = 1
         with self.assertRaisesRegex(compat.Rejected, 'non-hook'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40)
+
+    def test_source_archive_rejects_traversal_and_skips_symlinks(self):
+        archive_path = self.root / 'source.tar'
+        source = self.root / 'source'
+        source.mkdir()
+        with tarfile.open(archive_path, 'w') as tar:
+            link = tarfile.TarInfo('link')
+            link.type = tarfile.SYMTYPE
+            link.linkname = '../outside'
+            tar.addfile(link)
+            info = tarfile.TarInfo('../escape')
+            info.size = 3
+            tar.addfile(info, io.BytesIO(b'bad'))
+        with self.assertRaisesRegex(compat.Rejected, 'unsafe path'):
+            compat.extract_source_archive(archive_path, source)
+        self.assertFalse((self.root / 'escape').exists())
+        self.assertFalse((source / 'link').exists())
 
     def test_post_build_rejected_even_exact_revision(self):
         data = {'meta': self.meta, 'manifest': {'post_build': [{'command': 'bad'}]}}

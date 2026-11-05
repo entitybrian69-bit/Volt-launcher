@@ -113,3 +113,24 @@ code. A dirty tracked Volt checkout is refused. Temporary work is discarded.
   plugin host and the normal updater is not a mod installer.
 * Only then add an in-launcher browser/downloader that shows honest status and
   distributes approved compatible builds without requiring an external browser.
+
+## Native build worker prototype
+
+`tools/native_mods/build_set.py` is an experimental **offline worker**, not a
+hosted service or an installer. It accepts multiple `--mod ID=PATH` entries,
+checks the registry hash, revocation and manifests for each, applies the set
+with the pinned Horizon mixin compiler, and attempts to compile an Android
+native library. It writes an unsigned `.so`, logs, and a JSON report. One
+mixin compiler revision must match every bundle; duplicate IDs, the excluded
+project, and the four already-integrated mods are rejected. Successful
+compilation does not imply the combination works at runtime or on touchscreens.
+
+**Run only in a disposable, isolated, secret-free worker.** Mixins, Rust code,
+Cargo build scripts and native code have full worker permissions; this script
+is not a sandbox. Do not share credentials, signing keys, caches or trusted
+network services with it. A build result is executable untrusted code, not an
+APK. No artifact from the worker is automatically signed or published. A
+production service still needs isolation, quota/abuse controls, a launcher
+submission and status API, conflict and license review, a separate trusted
+packaging/signing process, safe update distribution, and device validation.
+Author-signed bundles remain rejected until signature verification is added.

@@ -72,3 +72,59 @@ jobs:
           path: ${{ runner.temp }}/probe-result/
           if-no-files-found: warn
           retention-days: 14
+
+  combination-build:
+    name: Native build worker / ${{ matrix.abi }} (unsigned library only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+          - abi: armeabi-v7a
+            target: armv7-linux-androideabi
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Test worker
+        run: python3 -m unittest discover -s tools/native_mods -v
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.target }}"
+      - name: Fetch pinned registry and reconstruct Coordinates HUD bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/registry" "$RUNNER_TEMP/coords-source"
+          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/78853c19a6d48640ef500f3c8ff8988923576f3f | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/7fd746624af4 | tar -xz -C "$RUNNER_TEMP/coords-source" --strip-components=1
+          cd "$RUNNER_TEMP/coords-source"
+          python3 native/tools/native.py package coords-hud
+      - name: Install pinned mixin compiler
+        run: |
+          cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
+            --rev 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
+      - name: Build reviewed source on disposable runner
+        run: |
+          python3 tools/native_mods/build_set.py \
+            --registry "$RUNNER_TEMP/registry" \
+            --mod "coords_hud=$RUNNER_TEMP/coords-source/native/target/coords_hud-2.0.0.hnmod" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
+            --mixins-revision 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
+            --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/worker-result" --trust-native-code
+      - name: Upload worker report and unsigned library (not an APK)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-worker-coordinates-${{ matrix.abi }}
+          path: ${{ runner.temp }}/worker-result/
+          if-no-files-found: warn
+          retention-days: 14
