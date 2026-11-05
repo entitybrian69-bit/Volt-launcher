@@ -482,13 +482,74 @@ fn wrap_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32, max_lines:
 
 /// A low-cost mobile approximation of Nightly's pixel-sunset backdrop.
 /// Its palette is taken from the pinned upstream scene; it is not the desktop renderer.
-/// Continuously animated backdrop: a deep blue vertical wash with large,
-/// softly drifting abstract shapes, built from inexpensive horizontal bands
-/// so it stays cheap on mobile GPUs. `phase` is seconds since launch.
+/// One smooth organic shape: a triangle fan around a wavy ellipse with a
+/// feathered (alpha-0) outer rim so the silhouette has no visible stepping.
+/// Coordinates are dp; vertices are pushed straight into the HUD batch.
+fn draw_scene_blob(
+    ui: &mut Ui,
+    cx: f32,
+    cy: f32,
+    rx: f32,
+    ry: f32,
+    rot: f32,
+    phase: f32,
+    center_color: u32,
+    edge_color: u32,
+) {
+    const N: usize = 30;
+    let white = ui.atlas_ref().white;
+    let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
+    let (rs, rc) = rot.sin_cos();
+    let mut ring = [[0.0f32; 2]; N];
+    for (i, point) in ring.iter_mut().enumerate() {
+        let th = i as f32 / N as f32 * std::f32::consts::TAU;
+        // Two slow sine harmonics make the outline organic and keep it moving.
+        let wobble = 1.0 + 0.10 * (2.0 * th + phase).sin() + 0.06 * (3.0 * th - phase * 0.7).sin();
+        let (sn, cs) = th.sin_cos();
+        let ex = cs * rx * wobble;
+        let ey = sn * ry * wobble;
+        *point = [
+            ui.to_batch(cx + ex * rc - ey * rs),
+            ui.to_batch(cy + ex * rs + ey * rc),
+        ];
+    }
+    let center = [ui.to_batch(cx), ui.to_batch(cy)];
+    let feather = 1.06;
+    let rim_color = edge_color & 0x00ff_ffff; // same hue, alpha 0
+    let vertex = |pos: [f32; 2], color: u32| horizon_client::hud::HudVertex {
+        pos,
+        uv,
+        color,
+        depth: 0.0,
+        glint_uv: [0.0, 0.0],
+    };
+    let vertices = &mut ui.batch_mut().vertices;
+    for i in 0..N {
+        let a = ring[i];
+        let b = ring[(i + 1) % N];
+        let oa = [center[0] + (a[0] - center[0]) * feather, center[1] + (a[1] - center[1]) * feather];
+        let ob = [center[0] + (b[0] - center[0]) * feather, center[1] + (b[1] - center[1]) * feather];
+        // Core wedge with a soft radial gradient…
+        vertices.push(vertex(center, center_color));
+        vertices.push(vertex(a, edge_color));
+        vertices.push(vertex(b, edge_color));
+        // …and the feathered rim fading to fully transparent.
+        vertices.push(vertex(a, edge_color));
+        vertices.push(vertex(oa, rim_color));
+        vertices.push(vertex(b, edge_color));
+        vertices.push(vertex(b, edge_color));
+        vertices.push(vertex(oa, rim_color));
+        vertices.push(vertex(ob, rim_color));
+    }
+}
+
+/// Continuously animated backdrop in the reference style: a near-black navy
+/// wash with a few huge, slowly drifting smooth blue shapes. `phase` is
+/// seconds since launch; everything stays cheap (a few hundred triangles).
 fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
-    const NIGHT: [u32; 6] = [0x040918, 0x061228, 0x081a3a, 0x0a2048, 0x0b2452, 0x0d2a5e];
-    const DAY: [u32; 6] = [0xdbe7fa, 0xd3e2f9, 0xc9dcf8, 0xbed4f6, 0xb2cbf4, 0xa6c2f2];
+    const NIGHT: [u32; 5] = [0x01040c, 0x020812, 0x03101f, 0x051831, 0x072044];
+    const DAY: [u32; 5] = [0xe9f1fc, 0xdde9fa, 0xcfdff8, 0xc0d4f5, 0xb0c8f2];
     let stops: &[u32] = if theme::dark() { &NIGHT } else { &DAY };
     for row in 0..40 {
         let t = (row as f32 / 39.0) * (stops.len() - 1) as f32;
@@ -496,50 +557,42 @@ fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
         let color = lerp(hex(stops[index], 255), hex(stops[index + 1], 255), t - index as f32);
         ui.rounded(0.0, row as f32 * h / 40.0, w, h / 40.0 + 1.0, 0.0, color);
     }
-    // Each petal is an ellipse of horizontal bands whose width breathes and
-    // whose center slowly orbits, overlapping into a flowing abstract bloom.
-    struct Petal { cx: f32, cy: f32, rx: f32, ry: f32, tilt: f32, speed: f32, seed: f32, deep: u32, bright: u32, alpha: u8 }
-    let (deep_a, deep_b, hi) = if theme::dark() {
-        (0x0a2a66, 0x123c8c, 0x3f7fd9)
+    // (cx, cy, rx, ry, rot, drift speed, seed, center colour, edge colour).
+    let shapes: [(f32, f32, f32, f32, f32, f32, f32, u32, u32); 4] = if theme::dark() {
+        [
+            // A dim leaf high right, behind everything.
+            (0.74, 0.16, 0.16, 0.26, -0.5, 0.06, 1.9, 0x10306e, 0x071633),
+            // Large side bloom on the right.
+            (0.86, 0.60, 0.34, 0.50, -0.45, 0.05, 4.0, 0x163d8c, 0x081b40),
+            // Deep companion shape lower left.
+            (0.16, 0.92, 0.30, 0.42, 0.55, 0.045, 2.2, 0x123374, 0x061330),
+            // The dominant bloom across the bottom centre.
+            (0.50, 1.02, 0.46, 0.55, -0.18, 0.04, 0.0, 0x1d4fae, 0x0a2050),
+        ]
     } else {
-        (0x9cc0f0, 0x7faced, 0xdcebff)
+        [
+            (0.74, 0.16, 0.16, 0.26, -0.5, 0.06, 1.9, 0xbcd4f6, 0xd8e6fb),
+            (0.86, 0.60, 0.34, 0.50, -0.45, 0.05, 4.0, 0x9dbdf0, 0xcadcf9),
+            (0.16, 0.92, 0.30, 0.42, 0.55, 0.045, 2.2, 0xa8c4f2, 0xd2e2fa),
+            (0.50, 1.02, 0.46, 0.55, -0.18, 0.04, 0.0, 0x8fb4ee, 0xc2d7f8),
+        ]
     };
-    let petals = [
-        Petal { cx: 0.62, cy: 0.78, rx: 0.42, ry: 0.52, tilt: 0.55, speed: 0.11, seed: 0.0, deep: deep_a, bright: deep_b, alpha: 235 },
-        Petal { cx: 0.80, cy: 0.42, rx: 0.34, ry: 0.40, tilt: -0.35, speed: 0.09, seed: 2.1, deep: deep_b, bright: hi, alpha: 180 },
-        Petal { cx: 0.38, cy: 0.98, rx: 0.36, ry: 0.42, tilt: 0.25, speed: 0.13, seed: 4.2, deep: deep_a, bright: deep_b, alpha: 205 },
-        Petal { cx: 0.14, cy: 0.30, rx: 0.26, ry: 0.34, tilt: -0.20, speed: 0.07, seed: 1.3, deep: deep_b, bright: hi, alpha: 120 },
-    ];
-    for petal in &petals {
-        let drift_x = (phase * petal.speed + petal.seed).sin() * 0.045;
-        let drift_y = (phase * petal.speed * 0.8 + petal.seed * 1.7).cos() * 0.035;
-        let breathe = 1.0 + 0.08 * (phase * petal.speed * 1.6 + petal.seed).sin();
-        let cx = (petal.cx + drift_x) * w;
-        let cy = (petal.cy + drift_y) * h;
-        let rx = petal.rx * w.min(h * 1.4) * breathe;
-        let ry = petal.ry * h * breathe;
-        const BANDS: i32 = 22;
-        for band in 0..BANDS {
-            let t = (band as f32 + 0.5) / BANDS as f32 * 2.0 - 1.0;
-            let wave = 1.0 + 0.18 * (t * 2.6 + phase * petal.speed * 3.0 + petal.seed).sin();
-            let half = (1.0 - t * t).max(0.0).sqrt() * rx * wave;
-            if half < 1.0 { continue; }
-            let y = cy + t * ry - ry / BANDS as f32;
-            let band_h = ry * 2.0 / BANDS as f32 + 1.0;
-            if y + band_h < 0.0 || y > h { continue; }
-            let x = cx - half + t * petal.tilt * rx;
-            // Brighter toward the top edge of the shape, like soft rim light.
-            let color = lerp(hex(petal.deep, petal.alpha), hex(petal.bright, petal.alpha),
-                ((-t) * 0.5 + 0.5).powf(1.6));
-            ui.rounded(x, y, half * 2.0, band_h, band_h * 0.5, color);
-        }
-    }
-    // A slow highlight sweep keeps visible motion even while the petals are
-    // near their turning points.
-    let sweep = ((phase * 0.05).fract()) * (w + h * 0.8) - h * 0.4;
-    let sweep_col = hex(if theme::dark() { 0x6ea8ff } else { 0xffffff }, 10);
-    for i in 0..3 {
-        ui.rounded(sweep - i as f32 * 26.0, 0.0, 18.0, h, 9.0, sweep_col);
+    let scale = w.min(h * 1.5);
+    for &(cx, cy, rx, ry, rot, speed, seed, center, edge) in &shapes {
+        let drift_x = (phase * speed + seed).sin() * 0.030;
+        let drift_y = (phase * speed * 0.8 + seed * 1.7).cos() * 0.022;
+        let breathe = 1.0 + 0.05 * (phase * speed * 1.5 + seed).sin();
+        draw_scene_blob(
+            ui,
+            (cx + drift_x) * w,
+            (cy + drift_y) * h,
+            rx * scale * breathe,
+            ry * scale * breathe,
+            rot + (phase * speed * 0.3 + seed).sin() * 0.05,
+            phase * (0.25 + speed) + seed,
+            hex(center, 235),
+            hex(edge, 235),
+        );
     }
 }
 
@@ -823,11 +876,12 @@ impl DrawCtx<'_> {
         let (gx, gy) = (gear[0] + gear[2] * 0.5, gear[1] + gear[3] * 0.5);
         let selected = self.catalog.page == Page::Settings;
         if selected { ui.rounded(gear[0], gear[1], gear[2], gear[3], 12.0, theme::CRIMSON_BADGE()); }
-        ui.rounded(gx - 8.0, gy - 8.0, 16.0, 16.0, 8.0, theme::MUTED());
-        for (dx, dy) in [(0.0, -10.0), (0.0, 10.0), (-10.0, 0.0), (10.0, 0.0)] {
-            ui.rounded(gx + dx - 2.2, gy + dy - 2.2, 4.4, 4.4, 1.6, theme::MUTED());
+        for i in 0..8 {
+            let th = i as f32 * std::f32::consts::TAU / 8.0;
+            ui.rounded(gx + th.cos() * 7.6 - 1.9, gy + th.sin() * 7.6 - 1.9, 3.8, 3.8, 1.9, theme::MUTED());
         }
-        ui.rounded(gx - 4.0, gy - 4.0, 8.0, 8.0, 4.0, if selected { theme::CRIMSON_BADGE() } else { theme::GLASS() });
+        ui.rounded(gx - 6.4, gy - 6.4, 12.8, 12.8, 6.4, theme::MUTED());
+        ui.rounded(gx - 3.0, gy - 3.0, 6.0, 6.0, 3.0, if selected { theme::CRIMSON_BADGE() } else { theme::GLASS() });
         self.targets.push((gear, Action::Page(Page::Settings)));
         draw_account_chip(ui, self.targets, [x + w - account_w, y, account_w, h],
             account_status, self.login.signed_in);
