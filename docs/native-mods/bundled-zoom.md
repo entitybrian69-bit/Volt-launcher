@@ -7,7 +7,9 @@ the APK before it is signed. There is no network download when you tap Install.
 The Horizon Zoom project is distinct from Volt's Zoomify feature.
 
 In the launcher, select a profile, open **Mods**, and find **Horizon Zoom
-2.0.0** (search “Horizon Zoom” if necessary). Tap **Install**. This activates
+2.0.0** in **Horizon browser** (search “Zoom” if necessary). Tap **Install**
+to verify and download the matching registry bundle, or choose **Volt mods**
+to activate the bundled version without a download. This activates
 only the selected profile; **Remove** deactivates it while retaining its
 settings. In-game Options > Mods lists Horizon Zoom and supplies its on/off
 switch, key binding, starting zoom, smoothing, and sensitivity controls.

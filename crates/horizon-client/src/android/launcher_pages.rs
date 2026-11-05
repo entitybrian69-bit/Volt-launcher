@@ -126,6 +126,7 @@ pub(super) enum Action {
     VoltPreset(horizon_client::volt_features::VoltBoostPreset),
     ToggleVoltMod(horizon_client::volt_mods::VoltModId),
     InstallBundledZoom,
+    HorizonModBrowser(bool),
     ModFilter(u8),
     EnableModPack,
     ResetModDefaults,
@@ -755,7 +756,7 @@ impl DrawCtx<'_> {
         // When the keyboard or a very short viewport is open, keep the mod search
         // and its results reachable instead of consuming the screen with the header.
         if self.catalog.page == Page::Mods && h < 320.0 {
-            self.draw_mods_page(ui, area, true, account_status);
+            self.draw_mods_landing(ui, area, account_status);
             return;
         }
         let installed = horizon_client::official_install::ready(self.home);
@@ -811,7 +812,7 @@ impl DrawCtx<'_> {
         let body_h = (y + h - body_y).max(0.0);
         if self.catalog.page == Page::Mods {
             // Single-column list matches the reference and retains search, filters and toggles.
-            self.draw_mods_page(ui, [x, body_y, w, body_h], true, account_status);
+            self.draw_mods_landing(ui, [x, body_y, w, body_h], account_status);
         } else if body_h >= 60.0 {
             if installing {
                 let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
@@ -1679,6 +1680,127 @@ impl DrawCtx<'_> {
                 status_text,
             );
         }
+    }
+
+    /// Choose between Volt's switches and the live Horizon registry.
+    fn draw_mods_landing(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
+        let [x, y, w, h] = area;
+        let tab_w = (w * 0.5).min(160.0);
+        for (i, (label, browser)) in [("Horizon browser", true), ("Volt mods", false)].iter().enumerate() {
+            let rect = [x + i as f32 * (tab_w + 6.0), y, tab_w, 30.0];
+            styled_button(ui, self.targets, rect, label, Action::HorizonModBrowser(*browser),
+                if self.catalog.horizon_mod_browser == *browser { BtnStyle::Primary } else { BtnStyle::Secondary }, true);
+        }
+        let body = [x, y + 36.0, w, (h - 36.0).max(0.0)];
+        if self.catalog.horizon_mod_browser {
+            self.draw_horizon_mod_browser(ui, body);
+        } else {
+            self.draw_mods_page(ui, body, true, account_status);
+        }
+    }
+
+    /// A paged, in-app registry browser. Native downloads remain source-only
+    /// unless their exact bundle is already compiled into this APK.
+    fn draw_horizon_mod_browser(&mut self, ui: &mut Ui, area: [f32; 4]) {
+        let [x, y, w, h] = area;
+        if h < 52.0 || w < 180.0 { return; }
+        let input = [x, y, (w - 96.0).max(40.0), 32.0];
+        ui.rounded(input[0], input[1], input[2], input[3], 8.0, theme::CARD_INNER);
+        ui.border(input[0], input[1], input[2], input[3], 8.0, theme::BORDER);
+        let placeholder = self.catalog.query.is_empty() && self.catalog.editing != Some("search");
+        let text = if placeholder { "Search Horizon mods..." } else { &self.catalog.query };
+        let text = ui.fit_text(Face::Regular, 13.0, text, input[2] - 18.0);
+        ui.text(Face::Regular, 13.0, x + 9.0, y + 6.0,
+            if placeholder { theme::DIM } else { theme::TEXT }, &text);
+        self.targets.push((input, Action::Field("search")));
+        styled_button(ui, self.targets, [x + w - 90.0, y, 90.0, 32.0], "Search",
+            Action::Search, BtnStyle::Primary, true);
+        let status = ui.fit_text(Face::Regular, 11.0, &self.catalog.status, w - 8.0);
+        ui.text(Face::Regular, 11.0, x + 4.0, y + 37.0, theme::MUTED, &status);
+        let top = y + 56.0;
+        let bottom = y + h - 35.0;
+        let view_h = (bottom - top).max(0.0);
+        if view_h < 1.0 { return; }
+        let row_h = 76.0;
+        let step = 83.0;
+        let total = self.catalog.results.len() as f32 * step;
+        let max_scroll = (total - view_h).max(0.0);
+        self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+        *self.list_view = Some([top, bottom, max_scroll]);
+        if self.catalog.results.is_empty() {
+            let hint = if self.catalog.status.is_empty() { "Search the Horizon registry" } else { &self.catalog.status };
+            let hint = ui.fit_text(Face::Regular, 12.0, hint, w - 16.0);
+            ui.text(Face::Regular, 12.0, x + 8.0, top + 8.0, theme::MUTED, &hint);
+        }
+        for (i, p) in self.catalog.results.iter().enumerate() {
+            let ry = top + i as f32 * step - self.catalog.scroll;
+            let button = [x + w - 108.0, ry + 8.0, 98.0, 29.0];
+            let native = crate::catalog::source_only_mod(p);
+            let installed = self.catalog.download_label(p);
+            let supported = !(p.kind == crate::browser::Kind::Mod && !native && !cfg!(target_pointer_width = "64"));
+            let remove_zoom = native && p.id == "zoom" && self.catalog.bundled_zoom_installed && !self.catalog.busy();
+            let can_press = installed.is_none() && supported && !self.catalog.busy();
+            if can_press { self.list_targets.push((button, Action::Install(i))); }
+            if remove_zoom { self.list_targets.push((button, Action::InstallBundledZoom)); }
+            if ry + row_h < top || ry > bottom { continue; }
+            let start = ui.batch_mut().vertices.len();
+            ui.rounded(x, ry, w, row_h, 10.0, theme::CARD);
+            ui.border(x, ry, w, row_h, 10.0, theme::BORDER);
+            let icon = [x + 8.0, ry + 9.0, 42.0, 42.0];
+            ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_BG);
+            if let Some(img) = self.catalog.project_icon(p) {
+                ui.draw_dynamic_rgba(4 + i % 24, img.hash, 64, 64, &img.rgba,
+                    icon[0], icon[1], icon[2], icon[3], 255);
+            }
+            let tx = x + 58.0;
+            let title_width = (w - 178.0).max(32.0);
+            let title = ui.fit_text(Face::Medium, 14.0, &p.title, title_width);
+            ui.text(Face::Medium, 14.0, tx, ry + 8.0, theme::TEXT, &title);
+            let kind = if native {
+                if p.id == "zoom" && self.catalog.bundled_zoom_installed { "Native · bundled build installed" }
+                else if p.id == "zoom" { "Native · 2.0.0 prebuilt only" }
+                else if self.catalog.native_sources.contains(&p.id) { "Native source saved · no Volt build" }
+                else { "Native · source only, no Volt build" }
+            } else if supported { "Horizon mod · 64-bit" } else { "Horizon mod · 64-bit required" };
+            let subtitle = format!("{} · {}", p.author, kind);
+            let subtitle = ui.fit_text(Face::Regular, 11.0, &subtitle, title_width);
+            ui.text(Face::Regular, 11.0, tx, ry + 30.0, theme::DIM, &subtitle);
+            let summary = ui.fit_text(Face::Regular, 11.0, &p.summary, (w - 70.0).max(30.0));
+            ui.text(Face::Regular, 11.0, tx, ry + 49.0, theme::MUTED, &summary);
+            if remove_zoom {
+                let first = self.targets.len();
+                styled_button(ui, self.targets, button, "Remove", Action::InstallBundledZoom, BtnStyle::Secondary, true);
+                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                    self.targets[first].0 = clipped;
+                } else { self.targets.truncate(first); }
+            } else if let Some(label) = installed {
+                draw_centered_text(ui, Face::Medium, 11.0, button, theme::MUTED, &label);
+            } else if can_press {
+                let first = self.targets.len();
+                styled_button(ui, self.targets, button, if native && p.id != "zoom" { "Download" } else { "Install" },
+                    Action::Install(i), BtnStyle::Primary, true);
+                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                    self.targets[first].0 = clipped;
+                } else { self.targets.truncate(first); }
+            } else if !supported {
+                draw_centered_text(ui, Face::Regular, 11.0, button, theme::MUTED, "64-bit only");
+            }
+            let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x + w), ui.to_batch(bottom)];
+            ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+        }
+        let footer = y + h - 30.0;
+        let prev_start = self.targets.len();
+        let prev_active = self.catalog.offset > 0 && !self.catalog.busy();
+        styled_button(ui, self.targets, [x, footer, 86.0, 28.0], "Previous", Action::Previous,
+            if prev_active { BtnStyle::Secondary } else { BtnStyle::Subtle }, true);
+        if !prev_active { self.targets.truncate(prev_start); }
+        let page = format!("Page {}", self.catalog.offset / 12 + 1);
+        draw_centered_text(ui, Face::Regular, 11.0, [x + 88.0, footer, (w - 176.0).max(0.0), 28.0], theme::MUTED, &page);
+        let next_start = self.targets.len();
+        let next_active = self.catalog.results.len() >= 11 && !self.catalog.busy();
+        styled_button(ui, self.targets, [x + w - 86.0, footer, 86.0, 28.0], "Next", Action::Next,
+            if next_active { BtnStyle::Secondary } else { BtnStyle::Subtle }, true);
+        if !next_active { self.targets.truncate(next_start); }
     }
 
     fn draw_mods_page(
@@ -5240,10 +5362,10 @@ impl Launcher {
                 self.error = None;
                 self.catalog.offset = 0;
                 if page == Page::Mods {
+                    self.catalog.query.clear();
                     self.catalog.mod_born = std::time::Instant::now();
-                } else {
-                    self.catalog.browse(&self.home);
                 }
+                self.catalog.browse(&self.home);
             }
             Some(Action::Play) => {
                 self.pending_play = true;
@@ -5474,6 +5596,16 @@ impl Launcher {
                         self.catalog.extras.active_volt_optimizations()
                     );
                 }
+            }
+            Some(Action::HorizonModBrowser(show)) => {
+                self.catalog.horizon_mod_browser = show;
+                self.catalog.query.clear();
+                self.catalog.offset = 0;
+                self.catalog.scroll = 0.0;
+                self.catalog.results.clear();
+                self.catalog.editing = None;
+                if crate::platform::active() { crate::platform::hide(); }
+                self.catalog.browse(&self.home);
             }
             Some(Action::InstallBundledZoom) => {
                 let game_dir = self.catalog.config.game_home(&self.home);

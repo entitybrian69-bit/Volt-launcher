@@ -2,6 +2,12 @@
 //! This is not a generic `.hnmod` loader and never executes downloaded code.
 use std::{fs, io, path::Path};
 
+/// The only registry bundle compiled into the current Android APK.
+pub fn is_bundled_zoom(id: &str, version: &str, sha256: &str) -> bool {
+    id == "zoom" && version == "2.0.0"
+        && sha256 == "49fa2d7d635225c53304fbf1477606c0677eb23d94dac75b730f6c3ba065f127"
+}
+
 const ZOOM_MARKER: &str = "volt-bundled-zoom-2.0.0.installed";
 
 /// The marker belongs to this profile and this exact bundled implementation.
@@ -50,6 +56,14 @@ pub fn set_zoom_installed(home: &Path, install: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn prebuilt_match_is_exact() {
+        let hash = "49fa2d7d635225c53304fbf1477606c0677eb23d94dac75b730f6c3ba065f127";
+        assert!(is_bundled_zoom("zoom", "2.0.0", hash));
+        assert!(!is_bundled_zoom("zoom", "2.0.1", hash));
+        assert!(!is_bundled_zoom("other", "2.0.0", hash));
+        assert!(!is_bundled_zoom("zoom", "2.0.0", "bad"));
+    }
     #[test]
     fn profile_install_remove_preserves_other_mods_and_keys() {
         let dir = std::env::temp_dir().join(format!("volt-bundled-zoom-{}", std::process::id()));

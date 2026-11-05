@@ -2,10 +2,10 @@
 
 Horizon `.hnmod` files contain Rust source transformations; they are not
 Android-loadable plugins. This is an **offline inventory and experimental
-per-mod Android type-check probe**, not an in-app installer, APK distribution
-service, security sandbox, or compatibility certification. It cannot yet make
-Horizon mods usable in Volt. It does not implement dynamic loading or arbitrary
-mod combinations.
+per-mod Android type-check probe**, not a general-purpose APK distribution service, security sandbox, or
+compatibility certification. A separate limited Android browser and bundled
+Zoom installer are described in `horizon-browser.md`; this probe does not
+implement dynamic loading or arbitrary mod combinations.
 
 ## Registry snapshot
 

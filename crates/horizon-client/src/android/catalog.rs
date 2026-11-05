@@ -202,7 +202,7 @@ impl Page {
         }
     }
     pub fn is_catalog(self) -> bool {
-        matches!(self, Self::Packs | Self::Shaders)
+        matches!(self, Self::Mods | Self::Packs | Self::Shaders)
     }
 }
 #[derive(Clone)]
@@ -214,6 +214,7 @@ pub struct ProjectIcon {
 
 enum Reply {
     Done(String, horizon_client::content_files::Kind),
+    NativeSource(String),
 }
 pub struct Catalog {
     pub local: Vec<LocalItem>,
@@ -231,6 +232,8 @@ pub struct Catalog {
     pub offset: usize,
     pub scroll: f32,
     pub mod_filter: u8,
+    pub horizon_mod_browser: bool,
+    pub native_sources: std::collections::HashSet<String>,
     pub bundled_zoom_installed: bool,
     pub bundled_zoom_enabled: bool,
     pub mod_born: std::time::Instant,
@@ -286,6 +289,8 @@ impl Catalog {
             offset: 0,
             scroll: 0.0,
             mod_filter: 0,
+            horizon_mod_browser: true,
+            native_sources: std::collections::HashSet::new(),
             bundled_zoom_installed: false,
             bundled_zoom_enabled: false,
             mod_born: std::time::Instant::now(),
@@ -336,6 +341,13 @@ impl Catalog {
             .filter(|e| game.join(&e.file).is_file())
             .map(|e| (e.source, e.project.clone()))
             .collect();
+        self.native_sources = std::fs::read_dir(game.join("mod-browser/native-sources"))
+            .into_iter().flatten().flatten()
+            .filter_map(|e| {
+                if !e.file_type().is_ok_and(|t| t.is_file()) { return None; }
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.strip_suffix(".hnmod").map(str::to_owned)
+            }).collect();
         let on = horizon_client::mod_list::ModList::load(&game);
         self.bundled_zoom_installed = horizon_client::bundled_native::zoom_installed(&game);
         self.bundled_zoom_enabled = self.bundled_zoom_installed && !on.disabled.contains("zoom");
@@ -398,6 +410,9 @@ impl Catalog {
                 *self.progress.lock().unwrap_or_else(|e| e.into_inner()) * 100.0
             ));
         }
+        if source_only_mod(project) && project.id == "zoom" && self.bundled_zoom_installed {
+            return Some("Installed".into());
+        }
         if self
             .downloaded
             .iter()
@@ -458,6 +473,7 @@ impl Catalog {
                     self.status = s;
                     self.show_installed(Some(kind));
                 }
+                Ok(Reply::NativeSource(s)) => self.status = s,
                 Err(e) => self.status = e,
             }
             self.refresh(home);
@@ -482,7 +498,7 @@ impl Catalog {
         if let Some(result) = result {
             self.search_worker = None;
             let visible = self.searches.finish(result.as_ref().ok().cloned());
-            if visible && self.page.is_catalog() && !self.busy() {
+            if visible && self.page.is_catalog() && (self.page != Page::Mods || self.horizon_mod_browser) && !self.busy() {
                 match result {
                     Ok(items) => self.show_results(items, home),
                     Err(error) => self.status = error,
@@ -504,24 +520,14 @@ impl Catalog {
         }
     }
     fn request_search(&mut self, home: &Path, refresh: bool) {
-        if !self.page.is_catalog() {
-            return;
-        }
-        if self.page == Page::Mods && self.query.trim().starts_with("https://") {
-            self.searches.cancel_interest();
-            if refresh {
-                self.import_native(home);
-            } else {
-                self.results.clear();
-                self.status = "Press Import .hmod to download this HTTPS link".into();
-            }
+        if !self.page.is_catalog() || (self.page == Page::Mods && !self.horizon_mod_browser) {
             return;
         }
         self.scroll = 0.0;
         let origin = match self.page {
             Page::Packs => self.config.pack_source,
             Page::Shaders => self.config.shader_source,
-            Page::Mods => self.config.mod_source,
+            Page::Mods => crate::shader_catalog::Origin::Horizon,
             _ => crate::shader_catalog::Origin::Horizon,
         };
         let key = (self.page, origin, self.query.trim().to_owned(), self.offset);
@@ -541,19 +547,8 @@ impl Catalog {
         {
             "No Horizon shader packs match this search. Try another query or import a .hshader."
                 .into()
-        } else if self.page == Page::Mods && self.config.mod_source != Origin::Horizon {
-            format!(
-                "{} Java mods ({}) - browsing; this Rust client runs native .hmod mods",
-                items.len(),
-                self.config.mod_source.label()
-            )
         } else if self.page == Page::Mods {
-            let native = items.iter().filter(|p| source_only_mod(p)).count();
-            format!(
-                "{} .hmod / {} source-only .hnmod (not supported yet)",
-                items.len() - native,
-                native
-            )
+            format!("{} Horizon results · native builds are limited", items.len())
         } else {
             let active_origin = match self.page {
                 Page::Packs => self.config.pack_source,
@@ -671,14 +666,32 @@ impl Catalog {
         let Some(project) = self.results.get(index).cloned() else {
             return;
         };
-        if source_only_mod(&project) {
-            self.status = "This .hnmod needs a separately compiled client. Android support is planned; sandboxed .hmod mods can be installed now.".into();
-            return;
-        }
         if self.busy() || self.download_label(&project).is_some() {
             return;
         }
         let game = self.config.game_home(home);
+        if source_only_mod(&project) {
+            if project.id == "accurate_block_placement" {
+                self.status = "This mod is excluded from Volt.".into();
+                return;
+            }
+            self.downloading = Some((project.source, project.id.clone()));
+            self.failed = None;
+            *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = 0.0;
+            let progress = self.progress.clone();
+            self.job("Checking and downloading native source...", move || {
+                let (version, hash) = browser::horizon::download_native_source(&project, &game, &|_, p| {
+                    if p.is_finite() { *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clamp(0.0, 1.0); }
+                })?;
+                if horizon_client::bundled_native::is_bundled_zoom(&project.id, &version, &hash) {
+                    horizon_client::bundled_native::set_zoom_installed(&game, true).map_err(|e| e.to_string())?;
+                    Ok(Reply::NativeSource("Zoom installed for this profile from the verified bundle and bundled APK code.".into()))
+                } else {
+                    Ok(Reply::NativeSource(format!("{} source downloaded; no compatible Volt APK build is available yet.", project.title)))
+                }
+            });
+            return;
+        }
         if project.kind != Kind::ResourcePack
             && !(project.kind == Kind::Shader
                 && matches!(
@@ -732,6 +745,9 @@ impl Catalog {
                 })?
                 .len()
             };
+            if project.kind == Kind::Mod {
+                return Ok(Reply::NativeSource(format!("Installed {count} item(s). Open Play to load this profile.")));
+            }
             Ok(Reply::Done(
                 format!("Installed {count} item(s). Open Play to load this profile."),
                 match project.kind {
@@ -903,7 +919,11 @@ fn run_single_source_query(
     query.offset = offset;
     query.limit = limit;
     match origin {
-        Origin::Horizon => browser::horizon::Registry.search(&query),
+        Origin::Horizon => {
+            let mut results = browser::horizon::Registry.search(&query)?;
+            if page == Page::Mods { results.retain(|p| p.id != "accurate_block_placement"); }
+            Ok(results)
+        },
         Origin::Modrinth => {
             query.everything = true;
             if page == Page::Shaders {
