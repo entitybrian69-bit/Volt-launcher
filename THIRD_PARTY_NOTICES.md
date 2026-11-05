@@ -1289,3 +1289,37 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
 ```
+
+## Horizon Zoom native mod 2.0.0
+
+`crates/horizon-client/src/game/official_zoom.rs` is the runtime of Horizon's
+[Zoom 2.0.0](https://github.com/horizon-rust/horizon-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native/zoom),
+by Ludovic Marie and the Horizon contributors, under the MIT License. The full
+license is in `crates/horizon-client/src/game/licenses/HORIZON-ZOOM-MIT.txt`.
+Volt adds a profile-state reset, integrates its hooks, and provides profile
+activation on Android; its
+Horizon key and settings remain distinct from Volt's Zoomify implementation.
+
+```text
+MIT License
+
+Copyright (c) 2026 Ludovic Marie and the Horizon contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

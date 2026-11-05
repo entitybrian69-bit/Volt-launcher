@@ -231,6 +231,8 @@ pub struct Catalog {
     pub offset: usize,
     pub scroll: f32,
     pub mod_filter: u8,
+    pub bundled_zoom_installed: bool,
+    pub bundled_zoom_enabled: bool,
     pub mod_born: std::time::Instant,
     pub volt_boost_modal: bool,
     pub volt_modal_scroll: f32,
@@ -284,6 +286,8 @@ impl Catalog {
             offset: 0,
             scroll: 0.0,
             mod_filter: 0,
+            bundled_zoom_installed: false,
+            bundled_zoom_enabled: false,
             mod_born: std::time::Instant::now(),
             volt_boost_modal: false,
             volt_modal_scroll: 0.0,
@@ -333,6 +337,8 @@ impl Catalog {
             .map(|e| (e.source, e.project.clone()))
             .collect();
         let on = horizon_client::mod_list::ModList::load(&game);
+        self.bundled_zoom_installed = horizon_client::bundled_native::zoom_installed(&game);
+        self.bundled_zoom_enabled = self.bundled_zoom_installed && !on.disabled.contains("zoom");
         let settings = horizon_client::settings::Settings::load(&game.join("options.txt"));
         self.extras = settings.extras.clone();
         horizon_client::volt_mods::sync_catalog_from_engine(&mut self.extras, &settings.horizon);

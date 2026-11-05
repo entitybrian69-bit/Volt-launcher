@@ -329,6 +329,7 @@ impl Game<'_> {
         // A native mod of the same id (one built into this game) takes over.
         let mut native = Vec::new();
         self.native_mods(&mut native);
+        self.bundled_zoom_list(&mut native);
         let enabled = &self.settings.mods.enabled;
         let on = |id: &str| {
             (enabled.contains(id) || dev_ids.iter().any(|d| d == id))

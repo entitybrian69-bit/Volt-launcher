@@ -251,6 +251,7 @@ jobs:
               ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
               ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
               ["cargo", "test", "-p", "horizon-client-input", "--lib", "keybinds"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "bundled_native"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "translating_ui_subtree_also_moves_depth_scissors"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
@@ -274,6 +275,8 @@ jobs:
                   print(f"\n::error title=Unit test failed ({' '.join(cmd)})::{tail}")
                   sys.exit(proc.returncode)
           PY
+          rustc --edition 2024 --test crates/horizon-client/src/game/official_zoom.rs -o "$RUNNER_TEMP/official-zoom-tests"
+          "$RUNNER_TEMP/official-zoom-tests"
 
       - name: Cache Gradle 8.14 distribution
         uses: actions/cache@v4

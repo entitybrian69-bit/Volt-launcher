@@ -125,6 +125,7 @@ pub(super) enum Action {
     VoltExtra(horizon_client::extras::Item),
     VoltPreset(horizon_client::volt_features::VoltBoostPreset),
     ToggleVoltMod(horizon_client::volt_mods::VoltModId),
+    InstallBundledZoom,
     ModFilter(u8),
     EnableModPack,
     ResetModDefaults,
@@ -787,7 +788,7 @@ impl DrawCtx<'_> {
         }
         let tabs_y = ay + 64.0;
         let tabs = [("Overview", Action::HomeTab(HomeTab::Overview)),
-            ("Mods 50", Action::Page(Page::Mods)), ("Worlds", Action::HomeTab(HomeTab::Worlds)),
+            ("Mods", Action::Page(Page::Mods)), ("Worlds", Action::HomeTab(HomeTab::Worlds)),
             ("Multiplayer", Action::HomeTab(HomeTab::Multiplayer)), ("Packs", Action::Page(Page::Packs)),
             ("Console", Action::HomeTab(HomeTab::Console))];
         let tab_w = (w / tabs.len() as f32).min(105.0);
@@ -1960,7 +1961,11 @@ impl DrawCtx<'_> {
             return;
         }
 
-        if visible.is_empty() {
+        let native_installed = self.catalog.bundled_zoom_installed;
+        let native_enabled = self.catalog.bundled_zoom_enabled;
+        let native_visible = (q.is_empty() || "horizon zoom official native bundled".contains(&q))
+            && match filt { 0 | 3 => true, 1 => native_enabled, 2 => !native_enabled, _ => false };
+        if visible.is_empty() && !native_visible {
             ui.rounded(cx, top, cw, view_h, 14.0, theme::CARD);
             ui.border(cx, top, cw, view_h, 14.0, theme::BORDER);
             draw_centered_text(
@@ -1993,18 +1998,50 @@ impl DrawCtx<'_> {
         let card_w = (cw - (cols.saturating_sub(1) as f32) * gap) / cols as f32;
         let card_h = if compact { 82.0 } else { 88.0 };
         let row_step = card_h + gap;
-        let total_rows = visible.len().div_ceil(cols);
+        let total_rows = (visible.len() + usize::from(native_visible)).div_ceil(cols);
         let content_h = (total_rows as f32 * row_step - gap).max(0.0);
         let max_scroll = (content_h - view_h).max(0.0);
         self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
         *self.list_view = Some([top, bottom, max_scroll]);
 
         let born_age = self.catalog.mod_born.elapsed().as_secs_f32();
-        for (i, m) in visible.iter().enumerate() {
+        for i in 0..(visible.len() + usize::from(native_visible)) {
             let row = i / cols;
             let col_idx = i % cols;
             let x = cx + col_idx as f32 * (card_w + gap);
             let y = top + row as f32 * row_step - self.catalog.scroll;
+            if native_visible && i == 0 {
+                let rect = [x, y, card_w, card_h];
+                self.list_targets.push((rect, Action::InstallBundledZoom));
+                if y + card_h < top - 4.0 || y > bottom + 4.0 { continue; }
+                let start = ui.batch_mut().vertices.len();
+                ui.rounded(x, y, card_w, card_h, 11.0, theme::CARD);
+                ui.border(x, y, card_w, card_h, 11.0, theme::BORDER);
+                let button_w = if native_installed { 92.0 } else { 98.0 };
+                let title_w = (card_w - button_w - 30.0).max(30.0);
+                let title = ui.fit_text(Face::Medium, 14.5, "Horizon Zoom 2.0.0", title_w);
+                ui.text(Face::Medium, 14.5, x + 12.0, y + 10.0, theme::TEXT, &title);
+                let state = if self.catalog.status.starts_with("Could not change Horizon Zoom:") {
+                    self.catalog.status.as_str()
+                } else if native_installed {
+                    if native_enabled { "Installed · On in game" } else { "Installed · Off in game" }
+                } else { "Bundled · not installed" };
+                let state = ui.fit_text(Face::Regular, 11.0, state, title_w);
+                ui.text(Face::Regular, 11.0, x + 12.0, y + 30.0, theme::DIM, &state);
+                let info = ui.fit_text(Face::Regular, 11.0, "Hold Z · add a Z touch button in Controls Studio", card_w - 24.0);
+                ui.text(Face::Regular, 11.0, x + 12.0, y + 52.0, theme::MUTED, &info);
+                let b = [x + card_w - button_w - 10.0, y + 8.0, button_w, 29.0];
+                let target_start = self.targets.len();
+                styled_button(ui, self.targets, b, if native_installed { "Remove" } else { "Install" },
+                    Action::InstallBundledZoom, BtnStyle::Secondary, true);
+                if let Some(clipped) = super::gesture::clip_target_y(b, top, bottom) {
+                    self.targets[target_start].0 = clipped;
+                } else { self.targets.truncate(target_start); }
+                let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
+                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+                continue;
+            }
+            let m = visible[i - usize::from(native_visible)];
             let sw_rect = [x + card_w - 58.0, y + 12.0, 46.0, 24.0];
             let act = Action::ToggleVoltMod(m.id);
             self.list_targets.push((sw_rect, act));
@@ -5436,6 +5473,20 @@ impl Launcher {
                         self.catalog.extras.volt_preset.label(),
                         self.catalog.extras.active_volt_optimizations()
                     );
+                }
+            }
+            Some(Action::InstallBundledZoom) => {
+                let game_dir = self.catalog.config.game_home(&self.home);
+                let install = !self.catalog.bundled_zoom_installed;
+                match horizon_client::bundled_native::set_zoom_installed(&game_dir, install) {
+                    Ok(()) => {
+                        self.catalog.bundled_zoom_installed = install;
+                        self.catalog.bundled_zoom_enabled = install;
+                        self.catalog.status = if install {
+                            "Horizon Zoom installed from the APK. Hold Z; add a Z button in Controls Studio. Settings: in-game Mods.".into()
+                        } else { "Horizon Zoom removed from this profile; its settings are kept.".into() };
+                    }
+                    Err(e) => self.catalog.status = format!("Could not change Horizon Zoom: {e}"),
                 }
             }
             Some(Action::ToggleVoltMod(id)) => {

@@ -119,7 +119,7 @@ pub const STUDIO_BINDINGS: &[(&str, &str)] = &[
     ("key.keyboard.tab", "Player List (Tab)"),
     ("key.keyboard.f3", "Debug Overlay (F3)"),
     ("key.keyboard.f5", "Perspective (F5)"),
-    ("key.keyboard.z", "Volt Zoom (Z)"),
+    ("key.keyboard.z", "Horizon Zoom (Z)"),
     ("key.keyboard.b", "New Waypoint (B)"),
     ("key.keyboard.w", "Move Forward (W)"),
     ("key.keyboard.a", "Strafe Left (A)"),

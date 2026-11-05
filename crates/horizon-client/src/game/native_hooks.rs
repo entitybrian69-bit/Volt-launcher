@@ -2244,6 +2244,7 @@ impl Game<'_> {
     pub(super) fn list_native_mods(&mut self) {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
+        self.bundled_zoom_list(&mut mods);
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings
@@ -2253,6 +2254,7 @@ impl Game<'_> {
         for m in mods {
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
+            self.bundled_zoom_settings(&m.id, &mut buttons);
             let page = NativePage {
                 keys: m.keys,
                 buttons,
@@ -2275,6 +2277,7 @@ impl Game<'_> {
             return;
         };
         self.native_settings_click(&id, button);
+        self.bundled_zoom_click(&id, button);
         self.native_settings_refresh(i);
     }
     /// Native mod `i`'s page opened: its labels asked again, so that they
@@ -2285,6 +2288,7 @@ impl Game<'_> {
         };
         let mut buttons = Vec::new();
         self.native_settings(&id, &mut buttons);
+        self.bundled_zoom_settings(&id, &mut buttons);
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
@@ -2300,17 +2304,20 @@ impl Game<'_> {
                 self.native_panel_key(name);
             }
             self.native_key(name, pressed);
+            self.bundled_zoom_key(name, pressed);
         }
     }
     /// A mouse button while playing, for `native_key`.
     pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
         let name = keybinds::mouse_name(button);
         self.native_key(&name, pressed);
+        self.bundled_zoom_key(&name, pressed);
     }
     /// Wheel steps while playing: whether a native mod took them.
     pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {
         let mut claimed = false;
         self.native_wheel(steps, &mut claimed);
+        self.bundled_zoom_wheel(steps, &mut claimed);
         claimed
     }
     /// A client mod's command: a native mod's first, then a WebAssembly mod's.
@@ -2327,6 +2334,7 @@ impl Game<'_> {
         }
         let mut zoom = None;
         self.native_zoom(&mut zoom);
+        self.bundled_zoom_view(&mut zoom);
         // As the WebAssembly runtime clamped a mod's zoom.
         let z = zoom?;
         let factor = finite(z.factor, 1.0, 10.0);

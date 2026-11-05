@@ -174,6 +174,9 @@ mod moved_extras;
 mod moving_pistons;
 mod music;
 mod names;
+#[cfg(target_os = "android")]
+mod official_zoom;
+mod official_zoom_bridge;
 mod native_hooks;
 mod native_lifecycle;
 mod native_menus;
