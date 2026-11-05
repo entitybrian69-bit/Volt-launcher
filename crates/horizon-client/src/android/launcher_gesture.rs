@@ -11,6 +11,13 @@ pub(super) fn reveal(scroll: f32, row: [f32; 4], view: [f32; 3]) -> f32 {
     };
     (scroll + adjustment).clamp(0.0, maximum.max(0.0))
 }
+/// Restrict a touch target to the visible vertical list viewport.
+pub(super) fn clip_target_y(rect: [f32; 4], top: f32, bottom: f32) -> Option<[f32; 4]> {
+    let y0 = rect[1].max(top);
+    let y1 = (rect[1] + rect[3]).min(bottom);
+    (y1 > y0 && rect[2] > 0.0).then_some([rect[0], y0, rect[2], y1 - y0])
+}
+
 pub(crate) struct Drag {
     pub(crate) pointer_id: Option<u64>,
     origin: [f64; 2],
@@ -92,6 +99,16 @@ mod tests {
             reveal(490.0, [0.0, 700.0, 100.0, 60.0], [100.0, 400.0, 500.0]),
             500.0
         );
+    }
+
+    #[test]
+    fn clipped_touch_targets_never_reach_outside_the_list() {
+        assert_eq!(clip_target_y([10.0, 80.0, 30.0, 40.0], 100.0, 200.0),
+            Some([10.0, 100.0, 30.0, 20.0]));
+        assert_eq!(clip_target_y([10.0, 180.0, 30.0, 40.0], 100.0, 200.0),
+            Some([10.0, 180.0, 30.0, 20.0]));
+        assert_eq!(clip_target_y([10.0, 40.0, 30.0, 40.0], 100.0, 200.0), None);
+        assert_eq!(clip_target_y([10.0, 200.0, 30.0, 40.0], 100.0, 200.0), None);
     }
 
     #[test]
