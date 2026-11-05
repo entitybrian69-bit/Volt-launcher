@@ -11,8 +11,9 @@ mod combinations.
 
 `horizon-registry-78853c19.json` lists the 72 native entries at the pinned
 [horizon-mods commit 78853c19a6d48640ef500f3c8ff8988923576f3f](https://github.com/horizon-rust/horizon-mods/tree/78853c19a6d48640ef500f3c8ff8988923576f3f).
-All 144 ABI results are `not_checked`: this inventory validates metadata only,
-not bundles, compilation, runtime, accessibility, safety or licenses. The
+The inventory baseline labels all 144 ABI entries `not_checked`: inventory
+alone validates metadata only, not bundles, compilation, runtime, accessibility,
+safety or licenses. See the separately recorded probe result below. The
 snapshot is not a live catalog and is not used by the launcher. The explicitly
 removed Accurate Block Placement project is excluded from probing, even if
 present in the upstream registry. Latest means the first listed `.hnmod`
@@ -31,6 +32,22 @@ python3 -m unittest discover -s tools/native_mods -v
 The revision parameter records what the operator verified; the tool does not
 verify the registry directory's provenance. Regenerate it deliberately and
 review changes, including revocations, before trusting it.
+
+## Recorded result
+
+[Run 42021388714](https://github.com/entitybrian69-bit/Volt-launcher/actions/runs/42021388714)
+checked official Zoom 2.0.0 (bundle SHA-256
+`49fa2d7d635225c53304fbf1477606c0677eb23d94dac75b730f6c3ba065f127`)
+on Volt commit `7ca0e07d1b62fa3e71368ace1a43a7e6d4b27367`:
+
+| ABI | Result |
+| --- | --- |
+| arm64-v8a | `compile_passed` (type-check only) |
+| armeabi-v7a | `compile_passed` (type-check only) |
+
+This run did not link an APK or test runtime behavior or touch controls. None
+of the other 71 projects has been compiled by this pipeline. Its CI artifacts
+are retained for 14 days; their logs may be unavailable outside GitHub Actions.
 
 ## Probe
 
