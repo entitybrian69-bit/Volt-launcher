@@ -70,6 +70,7 @@ pub(super) enum Action {
     ToggleAppearance,
     CycleAccent,
     ConnectServer(usize),
+    SaveServer,
     Page(Page),
     Play,
     Search,
@@ -931,12 +932,16 @@ impl DrawCtx<'_> {
             HomeTab::Multiplayer => {
                 ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Multiplayer");
                 ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), "Select a saved server or enter an address");
-                let r = [x + 8.0, y + 56.0, (w - 16.0).min(380.0), 38.0];
+                let r = [x + 8.0, y + 56.0, (w - 104.0).max(80.0).min(380.0), 38.0];
                 ui.rounded(r[0], r[1], r[2], r[3], 10.0, theme::CARD_INNER());
                 let value = if self.catalog.config.server.is_empty() { "Server address (optional)" } else { &self.catalog.config.server };
                 let value = ui.fit_text(Face::LauncherRegular, 13.0, value, r[2] - 24.0);
                 ui.text(Face::LauncherRegular, 13.0, r[0] + 12.0, text_vcenter(r[1], r[3], 13.0), theme::TEXT(), &value);
                 self.targets.push((r, Action::Field("server")));
+                if w >= 200.0 {
+                    styled_button(ui, self.targets, [r[0] + r[2] + 8.0, r[1], 80.0, r[3]],
+                        "Save", Action::SaveServer, BtnStyle::Secondary, true);
+                }
                 let servers = &self.catalog.saved_servers;
                 let top = y + 104.0;
                 let bottom = y + h;
@@ -5475,6 +5480,24 @@ impl Launcher {
                     self.catalog.mod_born = std::time::Instant::now();
                 }
                 self.catalog.browse(&self.home);
+            }
+            Some(Action::SaveServer) => {
+                let home = self.catalog.config.game_home(&self.home);
+                let address = self.catalog.config.server.trim().to_owned();
+                let result = crate::server_list::List::try_load(&home).and_then(|mut list| {
+                    if list.servers().iter().any(|server| server.ip.eq_ignore_ascii_case(&address)) {
+                        return Err("This server is already saved.".into());
+                    }
+                    list.add(&address, &address)?;
+                    list.save(&home)
+                });
+                self.catalog.status = match result {
+                    Ok(()) => {
+                        self.catalog.saved_servers = crate::server_list::List::load(&home).servers();
+                        "Server saved to this instance.".into()
+                    }
+                    Err(error) => error,
+                };
             }
             Some(Action::ConnectServer(index)) => {
                 if let Some(server) = self.catalog.saved_servers.get(index) {
