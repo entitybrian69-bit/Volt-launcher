@@ -1765,7 +1765,10 @@ impl DrawCtx<'_> {
             let subtitle = format!("{} · {}", p.author, kind);
             let subtitle = ui.fit_text(Face::Regular, 11.0, &subtitle, title_width);
             ui.text(Face::Regular, 11.0, tx, ry + 30.0, theme::DIM, &subtitle);
-            let summary = ui.fit_text(Face::Regular, 11.0, &p.summary, (w - 70.0).max(30.0));
+            let summary = if native && p.id != "zoom" {
+                "Source only — needs a compatible Android build"
+            } else { &p.summary };
+            let summary = ui.fit_text(Face::Regular, 11.0, summary, (w - 70.0).max(30.0));
             ui.text(Face::Regular, 11.0, tx, ry + 49.0, theme::MUTED, &summary);
             if remove_zoom {
                 let first = self.targets.len();
