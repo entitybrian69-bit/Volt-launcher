@@ -30,13 +30,17 @@ pub(crate) mod theme {
     pub const DIM: u32 = hex(0x7296aa, 255);
     pub const ONLINE: u32 = hex(0x22C55E, 255);
     // Translucent plates over the launcher scene (not a GPU backdrop blur).
-    pub const GLASS: u32 = hex(0x081e31, 225);
+    pub const GLASS: u32 = hex(0x081e31, 180);
     pub const GLASS_INNER: u32 = hex(0xFFFFFF, 16);
     pub const GLASS_BORDER: u32 = hex(0xFFFFFF, 34);
 }
 
 #[derive(Clone, Copy, PartialEq)]
+pub(super) enum HomeTab { Overview, Worlds, Multiplayer, Console }
+
+#[derive(Clone, Copy, PartialEq)]
 pub(super) enum Action {
+    HomeTab(HomeTab),
     Page(Page),
     Play,
     Search,
@@ -445,28 +449,36 @@ fn wrap_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32, max_lines:
 /// backdrop is approximated with fixed quads, without a costly blur pass on mobile.
 fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
-    let top = hex(0x071a2c, 255);
-    let horizon = hex(0x07537a, 255);
-    for i in 0..28 {
-        let y = h * i as f32 / 28.0;
-        let t = (i as f32 / 27.0).powf(1.5);
-        ui.rounded(0.0, y, w, h / 28.0 + 1.0, 0.0, lerp(top, horizon, t));
-    }
-    for i in 0..42 {
-        let x = w * (((i * 73 + 19) % 101) as f32 / 101.0);
-        let y = h * (((i * 37 + 11) % 69) as f32 / 100.0);
-        let size = if i % 7 == 0 { 2.0 } else { 1.0 };
-        ui.rounded(x, y, size, size, 0.0, hex(0xd8f4ff, if i % 3 == 0 { 130 } else { 65 }));
-    }
-    // Distant pixel ridgelines keep the scene inexpensive to render.
-    for layer in 0..3 {
-        let color = [hex(0x074566, 170), hex(0x063452, 210), hex(0x04263c, 245)][layer];
-        let base = h * (0.72 + layer as f32 * 0.09);
+    // A small fixed pixel grid creates a smooth cyan horizon and a bright,
+    // off-centre sunset. No runtime textures or blur render passes are needed.
+    let sky = hex(0x061b2c, 255);
+    let haze = hex(0x076184, 255);
+    let glow = hex(0x29bbe4, 255);
+    for row in 0..20 {
         for col in 0..32 {
-            let x = col as f32 * w / 32.0;
-            let rise = (((col * 13 + layer * 17) % 11) as f32 / 11.0) * h * 0.045;
-            let y = base - rise;
-            ui.rounded(x, y, w / 32.0 + 1.0, h - y, 0.0, color);
+            let nx = (col as f32 + 0.5) / 32.0;
+            let ny = (row as f32 + 0.5) / 20.0;
+            let base = lerp(sky, haze, (ny * 0.82).powf(1.7));
+            let d = (((nx - 0.76) * 1.25).powi(2) + ((ny - 0.70) * 1.55).powi(2)).sqrt();
+            let light = (1.0 - d / 0.44).clamp(0.0, 1.0).powi(2) * 0.72;
+            ui.rounded(col as f32 * w / 32.0, row as f32 * h / 20.0,
+                w / 32.0 + 1.0, h / 20.0 + 1.0, 0.0, lerp(base, glow, light));
+        }
+    }
+    for i in 0..48 {
+        let x = w * (((i * 73 + 19) % 101) as f32 / 101.0);
+        let y = h * (((i * 37 + 11) % 70) as f32 / 100.0);
+        let size = if i % 8 == 0 { 1.8 } else { 1.0 };
+        ui.rounded(x, y, size, size, 0.0, hex(0xd8f4ff, if i % 3 == 0 { 125 } else { 70 }));
+    }
+    for layer in 0..3 {
+        let color = [hex(0x07516c, 190), hex(0x063b56, 225), hex(0x042a42, 250)][layer];
+        let base = h * (0.79 + layer as f32 * 0.07);
+        for col in 0..48 {
+            let wave = ((col as f32 * 0.31 + layer as f32 * 2.1).sin() * 0.5 + 0.5)
+                * h * (0.055 + layer as f32 * 0.01);
+            let y = base - wave;
+            ui.rounded(col as f32 * w / 48.0, y, w / 48.0 + 1.0, h - y, 0.0, color);
         }
     }
 }
@@ -577,6 +589,7 @@ struct DrawCtx<'a> {
     worker: &'a Option<mpsc::Receiver<std::result::Result<(), String>>>,
     error: &'a Option<String>,
     catalog: &'a mut Catalog,
+    home_tab: HomeTab,
     targets: &'a mut Vec<([f32; 4], Action)>,
     list_targets: &'a mut Vec<([f32; 4], Action)>,
     list_view: &'a mut Option<[f32; 3]>,
@@ -594,22 +607,38 @@ impl DrawCtx<'_> {
     fn draw_sidebar(&mut self, ui: &mut Ui, rx: f32, ry: f32, rw: f32, rh: f32) {
         ui.rounded(rx, ry, rw, rh, 16.0, theme::GLASS);
         ui.border(rx, ry, rw, rh, 16.0, theme::GLASS_BORDER);
-        ui.text(Face::Medium, 13.0, rx + 14.0, ry + 15.0, theme::MUTED, "Instances");
-        styled_button(ui, self.targets, [rx + rw - 72.0, ry + 9.0, 60.0, 30.0],
-            "Change", Action::Profile, BtnStyle::Subtle, true);
+        ui.text(Face::Medium, 12.0, rx + 14.0, ry + 16.0, theme::MUTED, "Instances");
+        let add = [rx + rw - 42.0, ry + 7.0, 32.0, 32.0];
+        draw_centered_text(ui, Face::Medium, 22.0, add, theme::TEXT, "+");
+        self.targets.push((add, Action::Profile)); // chooser includes Create profile
 
-        // Volt exposes its real current profile, rather than inventing nightly instances.
-        let instance = [rx + 9.0, ry + 50.0, rw - 18.0, 58.0];
-        ui.rounded(instance[0], instance[1], instance[2], instance[3], 10.0, theme::GLASS_INNER);
-        ui.border(instance[0], instance[1], instance[2], instance[3], 10.0, theme::GLASS_BORDER);
-        ui.volt_logo(rx + 15.0, ry + 58.0, 38.0, 38.0);
-        let name = format!("Volt · Profile {}", self.catalog.config.profile);
-        let name = ui.fit_text(Face::Medium, 14.0, &name, rw - 72.0);
-        ui.text(Face::Medium, 14.0, rx + 60.0, ry + 57.0, theme::TEXT, &name);
-        ui.rounded(rx + 60.0, ry + 83.0, 6.0, 6.0, 3.0, theme::ONLINE);
-        let state = if horizon_client::official_install::ready(self.home) { "Ready · 26.3" } else { "Setup · 26.3" };
-        ui.text(Face::Regular, 11.5, rx + 71.0, ry + 77.0, theme::MUTED, state);
-        self.targets.push((instance, Action::Page(Page::Play)));
+        let mut ids = vec![0, self.catalog.config.profile];
+        ids.extend(std::fs::read_dir(self.home.join("profiles")).into_iter().flatten().flatten()
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().to_str()?.strip_prefix("profile-")?.parse::<u32>().ok()));
+        ids.sort_unstable();
+        ids.dedup();
+        let max_rows = (((rh - 260.0).max(55.0) / 54.0) as usize).clamp(1, 7);
+        if ids.len() > max_rows && !ids[..max_rows].contains(&self.catalog.config.profile) {
+            ids.truncate(max_rows.saturating_sub(1));
+            ids.push(self.catalog.config.profile);
+        } else {
+            ids.truncate(max_rows);
+        }
+        for (index, id) in ids.iter().enumerate() {
+            let row = [rx + 8.0, ry + 48.0 + index as f32 * 54.0, rw - 16.0, 50.0];
+            if *id == self.catalog.config.profile {
+                ui.rounded(row[0], row[1], row[2], row[3], 9.0, theme::CRIMSON_BADGE);
+                ui.border(row[0], row[1], row[2], row[3], 9.0, theme::GLASS_BORDER);
+            }
+            ui.volt_logo(row[0] + 7.0, row[1] + 7.0, 35.0, 35.0);
+            let name = if *id == 0 { "Volt".to_owned() } else { format!("Profile {id}") };
+            let name = ui.fit_text(Face::Medium, 13.0, &name, rw - 76.0);
+            ui.text(Face::Medium, 13.0, row[0] + 51.0, row[1] + 6.0, theme::TEXT, &name);
+            ui.rounded(row[0] + 51.0, row[1] + 33.0, 6.0, 6.0, 3.0, theme::ONLINE);
+            ui.text(Face::Regular, 11.0, row[0] + 61.0, row[1] + 27.0, theme::MUTED, "Native · 26.3");
+            self.targets.push((row, Action::ChooseProfile(*id)));
+        }
 
         // All existing destinations stay accessible; Account contains the 3D preview.
         let short = rh < 320.0;
@@ -643,19 +672,20 @@ impl DrawCtx<'_> {
     fn draw_topbar(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
         let [x, y, w, _] = area;
         let account_w = if w >= 730.0 { 150.0 } else { 106.0 };
-        let tab_w = ((w - account_w - 12.0) / 6.0).max(40.0);
         let tabs = [("Home", Page::Play), ("Mods", Page::Mods), ("Packs", Page::Packs),
             ("Shaders", Page::Shaders), ("Files", Page::Installed), ("Settings", Page::Settings)];
+        let available = (w - account_w - 12.0).max(240.0);
+        let tab_w = (available / tabs.len() as f32).min(88.0);
         for (i, (label, page)) in tabs.iter().enumerate() {
-            let rect = [x + i as f32 * tab_w, y, tab_w - 4.0, 38.0];
+            let rect = [x + i as f32 * tab_w, y, tab_w - 4.0, 36.0];
             let selected = if *page == Page::Play {
                 matches!(self.catalog.page, Page::Play | Page::Mods)
             } else { *page != Page::Mods && self.catalog.page == *page };
             if selected {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CRIMSON_BADGE);
-                ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::GLASS_BORDER);
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 9.0, theme::CRIMSON_BADGE);
+                ui.border(rect[0], rect[1], rect[2], rect[3], 9.0, theme::GLASS_BORDER);
             }
-            draw_centered_text(ui, Face::Medium, 13.0, rect,
+            draw_centered_text(ui, Face::Medium, 12.5, rect,
                 if selected { theme::TEXT } else { theme::MUTED }, label);
             self.targets.push((rect, Action::Page(*page)));
         }
@@ -730,77 +760,149 @@ impl DrawCtx<'_> {
         let installed = horizon_client::official_install::ready(self.home);
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
-        let logo = if compact { 42.0 } else { 52.0 };
-        ui.volt_logo(x + 2.0, y + 6.0, logo, logo);
-        let name = ui.fit_text(Face::Medium, if compact { 27.0 } else { 34.0 },
-            "Volt Launcher", (w - logo - 16.0).max(24.0));
-        ui.text(Face::Medium, if compact { 27.0 } else { 34.0 }, x + logo + 12.0, y + 2.0,
-            theme::TEXT, &name);
+        // Instance title and controls mirror the proportions of the reference.
+        let logo = if compact { 38.0 } else { 48.0 };
+        ui.volt_logo(x + 2.0, y + 5.0, logo, logo);
+        let name_size = if compact { 29.0 } else { 38.0 };
+        let name = ui.fit_text(Face::Medium, name_size, "Volt Launcher", (w - logo - 16.0).max(24.0));
+        ui.text(Face::Medium, name_size, x + logo + 12.0, y, theme::TEXT, &name);
         let desc = if installing { "Preparing Minecraft 26.3" }
             else if installed { "Minecraft 26.3 · Native Rust edition" }
             else { "Minecraft 26.3 · Game files need to be downloaded" };
-        let desc = ui.fit_text(Face::Regular, 13.0, desc, w - 8.0);
-        ui.text(Face::Regular, 13.0, x + 4.0, y + 60.0, theme::TEXT, &desc);
-
-        let ay = y + 88.0;
-        let play_w = if compact { 100.0 } else { 126.0 };
-        let label = if installing { "INSTALLING" } else if installed { "Play" }
+        let desc = ui.fit_text(Face::Regular, 12.5, desc, w - 8.0);
+        ui.text(Face::Regular, 12.5, x + 4.0, y + 57.0, theme::TEXT, &desc);
+        let ay = y + 82.0;
+        let play_w = if compact { 94.0 } else { 115.0 };
+        let label = if installing { "Installing" } else if installed { "Play" }
             else if self.error.is_some() { "Retry" } else { "Download" };
-        styled_button(ui, self.targets, [x, ay, play_w, 40.0], label,
+        styled_button(ui, self.targets, [x, ay, play_w, 42.0], label,
             Action::Play, BtnStyle::Primary, true);
-        let profile_w = if compact { 115.0 } else { 170.0 };
-        styled_button(ui, self.targets, [x + play_w + 8.0, ay, profile_w, 40.0],
-            &format!("Profile {} · 26.3", self.catalog.config.profile), Action::Profile,
+        let profile_w = if compact { 112.0 } else { 176.0 };
+        styled_button(ui, self.targets, [x + play_w + 8.0, ay, profile_w, 42.0],
+            &format!("Profile {} · 26.3  v", self.catalog.config.profile), Action::Profile,
             BtnStyle::Secondary, true);
-        if w >= play_w + profile_w + 148.0 {
-            styled_button(ui, self.targets, [x + play_w + profile_w + 16.0, ay, 124.0, 40.0],
+        if w >= play_w + profile_w + 124.0 {
+            styled_button(ui, self.targets, [x + play_w + profile_w + 16.0, ay, 106.0, 42.0],
                 "Volt Boost", Action::OpenVoltBoost, BtnStyle::Secondary, true);
         }
-        let tabs_y = ay + 54.0;
-        let tab_w = ((w - 8.0) / 4.0).min(112.0);
-        let tabs = [("Overview", Page::Play), ("Mods", Page::Mods),
-            ("Packs", Page::Packs), ("Shaders", Page::Shaders)];
-        for (i, (title, page)) in tabs.iter().enumerate() {
-            let r = [x + i as f32 * tab_w, tabs_y, tab_w - 4.0, 34.0];
-            if self.catalog.page == *page {
+        let tabs_y = ay + 64.0;
+        let tabs = [("Overview", Action::HomeTab(HomeTab::Overview)),
+            ("Mods 50", Action::Page(Page::Mods)), ("Worlds", Action::HomeTab(HomeTab::Worlds)),
+            ("Multiplayer", Action::HomeTab(HomeTab::Multiplayer)), ("Packs", Action::Page(Page::Packs)),
+            ("Console", Action::HomeTab(HomeTab::Console))];
+        let tab_w = (w / tabs.len() as f32).min(105.0);
+        for (i, (label, action)) in tabs.iter().enumerate() {
+            let r = [x + i as f32 * tab_w, tabs_y, tab_w - 3.0, 34.0];
+            let selected = match action {
+                Action::HomeTab(tab) => self.catalog.page == Page::Play && self.home_tab == *tab,
+                Action::Page(page) => self.catalog.page == *page,
+                _ => false,
+            };
+            if selected {
                 ui.rounded(r[0], r[1], r[2], r[3], 9.0, theme::CRIMSON_BADGE);
                 ui.border(r[0], r[1], r[2], r[3], 9.0, theme::GLASS_BORDER);
             }
-            let label = if *page == Page::Mods {
-                format!("Mods {}", horizon_client::volt_mods::TOTAL_VOLT_MODS)
-            } else { title.to_string() };
-            draw_centered_text(ui, Face::Medium, 13.0, r,
-                if self.catalog.page == *page { theme::TEXT } else { theme::MUTED }, &label);
-            self.targets.push((r, Action::Page(*page)));
+            draw_centered_text(ui, Face::Medium, if compact { 11.0 } else { 12.5 }, r,
+                if selected { theme::TEXT } else { theme::MUTED }, label);
+            self.targets.push((r, *action));
         }
         let body_y = tabs_y + 42.0;
         let body_h = (y + h - body_y).max(0.0);
         if self.catalog.page == Page::Mods {
             // Single-column list matches the reference and retains search, filters and toggles.
             self.draw_mods_page(ui, [x, body_y, w, body_h], true, account_status);
-        } else if body_h >= 76.0 {
-            ui.rounded(x, body_y, w, body_h, 16.0, theme::GLASS);
-            ui.border(x, body_y, w, body_h, 16.0, theme::GLASS_BORDER);
+        } else if body_h >= 60.0 {
             if installing {
                 let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
                 let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
                 let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
                 let stage = ui.fit_text(Face::Medium, 14.0, progress.stage.label(), w - 32.0);
-                ui.text(Face::Medium, 14.0, x + 16.0, body_y + 13.0, theme::TEXT, &stage);
-                ui.rounded(x + 16.0, body_y + 46.0, w - 32.0, 7.0, 3.0, theme::CARD_INNER);
+                ui.text(Face::Medium, 14.0, x + 14.0, body_y + 12.0, theme::TEXT, &stage);
+                ui.rounded(x + 14.0, body_y + 42.0, w - 28.0, 7.0, 3.0, theme::CARD_INNER);
                 if fraction > 0.0 {
-                    ui.rounded(x + 16.0, body_y + 46.0, ((w - 32.0) * fraction).max(7.0), 7.0, 3.0, theme::CRIMSON);
+                    ui.rounded(x + 14.0, body_y + 42.0, ((w - 28.0) * fraction).max(7.0), 7.0, 3.0, theme::CRIMSON);
                 }
             } else {
-                ui.text(Face::Medium, 16.0, x + 16.0, body_y + 12.0, theme::TEXT, "Overview");
-                let status = self.error.as_deref().unwrap_or(if installed { "Game files ready" } else { "Game files not yet downloaded" });
-                let status = ui.fit_text(Face::Regular, 13.0, status, w - 32.0);
-                ui.text(Face::Regular, 13.0, x + 16.0, body_y + 42.0,
-                    if self.error.is_some() { theme::CRIMSON_BRIGHT } else { theme::MUTED }, &status);
-                if body_h >= 130.0 {
-                    let account = ui.fit_text(Face::Regular, 13.0, &format!("Playing as {account_status}"), w - 32.0);
-                    ui.text(Face::Regular, 13.0, x + 16.0, body_y + 72.0, theme::MUTED, &account);
-                    self.targets.push(([x + 12.0, body_y + 68.0, w - 24.0, 34.0], Action::Page(Page::Account)));
+                self.draw_home_tab(ui, [x, body_y, w, body_h], account_status, installed);
+            }
+        }
+    }
+
+    fn draw_home_tab(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str, installed: bool) {
+        let [x, y, w, h] = area;
+        match self.home_tab {
+            HomeTab::Overview => {
+                // Separate compact cards rather than an empty full-height rectangle.
+                let gap = 12.0;
+                let half = (w - gap) * 0.5;
+                let card_h = h.min(132.0);
+                for r in [[x, y, half, card_h], [x + half + gap, y, half, card_h]] {
+                    ui.rounded(r[0], r[1], r[2], r[3], 12.0, theme::GLASS);
+                    ui.border(r[0], r[1], r[2], r[3], 12.0, theme::GLASS_BORDER);
+                }
+                ui.text(Face::Medium, 15.0, x + 14.0, y + 12.0, theme::TEXT, "Instance");
+                let state = self.error.as_deref().unwrap_or(if installed { "Game files ready · 26.3" } else { "Game files need to be downloaded" });
+                let state = ui.fit_text(Face::Regular, 12.5, state, half - 28.0);
+                ui.text(Face::Regular, 12.5, x + 14.0, y + 42.0, theme::MUTED, &state);
+                let account = ui.fit_text(Face::Regular, 12.5, account_status, half - 28.0);
+                if card_h >= 95.0 {
+                    ui.text(Face::Regular, 12.5, x + 14.0, y + 67.0, theme::MUTED, &account);
+                    self.targets.push(([x + 8.0, y + 62.0, half - 16.0, 30.0], Action::Page(Page::Account)));
+                }
+                let dx = x + half + gap;
+                ui.text(Face::Medium, 15.0, dx + 14.0, y + 12.0, theme::TEXT, "Native mods");
+                let note = format!("{} of 50 switches on", self.catalog.extras.mod_catalog.enabled_count());
+                ui.text(Face::Regular, 12.5, dx + 14.0, y + 42.0, theme::MUTED, &note);
+                if card_h >= 95.0 {
+                    let note = ui.fit_text(Face::Regular, 11.5, "Some native features are still in development", half - 28.0);
+                    ui.text(Face::Regular, 11.5, dx + 14.0, y + 67.0, theme::MUTED, &note);
+                }
+                self.targets.push(([dx, y, half, card_h], Action::Page(Page::Mods)));
+            }
+            HomeTab::Worlds => {
+                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT, "Worlds");
+                let mut worlds: Vec<String> = std::fs::read_dir(self.catalog.config.game_home(self.home).join("saves"))
+                    .into_iter().flatten().flatten().filter(|entry| entry.path().is_dir())
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+                worlds.sort_unstable();
+                let summary = if worlds.is_empty() { "No local world folders found".to_owned() }
+                    else { format!("{} local world folders · Open them from the game", worlds.len()) };
+                let summary = ui.fit_text(Face::Regular, 12.5, &summary, w - 16.0);
+                ui.text(Face::Regular, 12.5, x + 8.0, y + 35.0, theme::MUTED, &summary);
+                let top = y + 60.0;
+                let bottom = y + h;
+                let view_h = (bottom - top).max(0.0);
+                let maximum = (worlds.len() as f32 * 28.0 - view_h).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, maximum);
+                *self.list_view = Some([top, bottom, maximum]);
+                let start = ui.batch_mut().vertices.len();
+                for (i, world) in worlds.iter().enumerate() {
+                    let row_y = top + i as f32 * 28.0 - self.catalog.scroll;
+                    if row_y + 28.0 < top || row_y > bottom { continue; }
+                    let label = ui.fit_text(Face::Regular, 13.0, world, w - 24.0);
+                    ui.text(Face::Regular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT, &label);
+                }
+                let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x + w), ui.to_batch(bottom)];
+                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+            }
+            HomeTab::Multiplayer => {
+                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT, "Multiplayer");
+                ui.text(Face::Regular, 12.5, x + 8.0, y + 34.0, theme::MUTED, "Server address for direct connect on Play");
+                let r = [x + 8.0, y + 58.0, (w - 16.0).min(380.0), 38.0];
+                ui.rounded(r[0], r[1], r[2], r[3], 9.0, theme::CARD_INNER);
+                ui.border(r[0], r[1], r[2], r[3], 9.0, theme::GLASS_BORDER);
+                let value = if self.catalog.config.server.is_empty() { "Server address (optional)" } else { &self.catalog.config.server };
+                let value = ui.fit_text(Face::Regular, 13.0, value, r[2] - 24.0);
+                ui.text(Face::Regular, 13.0, r[0] + 12.0, text_vcenter(r[1], r[3], 13.0), theme::TEXT, &value);
+                self.targets.push((r, Action::Field("server")));
+            }
+            HomeTab::Console => {
+                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT, "Launcher diagnostics");
+                let status = if self.catalog.status.is_empty() { "Tap Refresh to read the latest local diagnostic summary." } else { &self.catalog.status };
+                let status = ui.fit_text(Face::Regular, 12.5, status, w - 16.0);
+                ui.text(Face::Regular, 12.5, x + 8.0, y + 38.0, theme::MUTED, &status);
+                if h >= 100.0 {
+                    styled_button(ui, self.targets, [x + 8.0, y + 64.0, 100.0, 32.0], "Refresh", Action::Logs, BtnStyle::Secondary, true);
                 }
             }
         }
@@ -4335,27 +4437,30 @@ impl Launcher {
         self.preview_rect = None;
         let mut b = HudBatch::new([r.config.width, r.config.height]);
         let mut ui = Ui::mobile(&gui.atlas, &mut b, (0.0, 0.0));
-        // OEM navigation bars can remain visible even in fullscreen (keypad phones).
-        // Inset the launcher layout only; keep surface and input coordinates intact.
-        if let Some(window) = &self.window {
-            use winit::platform::android::WindowExtAndroid;
-            let rect = window.content_rect();
-            let input = winit::platform::android::native_input_scale();
-            if rect.bottom > 0 {
-                ui.h = ui.h.min(rect.bottom as f32 * input[1] as f32 / ui.density);
+        // Draw the scene across the surface; controls use the visible window
+        // rect so temporarily visible system bars never cover buttons.
+        let full_w = ui.w;
+        let full_h = ui.h;
+        let scale = ui.density / ui.batch.scale;
+        ui.batch.fill(&gui.atlas, 0.0, 0.0, full_w * scale, full_h * scale, theme::BG);
+        draw_launcher_scene(&mut ui, full_w, full_h);
+        let scene_end = ui.batch_mut().vertices.len();
+        let mut offset = [0.0f32; 2];
+        if let Some([left, top, right, bottom]) = crate::native_ime::launcher_visible_bounds() {
+            let density = ui.density;
+            let x0 = (left as f32 / density).min(full_w);
+            let y0 = (top as f32 / density).min(full_h);
+            let x1 = (right as f32 / density).min(full_w);
+            let y1 = (bottom as f32 / density).min(full_h);
+            if x1 - x0 >= 120.0 && y1 - y0 >= 120.0 {
+                offset = [x0, y0];
+                ui.w = x1 - x0;
+                ui.h = y1 - y0;
             }
-            if rect.right > 0 {
-                ui.w = ui.w.min(rect.right as f32 * input[0] as f32 / ui.density);
-            }
-        }
-        if let Some(bottom) = crate::native_ime::viewport_bottom() {
-            ui.h = ui.h.min(bottom as f32 / ui.density);
         }
         let (w, h) = (ui.w, ui.h);
-        let scale = ui.density / ui.batch.scale;
-        ui.batch
-            .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, theme::BG);
-        draw_launcher_scene(&mut ui, w, h);
+        ui.cursor = (self.cursor.0 as f32 / ui.density - offset[0],
+                     self.cursor.1 as f32 / ui.density - offset[1]);
 
         let compact = w < 760.0;
         let account_status = self
@@ -4373,6 +4478,7 @@ impl Launcher {
                 worker: &self.worker,
                 error: &self.error,
                 catalog: &mut self.catalog,
+                home_tab: self.home_tab,
                 targets: &mut self.targets,
                 list_targets: &mut self.list_targets,
                 list_view: &mut self.list_view,
@@ -4601,14 +4707,14 @@ impl Launcher {
                 theme::CRIMSON_BRIGHT,
             );
             self.cursor = (
-                f64::from((x + bw / 2.0) * ui.density),
-                f64::from((y + bh / 2.0) * ui.density),
+                f64::from((x + bw / 2.0 + offset[0]) * ui.density),
+                f64::from((y + bh / 2.0 + offset[1]) * ui.density),
             );
         }
         if self.mouse_down || self.drag.as_ref().is_some_and(|drag| !drag.moved) {
             let point = [
-                self.cursor.0 as f32 / ui.density,
-                self.cursor.1 as f32 / ui.density,
+                self.cursor.0 as f32 / ui.density - offset[0],
+                self.cursor.1 as f32 / ui.density - offset[1],
             ];
             if let Some(([x, y, bw, bh], _)) = self.targets.iter().find(|(rect, _)| {
                 point[0] >= rect[0]
@@ -4642,6 +4748,25 @@ impl Launcher {
             );
         }
         crate::documents::draw_ui(&mut ui);
+        // Geometry and touch targets share the same translation. The scene is
+        // deliberately excluded so it still covers the whole Android surface.
+        if offset != [0.0, 0.0] {
+            let dx = ui.to_batch(offset[0]);
+            let dy = ui.to_batch(offset[1]);
+            ui.batch_mut().translate_since(scene_end, dx, dy);
+            for (rect, _) in self.targets.iter_mut().chain(self.list_targets.iter_mut()) {
+                rect[0] += offset[0];
+                rect[1] += offset[1];
+            }
+            if let Some(rect) = &mut self.preview_rect {
+                rect[0] += offset[0];
+                rect[1] += offset[1];
+            }
+            if let Some(view) = &mut self.list_view {
+                view[0] += offset[1];
+                view[1] += offset[1];
+            }
+        }
         ui.finish();
 
         if !r.render(&game::loading_frame(&b))? && !b.patches.is_empty() {
@@ -5058,7 +5183,15 @@ impl Launcher {
                     .sync_msa_accounts(&crate::account::Accounts::load(), false);
             }
             Some(Action::LoginLink) => self.login.open_link(),
+            Some(Action::HomeTab(tab)) => {
+                self.home_tab = tab;
+                self.catalog.page = Page::Play;
+                self.catalog.scroll = 0.0;
+                self.catalog.editing = None;
+                if crate::platform::active() { crate::platform::hide(); }
+            }
             Some(Action::Page(page)) => {
+                if page == Page::Play { self.home_tab = HomeTab::Overview; }
                 self.catalog.volt_boost_modal = false;
                 self.controls_studio.open = false;
                 self.catalog.editing = None;

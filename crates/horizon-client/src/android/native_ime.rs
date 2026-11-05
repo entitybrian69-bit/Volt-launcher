@@ -54,6 +54,7 @@ struct Ui {
     ready: AtomicBool,
     bounds_pending: AtomicBool,
     bottom: AtomicI32,
+    visible_bounds: Mutex<[i32; 4]>,
     failed: AtomicBool,
     keyboard_request: Mutex<Option<std::time::Instant>>,
     last_bounds: Mutex<Option<std::time::Instant>>,
@@ -208,6 +209,7 @@ pub unsafe fn initialize(
         ready: AtomicBool::new(false),
         bounds_pending: AtomicBool::new(false),
         bottom: AtomicI32::new(0),
+        visible_bounds: Mutex::new([0; 4]),
         failed: AtomicBool::new(false),
         keyboard_request: Mutex::new(None),
         last_bounds: Mutex::new(None),
@@ -562,8 +564,42 @@ impl Ui {
                 )?;
                 let mut window_origin = [0; 2];
                 env.get_int_array_region(location, 0, &mut window_origin)?;
+                let mut visible = [
+                    env.get_field(&rect, "left", "I")?.i()? - window_origin[0],
+                    env.get_field(&rect, "top", "I")?.i()? - window_origin[1],
+                    env.get_field(&rect, "right", "I")?.i()? - window_origin[0],
+                    env.get_field(&rect, "bottom", "I")?.i()? - window_origin[1],
+                ];
+                // Android 11+ can display transient system bars over an immersive
+                // window without changing its visible display frame. Use *visible*
+                // status and navigation insets for launcher layout only.
+                let bars = (|| -> jni::errors::Result<()> {
+                    let sdk = env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?.i()?;
+                    if sdk < 30 { return Ok(()); }
+                    let root = env.call_method(&self.native, "getRootWindowInsets",
+                        "()Landroid/view/WindowInsets;", &[])?.l()?;
+                    if root.is_null() { return Ok(()); }
+                    let insets = env.call_method(&root, "getInsets", "(I)Landroid/graphics/Insets;",
+                        &[JValue::Int(3)])?.l()?; // statusBars | navigationBars
+                    if insets.is_null() { return Ok(()); }
+                    let mut edge = [0; 4];
+                    for (i, field) in ["left", "top", "right", "bottom"].into_iter().enumerate() {
+                        edge[i] = env.get_field(&insets, field, "I")?.i()?.max(0);
+                    }
+                    let resources = env.call_method(&self.activity, "getResources", "()Landroid/content/res/Resources;", &[])?.l()?;
+                    let metrics = env.call_method(resources, "getDisplayMetrics", "()Landroid/util/DisplayMetrics;", &[])?.l()?;
+                    let width = env.get_field(&metrics, "widthPixels", "I")?.i()?;
+                    let height = env.get_field(&metrics, "heightPixels", "I")?.i()?;
+                    visible[0] = visible[0].max(edge[0] - window_origin[0]);
+                    visible[1] = visible[1].max(edge[1] - window_origin[1]);
+                    visible[2] = visible[2].min(width - edge[2] - window_origin[0]);
+                    visible[3] = visible[3].min(height - edge[3] - window_origin[1]);
+                    Ok(())
+                })();
+                if bars.is_err() { let _ = env.exception_clear(); }
+                *self.visible_bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = visible;
                 self.bottom.store(
-                    (env.get_field(rect, "bottom", "I")?.i()? - window_origin[1]).max(0),
+                    (env.get_field(&rect, "bottom", "I")?.i()? - window_origin[1]).max(0),
                     Ordering::Release,
                 );
                 let mut safe = [0; 4];
@@ -846,6 +882,23 @@ pub fn viewport_bottom() -> Option<u32> {
             .round() as u32
     })
 }
+/// Visible window bounds in renderer pixels. Unlike the shared game viewport,
+/// these also follow temporarily visible system bars while the launcher is open.
+pub fn launcher_visible_bounds() -> Option<[u32; 4]> {
+    let _ = viewport_bottom(); // schedules a throttled UI-thread bounds refresh
+    let ui = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
+    let bounds = *ui.visible_bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if bounds[2] <= bounds[0] || bounds[3] <= bounds[1] {
+        return None;
+    }
+    let origin = winit::platform::android::native_content_origin();
+    let scale = winit::platform::android::native_input_scale();
+    Some(std::array::from_fn(|i| {
+        let axis = i % 2;
+        ((bounds[i] - origin[axis] as i32).max(0) as f64 * scale[axis]).round() as u32
+    }))
+}
+
 pub fn pick_document() -> bool {
     let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
         return false;

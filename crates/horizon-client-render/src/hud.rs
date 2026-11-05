@@ -1151,6 +1151,25 @@ impl HudBatch {
             v.pos[1] = cy + (v.pos[1] - cy) * sy;
         }
     }
+    /// Move a UI subtree and any depth-preview scissors with it. `dx`/`dy`
+    /// are in batch coordinates; depth scissors are stored in physical pixels.
+    pub fn translate_since(&mut self, start: usize, dx: f32, dy: f32) {
+        for vertex in &mut self.vertices[start..] {
+            vertex.pos[0] += dx;
+            vertex.pos[1] += dy;
+        }
+        let px = (dx * self.scale).round() as i64;
+        let py = (dy * self.scale).round() as i64;
+        for (range, blend) in &mut self.blends {
+            if range.start >= start as u32 {
+                if let Blend::Depth(clip) = blend {
+                    clip[0] = (i64::from(clip[0]) + px).clamp(0, u32::MAX as i64) as u32;
+                    clip[1] = (i64::from(clip[1]) + py).clamp(0, u32::MAX as i64) as u32;
+                }
+            }
+        }
+    }
+
     pub fn clip_since(&mut self, start: usize, x0: f32, y0: f32, x1: f32, y1: f32) {
         let quads: Vec<[HudVertex; 6]> = self.vertices[start..].as_chunks::<6>().0.to_vec();
         self.vertices.truncate(start);
@@ -2865,6 +2884,22 @@ mod tests {
                 .iter()
                 .all(|v| v.depth.is_finite() && (0.0..=1.0).contains(&v.depth))
         );
+    }
+
+    #[test]
+    fn translating_ui_subtree_also_moves_depth_scissors() {
+        let mut batch = HudBatch::new([640, 480]);
+        batch.scale = 2.0;
+        let uv = [[0.0; 2]; 4];
+        batch.quad([[0.0; 2]; 4], uv, u32::MAX);
+        let start = batch.vertices.len();
+        batch.quad_3d([[1.0, 2.0, 1.0], [2.0, 2.0, 1.0],
+            [2.0, 3.0, 1.0], [1.0, 3.0, 1.0]], uv, u32::MAX);
+        batch.depth_since(start, [1.0, 2.0, 4.0, 6.0]);
+        batch.translate_since(start, 3.0, 4.0);
+        assert_eq!(batch.vertices[0].pos, [0.0, 0.0]);
+        assert_eq!(batch.vertices[start].pos, [4.0, 6.0]);
+        assert_eq!(batch.runs()[1].1, Blend::Depth([8, 12, 6, 8]));
     }
 
     #[test]

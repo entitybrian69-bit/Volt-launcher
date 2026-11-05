@@ -252,6 +252,7 @@ jobs:
               ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
               ["cargo", "test", "-p", "horizon-client-input", "--lib", "keybinds"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "translating_ui_subtree_also_moves_depth_scissors"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
               ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_mods"],
@@ -908,6 +909,14 @@ jobs:
               if "UnsatisfiedLinkError" in crash_lc or "ClassNotFoundException" in crash_lc:
                   raise RuntimeError(f"Runtime crash after upgrade:\n{crash_lc}")
               notes.append(f"launch_rc={launch.returncode}")
+              # Keep a visual debugging artifact, separate from release APKs.
+              # It is not a pixel-parity or physical-device test.
+              time.sleep(10)
+              shot = subprocess.run([adb, "exec-out", "screencap", "-p"], capture_output=True)
+              if shot.returncode == 0 and shot.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+                  visual = Path(".local/android/launcher-preview")
+                  visual.mkdir(parents=True, exist_ok=True)
+                  (visual / "launcher.png").write_bytes(shot.stdout)
               print(f"\n::notice title=Live Upgrade Verified::{esc(' | '.join(notes))}\n", flush=True)
           except BaseException:
               tb = traceback.format_exc()
@@ -921,6 +930,14 @@ jobs:
                   elog.close()
               subprocess.run([adb, "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
           PY
+
+      - name: Upload launcher preview for visual review
+        if: matrix.abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-emulator-preview
+          path: .local/android/launcher-preview/launcher.png
+          if-no-files-found: warn
 
       - name: Upload APK artifact (${{ matrix.abi }})
         uses: actions/upload-artifact@v4
