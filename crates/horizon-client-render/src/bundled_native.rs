@@ -2,24 +2,35 @@
 //! This is not a generic `.hnmod` loader and never executes downloaded code.
 use std::{fs, io, path::Path};
 
-/// The only registry bundle compiled into the current Android APK.
-pub fn is_bundled_zoom(id: &str, version: &str, sha256: &str) -> bool {
-    id == "zoom" && version == "2.0.0"
-        && sha256 == "49fa2d7d635225c53304fbf1477606c0677eb23d94dac75b730f6c3ba065f127"
+/// Exact source bundles whose code is compiled into the current Android APK.
+pub const BUNDLED: &[(&str, &str, &str)] = &[
+    ("zoom", "2.0.0", "49fa2d7d635225c53304fbf1477606c0677eb23d94dac75b730f6c3ba065f127"),
+    ("fps_overlay", "2.0.0", "bedb670e2490ce8239906c86eabd3a0c131ef5037b2937607231bdbdba38c171"),
+    ("keystrokes", "2.0.0", "bed34d2f8049e92c52cd7c91c0c4c8c9d165faaf0183500cf4021d9e04783a7d"),
+    ("minimap", "2.0.0", "6f5dbca0699562b088a04b3f5abdc1b7faf8da51257a96da0a4ed639c6644ed9"),
+];
+
+pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {
+    BUNDLED.iter().any(|&(i, v, h)| (id, version, sha256) == (i, v, h))
 }
-
-const ZOOM_MARKER: &str = "volt-bundled-zoom-2.0.0.installed";
-
-/// The marker belongs to this profile and this exact bundled implementation.
-pub fn zoom_installed(home: &Path) -> bool {
-    home.join(super::mod_list::NATIVE_DIR).join(ZOOM_MARKER).is_file()
+pub fn supports(id: &str) -> bool { BUNDLED.iter().any(|&(i, _, _)| i == id) }
+fn marker(home: &Path, id: &str) -> Option<std::path::PathBuf> {
+    let (id, version, _) = BUNDLED.iter().find(|&&(i, _, _)| i == id)?;
+    Some(home.join(super::mod_list::NATIVE_DIR).join(format!("volt-bundled-{id}-{version}.installed")))
 }
-
-/// Installs or removes the bundled Zoom for the selected profile. Settings
-/// remain in place when removing it. Removal never deletes an `.hnmod` file.
+/// The marker belongs to this profile and exact bundled implementation.
+pub fn installed(home: &Path, id: &str) -> bool {
+    marker(home, id).is_some_and(|p| p.is_file())
+}
+pub fn zoom_installed(home: &Path) -> bool { installed(home, "zoom") }
 pub fn set_zoom_installed(home: &Path, install: bool) -> io::Result<()> {
-    let dir = home.join(super::mod_list::NATIVE_DIR);
-    let marker = dir.join(ZOOM_MARKER);
+    set_installed(home, "zoom", install)
+}
+
+/// Installs or removes only a compiled-in mod. User settings are retained.
+pub fn set_installed(home: &Path, id: &str, install: bool) -> io::Result<()> {
+    let marker = marker(home, id).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "unknown bundled mod"))?;
+    let dir = marker.parent().expect("marker has a parent");
     if !install {
         return match fs::remove_file(marker) {
             Ok(()) => Ok(()),
@@ -38,18 +49,18 @@ pub fn set_zoom_installed(home: &Path, install: bool) -> io::Result<()> {
     };
     let mut updated = String::new();
     for line in old.lines() {
-        if line.split_once(':').is_some_and(|(k, _)| k.trim() == "mod.zoom") {
+        if line.split_once(':').is_some_and(|(k, _)| k.trim().strip_prefix("mod.") == Some(id)) {
             continue;
         }
         updated.push_str(line);
         updated.push('\n');
     }
-    updated.push_str("mod.zoom:true\n");
+    updated.push_str(&format!("mod.{id}:true\n"));
     let options_tmp = home.join("horizon-mods.txt.volt-partial");
     fs::write(&options_tmp, updated)?;
     fs::rename(options_tmp, options)?;
-    let temp = dir.join("volt-bundled-zoom-2.0.0.partial");
-    fs::write(&temp, b"Horizon Zoom 2.0.0; bundled in Volt APK\n")?;
+    let temp = marker.with_extension("partial");
+    fs::write(&temp, format!("Horizon {id}; bundled in Volt APK\n"))?;
     fs::rename(temp, marker)
 }
 
@@ -59,10 +70,15 @@ mod tests {
     #[test]
     fn prebuilt_match_is_exact() {
         let hash = "49fa2d7d635225c53304fbf1477606c0677eb23d94dac75b730f6c3ba065f127";
-        assert!(is_bundled_zoom("zoom", "2.0.0", hash));
-        assert!(!is_bundled_zoom("zoom", "2.0.1", hash));
-        assert!(!is_bundled_zoom("other", "2.0.0", hash));
-        assert!(!is_bundled_zoom("zoom", "2.0.0", "bad"));
+        assert!(is_bundled("zoom", "2.0.0", hash));
+        assert!(!is_bundled("zoom", "2.0.1", hash));
+        assert!(!is_bundled("other", "2.0.0", hash));
+        assert!(!is_bundled("zoom", "2.0.0", "bad"));
+        assert!(supports("fps_overlay"));
+        assert!(!supports("../escape"));
+        for &(id, version, hash) in BUNDLED {
+            assert!(is_bundled(id, version, hash));
+        }
     }
     #[test]
     fn profile_install_remove_preserves_other_mods_and_keys() {
@@ -74,9 +90,13 @@ mod tests {
         assert!(!zoom_installed(&dir));
         set_zoom_installed(&dir, true).unwrap();
         assert!(zoom_installed(&dir));
+        set_installed(&dir, "fps_overlay", true).unwrap();
+        assert!(installed(&dir, "fps_overlay"));
+        assert!(!installed(&dir, "minimap"));
+        assert!(set_installed(&dir, "../escape", true).is_err());
         let list = super::super::mod_list::ModList::load(&dir);
         assert!(fs::read_to_string(dir.join(super::super::mod_list::FILE)).unwrap().contains("unknown:keep me"));
-        assert!(list.enabled.contains("other") && list.enabled.contains("zoom"));
+        assert!(list.enabled.contains("other") && list.enabled.contains("zoom") && list.enabled.contains("fps_overlay"));
         assert!(!list.disabled.contains("zoom"));
         assert_eq!(list.keys["zoom"]["zoom"], "key.keyboard.x");
         set_zoom_installed(&dir, false).unwrap();

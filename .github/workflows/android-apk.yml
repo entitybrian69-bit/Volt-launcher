@@ -278,6 +278,10 @@ jobs:
           PY
           rustc --edition 2024 --test crates/horizon-client/src/game/official_zoom.rs -o "$RUNNER_TEMP/official-zoom-tests"
           "$RUNNER_TEMP/official-zoom-tests"
+          for mod in fps_overlay keystrokes minimap; do
+            rustc --edition 2024 --test "crates/horizon-client/src/game/official_${mod}.rs" -o "$RUNNER_TEMP/official-${mod}-tests"
+            "$RUNNER_TEMP/official-${mod}-tests"
+          done
 
       - name: Cache Gradle 8.14 distribution
         uses: actions/cache@v4

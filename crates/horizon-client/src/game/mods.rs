@@ -330,6 +330,7 @@ impl Game<'_> {
         let mut native = Vec::new();
         self.native_mods(&mut native);
         self.bundled_zoom_list(&mut native);
+        self.bundled_hud_list(&mut native);
         let enabled = &self.settings.mods.enabled;
         let on = |id: &str| {
             (enabled.contains(id) || dev_ids.iter().any(|d| d == id))

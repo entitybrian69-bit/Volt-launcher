@@ -127,6 +127,7 @@ pub(super) enum Action {
     ToggleVoltMod(horizon_client::volt_mods::VoltModId),
     InstallBundledZoom,
     HorizonModBrowser(bool),
+    RemoveBundled(usize),
     ModFilter(u8),
     EnableModPack,
     ResetModDefaults,
@@ -1738,10 +1739,11 @@ impl DrawCtx<'_> {
             let native = crate::catalog::source_only_mod(p);
             let installed = self.catalog.download_label(p);
             let supported = !(p.kind == crate::browser::Kind::Mod && !native && !cfg!(target_pointer_width = "64"));
-            let remove_zoom = native && p.id == "zoom" && self.catalog.bundled_zoom_installed && !self.catalog.busy();
+            let prebuilt = native && horizon_client::bundled_native::supports(&p.id);
+            let remove_bundled = prebuilt && self.catalog.bundled_mods.contains(&p.id) && !self.catalog.busy();
             let can_press = installed.is_none() && supported && !self.catalog.busy();
             if can_press { self.list_targets.push((button, Action::Install(i))); }
-            if remove_zoom { self.list_targets.push((button, Action::InstallBundledZoom)); }
+            if remove_bundled { self.list_targets.push((button, Action::RemoveBundled(i))); }
             if ry + row_h < top || ry > bottom { continue; }
             let start = ui.batch_mut().vertices.len();
             ui.rounded(x, ry, w, row_h, 10.0, theme::CARD);
@@ -1757,22 +1759,22 @@ impl DrawCtx<'_> {
             let title = ui.fit_text(Face::Medium, 14.0, &p.title, title_width);
             ui.text(Face::Medium, 14.0, tx, ry + 8.0, theme::TEXT, &title);
             let kind = if native {
-                if p.id == "zoom" && self.catalog.bundled_zoom_installed { "Native · bundled build installed" }
-                else if p.id == "zoom" { "Native · 2.0.0 prebuilt only" }
+                if prebuilt && self.catalog.bundled_mods.contains(&p.id) { "Native · bundled build installed" }
+                else if prebuilt { "Native · 2.0.0 prebuilt only" }
                 else if self.catalog.native_sources.contains(&p.id) { "Native source saved · no Volt build" }
                 else { "Native · source only, no Volt build" }
             } else if supported { "Horizon mod · 64-bit" } else { "Horizon mod · 64-bit required" };
             let subtitle = format!("{} · {}", p.author, kind);
             let subtitle = ui.fit_text(Face::Regular, 11.0, &subtitle, title_width);
             ui.text(Face::Regular, 11.0, tx, ry + 30.0, theme::DIM, &subtitle);
-            let summary = if native && p.id != "zoom" {
+            let summary = if native && !prebuilt {
                 "Source only — needs a compatible Android build"
             } else { &p.summary };
             let summary = ui.fit_text(Face::Regular, 11.0, summary, (w - 70.0).max(30.0));
             ui.text(Face::Regular, 11.0, tx, ry + 49.0, theme::MUTED, &summary);
-            if remove_zoom {
+            if remove_bundled {
                 let first = self.targets.len();
-                styled_button(ui, self.targets, button, "Remove", Action::InstallBundledZoom, BtnStyle::Secondary, true);
+                styled_button(ui, self.targets, button, "Remove", Action::RemoveBundled(i), BtnStyle::Secondary, true);
                 if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
                     self.targets[first].0 = clipped;
                 } else { self.targets.truncate(first); }
@@ -1780,7 +1782,7 @@ impl DrawCtx<'_> {
                 draw_centered_text(ui, Face::Medium, 11.0, button, theme::MUTED, &label);
             } else if can_press {
                 let first = self.targets.len();
-                styled_button(ui, self.targets, button, if native && p.id != "zoom" { "Download" } else { "Install" },
+                styled_button(ui, self.targets, button, if native && !prebuilt { "Download" } else { "Install" },
                     Action::Install(i), BtnStyle::Primary, true);
                 if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
                     self.targets[first].0 = clipped;
@@ -5600,6 +5602,7 @@ impl Launcher {
                     );
                 }
             }
+            Some(Action::RemoveBundled(i)) => self.catalog.remove_bundled(&self.home, i),
             Some(Action::HorizonModBrowser(show)) => {
                 self.catalog.horizon_mod_browser = show;
                 self.catalog.query.clear();
@@ -5617,6 +5620,8 @@ impl Launcher {
                     Ok(()) => {
                         self.catalog.bundled_zoom_installed = install;
                         self.catalog.bundled_zoom_enabled = install;
+                        if install { self.catalog.bundled_mods.insert("zoom".into()); }
+                        else { self.catalog.bundled_mods.remove("zoom"); }
                         self.catalog.status = if install {
                             "Horizon Zoom installed from the APK. Hold Z; add a Z button in Controls Studio. Settings: in-game Mods.".into()
                         } else { "Horizon Zoom removed from this profile; its settings are kept.".into() };

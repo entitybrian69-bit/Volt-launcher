@@ -177,6 +177,13 @@ mod names;
 #[cfg(target_os = "android")]
 mod official_zoom;
 mod official_zoom_bridge;
+#[cfg(target_os = "android")]
+mod official_fps_overlay;
+#[cfg(target_os = "android")]
+mod official_keystrokes;
+#[cfg(target_os = "android")]
+mod official_minimap;
+mod official_hud_bridge;
 mod native_hooks;
 mod native_lifecycle;
 mod native_menus;

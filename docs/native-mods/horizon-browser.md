@@ -16,11 +16,13 @@ manifest. If the registry cannot be reached, native downloads fail instead of
 using an old cached revocation list. The browsing index itself may be cached.
 No downloaded Rust code is executed on the phone or in the signing pipeline.
 
-The single prebuilt native project currently supported is **official Horizon
-Zoom 2.0.0**. Its exact source bundle digest is checked against the registry
-before the APK's bundled implementation is activated for that profile. Other
+The prebuilt native projects currently supported are **official Horizon Zoom,
+FPS Counter, Keystrokes and Minimap 2.0.0**. Each exact source bundle digest
+is checked against the registry before the APK's bundled implementation is
+activated for that profile. Other
 versions and projects remain source-only, even if the project has the same
-name. An installed Zoom can be removed from either Mods view. The exact bundled
+name. Installed bundled mods can be removed from the Horizon browser; Zoom can also be
+removed from Volt mods. The exact bundled
 version can also be activated offline in Volt mods, as documented in
 `bundled-zoom.md`.
 

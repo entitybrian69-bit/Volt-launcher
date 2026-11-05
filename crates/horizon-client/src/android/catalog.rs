@@ -234,6 +234,7 @@ pub struct Catalog {
     pub mod_filter: u8,
     pub horizon_mod_browser: bool,
     pub native_sources: std::collections::HashSet<String>,
+    pub bundled_mods: std::collections::HashSet<String>,
     pub bundled_zoom_installed: bool,
     pub bundled_zoom_enabled: bool,
     pub mod_born: std::time::Instant,
@@ -291,6 +292,7 @@ impl Catalog {
             mod_filter: 0,
             horizon_mod_browser: true,
             native_sources: std::collections::HashSet::new(),
+            bundled_mods: std::collections::HashSet::new(),
             bundled_zoom_installed: false,
             bundled_zoom_enabled: false,
             mod_born: std::time::Instant::now(),
@@ -348,6 +350,9 @@ impl Catalog {
                 let name = e.file_name().to_string_lossy().into_owned();
                 name.strip_suffix(".hnmod").map(str::to_owned)
             }).collect();
+        self.bundled_mods = horizon_client::bundled_native::BUNDLED.iter()
+            .filter(|(id, _, _)| horizon_client::bundled_native::installed(&game, id))
+            .map(|(id, _, _)| (*id).to_owned()).collect();
         let on = horizon_client::mod_list::ModList::load(&game);
         self.bundled_zoom_installed = horizon_client::bundled_native::zoom_installed(&game);
         self.bundled_zoom_enabled = self.bundled_zoom_installed && !on.disabled.contains("zoom");
@@ -410,7 +415,7 @@ impl Catalog {
                 *self.progress.lock().unwrap_or_else(|e| e.into_inner()) * 100.0
             ));
         }
-        if source_only_mod(project) && project.id == "zoom" && self.bundled_zoom_installed {
+        if source_only_mod(project) && self.bundled_mods.contains(&project.id) {
             return Some("Installed".into());
         }
         if self
@@ -683,9 +688,9 @@ impl Catalog {
                 let (version, hash) = browser::horizon::download_native_source(&project, &game, &|_, p| {
                     if p.is_finite() { *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clamp(0.0, 1.0); }
                 })?;
-                if horizon_client::bundled_native::is_bundled_zoom(&project.id, &version, &hash) {
-                    horizon_client::bundled_native::set_zoom_installed(&game, true).map_err(|e| e.to_string())?;
-                    Ok(Reply::NativeSource("Zoom installed for this profile from the verified bundle and bundled APK code.".into()))
+                if horizon_client::bundled_native::is_bundled(&project.id, &version, &hash) {
+                    horizon_client::bundled_native::set_installed(&game, &project.id, true).map_err(|e| e.to_string())?;
+                    Ok(Reply::NativeSource(format!("{} installed for this profile using bundled APK code.", project.title)))
                 } else {
                     Ok(Reply::NativeSource(format!("{} source downloaded; no compatible Volt APK build is available yet.", project.title)))
                 }
@@ -757,6 +762,16 @@ impl Catalog {
                 },
             ))
         });
+    }
+    pub fn remove_bundled(&mut self, home: &Path, index: usize) {
+        let Some(project) = self.results.get(index) else { return; };
+        let id = project.id.clone();
+        let game = self.config.game_home(home);
+        self.status = match horizon_client::bundled_native::set_installed(&game, &id, false) {
+            Ok(()) => format!("{} removed from this profile; its settings remain.", project.title),
+            Err(e) => format!("Could not remove {}: {e}", project.title),
+        };
+        self.refresh(home);
     }
     pub fn toggle_local(&mut self, home: &Path, index: usize) {
         let Some(item) = self.local.get(index).cloned() else {

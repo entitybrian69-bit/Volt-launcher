@@ -2245,6 +2245,7 @@ impl Game<'_> {
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
         self.bundled_zoom_list(&mut mods);
+        self.bundled_hud_list(&mut mods);
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings
@@ -2255,6 +2256,7 @@ impl Game<'_> {
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
             self.bundled_zoom_settings(&m.id, &mut buttons);
+            self.bundled_hud_settings(&m.id, &mut buttons);
             let page = NativePage {
                 keys: m.keys,
                 buttons,
@@ -2278,6 +2280,7 @@ impl Game<'_> {
         };
         self.native_settings_click(&id, button);
         self.bundled_zoom_click(&id, button);
+        self.bundled_hud_click(&id, button);
         self.native_settings_refresh(i);
     }
     /// Native mod `i`'s page opened: its labels asked again, so that they
@@ -2289,6 +2292,7 @@ impl Game<'_> {
         let mut buttons = Vec::new();
         self.native_settings(&id, &mut buttons);
         self.bundled_zoom_settings(&id, &mut buttons);
+        self.bundled_hud_settings(&id, &mut buttons);
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
@@ -2352,6 +2356,7 @@ impl Game<'_> {
     pub(super) fn native_minimap_now(&self) -> Option<NativeMinimap> {
         let mut minimap = None;
         self.native_minimap(&mut minimap);
+        self.bundled_minimap(&mut minimap);
         minimap.map(|m| NativeMinimap {
             size: finite(m.size, 16.0, 256.0),
             blocks_per_pixel: finite(m.blocks_per_pixel, 0.5, 4.0),

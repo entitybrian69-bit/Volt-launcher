@@ -888,6 +888,7 @@ impl Game<'_> {
             self.draw_mod_panels(batch, &mut corners);
         }
         self.native_hud(batch, &mut corners);
+        self.bundled_hud_draw(batch, &mut corners);
         self.draw_volt_all_huds(batch, &mut corners);
     }
 

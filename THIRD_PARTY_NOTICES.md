@@ -1323,3 +1323,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Horizon FPS Counter, Keystrokes and Minimap native mods
+
+`crates/horizon-client/src/game/official_{fps_overlay,keystrokes,minimap}.rs`
+contain the official Horizon 2.0.0 runtimes from
+[commit 22c6f14ea60be2b17a642b44a2aff44a98e3733d](https://github.com/horizon-rust/horizon-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native),
+by Ludovic Marie and the Horizon contributors. The same MIT license printed
+above applies. Volt adds a per-profile state reset and Android integration.
