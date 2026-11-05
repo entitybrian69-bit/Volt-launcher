@@ -11,10 +11,23 @@ pub(crate) mod theme {
     #![allow(non_snake_case)]
     use horizon_client::ui_theme::color::{hex, lerp};
     use std::cell::Cell;
-    thread_local! { static LOOK: Cell<(bool, u32)> = const { Cell::new((true, 0x6b4bff)) }; }
-    pub fn set(dark: bool, accent: u32) { LOOK.with(|look| look.set((dark, accent & 0xffffff))); }
-    pub fn dark() -> bool { LOOK.with(|look| look.get().0) }
-    fn accent() -> u32 { LOOK.with(|look| hex(look.get().1, 255)) }
+    use horizon_theme::glass::{Glass, ACCENT, BLUR, TINT};
+    #[derive(Clone, Copy)]
+    struct Look { dark: bool, glass: Glass }
+    thread_local! { static LOOK: Cell<Option<Look>> = const { Cell::new(None) }; }
+    pub fn set(dark: bool, accent: u32) {
+        let accent = accent & 0xffffff;
+        LOOK.with(|cell| {
+            if cell.get().is_none_or(|look| look.dark != dark || look.glass.accent != accent) {
+                cell.set(Some(Look { dark, glass: Glass::new(accent, TINT, BLUR) }));
+            }
+        });
+    }
+    fn look() -> Look { LOOK.with(|cell| cell.get().unwrap_or_else(|| Look {
+        dark: true, glass: Glass::new(ACCENT, TINT, BLUR)
+    })) }
+    pub fn dark() -> bool { look().dark }
+    fn accent() -> u32 { hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
     pub fn BG() -> u32 { choose(hex(0x0a0919,255), hex(0xe9e6f6,255)) }
     pub fn BACKDROP() -> u32 { hex(0x07050f, 215) }
@@ -28,24 +41,21 @@ pub(crate) mod theme {
     pub fn BORDER() -> u32 { choose(hex(0xb9acff,42), hex(0x3b2f78,38)) }
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
-    pub fn CRIMSON_BRIGHT() -> u32 { lerp(accent(), if dark() { hex(0xffffff,255) } else { hex(0x23164e,255) }, 0.40) }
-    pub fn CRIMSON_SOFT() -> u32 { (accent() & 0x00ffffff) | (42u32 << 24) }
-    pub fn CRIMSON_BADGE() -> u32 { lerp(CARD(), accent(), 0.24) }
-    pub fn ON_CRIMSON() -> u32 {
-        let value = LOOK.with(|look| look.get().1);
-        let r = ((value >> 16) & 255) as f32;
-        let g = ((value >> 8) & 255) as f32;
-        let b = (value & 255) as f32;
-        if 0.2126*r + 0.7152*g + 0.0722*b > 185.0 { hex(0x100a1f,255) } else { hex(0xffffff,255) }
+    pub fn CRIMSON_BRIGHT() -> u32 {
+        let glass = look().glass;
+        hex(if dark() { glass.accent_soft } else { glass.accent }, 255)
     }
+    pub fn CRIMSON_SOFT() -> u32 { (accent() & 0x00ffffff) | (42u32 << 24) }
+    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xffffff,26), hex(0x100a1f,26)) }
+    pub fn ON_CRIMSON() -> u32 { hex(look().glass.on_accent,255) }
     pub fn TEXT() -> u32 { choose(hex(0xf4f2ff,255), hex(0x1b1530,255)) }
     pub fn MUTED() -> u32 { choose(hex(0xcfc9ea,255), hex(0x585071,255)) }
     pub fn DIM() -> u32 { choose(hex(0xa59fc6,255), hex(0x706782,255)) }
     pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
     pub fn GLASS() -> u32 {
-        let base = choose(hex(0x15112e,185), hex(0xfdfcff,215));
-        let tint = (accent() & 0x00ff_ffff) | (base & 0xff00_0000);
-        lerp(base, tint, if dark() { 0.12 } else { 0.05 })
+        if !dark() { return hex(0xffffff, 214); }
+        let glass = look().glass;
+        hex(glass.plate, (glass.plate_alpha * 255.0).round() as u8)
     }
     pub fn GLASS_INNER() -> u32 { choose(hex(0xffffff,16), hex(0x100a1f,12)) }
     pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,34), hex(0x3b2f78,30)) }
@@ -59,6 +69,7 @@ pub(super) enum Action {
     HomeTab(HomeTab),
     ToggleAppearance,
     CycleAccent,
+    ConnectServer(usize),
     Page(Page),
     Play,
     Search,
@@ -269,16 +280,16 @@ fn styled_button(
     };
     let pad = (w * 0.1).clamp(8.0, 14.0);
     let font = if matches!(action, Action::Page(_)) {
-        (base * ((w - 2.0 * pad) / ui.measure(Face::Medium, base, label).max(1.0)).min(1.0))
+        (base * ((w - 2.0 * pad) / ui.measure(Face::LauncherMedium, base, label).max(1.0)).min(1.0))
             .max(11.0)
     } else {
         base
     };
     if centered {
-        draw_centered_text(ui, Face::Medium, font, rect, fg, label);
+        draw_centered_text(ui, Face::LauncherMedium, font, rect, fg, label);
     } else {
-        let fitted = ui.fit_text(Face::Medium, font, label, (w - 2.0 * pad).max(8.0));
-        ui.text(Face::Medium, font, x + pad, text_vcenter(y, h, font), fg, &fitted);
+        let fitted = ui.fit_text(Face::LauncherMedium, font, label, (w - 2.0 * pad).max(8.0));
+        ui.text(Face::LauncherMedium, font, x + pad, text_vcenter(y, h, font), fg, &fitted);
     }
     if let Some(t) = press_t {
         let dip = (t * std::f32::consts::PI).sin() * (1.0 - t * 0.45);
@@ -336,7 +347,7 @@ fn toggle(
     });
     if w >= 72.0 {
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             14.5,
             x,
             text_vcenter(y, h, 14.5),
@@ -538,9 +549,9 @@ fn draw_account_chip(
         theme::CRIMSON_BRIGHT()
     };
     ui.rounded(x + w - 16.0, y + (h - 8.0) * 0.5, 8.0, 8.0, 4.0, dot_col);
-    let label = ui.fit_text(Face::Medium, 13.5, status, (w - 34.0).max(24.0));
+    let label = ui.fit_text(Face::LauncherMedium, 13.5, status, (w - 34.0).max(24.0));
     ui.text(
-        Face::Medium,
+        Face::LauncherMedium,
         13.5,
         x + 14.0,
         text_vcenter(y, h, 13.5),
@@ -635,9 +646,9 @@ impl DrawCtx<'_> {
     fn draw_sidebar(&mut self, ui: &mut Ui, rx: f32, ry: f32, rw: f32, rh: f32) {
         ui.rounded(rx, ry, rw, rh, 16.0, theme::GLASS());
         ui.border(rx, ry, rw, rh, 16.0, theme::GLASS_BORDER());
-        ui.text(Face::Medium, 12.0, rx + 14.0, ry + 16.0, theme::MUTED(), "Instances");
+        ui.text(Face::LauncherMedium, 12.0, rx + 14.0, ry + 16.0, theme::MUTED(), "Instances");
         let add = [rx + rw - 42.0, ry + 7.0, 32.0, 32.0];
-        draw_centered_text(ui, Face::Medium, 22.0, add, theme::TEXT(), "+");
+        draw_centered_text(ui, Face::LauncherMedium, 22.0, add, theme::TEXT(), "+");
         self.targets.push((add, Action::Profile)); // chooser includes Create profile
 
         let mut ids = vec![0, self.catalog.config.profile];
@@ -661,10 +672,10 @@ impl DrawCtx<'_> {
             }
             ui.volt_logo(row[0] + 7.0, row[1] + 7.0, 35.0, 35.0);
             let name = if *id == 0 { "Volt".to_owned() } else { format!("Profile {id}") };
-            let name = ui.fit_text(Face::Medium, 13.0, &name, rw - 76.0);
-            ui.text(Face::Medium, 13.0, row[0] + 51.0, row[1] + 6.0, theme::TEXT(), &name);
+            let name = ui.fit_text(Face::LauncherMedium, 13.0, &name, rw - 76.0);
+            ui.text(Face::LauncherMedium, 13.0, row[0] + 51.0, row[1] + 6.0, theme::TEXT(), &name);
             ui.rounded(row[0] + 51.0, row[1] + 33.0, 6.0, 6.0, 3.0, theme::ONLINE());
-            ui.text(Face::Regular, 11.0, row[0] + 61.0, row[1] + 27.0, theme::MUTED(), "Native · 26.3");
+            ui.text(Face::LauncherRegular, 11.0, row[0] + 61.0, row[1] + 27.0, theme::MUTED(), "Native · 26.3");
             self.targets.push((row, Action::ChooseProfile(*id)));
         }
 
@@ -683,15 +694,15 @@ impl DrawCtx<'_> {
         let discord_bg = horizon_client::ui_theme::color::hex(0x5865f2, 255);
         ui.rounded(discord[0], discord[1], discord[2], discord[3], 10.0, discord_bg);
         draw_discord_icon(ui, discord[0] + 25.0, discord[1] + discord[3] * 0.5, theme::TEXT(), discord_bg);
-        draw_centered_text(ui, Face::Medium, 13.0,
+        draw_centered_text(ui, Face::LauncherMedium, 13.0,
             [discord[0] + 26.0, discord[1], discord[2] - 26.0, discord[3]], theme::TEXT(), "Join the Discord");
         self.targets.push((discord, Action::Discord));
         let github = [rx + 10.0, ry + rh - if short { 46.0 } else { 67.0 }, rw - 20.0, 32.0];
         draw_github_icon(ui, github[0] + 20.0, github[1] + 16.0, theme::MUTED());
-        ui.text(Face::Medium, 13.0, github[0] + 38.0, text_vcenter(github[1], github[3], 13.0), theme::MUTED(), "GitHub");
+        ui.text(Face::LauncherMedium, 13.0, github[0] + 38.0, text_vcenter(github[1], github[3], 13.0), theme::MUTED(), "GitHub");
         self.targets.push((github, Action::Repository));
         if !short {
-            ui.text(Face::Regular, 11.0, rx + 14.0, ry + rh - 27.0, theme::MUTED(),
+            ui.text(Face::LauncherRegular, 11.0, rx + 14.0, ry + rh - 27.0, theme::MUTED(),
                 &format!("Volt Launcher {}", crate::backend::VERSION));
         }
     }
@@ -700,22 +711,26 @@ impl DrawCtx<'_> {
     fn draw_topbar(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
         let [x, y, w, _] = area;
         let account_w = if w >= 730.0 { 150.0 } else { 106.0 };
-        let tabs = [("Home", Page::Play), ("Mods", Page::Mods), ("Packs", Page::Packs),
-            ("Shaders", Page::Shaders), ("Files", Page::Installed), ("Settings", Page::Settings)];
+        let tabs = [("Home", Action::Page(Page::Play)), ("Mods", Action::Page(Page::Mods)),
+            ("Servers", Action::HomeTab(HomeTab::Multiplayer)), ("Packs", Action::Page(Page::Packs)),
+            ("Shaders", Action::Page(Page::Shaders)), ("Files", Action::Page(Page::Installed)),
+            ("Settings", Action::Page(Page::Settings))];
         let available = (w - account_w - 12.0).max(240.0);
         let tab_w = (available / tabs.len() as f32).min(88.0);
-        for (i, (label, page)) in tabs.iter().enumerate() {
+        for (i, (label, action)) in tabs.iter().enumerate() {
             let rect = [x + i as f32 * tab_w, y, tab_w - 4.0, 36.0];
-            let selected = if *page == Page::Play {
-                matches!(self.catalog.page, Page::Play | Page::Mods)
-            } else { *page != Page::Mods && self.catalog.page == *page };
+            let selected = match action {
+                Action::HomeTab(tab) => self.catalog.page == Page::Play && self.home_tab == *tab,
+                Action::Page(Page::Play) => self.catalog.page == Page::Play && self.home_tab != HomeTab::Multiplayer,
+                Action::Page(page) => self.catalog.page == *page,
+                _ => false,
+            };
             if selected {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 9.0, theme::CRIMSON_BADGE());
-                ui.border(rect[0], rect[1], rect[2], rect[3], 9.0, theme::GLASS_BORDER());
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CRIMSON_BADGE());
             }
-            draw_centered_text(ui, Face::Medium, 12.5, rect,
+            draw_centered_text(ui, Face::LauncherMedium, 12.5, rect,
                 if selected { theme::TEXT() } else { theme::MUTED() }, label);
-            self.targets.push((rect, Action::Page(*page)));
+            self.targets.push((rect, *action));
         }
         draw_account_chip(ui, self.targets, [x + w - account_w, y, account_w, 38.0],
             account_status, self.login.signed_in);
@@ -726,7 +741,7 @@ impl DrawCtx<'_> {
         ui.border(12.0, 10.0, 168.0, 34.0, 9.0, theme::BORDER_CRIMSON());
         ui.volt_logo(18.0, 14.0, 26.0, 26.0);
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             12.5,
             50.0,
             text_vcenter(10.0, 34.0, 12.5),
@@ -765,7 +780,7 @@ impl DrawCtx<'_> {
             let rect = [tx + 1.0, 56.0, tab_w - 2.0, 32.0];
             draw_centered_text(
                 ui,
-                Face::Medium,
+                Face::LauncherMedium,
                 12.5,
                 rect,
                 horizon_client::ui_theme::color::lerp(theme::MUTED(), theme::ON_CRIMSON(), prox),
@@ -797,8 +812,8 @@ impl DrawCtx<'_> {
         let desc = if installing { "Preparing Minecraft 26.3" }
             else if installed { "Minecraft 26.3 · Native Rust edition" }
             else { "Minecraft 26.3 · Game files need to be downloaded" };
-        let desc = ui.fit_text(Face::Regular, 12.5, desc, w - 8.0);
-        ui.text(Face::Regular, 12.5, x + 4.0, y + 57.0, theme::TEXT(), &desc);
+        let desc = ui.fit_text(Face::LauncherRegular, 12.5, desc, w - 8.0);
+        ui.text(Face::LauncherRegular, 12.5, x + 4.0, y + 57.0, theme::TEXT(), &desc);
         let ay = y + 82.0;
         let play_w = if compact { 94.0 } else { 115.0 };
         let label = if installing { "Installing" } else if installed { "Play" }
@@ -830,7 +845,7 @@ impl DrawCtx<'_> {
                 ui.rounded(r[0], r[1], r[2], r[3], 9.0, theme::CRIMSON_BADGE());
                 ui.border(r[0], r[1], r[2], r[3], 9.0, theme::GLASS_BORDER());
             }
-            draw_centered_text(ui, Face::Medium, if compact { 11.0 } else { 12.5 }, r,
+            draw_centered_text(ui, Face::LauncherMedium, if compact { 11.0 } else { 12.5 }, r,
                 if selected { theme::TEXT() } else { theme::MUTED() }, label);
             self.targets.push((r, *action));
         }
@@ -844,8 +859,8 @@ impl DrawCtx<'_> {
                 let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
                 let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
                 let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
-                let stage = ui.fit_text(Face::Medium, 14.0, progress.stage.label(), w - 32.0);
-                ui.text(Face::Medium, 14.0, x + 14.0, body_y + 12.0, theme::TEXT(), &stage);
+                let stage = ui.fit_text(Face::LauncherMedium, 14.0, progress.stage.label(), w - 32.0);
+                ui.text(Face::LauncherMedium, 14.0, x + 14.0, body_y + 12.0, theme::TEXT(), &stage);
                 ui.rounded(x + 14.0, body_y + 42.0, w - 28.0, 7.0, 3.0, theme::CARD_INNER());
                 if fraction > 0.0 {
                     ui.rounded(x + 14.0, body_y + 42.0, ((w - 28.0) * fraction).max(7.0), 7.0, 3.0, theme::CRIMSON());
@@ -868,35 +883,35 @@ impl DrawCtx<'_> {
                     ui.rounded(r[0], r[1], r[2], r[3], 12.0, theme::GLASS());
                     ui.border(r[0], r[1], r[2], r[3], 12.0, theme::GLASS_BORDER());
                 }
-                ui.text(Face::Medium, 15.0, x + 14.0, y + 12.0, theme::TEXT(), "Instance");
+                ui.text(Face::LauncherMedium, 15.0, x + 14.0, y + 12.0, theme::TEXT(), "Instance");
                 let state = self.error.as_deref().unwrap_or(if installed { "Game files ready · 26.3" } else { "Game files need to be downloaded" });
-                let state = ui.fit_text(Face::Regular, 12.5, state, half - 28.0);
-                ui.text(Face::Regular, 12.5, x + 14.0, y + 42.0, theme::MUTED(), &state);
-                let account = ui.fit_text(Face::Regular, 12.5, account_status, half - 28.0);
+                let state = ui.fit_text(Face::LauncherRegular, 12.5, state, half - 28.0);
+                ui.text(Face::LauncherRegular, 12.5, x + 14.0, y + 42.0, theme::MUTED(), &state);
+                let account = ui.fit_text(Face::LauncherRegular, 12.5, account_status, half - 28.0);
                 if card_h >= 95.0 {
-                    ui.text(Face::Regular, 12.5, x + 14.0, y + 67.0, theme::MUTED(), &account);
+                    ui.text(Face::LauncherRegular, 12.5, x + 14.0, y + 67.0, theme::MUTED(), &account);
                     self.targets.push(([x + 8.0, y + 62.0, half - 16.0, 30.0], Action::Page(Page::Account)));
                 }
                 let dx = x + half + gap;
-                ui.text(Face::Medium, 15.0, dx + 14.0, y + 12.0, theme::TEXT(), "Native mods");
+                ui.text(Face::LauncherMedium, 15.0, dx + 14.0, y + 12.0, theme::TEXT(), "Native mods");
                 let note = format!("{} of 50 switches on", self.catalog.extras.mod_catalog.enabled_count());
-                ui.text(Face::Regular, 12.5, dx + 14.0, y + 42.0, theme::MUTED(), &note);
+                ui.text(Face::LauncherRegular, 12.5, dx + 14.0, y + 42.0, theme::MUTED(), &note);
                 if card_h >= 95.0 {
-                    let note = ui.fit_text(Face::Regular, 11.5, "Some native features are still in development", half - 28.0);
-                    ui.text(Face::Regular, 11.5, dx + 14.0, y + 67.0, theme::MUTED(), &note);
+                    let note = ui.fit_text(Face::LauncherRegular, 11.5, "Some native features are still in development", half - 28.0);
+                    ui.text(Face::LauncherRegular, 11.5, dx + 14.0, y + 67.0, theme::MUTED(), &note);
                 }
                 self.targets.push(([dx, y, half, card_h], Action::Page(Page::Mods)));
             }
             HomeTab::Worlds => {
-                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Worlds");
+                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Worlds");
                 let mut worlds: Vec<String> = std::fs::read_dir(self.catalog.config.game_home(self.home).join("saves"))
                     .into_iter().flatten().flatten().filter(|entry| entry.path().is_dir())
                     .map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
                 worlds.sort_unstable();
                 let summary = if worlds.is_empty() { "No local world folders found".to_owned() }
                     else { format!("{} local world folders · Open them from the game", worlds.len()) };
-                let summary = ui.fit_text(Face::Regular, 12.5, &summary, w - 16.0);
-                ui.text(Face::Regular, 12.5, x + 8.0, y + 35.0, theme::MUTED(), &summary);
+                let summary = ui.fit_text(Face::LauncherRegular, 12.5, &summary, w - 16.0);
+                ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 35.0, theme::MUTED(), &summary);
                 let top = y + 60.0;
                 let bottom = y + h;
                 let view_h = (bottom - top).max(0.0);
@@ -907,33 +922,52 @@ impl DrawCtx<'_> {
                 for (i, world) in worlds.iter().enumerate() {
                     let row_y = top + i as f32 * 28.0 - self.catalog.scroll;
                     if row_y + 28.0 < top || row_y > bottom { continue; }
-                    let label = ui.fit_text(Face::Regular, 13.0, world, w - 24.0);
-                    ui.text(Face::Regular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT(), &label);
+                    let label = ui.fit_text(Face::LauncherRegular, 13.0, world, w - 24.0);
+                    ui.text(Face::LauncherRegular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT(), &label);
                 }
                 let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x + w), ui.to_batch(bottom)];
                 ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
             }
             HomeTab::Multiplayer => {
-                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Multiplayer");
-                ui.text(Face::Regular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), "Server address for direct connect on Play");
-                let r = [x + 8.0, y + 58.0, (w - 16.0).min(380.0), 38.0];
-                ui.rounded(r[0], r[1], r[2], r[3], 9.0, theme::CARD_INNER());
-                ui.border(r[0], r[1], r[2], r[3], 9.0, theme::GLASS_BORDER());
+                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Multiplayer");
+                ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), "Select a saved server or enter an address");
+                let r = [x + 8.0, y + 56.0, (w - 16.0).min(380.0), 38.0];
+                ui.rounded(r[0], r[1], r[2], r[3], 10.0, theme::CARD_INNER());
                 let value = if self.catalog.config.server.is_empty() { "Server address (optional)" } else { &self.catalog.config.server };
-                let value = ui.fit_text(Face::Regular, 13.0, value, r[2] - 24.0);
-                ui.text(Face::Regular, 13.0, r[0] + 12.0, text_vcenter(r[1], r[3], 13.0), theme::TEXT(), &value);
+                let value = ui.fit_text(Face::LauncherRegular, 13.0, value, r[2] - 24.0);
+                ui.text(Face::LauncherRegular, 13.0, r[0] + 12.0, text_vcenter(r[1], r[3], 13.0), theme::TEXT(), &value);
                 self.targets.push((r, Action::Field("server")));
+                let servers = &self.catalog.saved_servers;
+                let top = y + 104.0;
+                let bottom = y + h;
+                let max = (servers.len() as f32 * 54.0 - (bottom - top).max(0.0)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max);
+                *self.list_view = Some([top, bottom, max]);
+                if servers.is_empty() && bottom > top + 20.0 {
+                    ui.text(Face::LauncherRegular, 12.5, x + 8.0, top + 5.0, theme::MUTED(), "No saved servers in this instance.");
+                }
+                let start = ui.batch_mut().vertices.len();
+                for (i, server) in servers.iter().enumerate() {
+                    let row_y = top + i as f32 * 54.0 - self.catalog.scroll;
+                    let row = [x + 8.0, row_y, w - 16.0, 48.0];
+                    self.list_targets.push((row, Action::ConnectServer(i)));
+                    if row_y < top || row_y + 48.0 > bottom { continue; }
+                    ui.rounded(row[0], row[1], row[2], row[3], 12.0, theme::GLASS_INNER());
+                    let title = ui.fit_text(Face::LauncherMedium, 13.0, &server.name, row[2] - 24.0);
+                    let address = ui.fit_text(Face::LauncherRegular, 11.5, &server.ip, row[2] - 24.0);
+                    ui.text(Face::LauncherMedium, 13.0, row[0] + 12.0, row[1] + 4.0, theme::TEXT(), &title);
+                    ui.text(Face::LauncherRegular, 11.5, row[0] + 12.0, row[1] + 25.0, theme::MUTED(), &address);
+                    self.targets.push((row, Action::ConnectServer(i)));
+                }
+                let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x+w), ui.to_batch(bottom)];
+                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
             }
             HomeTab::Screenshots => {
-                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Screenshots");
-                let mut shots: Vec<String> = std::fs::read_dir(self.catalog.config.game_home(self.home).join("screenshots"))
-                    .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
-                    .filter_map(|entry| entry.file_name().to_str().filter(|s| s.to_ascii_lowercase().ends_with(".png")).map(str::to_owned))
-                    .collect();
-                shots.sort_unstable_by(|a, b| b.cmp(a));
+                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Screenshots");
+                let shots = &self.catalog.screenshots;
                 let summary = if shots.is_empty() { "No screenshots yet".to_owned() }
                     else { format!("{} screenshots in this instance", shots.len()) };
-                ui.text(Face::Regular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), &summary);
+                ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), &summary);
                 let top = y + 58.0;
                 let bottom = y + h;
                 let maximum = (shots.len() as f32 * 28.0 - (bottom - top).max(0.0)).max(0.0);
@@ -943,17 +977,17 @@ impl DrawCtx<'_> {
                 for (i, shot) in shots.iter().enumerate() {
                     let row_y = top + i as f32 * 28.0 - self.catalog.scroll;
                     if row_y + 28.0 < top || row_y > bottom { continue; }
-                    let label = ui.fit_text(Face::Regular, 13.0, shot, w - 24.0);
-                    ui.text(Face::Regular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT(), &label);
+                    let label = ui.fit_text(Face::LauncherRegular, 13.0, shot, w - 24.0);
+                    ui.text(Face::LauncherRegular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT(), &label);
                 }
                 let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x+w), ui.to_batch(bottom)];
                 ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
             }
             HomeTab::Console => {
-                ui.text(Face::Medium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Launcher diagnostics");
+                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Launcher diagnostics");
                 let status = if self.catalog.status.is_empty() { "Tap Refresh to read the latest local diagnostic summary." } else { &self.catalog.status };
-                let status = ui.fit_text(Face::Regular, 12.5, status, w - 16.0);
-                ui.text(Face::Regular, 12.5, x + 8.0, y + 38.0, theme::MUTED(), &status);
+                let status = ui.fit_text(Face::LauncherRegular, 12.5, status, w - 16.0);
+                ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 38.0, theme::MUTED(), &status);
                 if h >= 100.0 {
                     styled_button(ui, self.targets, [x + 8.0, y + 64.0, 100.0, 32.0], "Refresh", Action::Logs, BtnStyle::Secondary, true);
                 }
@@ -1015,13 +1049,13 @@ impl DrawCtx<'_> {
 
         // Top header row with Modrinth | CurseForge | Both platform selector!
         if !compact {
-            ui.text(Face::Medium, 24.0, cx, cy, theme::TEXT(), title);
+            ui.text(Face::LauncherMedium, 24.0, cx, cy, theme::TEXT(), title);
             let acc_w = 186.0;
             let tab_item_w = if origins.len() == 4 { 84.0 } else { 88.0 };
             let seg_w = 8.0 + origins.len() as f32 * tab_item_w;
             let hint_max = (cw - acc_w - seg_w - 32.0).max(120.0);
-            let fitted_hint = ui.fit_text(Face::Regular, 13.0, hint, hint_max);
-            ui.text(Face::Regular, 13.0, cx, cy + 30.0, theme::MUTED(), &fitted_hint);
+            let fitted_hint = ui.fit_text(Face::LauncherRegular, 13.0, hint, hint_max);
+            ui.text(Face::LauncherRegular, 13.0, cx, cy + 30.0, theme::MUTED(), &fitted_hint);
 
             draw_account_chip(
                 ui,
@@ -1044,7 +1078,7 @@ impl DrawCtx<'_> {
                 }
                 draw_centered_text(
                     ui,
-                    Face::Medium,
+                    Face::LauncherMedium,
                     12.5,
                     orect,
                     if is_on { theme::ON_CRIMSON() } else { theme::MUTED() },
@@ -1053,7 +1087,7 @@ impl DrawCtx<'_> {
                 self.targets.push((orect, origin_action(origin)));
             }
         } else {
-            ui.text(Face::Medium, 18.0, cx, cy, theme::TEXT(), title);
+            ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), title);
             let seg_y = cy + 26.0;
             ui.rounded(cx, seg_y, cw, 34.0, 9.0, theme::CARD());
             ui.border(cx, seg_y, cw, 34.0, 9.0, theme::BORDER());
@@ -1071,7 +1105,7 @@ impl DrawCtx<'_> {
                 }
                 draw_centered_text(
                     ui,
-                    Face::Medium,
+                    Face::LauncherMedium,
                     12.0,
                     orect,
                     if is_on { theme::ON_CRIMSON() } else { theme::MUTED() },
@@ -1121,9 +1155,9 @@ impl DrawCtx<'_> {
                     theme::BORDER()
                 },
             );
-            let qfit = ui.fit_text(Face::Regular, 13.5, &display_query, s_w - 24.0);
+            let qfit = ui.fit_text(Face::LauncherRegular, 13.5, &display_query, s_w - 24.0);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.5,
                 srect[0] + 12.0,
                 text_vcenter(srect[1], srect[3], 13.5),
@@ -1183,9 +1217,9 @@ impl DrawCtx<'_> {
                     theme::BORDER()
                 },
             );
-            let qfit = ui.fit_text(Face::Regular, 14.0, &display_query, input_w - 28.0);
+            let qfit = ui.fit_text(Face::LauncherRegular, 14.0, &display_query, input_w - 28.0);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 14.0,
                 srect[0] + 14.0,
                 text_vcenter(srect[1], srect[3], 14.0),
@@ -1262,7 +1296,7 @@ impl DrawCtx<'_> {
             };
             draw_centered_text(
                 ui,
-                Face::Medium,
+                Face::LauncherMedium,
                 18.0,
                 [cx + 20.0, mid_y - 8.0, cw - 40.0, 26.0],
                 theme::TEXT(),
@@ -1275,7 +1309,7 @@ impl DrawCtx<'_> {
             };
             draw_centered_text(
                 ui,
-                Face::Regular,
+                Face::LauncherRegular,
                 13.5,
                 [cx + 20.0, mid_y + 20.0, cw - 40.0, 22.0],
                 theme::MUTED(),
@@ -1416,12 +1450,12 @@ impl DrawCtx<'_> {
 
                     // Platform badge next to icon so Both mode clearly distinguishes Modrinth vs CurseForge
                     let src_tag = p.source.label();
-                    let sw = ui.measure(Face::Medium, 10.5, src_tag) + 12.0;
+                    let sw = ui.measure(Face::LauncherMedium, 10.5, src_tag) + 12.0;
                     if x + 66.0 + sw < btn_rect[0] - 6.0 {
                         ui.rounded(x + 66.0, y + 25.0, sw, 20.0, 6.0, theme::CRIMSON_BADGE());
                         draw_centered_text(
                             ui,
-                            Face::Medium,
+                            Face::LauncherMedium,
                             10.5,
                             [x + 66.0, y + 25.0, sw, 20.0],
                             theme::CRIMSON_BRIGHT(),
@@ -1429,9 +1463,9 @@ impl DrawCtx<'_> {
                         );
                     }
 
-                    let title_fit = ui.fit_text(Face::Medium, 16.0, &p.title, card_w - 28.0);
+                    let title_fit = ui.fit_text(Face::LauncherMedium, 16.0, &p.title, card_w - 28.0);
                     ui.text(
-                        Face::Medium,
+                        Face::LauncherMedium,
                         16.0,
                         x + 14.0,
                         y + 66.0,
@@ -1439,10 +1473,10 @@ impl DrawCtx<'_> {
                         &title_fit,
                     );
                     let desc_lines =
-                        wrap_lines(ui, Face::Regular, 12.5, &p.summary, card_w - 28.0, 3);
+                        wrap_lines(ui, Face::LauncherRegular, 12.5, &p.summary, card_w - 28.0, 3);
                     for (li, line) in desc_lines.iter().enumerate() {
                         ui.text(
-                            Face::Regular,
+                            Face::LauncherRegular,
                             12.5,
                             x + 14.0,
                             y + 92.0 + li as f32 * 18.0,
@@ -1511,14 +1545,14 @@ impl DrawCtx<'_> {
                     let dl_w = if dl_text.is_empty() {
                         0.0
                     } else {
-                        ui.measure(Face::Regular, 12.0, &dl_text) + 12.0
+                        ui.measure(Face::LauncherRegular, 12.0, &dl_text) + 12.0
                     };
                     let title_max = (card_w - (text_x - x) - dl_w - 14.0).max(60.0);
-                    let title_fit = ui.fit_text(Face::Medium, 16.5, &p.title, title_max);
-                    ui.text(Face::Medium, 16.5, text_x, y + 12.0, theme::TEXT(), &title_fit);
+                    let title_fit = ui.fit_text(Face::LauncherMedium, 16.5, &p.title, title_max);
+                    ui.text(Face::LauncherMedium, 16.5, text_x, y + 12.0, theme::TEXT(), &title_fit);
                     if !dl_text.is_empty() {
                         ui.text(
-                            Face::Regular,
+                            Face::LauncherRegular,
                             12.0,
                             x + card_w - dl_w - 2.0,
                             y + 15.0,
@@ -1531,11 +1565,11 @@ impl DrawCtx<'_> {
                     if !compact {
                         let mut tx = text_x;
                         let src_tag = p.source.label();
-                        let sw = ui.measure(Face::Medium, 11.0, src_tag) + 14.0;
+                        let sw = ui.measure(Face::LauncherMedium, 11.0, src_tag) + 14.0;
                         ui.rounded(tx, y + 38.0, sw, 20.0, 6.0, theme::CRIMSON_BADGE());
                         draw_centered_text(
                             ui,
-                            Face::Medium,
+                            Face::LauncherMedium,
                             11.0,
                             [tx, y + 38.0, sw, 20.0],
                             theme::CRIMSON_BRIGHT(),
@@ -1549,14 +1583,14 @@ impl DrawCtx<'_> {
                             .take(1)
                             .chain(p.game_versions.iter().take(2))
                         {
-                            let tw = ui.measure(Face::Regular, 11.0, tag) + 14.0;
+                            let tw = ui.measure(Face::LauncherRegular, 11.0, tag) + 14.0;
                             if tx + tw > x + card_w - 14.0 {
                                 break;
                             }
                             ui.rounded(tx, y + 38.0, tw, 20.0, 6.0, theme::CARD_INNER());
                             draw_centered_text(
                                 ui,
-                                Face::Regular,
+                                Face::LauncherRegular,
                                 11.0,
                                 [tx, y + 38.0, tw, 20.0],
                                 theme::MUTED(),
@@ -1568,10 +1602,10 @@ impl DrawCtx<'_> {
 
                     let desc_y = if compact { y + 38.0 } else { y + 64.0 };
                     let desc_w = (card_w - (text_x - x) - 14.0).max(80.0);
-                    let lines = wrap_lines(ui, Face::Regular, 12.5, &p.summary, desc_w, 2);
+                    let lines = wrap_lines(ui, Face::LauncherRegular, 12.5, &p.summary, desc_w, 2);
                     for (li, line) in lines.iter().enumerate() {
                         ui.text(
-                            Face::Regular,
+                            Face::LauncherRegular,
                             12.5,
                             text_x,
                             desc_y + li as f32 * 17.0,
@@ -1619,7 +1653,7 @@ impl DrawCtx<'_> {
                         );
                         draw_centered_text(
                             ui,
-                            Face::Medium,
+                            Face::LauncherMedium,
                             13.0,
                             btn_rect,
                             theme::TEXT(),
@@ -1628,7 +1662,7 @@ impl DrawCtx<'_> {
                     } else if is_java_mod {
                         draw_centered_text(
                             ui,
-                            Face::Regular,
+                            Face::LauncherRegular,
                             12.5,
                             btn_rect,
                             theme::MUTED(),
@@ -1637,7 +1671,7 @@ impl DrawCtx<'_> {
                     } else if crate::catalog::source_only_mod(p) {
                         draw_centered_text(
                             ui,
-                            Face::Regular,
+                            Face::LauncherRegular,
                             12.5,
                             btn_rect,
                             theme::MUTED(),
@@ -1648,7 +1682,7 @@ impl DrawCtx<'_> {
                     {
                         draw_centered_text(
                             ui,
-                            Face::Regular,
+                            Face::LauncherRegular,
                             12.0,
                             btn_rect,
                             theme::MUTED(),
@@ -1720,7 +1754,7 @@ impl DrawCtx<'_> {
                 });
             draw_centered_text(
                 ui,
-                Face::Regular,
+                Face::LauncherRegular,
                 13.0,
                 [cx + 124.0, fy, (cw - 248.0).max(40.0), footer_h],
                 if self.error.is_some() {
@@ -1760,14 +1794,14 @@ impl DrawCtx<'_> {
         ui.border(input[0], input[1], input[2], input[3], 8.0, theme::BORDER());
         let placeholder = self.catalog.query.is_empty() && self.catalog.editing != Some("search");
         let text = if placeholder { "Search Horizon mods..." } else { &self.catalog.query };
-        let text = ui.fit_text(Face::Regular, 13.0, text, input[2] - 18.0);
-        ui.text(Face::Regular, 13.0, x + 9.0, y + 6.0,
+        let text = ui.fit_text(Face::LauncherRegular, 13.0, text, input[2] - 18.0);
+        ui.text(Face::LauncherRegular, 13.0, x + 9.0, y + 6.0,
             if placeholder { theme::DIM() } else { theme::TEXT() }, &text);
         self.targets.push((input, Action::Field("search")));
         styled_button(ui, self.targets, [x + w - 90.0, y, 90.0, 32.0], "Search",
             Action::Search, BtnStyle::Primary, true);
-        let status = ui.fit_text(Face::Regular, 11.0, &self.catalog.status, w - 8.0);
-        ui.text(Face::Regular, 11.0, x + 4.0, y + 37.0, theme::MUTED(), &status);
+        let status = ui.fit_text(Face::LauncherRegular, 11.0, &self.catalog.status, w - 8.0);
+        ui.text(Face::LauncherRegular, 11.0, x + 4.0, y + 37.0, theme::MUTED(), &status);
         let top = y + 56.0;
         let bottom = y + h - 35.0;
         let view_h = (bottom - top).max(0.0);
@@ -1780,8 +1814,8 @@ impl DrawCtx<'_> {
         *self.list_view = Some([top, bottom, max_scroll]);
         if self.catalog.results.is_empty() {
             let hint = if self.catalog.status.is_empty() { "Search the Horizon registry" } else { &self.catalog.status };
-            let hint = ui.fit_text(Face::Regular, 12.0, hint, w - 16.0);
-            ui.text(Face::Regular, 12.0, x + 8.0, top + 8.0, theme::MUTED(), &hint);
+            let hint = ui.fit_text(Face::LauncherRegular, 12.0, hint, w - 16.0);
+            ui.text(Face::LauncherRegular, 12.0, x + 8.0, top + 8.0, theme::MUTED(), &hint);
         }
         for (i, p) in self.catalog.results.iter().enumerate() {
             let ry = top + i as f32 * step - self.catalog.scroll;
@@ -1806,8 +1840,8 @@ impl DrawCtx<'_> {
             }
             let tx = x + 58.0;
             let title_width = (w - 178.0).max(32.0);
-            let title = ui.fit_text(Face::Medium, 14.0, &p.title, title_width);
-            ui.text(Face::Medium, 14.0, tx, ry + 8.0, theme::TEXT(), &title);
+            let title = ui.fit_text(Face::LauncherMedium, 14.0, &p.title, title_width);
+            ui.text(Face::LauncherMedium, 14.0, tx, ry + 8.0, theme::TEXT(), &title);
             let kind = if native {
                 if prebuilt && self.catalog.bundled_mods.contains(&p.id) { "Native · bundled build installed" }
                 else if prebuilt { "Native · 2.0.0 prebuilt only" }
@@ -1815,13 +1849,13 @@ impl DrawCtx<'_> {
                 else { "Native · source only, no Volt build" }
             } else if supported { "Horizon mod · 64-bit" } else { "Horizon mod · 64-bit required" };
             let subtitle = format!("{} · {}", p.author, kind);
-            let subtitle = ui.fit_text(Face::Regular, 11.0, &subtitle, title_width);
-            ui.text(Face::Regular, 11.0, tx, ry + 30.0, theme::DIM(), &subtitle);
+            let subtitle = ui.fit_text(Face::LauncherRegular, 11.0, &subtitle, title_width);
+            ui.text(Face::LauncherRegular, 11.0, tx, ry + 30.0, theme::DIM(), &subtitle);
             let summary = if native && !prebuilt {
                 "Source only — needs a compatible Android build"
             } else { &p.summary };
-            let summary = ui.fit_text(Face::Regular, 11.0, summary, (w - 70.0).max(30.0));
-            ui.text(Face::Regular, 11.0, tx, ry + 49.0, theme::MUTED(), &summary);
+            let summary = ui.fit_text(Face::LauncherRegular, 11.0, summary, (w - 70.0).max(30.0));
+            ui.text(Face::LauncherRegular, 11.0, tx, ry + 49.0, theme::MUTED(), &summary);
             if remove_bundled {
                 let first = self.targets.len();
                 styled_button(ui, self.targets, button, "Remove", Action::RemoveBundled(i), BtnStyle::Secondary, true);
@@ -1829,7 +1863,7 @@ impl DrawCtx<'_> {
                     self.targets[first].0 = clipped;
                 } else { self.targets.truncate(first); }
             } else if let Some(label) = installed {
-                draw_centered_text(ui, Face::Medium, 11.0, button, theme::MUTED(), &label);
+                draw_centered_text(ui, Face::LauncherMedium, 11.0, button, theme::MUTED(), &label);
             } else if can_press {
                 let first = self.targets.len();
                 styled_button(ui, self.targets, button, if native && !prebuilt { "Download" } else { "Install" },
@@ -1838,7 +1872,7 @@ impl DrawCtx<'_> {
                     self.targets[first].0 = clipped;
                 } else { self.targets.truncate(first); }
             } else if !supported {
-                draw_centered_text(ui, Face::Regular, 11.0, button, theme::MUTED(), "64-bit only");
+                draw_centered_text(ui, Face::LauncherRegular, 11.0, button, theme::MUTED(), "64-bit only");
             }
             let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x + w), ui.to_batch(bottom)];
             ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
@@ -1850,7 +1884,7 @@ impl DrawCtx<'_> {
             if prev_active { BtnStyle::Secondary } else { BtnStyle::Subtle }, true);
         if !prev_active { self.targets.truncate(prev_start); }
         let page = format!("Page {}", self.catalog.offset / 12 + 1);
-        draw_centered_text(ui, Face::Regular, 11.0, [x + 88.0, footer, (w - 176.0).max(0.0), 28.0], theme::MUTED(), &page);
+        draw_centered_text(ui, Face::LauncherRegular, 11.0, [x + 88.0, footer, (w - 176.0).max(0.0), 28.0], theme::MUTED(), &page);
         let next_start = self.targets.len();
         let next_active = self.catalog.results.len() >= 11 && !self.catalog.busy();
         styled_button(ui, self.targets, [x + w - 86.0, footer, 86.0, 28.0], "Next", Action::Next,
@@ -1885,15 +1919,15 @@ impl DrawCtx<'_> {
         ];
 
         if !compact {
-            ui.text(Face::Medium, 24.0, cx, cy, theme::TEXT(), "Volt Native Mods");
+            ui.text(Face::LauncherMedium, 24.0, cx, cy, theme::TEXT(), "Volt Native Mods");
             let pill_txt = format!("{enabled_total} / {TOTAL_VOLT_MODS} Active");
-            let pill_w = ui.measure(Face::Medium, 12.0, &pill_txt) + 22.0;
-            let pill_x = cx + ui.measure(Face::Medium, 24.0, "Volt Native Mods") + 14.0;
+            let pill_w = ui.measure(Face::LauncherMedium, 12.0, &pill_txt) + 22.0;
+            let pill_x = cx + ui.measure(Face::LauncherMedium, 24.0, "Volt Native Mods") + 14.0;
             ui.rounded(pill_x, cy + 4.0, pill_w, 24.0, 12.0, hex(0x0E2925, 235));
             ui.border(pill_x, cy + 4.0, pill_w, 24.0, 12.0, hex(0x2DD4BF, 220));
             draw_centered_text(
                 ui,
-                Face::Medium,
+                Face::LauncherMedium,
                 12.0,
                 [pill_x, cy + 4.0, pill_w, 24.0],
                 hex(0x5EEAD4, 255),
@@ -1903,8 +1937,8 @@ impl DrawCtx<'_> {
             let acc_w = 186.0;
             let hint =
                 "50 catalog entries • Native features are still being implemented";
-            let fitted_hint = ui.fit_text(Face::Regular, 13.0, hint, (cw - acc_w - 24.0).max(120.0));
-            ui.text(Face::Regular, 13.0, cx, cy + 30.0, theme::MUTED(), &fitted_hint);
+            let fitted_hint = ui.fit_text(Face::LauncherRegular, 13.0, hint, (cw - acc_w - 24.0).max(120.0));
+            ui.text(Face::LauncherRegular, 13.0, cx, cy + 30.0, theme::MUTED(), &fitted_hint);
 
             draw_account_chip(
                 ui,
@@ -1915,7 +1949,7 @@ impl DrawCtx<'_> {
             );
         } else {
             let hdr = format!("Volt Mods  ({enabled_total}/{TOTAL_VOLT_MODS} On)");
-            ui.text(Face::Medium, 18.0, cx, cy, theme::TEXT(), &hdr);
+            ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), &hdr);
         }
 
         // Command Search + Category Filter Bar (no .hmod / Modrinth / CurseForge)
@@ -1954,9 +1988,9 @@ impl DrawCtx<'_> {
                     theme::BORDER()
                 },
             );
-            let qfit = ui.fit_text(Face::Regular, 13.0, &display_query, s_w - 22.0);
+            let qfit = ui.fit_text(Face::LauncherRegular, 13.0, &display_query, s_w - 22.0);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.0,
                 srect[0] + 11.0,
                 text_vcenter(srect[1], srect[3], 13.0),
@@ -2003,9 +2037,9 @@ impl DrawCtx<'_> {
                     theme::BORDER()
                 },
             );
-            let qfit = ui.fit_text(Face::Regular, 13.5, &display_query, input_w - 28.0);
+            let qfit = ui.fit_text(Face::LauncherRegular, 13.5, &display_query, input_w - 28.0);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.5,
                 srect[0] + 14.0,
                 text_vcenter(srect[1], srect[3], 13.5),
@@ -2088,7 +2122,7 @@ impl DrawCtx<'_> {
             );
             draw_centered_text(
                 ui,
-                Face::Medium,
+                Face::LauncherMedium,
                 if compact { 11.5 } else { 12.5 },
                 frect,
                 if active {
@@ -2147,7 +2181,7 @@ impl DrawCtx<'_> {
             ui.border(cx, top, cw, view_h, 14.0, theme::BORDER());
             draw_centered_text(
                 ui,
-                Face::Medium,
+                Face::LauncherMedium,
                 16.5,
                 [cx + 20.0, top + view_h * 0.5 - 18.0, cw - 40.0, 24.0],
                 theme::TEXT(),
@@ -2155,7 +2189,7 @@ impl DrawCtx<'_> {
             );
             draw_centered_text(
                 ui,
-                Face::Regular,
+                Face::LauncherRegular,
                 13.0,
                 [cx + 20.0, top + view_h * 0.5 + 8.0, cw - 40.0, 20.0],
                 theme::MUTED(),
@@ -2196,17 +2230,17 @@ impl DrawCtx<'_> {
                 ui.border(x, y, card_w, card_h, 11.0, theme::BORDER());
                 let button_w = if native_installed { 92.0 } else { 98.0 };
                 let title_w = (card_w - button_w - 30.0).max(30.0);
-                let title = ui.fit_text(Face::Medium, 14.5, "Horizon Zoom 2.0.0", title_w);
-                ui.text(Face::Medium, 14.5, x + 12.0, y + 10.0, theme::TEXT(), &title);
+                let title = ui.fit_text(Face::LauncherMedium, 14.5, "Horizon Zoom 2.0.0", title_w);
+                ui.text(Face::LauncherMedium, 14.5, x + 12.0, y + 10.0, theme::TEXT(), &title);
                 let state = if self.catalog.status.starts_with("Could not change Horizon Zoom:") {
                     self.catalog.status.as_str()
                 } else if native_installed {
                     if native_enabled { "Installed · On in game" } else { "Installed · Off in game" }
                 } else { "Bundled · not installed" };
-                let state = ui.fit_text(Face::Regular, 11.0, state, title_w);
-                ui.text(Face::Regular, 11.0, x + 12.0, y + 30.0, theme::DIM(), &state);
-                let info = ui.fit_text(Face::Regular, 11.0, "Hold Z · add a Z touch button in Controls Studio", card_w - 24.0);
-                ui.text(Face::Regular, 11.0, x + 12.0, y + 52.0, theme::MUTED(), &info);
+                let state = ui.fit_text(Face::LauncherRegular, 11.0, state, title_w);
+                ui.text(Face::LauncherRegular, 11.0, x + 12.0, y + 30.0, theme::DIM(), &state);
+                let info = ui.fit_text(Face::LauncherRegular, 11.0, "Hold Z · add a Z touch button in Controls Studio", card_w - 24.0);
+                ui.text(Face::LauncherRegular, 11.0, x + 12.0, y + 52.0, theme::MUTED(), &info);
                 let b = [x + card_w - button_w - 10.0, y + 8.0, button_w, 29.0];
                 let target_start = self.targets.len();
                 styled_button(ui, self.targets, b, if native_installed { "Remove" } else { "Install" },
@@ -2312,13 +2346,13 @@ impl DrawCtx<'_> {
             // Title + Category badge + Summary
             let tx = lx + logo_sz + 12.0;
             let title_max = (card_w - (tx - x) - 66.0).max(56.0);
-            let tfit = ui.fit_text(Face::Medium, 14.5, m.title, title_max);
-            ui.text(Face::Medium, 14.5, tx, y + 11.0, theme::TEXT(), &tfit);
+            let tfit = ui.fit_text(Face::LauncherMedium, 14.5, m.title, title_max);
+            ui.text(Face::LauncherMedium, 14.5, tx, y + 11.0, theme::TEXT(), &tfit);
 
             let cat_txt = format!("{} • v{}", m.category.short_label(), m.version);
-            let cfit = ui.fit_text(Face::Regular, 11.0, &cat_txt, title_max);
+            let cfit = ui.fit_text(Face::LauncherRegular, 11.0, &cat_txt, title_max);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 11.0,
                 tx,
                 y + 30.0,
@@ -2331,8 +2365,8 @@ impl DrawCtx<'_> {
             );
 
             let sum_max = (card_w - (tx - x) - 14.0).max(60.0);
-            let sfit = ui.fit_text(Face::Regular, 12.0, m.summary, sum_max);
-            ui.text(Face::Regular, 12.0, tx, y + 50.0, theme::MUTED(), &sfit);
+            let sfit = ui.fit_text(Face::LauncherRegular, 12.0, m.summary, sum_max);
+            ui.text(Face::LauncherRegular, 12.0, tx, y + 50.0, theme::MUTED(), &sfit);
 
             // Clip touch regions as well as vertices; a partially scrolled row must
             // not intercept the tabs, search field, or footer outside the viewport.
@@ -2378,7 +2412,7 @@ impl DrawCtx<'_> {
 
         if !compact {
             // Top bar: Installed Content + Profile pill + Account chip
-            ui.text(Face::Medium, 24.0, cx, cy, theme::TEXT(), "Installed Content");
+            ui.text(Face::LauncherMedium, 24.0, cx, cy, theme::TEXT(), "Installed Content");
             styled_button(
                 ui,
                 self.targets,
@@ -2431,8 +2465,8 @@ impl DrawCtx<'_> {
 
                 let count = self.catalog.local.iter().filter(|e| e.kind == kind).count();
                 let header_label = format!("{} ({count})", kind.label());
-                let hfit = ui.fit_text(Face::Medium, 16.5, &header_label, col_w - 60.0);
-                ui.text(Face::Medium, 16.5, col_x + 16.0, top + 12.0, theme::TEXT(), &hfit);
+                let hfit = ui.fit_text(Face::LauncherMedium, 16.5, &header_label, col_w - 60.0);
+                ui.text(Face::LauncherMedium, 16.5, col_x + 16.0, top + 12.0, theme::TEXT(), &hfit);
 
                 let chev = if self.catalog.sections[section] { "v" } else { ">" };
                 styled_button(
@@ -2469,7 +2503,7 @@ impl DrawCtx<'_> {
                 if !self.catalog.sections[section] {
                     draw_centered_text(
                         ui,
-                        Face::Regular,
+                        Face::LauncherRegular,
                         13.0,
                         [col_x + 14.0, inner_top + 20.0, col_w - 28.0, 28.0],
                         theme::MUTED(),
@@ -2487,7 +2521,7 @@ impl DrawCtx<'_> {
                     draw_page_icon(ui, Page::Installed, dz[0] + dz[2] * 0.5, mid_y - 26.0, theme::TEXT());
                     draw_centered_text(
                         ui,
-                        Face::Regular,
+                        Face::LauncherRegular,
                         13.5,
                         [dz[0] + 8.0, mid_y - 6.0, dz[2] - 16.0, 22.0],
                         theme::TEXT(),
@@ -2495,7 +2529,7 @@ impl DrawCtx<'_> {
                     );
                     draw_centered_text(
                         ui,
-                        Face::Regular,
+                        Face::LauncherRegular,
                         12.5,
                         [dz[0] + 8.0, mid_y + 18.0, dz[2] - 16.0, 20.0],
                         theme::MUTED(),
@@ -2536,11 +2570,11 @@ impl DrawCtx<'_> {
                             9.0,
                             theme::BORDER(),
                         );
-                        let tfit = ui.fit_text(Face::Medium, 13.5, &item.title, col_w - 40.0);
-                        ui.text(Face::Medium, 13.5, col_x + 20.0, iy + 6.0, theme::TEXT(), &tfit);
+                        let tfit = ui.fit_text(Face::LauncherMedium, 13.5, &item.title, col_w - 40.0);
+                        ui.text(Face::LauncherMedium, 13.5, col_x + 20.0, iy + 6.0, theme::TEXT(), &tfit);
                         if kind == Kind::Mods && !cfg!(target_pointer_width = "64") {
                             ui.text(
-                                Face::Regular,
+                                Face::LauncherRegular,
                                 12.0,
                                 col_x + 20.0,
                                 iy + 34.0,
@@ -2582,9 +2616,9 @@ impl DrawCtx<'_> {
                         &default_msg
                     }
                 });
-            let fitted = ui.fit_text(Face::Regular, 13.5, msg, cw - 32.0);
+            let fitted = ui.fit_text(Face::LauncherRegular, 13.5, msg, cw - 32.0);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.5,
                 cx + 16.0,
                 text_vcenter(fy, footer_h, 13.5),
@@ -2666,11 +2700,11 @@ impl DrawCtx<'_> {
                     }
                     ui.rounded(cx, y, cw, row_height - 8.0, 10.0, theme::CARD());
                     ui.border(cx, y, cw, row_height - 8.0, 10.0, theme::BORDER());
-                    let tfit = ui.fit_text(Face::Medium, 15.0, &item.title, cw - 24.0);
-                    ui.text(Face::Medium, 15.0, cx + 12.0, y + 10.0, theme::TEXT(), &tfit);
+                    let tfit = ui.fit_text(Face::LauncherMedium, 15.0, &item.title, cw - 24.0);
+                    ui.text(Face::LauncherMedium, 15.0, cx + 12.0, y + 10.0, theme::TEXT(), &tfit);
                     if kind == Kind::Mods && !cfg!(target_pointer_width = "64") {
                         ui.text(
-                            Face::Regular,
+                            Face::LauncherRegular,
                             13.0,
                             cx + 12.0,
                             y + 54.0,
@@ -2881,7 +2915,7 @@ impl DrawCtx<'_> {
             let text_max = (btn_x - cx - 32.0).max(140.0);
 
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 18.0,
                 cx + 20.0,
                 cy + 11.0,
@@ -2894,7 +2928,7 @@ impl DrawCtx<'_> {
                 ui.border(badge_x, cy + 12.0, 128.0, 22.0, 6.0, theme::BORDER_CRIMSON());
                 draw_centered_text(
                     ui,
-                    Face::Medium,
+                    Face::LauncherMedium,
                     11.0,
                     [badge_x, cy + 12.0, 128.0, 22.0],
                     theme::CRIMSON_BRIGHT(),
@@ -2902,9 +2936,9 @@ impl DrawCtx<'_> {
                 );
             }
 
-            let active_fit = ui.fit_text(Face::Medium, 13.5, &active_ctrl_summary, text_max);
+            let active_fit = ui.fit_text(Face::LauncherMedium, 13.5, &active_ctrl_summary, text_max);
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 13.5,
                 cx + 20.0,
                 cy + 41.0,
@@ -2917,9 +2951,9 @@ impl DrawCtx<'_> {
             );
             let sub_hint =
                 "Built-in Pojav, Zalith, FCL & Claw presets + visual button editor & .json/.zip import";
-            let sub_fit = ui.fit_text(Face::Regular, 12.5, sub_hint, text_max);
+            let sub_fit = ui.fit_text(Face::LauncherRegular, 12.5, sub_hint, text_max);
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 12.5,
                 cx + 20.0,
                 cy + 65.0,
@@ -2984,7 +3018,7 @@ impl DrawCtx<'_> {
             ui.rounded(cx, cards_y, col_w, cards_h, 14.0, theme::CARD());
             ui.border(cx, cards_y, col_w, cards_h, 14.0, theme::BORDER());
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 17.0,
                 cx + 20.0,
                 cards_y + 12.0,
@@ -2996,7 +3030,7 @@ impl DrawCtx<'_> {
             ui.rounded(rx, cards_y, col_w, cards_h, 14.0, theme::CARD());
             ui.border(rx, cards_y, col_w, cards_h, 14.0, theme::BORDER());
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 17.0,
                 rx + 20.0,
                 cards_y + 12.0,
@@ -3027,9 +3061,9 @@ impl DrawCtx<'_> {
                         ui.rounded(row_rect[0] + 1.0, row_rect[1] + 6.0, 2.5, row_rect[3] - 12.0, 1.2, theme::CRIMSON_BRIGHT());
                     }
                     let lbl_fit =
-                        ui.fit_text(Face::Regular, 14.0, label, col_w - ctrl_w - 40.0);
+                        ui.fit_text(Face::LauncherRegular, 14.0, label, col_w - ctrl_w - 40.0);
                     ui.text(
-                        Face::Regular,
+                        Face::LauncherRegular,
                         14.0,
                         base_x + 20.0,
                         text_vcenter(y, row_h - 4.0, 14.0),
@@ -3100,10 +3134,10 @@ impl DrawCtx<'_> {
 
             let status = self.error.as_deref().unwrap_or(&self.catalog.status);
             if !status.is_empty() {
-                let lines = wrap_lines(ui, Face::Regular, 13.0, status, col_w, 2);
+                let lines = wrap_lines(ui, Face::LauncherRegular, 13.0, status, col_w, 2);
                 for (li, line) in lines.iter().enumerate() {
                     ui.text(
-                        Face::Regular,
+                        Face::LauncherRegular,
                         13.0,
                         cx + 4.0,
                         btn_y + 2.0 + li as f32 * 18.0,
@@ -3152,7 +3186,7 @@ impl DrawCtx<'_> {
                 ui.rounded(cx, iy, cw, import_card_h, 12.0, theme::HERO_BG());
                 ui.border(cx, iy, cw, import_card_h, 12.0, theme::BORDER_CRIMSON());
                 ui.text(
-                    Face::Medium,
+                    Face::LauncherMedium,
                     16.5,
                     cx + 16.0,
                     iy + 10.0,
@@ -3160,9 +3194,9 @@ impl DrawCtx<'_> {
                     "Controls Studio",
                 );
                 let act_fit =
-                    ui.fit_text(Face::Regular, 12.5, &active_ctrl_summary, cw - 32.0);
+                    ui.fit_text(Face::LauncherRegular, 12.5, &active_ctrl_summary, cw - 32.0);
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     12.5,
                     cx + 16.0,
                     iy + 38.0,
@@ -3227,7 +3261,7 @@ impl DrawCtx<'_> {
                 if y < top || y + row_h - 4.0 > bottom {
                     continue;
                 }
-                ui.text(Face::Regular, 13.5, cx + 2.0, y, theme::MUTED(), label);
+                ui.text(Face::LauncherRegular, 13.5, cx + 2.0, y, theme::MUTED(), label);
                 if let Some(on) = sw {
                     toggle(ui, self.targets, ctrl_rect, *on, *act);
                 } else {
@@ -3584,16 +3618,16 @@ impl DrawCtx<'_> {
             ui.border(cx, cy, cw, hero_h, 14.0, theme::BORDER_CRIMSON());
 
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 18.5,
                 cx + 20.0,
                 cy + 11.0,
                 theme::TEXT(),
                 "Volt Performance & Optimization Suite",
             );
-            let hw_fit = ui.fit_text(Face::Regular, 13.0, &hw_summary, (cw - 320.0).max(160.0));
+            let hw_fit = ui.fit_text(Face::LauncherRegular, 13.0, &hw_summary, (cw - 320.0).max(160.0));
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.0,
                 cx + 20.0,
                 cy + 36.0,
@@ -3649,7 +3683,7 @@ impl DrawCtx<'_> {
             ui.rounded(cx, cards_y, col_w, cards_h, 14.0, theme::CARD());
             ui.border(cx, cards_y, col_w, cards_h, 14.0, theme::BORDER());
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 16.5,
                 cx + 20.0,
                 cards_y + 12.0,
@@ -3661,7 +3695,7 @@ impl DrawCtx<'_> {
             ui.rounded(rx, cards_y, col_w, cards_h, 14.0, theme::CARD());
             ui.border(rx, cards_y, col_w, cards_h, 14.0, theme::BORDER());
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 16.5,
                 rx + 20.0,
                 cards_y + 12.0,
@@ -3692,9 +3726,9 @@ impl DrawCtx<'_> {
                         ui.rounded(row_rect[0] + 1.0, row_rect[1] + 6.0, 2.5, row_rect[3] - 12.0, 1.2, theme::CRIMSON_BRIGHT());
                     }
                     let lbl_fit =
-                        ui.fit_text(Face::Regular, 13.5, label, col_w - ctrl_w - 36.0);
+                        ui.fit_text(Face::LauncherRegular, 13.5, label, col_w - ctrl_w - 36.0);
                     ui.text(
-                        Face::Regular,
+                        Face::LauncherRegular,
                         13.5,
                         base_x + 18.0,
                         text_vcenter(y, row_h - 4.0, 13.5),
@@ -3758,15 +3792,15 @@ impl DrawCtx<'_> {
                 ui.rounded(cx, iy, cw, hero_h, 12.0, theme::HERO_BG());
                 ui.border(cx, iy, cw, hero_h, 12.0, theme::BORDER_CRIMSON());
                 ui.text(
-                    Face::Medium,
+                    Face::LauncherMedium,
                     16.5,
                     cx + 16.0,
                     iy + 10.0,
                     theme::TEXT(),
                     "Volt Settings & Boost",
                 );
-                let hw_fit = ui.fit_text(Face::Regular, 12.0, &hw_summary, cw - 32.0);
-                ui.text(Face::Regular, 12.0, cx + 16.0, iy + 34.0, theme::MUTED(), &hw_fit);
+                let hw_fit = ui.fit_text(Face::LauncherRegular, 12.0, &hw_summary, cw - 32.0);
+                ui.text(Face::LauncherRegular, 12.0, cx + 16.0, iy + 34.0, theme::MUTED(), &hw_fit);
                 styled_button(ui, self.targets, auto_r, "Auto-Tune", Action::VoltExtra(Item::VoltAutoOptimize), BtnStyle::Primary, true);
                 styled_button(ui, self.targets, purge_r, "Purge RAM", Action::VoltExtra(Item::VoltPurgeRam), BtnStyle::CrimsonOutline, true);
                 styled_button(
@@ -3787,7 +3821,7 @@ impl DrawCtx<'_> {
                 if y < top || y + row_h - 4.0 > bottom {
                     continue;
                 }
-                ui.text(Face::Regular, 13.5, cx + 2.0, y, theme::MUTED(), label);
+                ui.text(Face::LauncherRegular, 13.5, cx + 2.0, y, theme::MUTED(), label);
                 if let Some(on) = sw {
                     toggle(ui, self.targets, ctrl_rect, *on, *act);
                 } else {
@@ -3838,9 +3872,9 @@ impl DrawCtx<'_> {
         } else {
             theme::TEXT()
         };
-        let fitted = ui.fit_text(Face::Medium, 14.5, &display, (w - 24.0).max(16.0));
+        let fitted = ui.fit_text(Face::LauncherMedium, 14.5, &display, (w - 24.0).max(16.0));
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             14.5,
             x + 12.0,
             text_vcenter(y, h, 14.5),
@@ -3863,7 +3897,7 @@ impl DrawCtx<'_> {
         // Top Page Title + Status Bar
         let header_h = if compact { 34.0 } else { 38.0 };
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             if compact { 19.5 } else { 24.0 },
             cx + 4.0,
             cy + 2.0,
@@ -3971,9 +4005,9 @@ impl DrawCtx<'_> {
             })
             .or(self.volt_accounts.status.as_deref());
         if let Some(status) = status {
-            let fitted = ui.fit_text(Face::Medium, 12.5, status, cw);
+            let fitted = ui.fit_text(Face::LauncherMedium, 12.5, status, cw);
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 12.5,
                 cx + 4.0,
                 cy + ch - 18.0,
@@ -4012,12 +4046,12 @@ impl DrawCtx<'_> {
         );
         ui.border(x, y, w, h, 14.0, theme::BORDER_CRIMSON());
 
-        let badge_w = (ui.measure(Face::Medium, 11.0, acc_badge) + 18.0).min(96.0);
+        let badge_w = (ui.measure(Face::LauncherMedium, 11.0, acc_badge) + 18.0).min(96.0);
         ui.rounded(x + 14.0, y + 12.0, badge_w, 22.0, 6.0, theme::CRIMSON_BADGE());
         ui.border(x + 14.0, y + 12.0, badge_w, 22.0, 6.0, theme::BORDER_CRIMSON());
         draw_centered_text(
             ui,
-            Face::Medium,
+            Face::LauncherMedium,
             11.0,
             [x + 14.0, y + 12.0, badge_w, 22.0],
             theme::CRIMSON_BRIGHT(),
@@ -4025,13 +4059,13 @@ impl DrawCtx<'_> {
         );
 
         let nfit = ui.fit_text(
-            Face::Medium,
+            Face::LauncherMedium,
             14.5,
             acc_name,
             (w - badge_w - 94.0).max(36.0),
         );
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             14.5,
             x + 20.0 + badge_w,
             text_vcenter(y + 12.0, 22.0, 14.5),
@@ -4087,14 +4121,14 @@ impl DrawCtx<'_> {
             true,
         );
         let summary = ui.fit_text(
-            Face::Regular,
+            Face::LauncherRegular,
             11.5,
             &format!("Skin: {skin_lbl}  •  Cape: {cape_lbl}"),
             w - 24.0,
         );
         draw_centered_text(
             ui,
-            Face::Regular,
+            Face::LauncherRegular,
             11.5,
             [x + 12.0, y + h - 26.0, w - 24.0, 20.0],
             theme::MUTED(),
@@ -4109,7 +4143,7 @@ impl DrawCtx<'_> {
         ui.border(x, y, w, h, 14.0, theme::BORDER_CRIMSON());
 
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             15.5,
             x + 16.0,
             y + 12.0,
@@ -4157,9 +4191,9 @@ impl DrawCtx<'_> {
                 },
             );
             let tag = format!("[{}] {}", acc.provider.badge(), acc.name);
-            let tfit = ui.fit_text(Face::Medium, 12.5, &tag, row_w - 20.0);
+            let tfit = ui.fit_text(Face::LauncherMedium, 12.5, &tag, row_w - 20.0);
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 12.5,
                 row_rect[0] + 10.0,
                 text_vcenter(row_rect[1], row_rect[3], 12.5),
@@ -4202,7 +4236,7 @@ impl DrawCtx<'_> {
             }
             draw_centered_text(
                 ui,
-                Face::Medium,
+                Face::LauncherMedium,
                 12.0,
                 trect,
                 if active { theme::ON_CRIMSON() } else { theme::MUTED() },
@@ -4243,12 +4277,12 @@ impl DrawCtx<'_> {
                     true,
                 );
                 let note = ui.fit_text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     11.5,
                     "Supports full offline skin & cape equipping + server sync.",
                     w - 28.0,
                 );
-                ui.text(Face::Regular, 11.5, x + 14.0, fy + 84.0, theme::MUTED(), &note);
+                ui.text(Face::LauncherRegular, 11.5, x + 14.0, fy + 84.0, theme::MUTED(), &note);
             }
             AccountProvider::ElyBy => {
                 let u_val = self.catalog.ely_user_input.clone();
@@ -4308,7 +4342,7 @@ impl DrawCtx<'_> {
             AccountProvider::Microsoft => {
                 let lines = wrap_lines(
                     ui,
-                    Face::Regular,
+                    Face::LauncherRegular,
                     12.0,
                     "Official Microsoft / Xbox Live login for Hypixel and online-mode Java servers using device code.",
                     w - 28.0,
@@ -4316,7 +4350,7 @@ impl DrawCtx<'_> {
                 );
                 for (li, line) in lines.iter().enumerate() {
                     ui.text(
-                        Face::Regular,
+                        Face::LauncherRegular,
                         12.0,
                         x + 14.0,
                         fy + li as f32 * 17.0,
@@ -4366,7 +4400,7 @@ impl DrawCtx<'_> {
         ui.border(x, y, w, h, 14.0, theme::BORDER_CRIMSON());
 
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             15.5,
             x + 16.0,
             y + 12.0,
@@ -4382,8 +4416,8 @@ impl DrawCtx<'_> {
         } else {
             "Auto-syncs on SkinsRestorer, Ely.by & LAN"
         };
-        let sync_fit = ui.fit_text(Face::Regular, 12.0, sync_sub, (w - 86.0).max(60.0));
-        ui.text(Face::Regular, 12.0, x + 16.0, y + 38.0, theme::MUTED(), &sync_fit);
+        let sync_fit = ui.fit_text(Face::LauncherRegular, 12.0, sync_sub, (w - 86.0).max(60.0));
+        ui.text(Face::LauncherRegular, 12.0, x + 16.0, y + 38.0, theme::MUTED(), &sync_fit);
         toggle(
             ui,
             self.targets,
@@ -4405,7 +4439,7 @@ impl DrawCtx<'_> {
 
         // Skin Loader Buttons
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             12.5,
             x + 16.0,
             y + 106.0,
@@ -4452,7 +4486,7 @@ impl DrawCtx<'_> {
 
         // Cape Loader + One-Tap Volt Preset Capes
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             12.5,
             x + 16.0,
             y + 198.0,
@@ -4762,8 +4796,8 @@ impl Launcher {
         if compact {
             let status = self.error.as_deref().unwrap_or(&self.catalog.status);
             if !status.is_empty() {
-                let sfit = ui.fit_text(Face::Regular, 12.0, status, (w - 196.0).max(40.0));
-                ui.text(Face::Regular, 12.0, 14.0, h - 32.0, theme::MUTED(), &sfit);
+                let sfit = ui.fit_text(Face::LauncherRegular, 12.0, status, (w - 196.0).max(40.0));
+                ui.text(Face::LauncherRegular, 12.0, 14.0, h - 32.0, theme::MUTED(), &sfit);
             }
             styled_button(
                 &mut ui,
@@ -4888,9 +4922,9 @@ impl Launcher {
                 _ => (self.catalog.query.clone(), 14.5, 14.0),
             };
             let face = if name == "search" {
-                Face::Regular
+                Face::LauncherRegular
             } else {
-                Face::Medium
+                Face::LauncherMedium
             };
             for ([x, y, bw, bh], action) in &self.targets {
                 if *action == Action::Field(name)
@@ -5412,6 +5446,12 @@ impl Launcher {
             }
             Some(Action::LoginLink) => self.login.open_link(),
             Some(Action::HomeTab(tab)) => {
+                if tab == HomeTab::Multiplayer {
+                    let home = self.catalog.config.game_home(&self.home);
+                    self.catalog.saved_servers = crate::server_list::List::load(&home).servers();
+                } else if tab == HomeTab::Screenshots {
+                    self.catalog.refresh_screenshots(&self.home);
+                }
                 self.home_tab = tab;
                 self.catalog.page = Page::Play;
                 self.catalog.scroll = 0.0;
@@ -5435,6 +5475,16 @@ impl Launcher {
                     self.catalog.mod_born = std::time::Instant::now();
                 }
                 self.catalog.browse(&self.home);
+            }
+            Some(Action::ConnectServer(index)) => {
+                if let Some(server) = self.catalog.saved_servers.get(index) {
+                    self.catalog.config.server = server.ip.clone();
+                    self.catalog.config.save(&self.home)?;
+                    self.pending_play = true;
+                    self.needs_redraw = true;
+                } else {
+                    self.catalog.status = "Server list changed; please choose again.".into();
+                }
             }
             Some(Action::Play) => {
                 self.pending_play = true;
@@ -5553,6 +5603,12 @@ impl Launcher {
                 self.catalog.config.profile = profile;
                 self.catalog.config.save(&self.home)?;
                 self.catalog.refresh(&self.home);
+                if self.home_tab == HomeTab::Multiplayer {
+                    let home = self.catalog.config.game_home(&self.home);
+                    self.catalog.saved_servers = crate::server_list::List::load(&home).servers();
+                } else if self.home_tab == HomeTab::Screenshots {
+                    self.catalog.refresh_screenshots(&self.home);
+                }
                 self.chooser = None;
             }
             Some(Action::Dismiss) => self.chooser = None,
@@ -6012,7 +6068,7 @@ fn wrap_modal_lines(ui: &Ui, lines: &[String], font_sz: f32, max_w: f32) -> Vec<
         while !rest.is_empty() {
             let prefix = if !first && is_bullet { "   " } else { "" };
             let avail = (max_w - if !first && is_bullet { 14.0 } else { 0.0 }).max(80.0);
-            let fitted = ui.fit_text(Face::Regular, font_sz, rest, avail);
+            let fitted = ui.fit_text(Face::LauncherRegular, font_sz, rest, avail);
             if fitted == rest || !fitted.ends_with("...") {
                 out.push((format!("{prefix}{rest}"), is_bullet && first));
                 break;
@@ -6057,7 +6113,7 @@ fn draw_update_prompt(
     ui.border(mx, my, mw, mh, 16.0, theme::BORDER_CRIMSON());
 
     ui.text(
-        Face::Medium,
+        Face::LauncherMedium,
         20.0,
         mx + 22.0,
         my + 15.0,
@@ -6085,7 +6141,7 @@ fn draw_update_prompt(
     );
     draw_centered_text(
         ui,
-        Face::Medium,
+        Face::LauncherMedium,
         12.5,
         [ver_badge_x, my + 15.0, ver_badge_w, 24.0],
         theme::CRIMSON_BRIGHT(),
@@ -6101,9 +6157,9 @@ fn draw_update_prompt(
         "Matched build for your device: {}{}",
         prompt.info.abi_label, size_mb
     );
-    let sub_fit = ui.fit_text(Face::Regular, 12.5, &subtitle, mw - 44.0);
+    let sub_fit = ui.fit_text(Face::LauncherRegular, 12.5, &subtitle, mw - 44.0);
     ui.text(
-        Face::Regular,
+        Face::LauncherRegular,
         12.5,
         mx + 22.0,
         my + 43.0,
@@ -6112,7 +6168,7 @@ fn draw_update_prompt(
     );
 
     ui.text(
-        Face::Medium,
+        Face::LauncherMedium,
         14.0,
         mx + 22.0,
         my + 76.0,
@@ -6138,7 +6194,7 @@ fn draw_update_prompt(
             continue;
         }
         ui.text(
-            if *highlight { Face::Medium } else { Face::Regular },
+            if *highlight { Face::LauncherMedium } else { Face::LauncherRegular },
             13.0,
             box_x + 14.0,
             ly,
@@ -6180,8 +6236,8 @@ fn draw_update_prompt(
             } else {
                 format!("Downloading {} APK... {:.1} MB", prompt.info.abi_label, dl_mb)
             };
-            let fit_lbl = ui.fit_text(Face::Medium, 12.0, &label, bar_w);
-            ui.text(Face::Medium, 12.0, bar_x, footer_y + 2.0, theme::TEXT(), &fit_lbl);
+            let fit_lbl = ui.fit_text(Face::LauncherMedium, 12.0, &label, bar_w);
+            ui.text(Face::LauncherMedium, 12.0, bar_x, footer_y + 2.0, theme::TEXT(), &fit_lbl);
             ui.rounded(bar_x, footer_y + 24.0, bar_w, 12.0, 6.0, theme::CARD_INNER());
             ui.border(bar_x, footer_y + 24.0, bar_w, 12.0, 6.0, theme::BORDER());
             if pct > 0.01 {
@@ -6207,9 +6263,9 @@ fn draw_update_prompt(
         other => {
             if let crate::volt_updater::UpdateModalState::Error(err) = other {
                 let max_err_w = (mw - 290.0).max(110.0);
-                let err_fit = ui.fit_text(Face::Regular, 11.5, err, max_err_w);
+                let err_fit = ui.fit_text(Face::LauncherRegular, 11.5, err, max_err_w);
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     11.5,
                     mx + 22.0,
                     footer_y + 12.0,
@@ -6218,7 +6274,7 @@ fn draw_update_prompt(
                 );
             } else {
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     11.5,
                     mx + 22.0,
                     footer_y + 12.0,
@@ -6277,7 +6333,7 @@ fn draw_volt_boost_modal(
     let active_n = catalog.extras.active_volt_optimizations();
     let rss_mib = horizon_threads::resident_ram_mib().unwrap_or(0);
     ui.text(
-        Face::Medium,
+        Face::LauncherMedium,
         19.0,
         mx + 20.0,
         my + 12.0,
@@ -6285,8 +6341,8 @@ fn draw_volt_boost_modal(
         "Volt Boost — Performance Hub",
     );
     let sub = format!("{active_n} Optimizations Active  •  Resident RAM: {rss_mib} MiB");
-    let sub_fit = ui.fit_text(Face::Regular, 12.5, &sub, (mw - 260.0).max(120.0));
-    ui.text(Face::Regular, 12.5, mx + 20.0, my + 37.0, theme::MUTED(), &sub_fit);
+    let sub_fit = ui.fit_text(Face::LauncherRegular, 12.5, &sub, (mw - 260.0).max(120.0));
+    ui.text(Face::LauncherRegular, 12.5, mx + 20.0, my + 37.0, theme::MUTED(), &sub_fit);
 
     styled_button(
         ui,
@@ -6414,9 +6470,9 @@ fn draw_volt_boost_modal(
         if ry < list_top - 2.0 || ry + row_h - 4.0 > list_bottom {
             continue;
         }
-        let lbl_fit = ui.fit_text(Face::Regular, 13.0, item.caption(), col_w - ctrl_w - 14.0);
+        let lbl_fit = ui.fit_text(Face::LauncherRegular, 13.0, item.caption(), col_w - ctrl_w - 14.0);
         ui.text(
-            Face::Regular,
+            Face::LauncherRegular,
             13.0,
             rx + 4.0,
             text_vcenter(ry, row_h - 4.0, 13.0),

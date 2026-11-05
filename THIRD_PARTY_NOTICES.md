@@ -1338,3 +1338,7 @@ The launcher display face `crates/horizon-theme/fonts/BricolageGrotesqueDisplay-
 comes from the Horizon Nightly source at `f319701e8c9ab657ff562250b3ba07b2d654e3bc`.
 Bricolage Grotesque is distributed under the SIL Open Font License 1.1; its
 license is `crates/horizon-theme/fonts/OFL-BricolageGrotesque.txt`.
+
+`crates/horizon-theme/src/glass.rs` is from the same Horizon Nightly snapshot,
+Copyright (c) 2026 Ludovic Marie and the Horizon contributors, under the MIT
+license in the repository's `LICENSE` file.

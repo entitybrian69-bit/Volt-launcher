@@ -248,6 +248,7 @@ jobs:
           python3 - <<'PY'
           import subprocess, sys
           cmds = [
+              ["cargo", "test", "-p", "horizon-theme", "--lib", "glass::"],
               ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
               ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
               ["cargo", "test", "-p", "horizon-client-input", "--lib", "keybinds"],

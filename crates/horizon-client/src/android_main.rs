@@ -17,6 +17,10 @@ mod account;
 #[allow(dead_code)]
 #[path = "../../../launcher/src/browser.rs"]
 mod browser;
+#[rustfmt::skip]
+#[allow(dead_code)]
+#[path = "../../../launcher/src/server_list.rs"]
+mod server_list;
 #[path = "android/dns.rs"]
 mod android_dns;
 #[path = "android/catalog.rs"]

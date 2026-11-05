@@ -89,9 +89,11 @@ pub enum Face {
     Regular,
     Medium,
     Display,
+    LauncherRegular,
+    LauncherMedium,
 }
 struct Fonts {
-    faces: [FontRef<'static>; 3],
+    faces: [FontRef<'static>; 5],
 }
 impl Fonts {
     fn load() -> Self {
@@ -101,6 +103,8 @@ impl Fonts {
                 f(horizon_theme::fonts::GEIST_MEDIUM),
                 f(horizon_theme::fonts::GEIST_SEMIBOLD),
                 f(horizon_theme::fonts::BRICOLAGE_DISPLAY_SEMIBOLD),
+                f(horizon_theme::fonts::GEIST_REGULAR),
+                f(horizon_theme::fonts::GEIST_MEDIUM),
             ],
         }
     }

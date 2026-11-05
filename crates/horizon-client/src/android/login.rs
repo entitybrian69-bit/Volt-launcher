@@ -180,7 +180,7 @@ impl Login {
         ui.border(x, y, w, h, 16.0, theme::BORDER_CRIMSON());
         if editing_name {
             ui.text(
-                Face::Medium,
+                Face::LauncherMedium,
                 22.0,
                 x + 24.0,
                 y + 20.0,
@@ -188,7 +188,7 @@ impl Login {
                 "Offline player name",
             );
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 14.5,
                 x + 24.0,
                 y + 62.0,
@@ -215,7 +215,7 @@ impl Login {
         }
 
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             23.0,
             x + 24.0,
             y + 18.0,
@@ -223,7 +223,7 @@ impl Login {
             "Accounts",
         );
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             16.5,
             x + 24.0,
             y + 56.0,
@@ -246,7 +246,7 @@ impl Login {
             );
         } else {
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 14.5,
                 x + 24.0,
                 y + 102.0,
@@ -269,7 +269,7 @@ impl Login {
         for word in text.split_whitespace() {
             if line.len() + word.len() + 1 > limit {
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     13.5,
                     x + 24.0,
                     y + 158.0 + row as f32 * 20.0,
@@ -289,7 +289,7 @@ impl Login {
         }
         if row < max_rows {
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.5,
                 x + 24.0,
                 y + 158.0 + row as f32 * 20.0,
@@ -299,7 +299,7 @@ impl Login {
         }
         if !self.pending() {
             ui.text(
-                Face::Regular,
+                Face::LauncherRegular,
                 13.5,
                 x + 24.0,
                 y + h - 248.0,

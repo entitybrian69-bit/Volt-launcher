@@ -645,7 +645,7 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
     ui.rounded(x, y, w, height, 14.0, theme::CARD());
     ui.border(x, y, w, height, 14.0, theme::BORDER_CRIMSON());
     ui.text(
-        Face::Medium,
+        Face::LauncherMedium,
         19.0,
         x + 18.0,
         y + 14.0,
@@ -656,8 +656,8 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             "Importing file"
         },
     );
-    let name = ui.fit_text(Face::Regular, 14.5, &name, w - 36.0);
-    ui.text(Face::Regular, 14.5, x + 18.0, y + 48.0, theme::MUTED(), &name);
+    let name = ui.fit_text(Face::LauncherRegular, 14.5, &name, w - 36.0);
+    ui.text(Face::LauncherRegular, 14.5, x + 18.0, y + 48.0, theme::MUTED(), &name);
     let width = (w - 36.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {
@@ -690,9 +690,9 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
                 theme::BORDER()
             },
         );
-        let tw = ui.measure(Face::Medium, 14.5, label);
+        let tw = ui.measure(Face::LauncherMedium, 14.5, label);
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             14.5,
             rect[0] + ((rect[2] - tw) * 0.5).max(8.0),
             rect[1] + 8.5,

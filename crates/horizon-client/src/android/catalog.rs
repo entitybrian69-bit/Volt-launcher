@@ -241,6 +241,8 @@ enum Reply {
     NativeSource(String),
 }
 pub struct Catalog {
+    pub saved_servers: Vec<crate::server_list::Server>,
+    pub screenshots: Vec<String>,
     pub local: Vec<LocalItem>,
     pub sections: [bool; 3],
     pub pending_delete: Option<LocalItem>,
@@ -299,6 +301,8 @@ impl Catalog {
         let config = Config::load(home);
         let (icon_tx, icon_rx) = mpsc::channel();
         let mut result = Self {
+            saved_servers: vec![],
+            screenshots: vec![],
             local: vec![],
             sections: [true, true, true],
             pending_delete: None,
@@ -344,6 +348,14 @@ impl Catalog {
         };
         result.refresh(home);
         result
+    }
+    pub fn refresh_screenshots(&mut self, home: &Path) {
+        self.screenshots = std::fs::read_dir(self.config.game_home(home).join("screenshots"))
+            .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
+            .filter_map(|entry| entry.file_name().to_str()
+                .filter(|s| s.to_ascii_lowercase().ends_with(".png")).map(str::to_owned))
+            .collect();
+        self.screenshots.sort_unstable_by(|a, b| b.cmp(a));
     }
     pub fn show_installed(&mut self, kind: Option<horizon_client::content_files::Kind>) {
         self.searches.cancel_interest();

@@ -727,7 +727,7 @@ impl ControlsStudio {
         let top_h = 42.0;
         ui.rounded(mx + 4.0, my + 4.0, mw - 8.0, top_h, 10.0, theme::RAIL());
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             14.0,
             mx + 14.0,
             my + 13.0,
@@ -1008,9 +1008,9 @@ impl ControlsStudio {
 
         // Status hint line under canvas
         let hint_y = body_y + body_h - 16.0;
-        let fit_hint = ui.fit_text(Face::Regular, 11.0, &self.status_hint, canvas_area_w);
+        let fit_hint = ui.fit_text(Face::LauncherRegular, 11.0, &self.status_hint, canvas_area_w);
         ui.text(
-            Face::Regular,
+            Face::LauncherRegular,
             11.0,
             canvas_area_x + 2.0,
             hint_y,
@@ -1049,8 +1049,8 @@ impl ControlsStudio {
                 let b = &self.settings.custom_buttons[idx];
                 let p = b.layouts[self.settings.mode.index()];
                 let title = format!("Button #{}: {}", idx + 1, b.label());
-                let fit_t = ui.fit_text(Face::Medium, 12.5, &title, inner_w);
-                ui.text(Face::Medium, 12.5, ix + pad, y, theme::TEXT(), &fit_t);
+                let fit_t = ui.fit_text(Face::LauncherMedium, 12.5, &title, inner_w);
+                ui.text(Face::LauncherMedium, 12.5, ix + pad, y, theme::TEXT(), &fit_t);
                 y += 22.0;
 
                 // Binding selector row: [<] [Pick Keybind...] [>]
@@ -1207,7 +1207,7 @@ impl ControlsStudio {
             }
             Some(StudioTarget::Joystick) => {
                 ui.text(
-                    Face::Medium,
+                    Face::LauncherMedium,
                     13.0,
                     ix + pad,
                     y,
@@ -1235,7 +1235,7 @@ impl ControlsStudio {
                 );
                 y += 34.0;
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     11.5,
                     ix + pad,
                     y,
@@ -1243,7 +1243,7 @@ impl ControlsStudio {
                     "Drag the joystick on the canvas",
                 );
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     11.5,
                     ix + pad,
                     y + 16.0,
@@ -1253,8 +1253,8 @@ impl ControlsStudio {
             }
             Some(StudioTarget::Builtin(idx)) if idx < 14 => {
                 let ctrl = Control::ALL[idx];
-                let fit = ui.fit_text(Face::Medium, 12.5, ctrl.name(), inner_w);
-                ui.text(Face::Medium, 12.5, ix + pad, y, theme::TEXT(), &fit);
+                let fit = ui.fit_text(Face::LauncherMedium, 12.5, ctrl.name(), inner_w);
+                ui.text(Face::LauncherMedium, 12.5, ix + pad, y, theme::TEXT(), &fit);
                 y += 24.0;
                 let p = self.settings.layouts[self.settings.mode.index()][idx];
                 draw_stepper_row(
@@ -1277,7 +1277,7 @@ impl ControlsStudio {
             }
             _ => {
                 ui.text(
-                    Face::Regular,
+                    Face::LauncherRegular,
                     12.0,
                     ix + pad,
                     y + 8.0,
@@ -1318,7 +1318,7 @@ impl ControlsStudio {
         ui.rounded(cx, cy, cw, ch, 10.0, hex(0x090A10, 242));
         ui.border(cx, cy, cw, ch, 10.0, theme::BORDER_CRIMSON());
         ui.text(
-            Face::Medium,
+            Face::LauncherMedium,
             13.0,
             cx + 12.0,
             cy + 8.0,
@@ -1389,11 +1389,11 @@ enum StudioBtn {
 
 fn draw_label_centered(ui: &mut Ui, rect: [f32; 4], size: f32, col: u32, text: &str) {
     let [x, y, w, h] = rect;
-    let fitted = ui.fit_text(Face::Medium, size, text, (w - 6.0).max(6.0));
-    let tw = ui.measure(Face::Medium, size, &fitted);
+    let fitted = ui.fit_text(Face::LauncherMedium, size, text, (w - 6.0).max(6.0));
+    let tw = ui.measure(Face::LauncherMedium, size, &fitted);
     let ty = y + (h - (size * 1.42).round()) * 0.5;
     ui.text(
-        Face::Medium,
+        Face::LauncherMedium,
         size,
         x + ((w - tw) * 0.5).max(2.0),
         ty,
