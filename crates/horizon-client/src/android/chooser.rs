@@ -330,19 +330,19 @@ impl Chooser {
         use super::pages::theme;
         let (w, h) = (ui.w, ui.h);
         targets.clear();
-        ui.rounded(0.0, 0.0, w, h, 0.0, theme::BACKDROP);
+        ui.rounded(0.0, 0.0, w, h, 0.0, theme::BACKDROP());
         let [mx, my, mw, mh] = Self::modal_box(w, h);
-        ui.rounded(mx, my, mw, mh, 16.0, theme::CARD);
-        ui.border(mx, my, mw, mh, 16.0, theme::BORDER_CRIMSON);
+        ui.rounded(mx, my, mw, mh, 16.0, theme::CARD());
+        ui.border(mx, my, mw, mh, 16.0, theme::BORDER_CRIMSON());
 
-        ui.text(Face::Medium, 23.0, mx + 24.0, my + 18.0, theme::TEXT, self.title);
+        ui.text(Face::Medium, 23.0, mx + 24.0, my + 18.0, theme::TEXT(), self.title);
         let help_fit = ui.fit_text(Face::Regular, 13.5, self.help, mw - 48.0);
-        ui.text(Face::Regular, 13.5, mx + 24.0, my + 54.0, theme::MUTED, &help_fit);
+        ui.text(Face::Regular, 13.5, mx + 24.0, my + 54.0, theme::MUTED(), &help_fit);
         if let Some(device) = &self.device {
             let dev_fit = ui.fit_text(Face::Regular, 12.5, device, mw - 48.0);
-            ui.text(Face::Regular, 12.5, mx + 24.0, my + 76.0, theme::CRIMSON_BRIGHT, &dev_fit);
+            ui.text(Face::Regular, 12.5, mx + 24.0, my + 76.0, theme::CRIMSON_BRIGHT(), &dev_fit);
         }
-        ui.rounded(mx + 20.0, my + 100.0, mw - 40.0, 1.0, 0.0, theme::BORDER);
+        ui.rounded(mx + 20.0, my + 100.0, mw - 40.0, 1.0, 0.0, theme::BORDER());
 
         let top = my + 108.0;
         let bottom = my + mh - 68.0;
@@ -363,9 +363,9 @@ impl Chooser {
                 row_rect[3],
                 10.0,
                 if *selected {
-                    theme::HERO_BG
+                    theme::HERO_BG()
                 } else {
-                    theme::CARD_INNER
+                    theme::CARD_INNER()
                 },
             );
             ui.border(
@@ -375,9 +375,9 @@ impl Chooser {
                 row_rect[3],
                 10.0,
                 if *selected {
-                    theme::CRIMSON
+                    theme::CRIMSON()
                 } else {
-                    theme::BORDER
+                    theme::BORDER()
                 },
             );
 
@@ -390,20 +390,20 @@ impl Chooser {
                 22.0,
                 11.0,
                 if *selected {
-                    theme::CRIMSON_BRIGHT
+                    theme::CRIMSON_BRIGHT()
                 } else {
-                    theme::MUTED
+                    theme::MUTED()
                 },
             );
             if *selected {
-                ui.rounded(rx + 5.0, ry + 5.0, 12.0, 12.0, 6.0, theme::CRIMSON);
+                ui.rounded(rx + 5.0, ry + 5.0, 12.0, 12.0, 6.0, theme::CRIMSON());
             }
             let lbl_y = if detail.is_empty() { y + 21.0 } else { y + 10.0 };
             let lbl_fit = ui.fit_text(Face::Medium, 16.5, label, row_rect[2] - 64.0);
-            ui.text(Face::Medium, 16.5, rx + 36.0, lbl_y, theme::TEXT, &lbl_fit);
+            ui.text(Face::Medium, 16.5, rx + 36.0, lbl_y, theme::TEXT(), &lbl_fit);
             if !detail.is_empty() {
                 let det_fit = ui.fit_text(Face::Regular, 13.0, detail, row_rect[2] - 64.0);
-                ui.text(Face::Regular, 13.0, rx + 36.0, y + 38.0, theme::MUTED, &det_fit);
+                ui.text(Face::Regular, 13.0, rx + 36.0, y + 38.0, theme::MUTED(), &det_fit);
             }
             targets.push((row_rect, *action));
         }

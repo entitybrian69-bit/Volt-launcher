@@ -1331,3 +1331,10 @@ contain the official Horizon 2.0.0 runtimes from
 [commit 22c6f14ea60be2b17a642b44a2aff44a98e3733d](https://github.com/horizon-rust/horizon-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native),
 by Ludovic Marie and the Horizon contributors. The same MIT license printed
 above applies. Volt adds a per-profile state reset and Android integration.
+
+## Horizon launcher typography
+
+The launcher display face `crates/horizon-theme/fonts/BricolageGrotesqueDisplay-SemiBold.ttf`
+comes from the Horizon Nightly source at `f319701e8c9ab657ff562250b3ba07b2d654e3bc`.
+Bricolage Grotesque is distributed under the SIL Open Font License 1.1; its
+license is `crates/horizon-theme/fonts/OFL-BricolageGrotesque.txt`.

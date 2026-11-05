@@ -171,20 +171,20 @@ impl Login {
         editing_name: bool,
     ) {
         targets.clear();
-        ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, theme::BACKDROP);
+        ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, theme::BACKDROP());
         let w = (ui.w - 32.0).min(680.0);
         let h = (ui.h - 24.0).min(540.0);
         let x = (ui.w - w) / 2.0;
         let y = (ui.h - h) / 2.0;
-        ui.rounded(x, y, w, h, 16.0, theme::CARD);
-        ui.border(x, y, w, h, 16.0, theme::BORDER_CRIMSON);
+        ui.rounded(x, y, w, h, 16.0, theme::CARD());
+        ui.border(x, y, w, h, 16.0, theme::BORDER_CRIMSON());
         if editing_name {
             ui.text(
                 Face::Medium,
                 22.0,
                 x + 24.0,
                 y + 20.0,
-                theme::TEXT,
+                theme::TEXT(),
                 "Offline player name",
             );
             ui.text(
@@ -192,7 +192,7 @@ impl Login {
                 14.5,
                 x + 24.0,
                 y + 62.0,
-                theme::MUTED,
+                theme::MUTED(),
                 "Used when signed out of Microsoft.",
             );
             button(
@@ -219,7 +219,7 @@ impl Login {
             23.0,
             x + 24.0,
             y + 18.0,
-            theme::TEXT,
+            theme::TEXT(),
             "Accounts",
         );
         ui.text(
@@ -228,13 +228,13 @@ impl Login {
             x + 24.0,
             y + 56.0,
             if self.signed_in {
-                theme::CRIMSON_BRIGHT
+                theme::CRIMSON_BRIGHT()
             } else {
-                theme::MUTED
+                theme::MUTED()
             },
             &self.status(offline_name),
         );
-        ui.rounded(x + 24.0, y + 88.0, w - 48.0, 1.0, 0.0, theme::BORDER);
+        ui.rounded(x + 24.0, y + 88.0, w - 48.0, 1.0, 0.0, theme::BORDER());
         if let Some(SignInState::Code(code)) = &self.state {
             button(
                 ui,
@@ -250,7 +250,7 @@ impl Login {
                 14.5,
                 x + 24.0,
                 y + 102.0,
-                theme::TEXT,
+                theme::TEXT(),
                 if self.signed_in {
                     "Account saved securely. Sessions renew automatically."
                 } else {
@@ -273,7 +273,7 @@ impl Login {
                     13.5,
                     x + 24.0,
                     y + 158.0 + row as f32 * 20.0,
-                    theme::MUTED,
+                    theme::MUTED(),
                     &line,
                 );
                 row += 1;
@@ -293,7 +293,7 @@ impl Login {
                 13.5,
                 x + 24.0,
                 y + 158.0 + row as f32 * 20.0,
-                theme::MUTED,
+                theme::MUTED(),
                 &line,
             );
         }
@@ -303,7 +303,7 @@ impl Login {
                 13.5,
                 x + 24.0,
                 y + h - 248.0,
-                theme::MUTED,
+                theme::MUTED(),
                 "Offline player name",
             );
             button(

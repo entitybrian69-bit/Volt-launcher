@@ -712,7 +712,7 @@ impl ControlsStudio {
         let (w, h) = (ui.w, ui.h);
         let scale = ui.density / ui.batch.scale;
         ui.batch
-            .fill(ui.atlas, 0.0, 0.0, w * scale, h * scale, theme::BACKDROP);
+            .fill(ui.atlas, 0.0, 0.0, w * scale, h * scale, theme::BACKDROP());
 
         let pad = 10.0;
         let mx = pad;
@@ -720,18 +720,18 @@ impl ControlsStudio {
         let mw = (w - pad * 2.0).max(300.0);
         let mh = (h - pad * 2.0).max(220.0);
 
-        ui.rounded(mx, my, mw, mh, 14.0, theme::BG);
-        ui.border(mx, my, mw, mh, 14.0, theme::BORDER_CRIMSON);
+        ui.rounded(mx, my, mw, mh, 14.0, theme::BG());
+        ui.border(mx, my, mw, mh, 14.0, theme::BORDER_CRIMSON());
 
         // Top Studio bar: title + 5 built-in preset chips + Import + Apply & Close
         let top_h = 42.0;
-        ui.rounded(mx + 4.0, my + 4.0, mw - 8.0, top_h, 10.0, theme::RAIL);
+        ui.rounded(mx + 4.0, my + 4.0, mw - 8.0, top_h, 10.0, theme::RAIL());
         ui.text(
             Face::Medium,
             14.0,
             mx + 14.0,
             my + 13.0,
-            theme::CRIMSON_BRIGHT,
+            theme::CRIMSON_BRIGHT(),
             "CONTROLS STUDIO",
         );
 
@@ -843,7 +843,7 @@ impl ControlsStudio {
 
         // Draw 16:9 simulated Minecraft HUD canvas
         ui.rounded(cx, cy, cw, ch, 10.0, hex(0x0B0D13, 255));
-        ui.border(cx, cy, cw, ch, 10.0, theme::BORDER);
+        ui.border(cx, cy, cw, ch, 10.0, theme::BORDER());
 
         if self.snap_grid {
             let grid_col = hex(0xFFFFFF, 13);
@@ -886,7 +886,7 @@ impl ControlsStudio {
                 rh,
                 outer_r,
                 if sel {
-                    theme::CRIMSON_BRIGHT
+                    theme::CRIMSON_BRIGHT()
                 } else {
                     hex(0xD8DCE8, 95)
                 },
@@ -899,7 +899,7 @@ impl ControlsStudio {
                 knob,
                 knob * 0.5,
                 if sel {
-                    theme::CRIMSON
+                    theme::CRIMSON()
                 } else {
                     hex(0xDC143C, 155)
                 },
@@ -927,7 +927,7 @@ impl ControlsStudio {
                         rh,
                         6.0,
                         if sel {
-                            theme::CRIMSON_BRIGHT
+                            theme::CRIMSON_BRIGHT()
                         } else {
                             hex(0xFFFFFF, 85)
                         },
@@ -948,7 +948,7 @@ impl ControlsStudio {
                         Control::Shield => "SHD",
                         Control::Move => "",
                     };
-                    draw_label_centered(ui, [rx, ry, rw, rh], 10.5, theme::TEXT, short);
+                    draw_label_centered(ui, [rx, ry, rw, rh], 10.5, theme::TEXT(), short);
                 }
             }
         }
@@ -981,7 +981,7 @@ impl ControlsStudio {
                 .min(rh * 0.48);
             ui.rounded(rx, ry, rw, rh, rad, fill);
             let border_col = if sel {
-                theme::CRIMSON_BRIGHT
+                theme::CRIMSON_BRIGHT()
             } else if let Some(sc) = b.stroke_color {
                 hex(
                     (u32::from(sc[0]) << 16) | (u32::from(sc[1]) << 8) | u32::from(sc[2]),
@@ -998,12 +998,12 @@ impl ControlsStudio {
                     rw + 3.0,
                     rh + 3.0,
                     rad + 1.5,
-                    theme::CRIMSON,
+                    theme::CRIMSON(),
                 );
             }
             let lbl = b.label();
             let font_sz = (rh * 0.34).clamp(8.5, 13.0);
-            draw_label_centered(ui, [rx, ry, rw, rh], font_sz, theme::TEXT, &lbl);
+            draw_label_centered(ui, [rx, ry, rw, rh], font_sz, theme::TEXT(), &lbl);
         }
 
         // Status hint line under canvas
@@ -1014,7 +1014,7 @@ impl ControlsStudio {
             11.0,
             canvas_area_x + 2.0,
             hint_y,
-            theme::MUTED,
+            theme::MUTED(),
             &fit_hint,
         );
 
@@ -1022,8 +1022,8 @@ impl ControlsStudio {
         let ix = mx + mw - inspector_w - 8.0;
         let iy = body_y;
         let ih = body_h;
-        ui.rounded(ix, iy, inspector_w, ih, 12.0, theme::CARD);
-        ui.border(ix, iy, inspector_w, ih, 12.0, theme::BORDER);
+        ui.rounded(ix, iy, inspector_w, ih, 12.0, theme::CARD());
+        ui.border(ix, iy, inspector_w, ih, 12.0, theme::BORDER());
 
         self.draw_inspector(ui, targets, [ix, iy, inspector_w, ih]);
 
@@ -1050,7 +1050,7 @@ impl ControlsStudio {
                 let p = b.layouts[self.settings.mode.index()];
                 let title = format!("Button #{}: {}", idx + 1, b.label());
                 let fit_t = ui.fit_text(Face::Medium, 12.5, &title, inner_w);
-                ui.text(Face::Medium, 12.5, ix + pad, y, theme::TEXT, &fit_t);
+                ui.text(Face::Medium, 12.5, ix + pad, y, theme::TEXT(), &fit_t);
                 y += 22.0;
 
                 // Binding selector row: [<] [Pick Keybind...] [>]
@@ -1211,7 +1211,7 @@ impl ControlsStudio {
                     13.0,
                     ix + pad,
                     y,
-                    theme::TEXT,
+                    theme::TEXT(),
                     "Movement Joystick",
                 );
                 y += 24.0;
@@ -1239,7 +1239,7 @@ impl ControlsStudio {
                     11.5,
                     ix + pad,
                     y,
-                    theme::MUTED,
+                    theme::MUTED(),
                     "Drag the joystick on the canvas",
                 );
                 ui.text(
@@ -1247,14 +1247,14 @@ impl ControlsStudio {
                     11.5,
                     ix + pad,
                     y + 16.0,
-                    theme::MUTED,
+                    theme::MUTED(),
                     "or tap + Button to add keys.",
                 );
             }
             Some(StudioTarget::Builtin(idx)) if idx < 14 => {
                 let ctrl = Control::ALL[idx];
                 let fit = ui.fit_text(Face::Medium, 12.5, ctrl.name(), inner_w);
-                ui.text(Face::Medium, 12.5, ix + pad, y, theme::TEXT, &fit);
+                ui.text(Face::Medium, 12.5, ix + pad, y, theme::TEXT(), &fit);
                 y += 24.0;
                 let p = self.settings.layouts[self.settings.mode.index()][idx];
                 draw_stepper_row(
@@ -1281,7 +1281,7 @@ impl ControlsStudio {
                     12.0,
                     ix + pad,
                     y + 8.0,
-                    theme::MUTED,
+                    theme::MUTED(),
                     "Tap any control on canvas.",
                 );
             }
@@ -1316,13 +1316,13 @@ impl ControlsStudio {
     ) {
         let [cx, cy, cw, ch] = canvas;
         ui.rounded(cx, cy, cw, ch, 10.0, hex(0x090A10, 242));
-        ui.border(cx, cy, cw, ch, 10.0, theme::BORDER_CRIMSON);
+        ui.border(cx, cy, cw, ch, 10.0, theme::BORDER_CRIMSON());
         ui.text(
             Face::Medium,
             13.0,
             cx + 12.0,
             cy + 8.0,
-            theme::TEXT,
+            theme::TEXT(),
             "Select Key / Mouse Binding",
         );
         studio_btn(
@@ -1412,9 +1412,9 @@ fn studio_btn(
 ) {
     let [x, y, w, h] = rect;
     let (fill, border, text_col) = match style {
-        StudioBtn::Crimson => (theme::CRIMSON, theme::CRIMSON_BRIGHT, theme::ON_CRIMSON),
-        StudioBtn::Outline => (theme::CRIMSON_BADGE, theme::CRIMSON, theme::TEXT),
-        StudioBtn::Dark => (theme::CARD_INNER, theme::BORDER, theme::TEXT),
+        StudioBtn::Crimson => (theme::CRIMSON(), theme::CRIMSON_BRIGHT(), theme::ON_CRIMSON()),
+        StudioBtn::Outline => (theme::CRIMSON_BADGE(), theme::CRIMSON(), theme::TEXT()),
+        StudioBtn::Dark => (theme::CARD_INNER(), theme::BORDER(), theme::TEXT()),
     };
     ui.rounded(x, y, w, h, 7.0, fill);
     ui.border(x, y, w, h, 7.0, border);
@@ -1441,8 +1441,8 @@ fn draw_stepper_row(
         StudioBtn::Dark,
     );
     let mid_r = [x + btn_w + 4.0, y, (w - btn_w * 2.0 - 8.0).max(24.0), h];
-    ui.rounded(mid_r[0], mid_r[1], mid_r[2], mid_r[3], 6.0, theme::BG);
-    draw_label_centered(ui, mid_r, 10.5, theme::MUTED, caption);
+    ui.rounded(mid_r[0], mid_r[1], mid_r[2], mid_r[3], 6.0, theme::BG());
+    draw_label_centered(ui, mid_r, 10.5, theme::MUTED(), caption);
     studio_btn(
         ui,
         targets,

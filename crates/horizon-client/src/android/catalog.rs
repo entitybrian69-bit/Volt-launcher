@@ -46,14 +46,21 @@ impl RendererMode {
     }
 }
 
+fn default_launcher_dark() -> bool { true }
+fn default_launcher_accent() -> u32 { 0x6b4bff }
+
 fn default_pack_source() -> crate::shader_catalog::Origin {
     crate::shader_catalog::Origin::Modrinth
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub profile: u32,
+    #[serde(default = "default_launcher_dark")]
+    pub launcher_dark: bool,
+    #[serde(default = "default_launcher_accent")]
+    pub launcher_accent: u32,
     pub proxy: Option<String>,
     pub name: String,
     pub server: String,
@@ -77,6 +84,20 @@ pub struct Config {
     pub custom_vulkan_driver: Option<String>,
     #[serde(default)]
     pub custom_vulkan_driver_name: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            profile: 0, launcher_dark: default_launcher_dark(), launcher_accent: default_launcher_accent(),
+            proxy: None, name: String::new(), server: String::new(), microsoft_client_id: String::new(),
+            renderer: Default::default(), render_scale: Default::default(), orientation: Default::default(),
+            screen: Default::default(), input_host: Default::default(), keypad_controls: false,
+            record_performance: false, device: Default::default(), shader_source: Default::default(),
+            mod_source: Default::default(), pack_source: Default::default(),
+            custom_vulkan_driver: None, custom_vulkan_driver_name: None,
+        }
+    }
 }
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
@@ -126,6 +147,9 @@ impl Config {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
         let mut config: Self = serde_json::from_value(value.clone()).unwrap_or_default();
+        if value.get("launcher_dark").is_none() { config.launcher_dark = true; }
+        if value.get("launcher_accent").is_none() { config.launcher_accent = default_launcher_accent(); }
+        config.launcher_accent &= 0x00ff_ffff;
         if value.get("renderer").is_none() {
             config.renderer = RendererMode::VulkanCompatibility;
         }

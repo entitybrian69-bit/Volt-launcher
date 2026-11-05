@@ -33,6 +33,7 @@ pub mod fonts {
     pub const BRICOLAGE_SEMIBOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesque-SemiBold.ttf");
     pub const BRICOLAGE_BOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Bold.ttf");
+    pub const BRICOLAGE_DISPLAY_SEMIBOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesqueDisplay-SemiBold.ttf");
     pub const BRICOLAGE_DISPLAY_BOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesqueDisplay-Bold.ttf");
 }

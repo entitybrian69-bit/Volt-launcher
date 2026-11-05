@@ -641,15 +641,15 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
     };
     let x = (ui.w - w) / 2.0;
     let y = ((ui.h - height) / 2.0).max(0.0);
-    ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, theme::BACKDROP);
-    ui.rounded(x, y, w, height, 14.0, theme::CARD);
-    ui.border(x, y, w, height, 14.0, theme::BORDER_CRIMSON);
+    ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, theme::BACKDROP());
+    ui.rounded(x, y, w, height, 14.0, theme::CARD());
+    ui.border(x, y, w, height, 14.0, theme::BORDER_CRIMSON());
     ui.text(
         Face::Medium,
         19.0,
         x + 18.0,
         y + 14.0,
-        theme::TEXT,
+        theme::TEXT(),
         if s.conflict.is_some() {
             "File exists"
         } else {
@@ -657,7 +657,7 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
         },
     );
     let name = ui.fit_text(Face::Regular, 14.5, &name, w - 36.0);
-    ui.text(Face::Regular, 14.5, x + 18.0, y + 48.0, theme::MUTED, &name);
+    ui.text(Face::Regular, 14.5, x + 18.0, y + 48.0, theme::MUTED(), &name);
     let width = (w - 36.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {
@@ -673,9 +673,9 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             rect[3],
             8.0,
             if is_primary {
-                theme::CRIMSON
+                theme::CRIMSON()
             } else {
-                theme::CARD_INNER
+                theme::CARD_INNER()
             },
         );
         ui.border(
@@ -685,9 +685,9 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             rect[3],
             8.0,
             if is_primary {
-                theme::CRIMSON_BRIGHT
+                theme::CRIMSON_BRIGHT()
             } else {
-                theme::BORDER
+                theme::BORDER()
             },
         );
         let tw = ui.measure(Face::Medium, 14.5, label);
@@ -697,9 +697,9 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             rect[0] + ((rect[2] - tw) * 0.5).max(8.0),
             rect[1] + 8.5,
             if is_primary {
-                theme::ON_CRIMSON
+                theme::ON_CRIMSON()
             } else {
-                theme::TEXT
+                theme::TEXT()
             },
             label,
         );

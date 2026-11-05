@@ -88,9 +88,10 @@ pub(crate) const RADIUS_PLATE: f32 = horizon_theme::RADIUS_PLATE;
 pub enum Face {
     Regular,
     Medium,
+    Display,
 }
 struct Fonts {
-    faces: [FontRef<'static>; 2],
+    faces: [FontRef<'static>; 3],
 }
 impl Fonts {
     fn load() -> Self {
@@ -99,6 +100,7 @@ impl Fonts {
             faces: [
                 f(horizon_theme::fonts::GEIST_MEDIUM),
                 f(horizon_theme::fonts::GEIST_SEMIBOLD),
+                f(horizon_theme::fonts::BRICOLAGE_DISPLAY_SEMIBOLD),
             ],
         }
     }
