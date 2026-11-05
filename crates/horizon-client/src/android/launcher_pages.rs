@@ -29,6 +29,10 @@ pub(crate) mod theme {
     pub const MUTED: u32 = hex(0x9898AA, 255);
     pub const DIM: u32 = hex(0x68687A, 255);
     pub const ONLINE: u32 = hex(0x22C55E, 255);
+    // Translucent plates over the launcher scene (not a GPU backdrop blur).
+    pub const GLASS: u32 = hex(0x151019, 225);
+    pub const GLASS_INNER: u32 = hex(0xFFFFFF, 16);
+    pub const GLASS_BORDER: u32 = hex(0xFFFFFF, 34);
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -437,6 +441,40 @@ fn wrap_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32, max_lines:
     lines
 }
 
+/// A lightweight, crimson-tinted pixel sunset behind the glass plates.  It is drawn
+/// with a fixed number of quads, with no blur pass or extra GPU textures on mobile.
+fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32) {
+    use horizon_client::ui_theme::color::{hex, lerp};
+    let top = hex(0x100b17, 255);
+    let horizon = hex(0x6a1c2a, 255);
+    for i in 0..24 {
+        let y = h * i as f32 / 24.0;
+        let t = (i as f32 / 23.0).powf(1.7);
+        ui.rounded(0.0, y, w, h / 24.0 + 1.0, 0.0, lerp(top, horizon, t));
+    }
+    let sun = (w.min(h) * 0.34).max(80.0);
+    let sx = w * 0.72 - sun * 0.5;
+    let sy = h * 0.49 - sun * 0.5;
+    // Stepped bands avoid rasterizing a large rounded-corner atlas entry.
+    for band in 0..12 {
+        let t = (band as f32 + 0.5) / 12.0 * 2.0 - 1.0;
+        let width = sun * (1.0 - t * t).sqrt();
+        ui.rounded(sx + (sun - width) * 0.5, sy + band as f32 * sun / 12.0,
+            width, sun / 12.0 + 1.0, 0.0, hex(0xe8755f, 95));
+    }
+    // Layered blocky ridgelines evoke the nightly's pixel-art scene.
+    for layer in 0..3 {
+        let color = [hex(0x321523, 220), hex(0x21101a, 240), hex(0x110b13, 255)][layer];
+        let base = h * (0.69 + layer as f32 * 0.10);
+        for col in 0..32 {
+            let x = col as f32 * w / 32.0;
+            let rise = (((col * 13 + layer * 17) % 11) as f32 / 11.0) * h * 0.055;
+            let y = base - rise;
+            ui.rounded(x, y, w / 32.0 + 1.0, h - y, 0.0, color);
+        }
+    }
+}
+
 fn draw_account_chip(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -558,8 +596,8 @@ struct DrawCtx<'a> {
 
 impl DrawCtx<'_> {
     fn draw_sidebar(&mut self, ui: &mut Ui, rx: f32, ry: f32, rw: f32, rh: f32) {
-        ui.rounded(rx, ry, rw, rh, 14.0, theme::RAIL);
-        ui.border(rx, ry, rw, rh, 14.0, theme::BORDER_CRIMSON);
+        ui.rounded(rx, ry, rw, rh, 20.0, theme::GLASS);
+        ui.border(rx, ry, rw, rh, 20.0, theme::GLASS_BORDER);
 
         // Brand emblem + VOLT LAUNCHER header
         let bx = rx + 12.0;
@@ -588,34 +626,15 @@ impl DrawCtx<'_> {
         for (i, &page) in Page::ALL.iter().enumerate() {
             let iy = nav_top + i as f32 * step;
             let rect = [rx + 10.0, iy, rw - 20.0, item_h];
-            ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CARD);
-            ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::BORDER);
             self.targets.push((rect, Action::Page(page)));
         }
 
-        // Smoothly gliding active crimson selection pill + glowing left bar!
+        // Nightly-style glass selection, with Volt's crimson accent and smooth motion.
         let anim_y = nav_top + self.sidebar_anim * step;
-        let play_blend = (1.0 - self.sidebar_anim).clamp(0.0, 1.0);
-        let pill_fill = horizon_client::ui_theme::color::lerp(
-            theme::CRIMSON_BADGE,
-            theme::CRIMSON,
-            play_blend,
-        );
-        let pill_border = horizon_client::ui_theme::color::lerp(
-            theme::CRIMSON,
-            theme::CRIMSON_BRIGHT,
-            play_blend,
-        );
-        ui.rounded(rx + 10.0, anim_y, rw - 20.0, item_h, 10.0, pill_fill);
-        ui.border(rx + 10.0, anim_y, rw - 20.0, item_h, 10.0, pill_border);
-        ui.rounded(
-            rx + 2.5,
-            anim_y + (item_h * 0.18).clamp(5.0, 12.0),
-            4.0,
-            (item_h * 0.64).max(14.0),
-            2.0,
-            theme::CRIMSON_BRIGHT,
-        );
+        ui.rounded(rx + 10.0, anim_y, rw - 20.0, item_h, 10.0, theme::GLASS_INNER);
+        ui.border(rx + 10.0, anim_y, rw - 20.0, item_h, 10.0, theme::GLASS_BORDER);
+        ui.rounded(rx + 10.0, anim_y + 7.0, 3.0, (item_h - 14.0).max(10.0), 1.5,
+            theme::CRIMSON_BRIGHT);
 
         for (i, &page) in Page::ALL.iter().enumerate() {
             let iy = nav_top + i as f32 * step;
@@ -771,195 +790,99 @@ impl DrawCtx<'_> {
             )
         };
 
-        // Left Hero Card (Launch overview + active identity; PLAY moved to bottom-right!)
+        // Home's instance heading and overview panel follow the nightly glass layout,
+        // while keeping Volt's single native 26.3 profile and mobile launch controls.
         let [hx, hy, hw, hh] = hero_rect;
-        ui.rounded(hx, hy, hw, hh, 16.0, theme::HERO_BG);
-        ui.rounded(hx + 8.0, hy + 8.0, hw * 0.65, hh * 0.45, 14.0, theme::HERO_GLOW_SOFT);
-        ui.rounded(hx + 16.0, hy + 14.0, hw * 0.42, hh * 0.28, 12.0, theme::HERO_GLOW);
-        ui.border(hx, hy, hw, hh, 16.0, theme::BORDER_CRIMSON);
-
+        let tile = if compact { 48.0 } else { 64.0 };
+        ui.rounded(hx + 16.0, hy + 16.0, tile, tile, 14.0, theme::GLASS);
+        ui.border(hx + 16.0, hy + 16.0, tile, tile, 14.0, theme::GLASS_BORDER);
+        ui.volt_logo(hx + 22.0, hy + 22.0, tile - 12.0, tile - 12.0);
+        let title_x = hx + tile + 30.0;
+        let title_w = (hw - tile - 46.0).max(24.0);
+        let edition = ui.fit_text(Face::Medium, 12.0, "RUST EDITION  ·  MINECRAFT 26.3", title_w);
+        ui.text(Face::Medium, 12.0, title_x, hy + 16.0, theme::CRIMSON_BRIGHT, &edition);
+        let title_size = if compact { 21.0 } else { 29.0 };
+        let title = ui.fit_text(Face::Medium, title_size, "Volt Launcher", title_w);
+        ui.text(Face::Medium, title_size, title_x, hy + 34.0, theme::TEXT, &title);
         if !compact {
-            let lx = hx + hw - 88.0;
-            let ly = hy + 24.0;
-            ui.rounded(lx, ly, 64.0, 64.0, 15.0, theme::BG);
-            ui.border(lx, ly, 64.0, 64.0, 15.0, theme::BORDER_CRIMSON);
-            ui.volt_logo(lx + 6.0, ly + 6.0, 52.0, 52.0);
+            let subtitle = if installing { "Preparing your game" } else if installed {
+                "Ready for your next adventure"
+            } else { "Download game files to get started" };
+            let fitted = ui.fit_text(Face::Regular, 13.0, subtitle, title_w);
+            ui.text(Face::Regular, 13.0, title_x, hy + 72.0, theme::MUTED, &fitted);
         }
 
-        let heading = if installing {
-            "Getting Game Ready"
-        } else if installed {
-            "Ready to Play"
-        } else if compact {
-            "Minecraft Java 26.3"
-        } else {
-            "Java Worlds on Android"
-        };
-        let heading_sz = if compact { 25.0 } else { 38.0 };
-        let heading_max = if compact { hw - 52.0 } else { hw - 126.0 };
-        let fitted_heading = ui.fit_text(Face::Medium, heading_sz, heading, heading_max);
-        ui.text(
-            Face::Medium,
-            heading_sz,
-            hx + 26.0,
-            hy + if compact { 16.0 } else { 28.0 },
-            theme::TEXT,
-            &fitted_heading,
-        );
-
-        // Version badge pill
-        let badge_y = hy + if compact { 56.0 } else { 88.0 };
-        let ver_w = 216.0f32.min(hw - 52.0);
-        ui.rounded(hx + 26.0, badge_y, ver_w, 38.0, 10.0, theme::CRIMSON_BADGE);
-        ui.border(hx + 26.0, badge_y, ver_w, 38.0, 10.0, theme::BORDER_CRIMSON);
-        ui.rounded(hx + 38.0, badge_y + 12.5, 13.0, 13.0, 3.5, theme::CRIMSON_BRIGHT);
-        ui.text(
-            Face::Medium,
-            15.0,
-            hx + 58.0,
-            text_vcenter(badge_y, 38.0, 15.0),
-            theme::CRIMSON_BRIGHT,
-            "Minecraft Java 26.3",
-        );
-
-        // Profile selector pill + Interactive Home Dashboard "Volt Boost" button!
-        let prof_y = badge_y + if compact { 44.0 } else { 48.0 };
-        let prof_w = if hw >= 380.0 { 164.0 } else { (hw - 60.0) * 0.48 };
-        styled_button(
-            ui,
-            self.targets,
-            [hx + 26.0, prof_y, prof_w, 40.0],
-            &format!("Profile {}   v", self.catalog.config.profile),
-            Action::Profile,
-            BtnStyle::CrimsonOutline,
-            false,
-        );
-        let vb_x = hx + 26.0 + prof_w + 8.0;
-        let vb_w = (hw - 52.0 - prof_w - 8.0).max(118.0);
+        let action_y = hy + if compact { 76.0 } else { 104.0 };
+        let action_gap = 8.0;
+        let action_w = ((hw - 32.0 - action_gap) * 0.5).max(42.0);
+        styled_button(ui, self.targets, [hx + 16.0, action_y, action_w, 40.0],
+            &format!("Profile {}", self.catalog.config.profile), Action::Profile,
+            BtnStyle::Secondary, true);
         let active_cnt = self.catalog.extras.active_volt_optimizations();
-        let vb_label = if self.catalog.extras.volt_preset
-            != horizon_client::volt_features::VoltBoostPreset::Off
-        {
-            format!("Volt Boost: {}", self.catalog.extras.volt_preset.label())
-        } else if active_cnt > 0 {
-            format!("Volt Boost ({active_cnt} ON)")
-        } else {
-            "Volt Boost".to_owned()
-        };
-        styled_button(
-            ui,
-            self.targets,
-            [vb_x, prof_y, vb_w, 40.0],
-            &vb_label,
-            Action::OpenVoltBoost,
-            if active_cnt > 0 {
-                BtnStyle::Primary
-            } else {
-                BtnStyle::CrimsonOutline
-            },
-            true,
-        );
+        let boost = if active_cnt > 0 { format!("Volt Boost ({active_cnt} ON)") }
+            else { "Volt Boost".to_owned() };
+        styled_button(ui, self.targets, [hx + 16.0 + action_w + action_gap, action_y, action_w, 40.0],
+            &boost, Action::OpenVoltBoost, BtnStyle::CrimsonOutline, true);
 
-        if installing {
-            let current = InstallStage::ALL
-                .iter()
-                .position(|s| *s == progress.stage)
-                .unwrap_or(0);
-            let list_top = prof_y + 46.0;
-            let bar_y = hy + hh - 42.0;
-            let avail_rows = bar_y - list_top - 8.0;
-            if avail_rows >= 120.0 {
-                let step_h = (avail_rows / 6.0).clamp(18.0, 26.0);
-                for (idx, stage) in InstallStage::ALL.iter().enumerate() {
-                    let sy = list_top + idx as f32 * step_h;
-                    let label = if idx < current {
-                        format!("{:02}  {}  [done]", idx + 1, stage.label())
-                    } else {
-                        format!("{:02}  {}", idx + 1, stage.label())
-                    };
-                    let col = if idx == current {
-                        theme::CRIMSON_BRIGHT
-                    } else if idx < current {
-                        theme::TEXT
-                    } else {
-                        theme::MUTED
-                    };
-                    let fitted = ui.fit_text(Face::Regular, 13.5, &label, hw - 52.0);
-                    ui.text(Face::Regular, 13.5, hx + 26.0, sy, col, &fitted);
+        let panel_y = action_y + 52.0;
+        let panel_h = hy + hh - panel_y - 8.0;
+        if panel_h >= 70.0 {
+            ui.rounded(hx, panel_y, hw, panel_h, 20.0, theme::GLASS);
+            ui.border(hx, panel_y, hw, panel_h, 20.0, theme::GLASS_BORDER);
+            if installing {
+                let current = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
+                let fraction = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
+                let overall = ((current as f32 + fraction.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
+                let stage = ui.fit_text(Face::Medium, 15.0, progress.stage.label(), hw - 32.0);
+                ui.text(Face::Medium, 15.0, hx + 16.0, panel_y + 12.0, theme::TEXT, &stage);
+                let bar_y = panel_y + 44.0;
+                ui.rounded(hx + 16.0, bar_y, hw - 32.0, 7.0, 3.5, theme::CARD_INNER);
+                if overall > 0.0 {
+                    ui.rounded(hx + 16.0, bar_y, ((hw - 32.0) * overall).max(7.0), 7.0, 3.5, theme::CRIMSON);
+                }
+                if panel_h >= 100.0 {
+                    let detail = if progress.stage == InstallStage::Download {
+                        format!("{:.1} / {:.1} MiB verified", progress.done as f64 / 1048576.0, progress.total as f64 / 1048576.0)
+                    } else { "Keep the launcher open while files are prepared.".to_owned() };
+                    let detail = ui.fit_text(Face::Regular, 12.5, &detail, hw - 32.0);
+                    ui.text(Face::Regular, 12.5, hx + 16.0, panel_y + 62.0, theme::MUTED, &detail);
                 }
             } else {
-                ui.text(
-                    Face::Medium,
-                    15.0,
-                    hx + 26.0,
-                    list_top + 4.0,
-                    theme::TEXT,
-                    progress.stage.label(),
-                );
+                // These tabs link to real Volt pages; unsupported nightly tabs are omitted.
+                let tab_y = panel_y + 10.0;
+                let tab_w = (hw - 24.0) / 4.0;
+                let tabs = [("Overview", None), ("Mods", Some(Page::Mods)),
+                    ("Packs", Some(Page::Packs)), ("Shaders", Some(Page::Shaders))];
+                for (i, (label, page)) in tabs.iter().enumerate() {
+                    let rect = [hx + 12.0 + i as f32 * tab_w, tab_y, tab_w, 34.0];
+                    if page.is_none() {
+                        ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::GLASS_INNER);
+                    } else if let Some(page) = *page {
+                        self.targets.push((rect, Action::Page(page)));
+                    }
+                    draw_centered_text(ui, Face::Medium, 13.0, rect,
+                        if page.is_none() { theme::TEXT } else { theme::MUTED }, label);
+                }
+                if panel_h >= 110.0 {
+                    ui.rounded(hx + 16.0, panel_y + 54.0, hw - 32.0, 1.0, 0.0, theme::GLASS_BORDER);
+                    let state = if installed { "Game files ready" } else { "Game files not yet downloaded" };
+                    ui.text(Face::Medium, 14.5, hx + 16.0, panel_y + 68.0, theme::TEXT, state);
+                }
+                if panel_h >= 152.0 {
+                    let player = ui.fit_text(Face::Regular, 13.0, &format!("Playing as {account_status}"), hw - 32.0);
+                    ui.text(Face::Regular, 13.0, hx + 16.0, panel_y + 99.0, theme::MUTED, &player);
+                    self.targets.push(([hx + 12.0, panel_y + 94.0, hw - 24.0, 36.0], Action::Page(Page::Account)));
+                }
             }
-            let fraction = if progress.total > 0 {
-                progress.done as f32 / progress.total as f32
-            } else {
-                0.0
-            };
-            let overall = ((current as f32 + fraction.clamp(0.0, 1.0)) / 6.0).clamp(0.0, 1.0);
-            ui.rounded(hx + 26.0, bar_y, hw - 52.0, 8.0, 4.0, theme::CARD_INNER);
+        } else if installing {
+            // Keep progress visible even in very short compact layouts.
+            let current = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
+            let fraction = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
+            let overall = ((current as f32 + fraction.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
+            let y = hy + hh - 8.0;
+            ui.rounded(hx + 16.0, y, hw - 32.0, 5.0, 2.5, theme::CARD_INNER);
             if overall > 0.0 {
-                ui.rounded(
-                    hx + 26.0,
-                    bar_y,
-                    ((hw - 52.0) * overall).max(8.0),
-                    8.0,
-                    4.0,
-                    theme::CRIMSON,
-                );
-            }
-            let detail = match progress.stage {
-                InstallStage::Download => format!(
-                    "{:.1} / {:.1} MiB verified",
-                    progress.done as f64 / 1048576.0,
-                    progress.total as f64 / 1048576.0
-                ),
-                InstallStage::Controls => {
-                    format!("{} / {} control files verified", progress.done, progress.total)
-                }
-                _ => "Keep launcher open; verified files are cached for retry.".into(),
-            };
-            let fitted = ui.fit_text(Face::Regular, 12.5, &detail, hw - 52.0);
-            ui.text(Face::Regular, 12.5, hx + 26.0, bar_y + 14.0, theme::MUTED, &fitted);
-        } else if !compact {
-            // Active loadout summary card anchored cleanly at the bottom of the left hero card
-            let info_h = 92.0f32.min((hy + hh - (prof_y + 52.0) - 22.0).max(0.0));
-            if info_h >= 68.0 {
-                let iy = hy + hh - info_h - 22.0;
-                ui.rounded(hx + 26.0, iy, hw - 52.0, info_h, 12.0, theme::CARD);
-                ui.border(hx + 26.0, iy, hw - 52.0, info_h, 12.0, theme::BORDER_CRIMSON);
-                let active_acc = self.volt_accounts.active();
-                let (acc_name, badge_txt, skin_txt, cape_txt) = match active_acc {
-                    Some(a) => (
-                        a.name.as_str(),
-                        a.provider.badge(),
-                        a.skin_label.as_str(),
-                        a.cape_label.as_str(),
-                    ),
-                    None => (account_status, "OFFLINE", "Default", "None"),
-                };
-                let title = ui.fit_text(
-                    Face::Medium,
-                    17.0,
-                    &format!("{acc_name}  •  {badge_txt}"),
-                    hw - 84.0,
-                );
-                ui.text(Face::Medium, 17.0, hx + 42.0, iy + 15.0, theme::TEXT, &title);
-                let sub = ui.fit_text(
-                    Face::Regular,
-                    13.5,
-                    &format!("Skin: {skin_txt}   |   Cape: {cape_txt}   |   Renderer: {}", self.catalog.config.renderer.label()),
-                    hw - 84.0,
-                );
-                ui.text(Face::Regular, 13.5, hx + 42.0, iy + 46.0, theme::MUTED, &sub);
-                self.targets
-                    .push(([hx + 26.0, iy, hw - 52.0, info_h], Action::Page(Page::Account)));
+                ui.rounded(hx + 16.0, y, ((hw - 32.0) * overall).max(5.0), 5.0, 2.5, theme::CRIMSON);
             }
         }
 
@@ -969,7 +892,7 @@ impl DrawCtx<'_> {
         let char_h = (rh - cta_h - 14.0).max(140.0);
         let char_card = [rx, ry, rw, char_h];
 
-        ui.rounded(char_card[0], char_card[1], char_card[2], char_card[3], 16.0, theme::CARD);
+        ui.rounded(char_card[0], char_card[1], char_card[2], char_card[3], 20.0, theme::GLASS);
         ui.rounded(
             char_card[0] + char_card[2] * 0.16,
             char_card[1] + char_card[3] * 0.14,
@@ -983,8 +906,8 @@ impl DrawCtx<'_> {
             char_card[1],
             char_card[2],
             char_card[3],
-            16.0,
-            theme::BORDER_CRIMSON,
+            20.0,
+            theme::GLASS_BORDER,
         );
 
         let active_acc = self.volt_accounts.active();
@@ -4666,6 +4589,7 @@ impl Launcher {
         let scale = ui.density / ui.batch.scale;
         ui.batch
             .fill(&gui.atlas, 0.0, 0.0, w * scale, h * scale, theme::BG);
+        draw_launcher_scene(&mut ui, w, h);
 
         let compact = w < 760.0;
         let account_status = self
