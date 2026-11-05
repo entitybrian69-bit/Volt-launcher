@@ -47,7 +47,7 @@ impl RendererMode {
 }
 
 fn default_launcher_dark() -> bool { true }
-fn default_launcher_accent() -> u32 { 0x6b4bff }
+fn default_launcher_accent() -> u32 { 0x3b82f6 }
 
 fn default_pack_source() -> crate::shader_catalog::Origin {
     crate::shader_catalog::Origin::Modrinth
@@ -80,6 +80,16 @@ pub struct Config {
     pub mod_source: crate::shader_catalog::Origin,
     #[serde(default = "default_pack_source")]
     pub pack_source: crate::shader_catalog::Origin,
+    /// Accumulated seconds of play across sessions, shown in the Home hero.
+    #[serde(default)]
+    pub play_seconds: u64,
+    /// Unix seconds when Play was last pressed; 0 when the game was never started.
+    #[serde(default)]
+    pub last_played: u64,
+    /// Unix seconds when the current/most recent game session started; folded
+    /// into `play_seconds` the next time the launcher loads this config.
+    #[serde(default)]
+    pub session_mark: u64,
     #[serde(default)]
     pub custom_vulkan_driver: Option<String>,
     #[serde(default)]
@@ -95,6 +105,7 @@ impl Default for Config {
             screen: Default::default(), input_host: Default::default(), keypad_controls: false,
             record_performance: false, device: Default::default(), shader_source: Default::default(),
             mod_source: Default::default(), pack_source: Default::default(),
+            play_seconds: 0, last_played: 0, session_mark: 0,
             custom_vulkan_driver: None, custom_vulkan_driver_name: None,
         }
     }
@@ -150,6 +161,19 @@ impl Config {
         if value.get("launcher_dark").is_none() { config.launcher_dark = true; }
         if value.get("launcher_accent").is_none() { config.launcher_accent = default_launcher_accent(); }
         config.launcher_accent &= 0x00ff_ffff;
+        // The launcher's stock look moved from violet to the reference blue;
+        // carry installs that still sit on the old default across with it.
+        if config.launcher_accent == 0x6b4bff { config.launcher_accent = default_launcher_accent(); }
+        // Fold a finished play session into the running total (capped per session).
+        if config.session_mark > 0 {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs()).unwrap_or(0);
+            if now > config.session_mark {
+                config.play_seconds = config.play_seconds
+                    .saturating_add((now - config.session_mark).min(12 * 3600));
+            }
+            config.session_mark = 0;
+        }
         if value.get("renderer").is_none() {
             config.renderer = RendererMode::VulkanCompatibility;
         }

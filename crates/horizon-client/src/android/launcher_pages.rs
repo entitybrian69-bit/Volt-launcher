@@ -5,7 +5,8 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
-/// Launcher colors based on Horizon Nightly's glass/night tokens (f319701e).
+/// Launcher colors: the upstream glass calculations with Volt's deep-blue
+/// night palette and a bright blue accent, as in the reference capture.
 /// The scene is approximated in this mobile renderer; no backdrop blur is claimed.
 pub(crate) mod theme {
     #![allow(non_snake_case)]
@@ -29,16 +30,16 @@ pub(crate) mod theme {
     pub fn dark() -> bool { look().dark }
     fn accent() -> u32 { hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
-    pub fn BG() -> u32 { choose(hex(0x0a0919,255), hex(0xe9e6f6,255)) }
-    pub fn BACKDROP() -> u32 { hex(0x07050f, 215) }
-    pub fn RAIL() -> u32 { choose(hex(0x15112e,235), hex(0xfdfcff,225)) }
-    pub fn CARD() -> u32 { choose(hex(0x15112e,225), hex(0xfdfcff,230)) }
-    pub fn CARD_INNER() -> u32 { choose(hex(0x29213d,235), hex(0xebe8f5,245)) }
-    pub fn HOVER() -> u32 { choose(hex(0x403652,230), hex(0xded9ee,245)) }
+    pub fn BG() -> u32 { choose(hex(0x071127,255), hex(0xe7eefb,255)) }
+    pub fn BACKDROP() -> u32 { hex(0x040a19, 215) }
+    pub fn RAIL() -> u32 { choose(hex(0x0f1d3a,235), hex(0xfcfdff,225)) }
+    pub fn CARD() -> u32 { choose(hex(0x0f1d3a,225), hex(0xfcfdff,230)) }
+    pub fn CARD_INNER() -> u32 { choose(hex(0x1b2e52,235), hex(0xe6edf9,245)) }
+    pub fn HOVER() -> u32 { choose(hex(0x2a3f68,230), hex(0xd4e0f2,245)) }
     pub fn HERO_BG() -> u32 { CARD() }
     pub fn HERO_GLOW() -> u32 { lerp(CARD(), accent(), 0.22) }
     pub fn HERO_GLOW_SOFT() -> u32 { lerp(CARD(), accent(), 0.12) }
-    pub fn BORDER() -> u32 { choose(hex(0xb9acff,42), hex(0x3b2f78,38)) }
+    pub fn BORDER() -> u32 { choose(hex(0xa9c7ff,42), hex(0x29569e,38)) }
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
     pub fn CRIMSON_BRIGHT() -> u32 {
@@ -46,19 +47,19 @@ pub(crate) mod theme {
         hex(if dark() { glass.accent_soft } else { glass.accent }, 255)
     }
     pub fn CRIMSON_SOFT() -> u32 { (accent() & 0x00ffffff) | (42u32 << 24) }
-    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xffffff,26), hex(0x100a1f,26)) }
+    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xffffff,26), hex(0x0a1626,26)) }
     pub fn ON_CRIMSON() -> u32 { hex(look().glass.on_accent,255) }
-    pub fn TEXT() -> u32 { choose(hex(0xf4f2ff,255), hex(0x1b1530,255)) }
-    pub fn MUTED() -> u32 { choose(hex(0xcfc9ea,255), hex(0x585071,255)) }
-    pub fn DIM() -> u32 { choose(hex(0xa59fc6,255), hex(0x706782,255)) }
+    pub fn TEXT() -> u32 { choose(hex(0xf2f7ff,255), hex(0x122036,255)) }
+    pub fn MUTED() -> u32 { choose(hex(0xc3d2ec,255), hex(0x4a5a74,255)) }
+    pub fn DIM() -> u32 { choose(hex(0x93a7c9,255), hex(0x64748b,255)) }
     pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
     pub fn GLASS() -> u32 {
         if !dark() { return hex(0xffffff, 214); }
         let glass = look().glass;
         hex(glass.plate, (glass.plate_alpha * 255.0).round() as u8)
     }
-    pub fn GLASS_INNER() -> u32 { choose(hex(0xffffff,16), hex(0x100a1f,12)) }
-    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,34), hex(0x3b2f78,30)) }
+    pub fn GLASS_INNER() -> u32 { choose(hex(0xffffff,16), hex(0x0a1626,12)) }
+    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,34), hex(0x29569e,30)) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -71,6 +72,7 @@ pub(super) enum Action {
     CycleAccent,
     ConnectServer(usize),
     SaveServer,
+    PatchNotes,
     Page(Page),
     Play,
     Search,
@@ -480,47 +482,100 @@ fn wrap_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32, max_lines:
 
 /// A low-cost mobile approximation of Nightly's pixel-sunset backdrop.
 /// Its palette is taken from the pinned upstream scene; it is not the desktop renderer.
-fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32) {
+/// Continuously animated backdrop: a deep blue vertical wash with large,
+/// softly drifting abstract shapes, built from inexpensive horizontal bands
+/// so it stays cheap on mobile GPUs. `phase` is seconds since launch.
+fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
-    const NIGHT: [u32; 15] = [0x0a0919, 0x0f0c28, 0x151136, 0x1d1444, 0x281850,
-        0x361b5b, 0x481e66, 0x5d236e, 0x752873, 0x902f76, 0xab3a75, 0xc64a71,
-        0xde5f6a, 0xef7c63, 0xf89d62];
-    const DAWN: [u32; 6] = [0xc9d3f2, 0xdcd8f3, 0xead5ec, 0xf5d3d8, 0xf9d6bd, 0xfbe4c6];
-    let stops: &[u32] = if theme::dark() { &NIGHT } else { &DAWN };
-    for row in 0..48 {
-        let t = (row as f32 / 47.0).powf(2.0) * (stops.len() - 1) as f32;
+    const NIGHT: [u32; 6] = [0x040918, 0x061228, 0x081a3a, 0x0a2048, 0x0b2452, 0x0d2a5e];
+    const DAY: [u32; 6] = [0xdbe7fa, 0xd3e2f9, 0xc9dcf8, 0xbed4f6, 0xb2cbf4, 0xa6c2f2];
+    let stops: &[u32] = if theme::dark() { &NIGHT } else { &DAY };
+    for row in 0..40 {
+        let t = (row as f32 / 39.0) * (stops.len() - 1) as f32;
         let index = (t as usize).min(stops.len() - 2);
-        let color = lerp(hex(stops[index],255), hex(stops[index+1],255), t - index as f32);
-        ui.rounded(0.0, row as f32 * h / 48.0, w, h / 48.0 + 1.0, 0.0, color);
+        let color = lerp(hex(stops[index], 255), hex(stops[index + 1], 255), t - index as f32);
+        ui.rounded(0.0, row as f32 * h / 40.0, w, h / 40.0 + 1.0, 0.0, color);
     }
-    if theme::dark() {
-        for i in 0..52 {
-            let x = w * (((i * 73 + 19) % 101) as f32 / 101.0);
-            let y = h * (((i * 37 + 11) % 64) as f32 / 100.0);
-            let size = if i % 8 == 0 { 1.8 } else { 1.0 };
-            ui.rounded(x, y, size, size, 0.0, hex(0xd2c8ff, if i % 3 == 0 { 140 } else { 80 }));
+    // Each petal is an ellipse of horizontal bands whose width breathes and
+    // whose center slowly orbits, overlapping into a flowing abstract bloom.
+    struct Petal { cx: f32, cy: f32, rx: f32, ry: f32, tilt: f32, speed: f32, seed: f32, deep: u32, bright: u32, alpha: u8 }
+    let (deep_a, deep_b, hi) = if theme::dark() {
+        (0x0a2a66, 0x123c8c, 0x3f7fd9)
+    } else {
+        (0x9cc0f0, 0x7faced, 0xdcebff)
+    };
+    let petals = [
+        Petal { cx: 0.62, cy: 0.78, rx: 0.42, ry: 0.52, tilt: 0.55, speed: 0.11, seed: 0.0, deep: deep_a, bright: deep_b, alpha: 235 },
+        Petal { cx: 0.80, cy: 0.42, rx: 0.34, ry: 0.40, tilt: -0.35, speed: 0.09, seed: 2.1, deep: deep_b, bright: hi, alpha: 180 },
+        Petal { cx: 0.38, cy: 0.98, rx: 0.36, ry: 0.42, tilt: 0.25, speed: 0.13, seed: 4.2, deep: deep_a, bright: deep_b, alpha: 205 },
+        Petal { cx: 0.14, cy: 0.30, rx: 0.26, ry: 0.34, tilt: -0.20, speed: 0.07, seed: 1.3, deep: deep_b, bright: hi, alpha: 120 },
+    ];
+    for petal in &petals {
+        let drift_x = (phase * petal.speed + petal.seed).sin() * 0.045;
+        let drift_y = (phase * petal.speed * 0.8 + petal.seed * 1.7).cos() * 0.035;
+        let breathe = 1.0 + 0.08 * (phase * petal.speed * 1.6 + petal.seed).sin();
+        let cx = (petal.cx + drift_x) * w;
+        let cy = (petal.cy + drift_y) * h;
+        let rx = petal.rx * w.min(h * 1.4) * breathe;
+        let ry = petal.ry * h * breathe;
+        const BANDS: i32 = 22;
+        for band in 0..BANDS {
+            let t = (band as f32 + 0.5) / BANDS as f32 * 2.0 - 1.0;
+            let wave = 1.0 + 0.18 * (t * 2.6 + phase * petal.speed * 3.0 + petal.seed).sin();
+            let half = (1.0 - t * t).max(0.0).sqrt() * rx * wave;
+            if half < 1.0 { continue; }
+            let y = cy + t * ry - ry / BANDS as f32;
+            let band_h = ry * 2.0 / BANDS as f32 + 1.0;
+            if y + band_h < 0.0 || y > h { continue; }
+            let x = cx - half + t * petal.tilt * rx;
+            // Brighter toward the top edge of the shape, like soft rim light.
+            let color = lerp(hex(petal.deep, petal.alpha), hex(petal.bright, petal.alpha),
+                ((-t) * 0.5 + 0.5).powf(1.6));
+            ui.rounded(x, y, half * 2.0, band_h, band_h * 0.5, color);
         }
     }
-    // A pixel sun and three layered ridges, as in the glass reference.
-    let sun_x = w * 0.72;
-    let sun_y = h * 0.67;
-    let radius = h.min(w) * 0.17;
-    for band in 0..16 {
-        let yy = (band as f32 + 0.5) / 8.0 - 1.0;
-        let half = (1.0 - yy * yy).max(0.0).sqrt() * radius;
-        let color = lerp(hex(0xfff5d2,255), hex(0xfb6c62,255), (yy + 1.0) * 0.5);
-        ui.rounded(sun_x - half, sun_y + yy * radius, half * 2.0, radius / 8.0 + 1.0, 0.0, color);
+    // A slow highlight sweep keeps visible motion even while the petals are
+    // near their turning points.
+    let sweep = ((phase * 0.05).fract()) * (w + h * 0.8) - h * 0.4;
+    let sweep_col = hex(if theme::dark() { 0x6ea8ff } else { 0xffffff }, 10);
+    for i in 0..3 {
+        ui.rounded(sweep - i as f32 * 26.0, 0.0, 18.0, h, 9.0, sweep_col);
     }
-    for layer in 0..3 {
-        let colors = if theme::dark() { [0x5b2a67, 0x2b194e, 0x100d2b] } else { [0xc99abc, 0x9c8bb3, 0x77749e] };
-        let base = h * (0.79 + layer as f32 * 0.07);
-        for col in 0..48 {
-            let wave = ((col as f32 * 0.31 + layer as f32 * 2.1).sin() * 0.5 + 0.5)
-                * h * (0.055 + layer as f32 * 0.01);
-            let y = base - wave;
-            ui.rounded(col as f32 * w / 48.0, y, w / 48.0 + 1.0, h - y, 0.0, hex(colors[layer], 255));
-        }
+}
+
+/// "You've played for 12 hours! Last played 2 hours ago", from persisted
+/// launch records; honest fallbacks when the game was never started.
+fn played_summary(config: &crate::catalog::Config) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Count an in-progress session so the number grows while you play today.
+    let mut seconds = config.play_seconds;
+    if config.session_mark > 0 && now > config.session_mark {
+        seconds = seconds.saturating_add((now - config.session_mark).min(12 * 3600));
     }
+    let played = if seconds == 0 {
+        "Not played yet".to_owned()
+    } else if seconds < 3600 {
+        format!("You've played for {} minutes!", (seconds / 60).max(1))
+    } else {
+        format!("You've played for {} hours!", seconds / 3600)
+    };
+    if config.last_played == 0 {
+        return played;
+    }
+    let ago = now.saturating_sub(config.last_played);
+    let last = if ago < 120 {
+        "just now".to_owned()
+    } else if ago < 3600 {
+        format!("{} minutes ago", ago / 60)
+    } else if ago < 48 * 3600 {
+        format!("{} hours ago", ago / 3600)
+    } else {
+        format!("{} days ago", ago / 86_400)
+    };
+    format!("{played} Last played {last}.")
 }
 
 fn draw_account_chip(
@@ -640,15 +695,19 @@ struct DrawCtx<'a> {
     preview_vel_yaw: f32,
     sidebar_anim: f32,
     idle_phase: f32,
+    /// Live home-tab switch transition: (slide offset in dp, alpha multiplier).
+    tab_anim: Option<(f32, f32)>,
     preview_rect: &'a mut Option<[f32; 4]>,
 }
 
 impl DrawCtx<'_> {
     fn draw_sidebar(&mut self, ui: &mut Ui, rx: f32, ry: f32, rw: f32, rh: f32) {
-        ui.rounded(rx, ry, rw, rh, 16.0, theme::GLASS());
-        ui.border(rx, ry, rw, rh, 16.0, theme::GLASS_BORDER());
-        ui.text(Face::LauncherMedium, 12.0, rx + 14.0, ry + 16.0, theme::MUTED(), "Instances");
-        let add = [rx + rw - 42.0, ry + 7.0, 32.0, 32.0];
+        ui.rounded(rx, ry, rw, rh, 18.0, theme::GLASS());
+        ui.border(rx, ry, rw, rh, 18.0, theme::GLASS_BORDER());
+        ui.text(Face::LauncherMedium, 12.5, rx + 16.0, ry + 20.0, theme::MUTED(), "Instances");
+        let add = [rx + rw - 48.0, ry + 10.0, 38.0, 38.0];
+        ui.rounded(add[0], add[1], add[2], add[3], 11.0, theme::GLASS_INNER());
+        ui.border(add[0], add[1], add[2], add[3], 11.0, theme::GLASS_BORDER());
         draw_centered_text(ui, Face::LauncherMedium, 22.0, add, theme::TEXT(), "+");
         self.targets.push((add, Action::Profile)); // chooser includes Create profile
 
@@ -658,7 +717,8 @@ impl DrawCtx<'_> {
             .filter_map(|entry| entry.file_name().to_str()?.strip_prefix("profile-")?.parse::<u32>().ok()));
         ids.sort_unstable();
         ids.dedup();
-        let max_rows = (((rh - 260.0).max(55.0) / 54.0) as usize).clamp(1, 7);
+        let row_step = 62.0;
+        let max_rows = (((rh - 280.0).max(row_step) / row_step) as usize).clamp(1, 7);
         if ids.len() > max_rows && !ids[..max_rows].contains(&self.catalog.config.profile) {
             ids.truncate(max_rows.saturating_sub(1));
             ids.push(self.catalog.config.profile);
@@ -666,74 +726,110 @@ impl DrawCtx<'_> {
             ids.truncate(max_rows);
         }
         for (index, id) in ids.iter().enumerate() {
-            let row = [rx + 8.0, ry + 48.0 + index as f32 * 54.0, rw - 16.0, 50.0];
+            let row = [rx + 10.0, ry + 58.0 + index as f32 * row_step, rw - 20.0, 56.0];
             if *id == self.catalog.config.profile {
-                ui.rounded(row[0], row[1], row[2], row[3], 9.0, theme::CRIMSON_BADGE());
-                ui.border(row[0], row[1], row[2], row[3], 9.0, theme::GLASS_BORDER());
+                ui.rounded(row[0], row[1], row[2], row[3], 12.0, theme::CRIMSON_SOFT());
+                ui.border(row[0], row[1], row[2], row[3], 12.0, theme::BORDER_CRIMSON());
             }
-            ui.volt_logo(row[0] + 7.0, row[1] + 7.0, 35.0, 35.0);
+            ui.volt_logo(row[0] + 9.0, row[1] + 10.0, 36.0, 36.0);
             let name = if *id == 0 { "Volt".to_owned() } else { format!("Profile {id}") };
-            let name = ui.fit_text(Face::LauncherMedium, 13.0, &name, rw - 76.0);
-            ui.text(Face::LauncherMedium, 13.0, row[0] + 51.0, row[1] + 6.0, theme::TEXT(), &name);
-            ui.rounded(row[0] + 51.0, row[1] + 33.0, 6.0, 6.0, 3.0, theme::ONLINE());
-            ui.text(Face::LauncherRegular, 11.0, row[0] + 61.0, row[1] + 27.0, theme::MUTED(), "Native · 26.3");
+            let name = ui.fit_text(Face::LauncherMedium, 13.5, &name, rw - 86.0);
+            ui.text(Face::LauncherMedium, 13.5, row[0] + 54.0, row[1] + 9.0, theme::TEXT(), &name);
+            ui.rounded(row[0] + 54.0, row[1] + 37.0, 6.0, 6.0, 3.0, theme::ONLINE());
+            ui.text(Face::LauncherRegular, 11.0, row[0] + 64.0, row[1] + 31.0, theme::MUTED(), "Native build · 26.3");
             self.targets.push((row, Action::ChooseProfile(*id)));
         }
 
         // All existing destinations stay accessible; Account contains the 3D preview.
-        let short = rh < 320.0;
-        let foot_y = ry + rh - if short { 148.0 } else { 196.0 };
-        let foot_step = if short { 29.0 } else { 37.0 };
-        let foot_height = if short { 26.0 } else { 33.0 };
+        let short = rh < 400.0;
+        let foot_y = ry + rh - if short { 172.0 } else { 254.0 };
+        let foot_step = if short { 30.0 } else { 40.0 };
+        let foot_height = if short { 27.0 } else { 36.0 };
         for (i, (label, action)) in [("Account", Action::Page(Page::Account)),
             ("Volt Settings", Action::Page(Page::VoltSettings))].iter().enumerate() {
-            styled_button(ui, self.targets, [rx + 10.0, foot_y + i as f32 * foot_step, rw - 20.0, foot_height],
+            styled_button(ui, self.targets, [rx + 12.0, foot_y + i as f32 * foot_step, rw - 24.0, foot_height],
                 label, *action, BtnStyle::Subtle, false);
         }
-        let discord_h = if short { 30.0 } else { 38.0 };
-        let discord = [rx + 10.0, ry + rh - if short { 83.0 } else { 112.0 }, rw - 20.0, discord_h];
+        let discord_h = if short { 32.0 } else { 42.0 };
+        let discord = [rx + 12.0, foot_y + 2.0 * foot_step + 4.0, rw - 24.0, discord_h];
         let discord_bg = horizon_client::ui_theme::color::hex(0x5865f2, 255);
-        ui.rounded(discord[0], discord[1], discord[2], discord[3], 10.0, discord_bg);
-        draw_discord_icon(ui, discord[0] + 25.0, discord[1] + discord[3] * 0.5, theme::TEXT(), discord_bg);
-        draw_centered_text(ui, Face::LauncherMedium, 13.0,
+        ui.rounded(discord[0], discord[1], discord[2], discord[3], 12.0, discord_bg);
+        draw_discord_icon(ui, discord[0] + 26.0, discord[1] + discord[3] * 0.5, theme::TEXT(), discord_bg);
+        draw_centered_text(ui, Face::LauncherMedium, 13.5,
             [discord[0] + 26.0, discord[1], discord[2] - 26.0, discord[3]], theme::TEXT(), "Join the Discord");
         self.targets.push((discord, Action::Discord));
-        let github = [rx + 10.0, ry + rh - if short { 46.0 } else { 67.0 }, rw - 20.0, 32.0];
-        draw_github_icon(ui, github[0] + 20.0, github[1] + 16.0, theme::MUTED());
-        ui.text(Face::LauncherMedium, 13.0, github[0] + 38.0, text_vcenter(github[1], github[3], 13.0), theme::MUTED(), "GitHub");
-        self.targets.push((github, Action::Repository));
+        let link_y = discord[1] + discord_h + if short { 6.0 } else { 10.0 };
+        let link_step = if short { 26.0 } else { 32.0 };
+        for (i, (label, action)) in [("Sponsor", Action::ReviewApp), ("Website", Action::Repository)]
+            .iter().enumerate() {
+            let row = [rx + 12.0, link_y + i as f32 * link_step, rw - 24.0, link_step - 2.0];
+            let cx = row[0] + 12.0;
+            let cy = row[1] + row[3] * 0.5;
+            if i == 0 {
+                // A simple heart from two circles over a square, drawn locally.
+                ui.rounded(cx - 6.0, cy - 5.0, 6.5, 6.5, 3.2, theme::MUTED());
+                ui.rounded(cx - 0.5, cy - 5.0, 6.5, 6.5, 3.2, theme::MUTED());
+                ui.rounded(cx - 4.4, cy - 2.4, 8.8, 6.6, 2.4, theme::MUTED());
+            } else {
+                // A simple globe: ring plus meridian and equator strokes.
+                ui.rounded(cx - 6.0, cy - 6.0, 12.0, 12.0, 6.0, theme::MUTED());
+                ui.rounded(cx - 4.6, cy - 4.6, 9.2, 9.2, 4.6, theme::GLASS());
+                ui.rounded(cx - 1.0, cy - 6.0, 2.0, 12.0, 1.0, theme::MUTED());
+                ui.rounded(cx - 6.0, cy - 1.0, 12.0, 2.0, 1.0, theme::MUTED());
+            }
+            ui.text(Face::LauncherMedium, 13.0, row[0] + 26.0, text_vcenter(row[1], row[3], 13.0),
+                theme::MUTED(), label);
+            self.targets.push((row, *action));
+        }
         if !short {
-            ui.text(Face::LauncherRegular, 11.0, rx + 14.0, ry + rh - 27.0, theme::MUTED(),
+            ui.text(Face::LauncherRegular, 11.0, rx + 16.0, ry + rh - 26.0, theme::DIM(),
                 &format!("Volt Launcher {}", crate::backend::VERSION));
         }
     }
 
-    /// Screenshot-style top navigation. Every entry points at an existing Volt page.
+    /// Reference-style top navigation. Every entry points at an existing Volt
+    /// destination: Wardrobe opens the Account wardrobe, Versions opens the
+    /// profile/version chooser, Patch notes opens the release history, and
+    /// Build log opens the Console tab.
     fn draw_topbar(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
-        let [x, y, w, _] = area;
-        let account_w = if w >= 730.0 { 150.0 } else { 106.0 };
+        let [x, y, w, h] = area;
+        let account_w = if w >= 760.0 { 158.0 } else { 112.0 };
+        let gear_w = h;
         let tabs = [("Home", Action::Page(Page::Play)), ("Mods", Action::Page(Page::Mods)),
-            ("Servers", Action::HomeTab(HomeTab::Multiplayer)), ("Packs", Action::Page(Page::Packs)),
-            ("Shaders", Action::Page(Page::Shaders)), ("Files", Action::Page(Page::Installed)),
-            ("Settings", Action::Page(Page::Settings))];
-        let available = (w - account_w - 12.0).max(240.0);
-        let tab_w = (available / tabs.len() as f32).min(88.0);
+            ("Servers", Action::HomeTab(HomeTab::Multiplayer)), ("Wardrobe", Action::Page(Page::Account)),
+            ("Versions", Action::Profile), ("Patch notes", Action::PatchNotes),
+            ("Build log", Action::HomeTab(HomeTab::Console))];
+        let available = (w - account_w - gear_w - 20.0).max(260.0);
+        let tab_w = (available / tabs.len() as f32).min(102.0);
         for (i, (label, action)) in tabs.iter().enumerate() {
-            let rect = [x + i as f32 * tab_w, y, tab_w - 4.0, 36.0];
+            let rect = [x + i as f32 * tab_w, y, tab_w - 6.0, h];
             let selected = match action {
                 Action::HomeTab(tab) => self.catalog.page == Page::Play && self.home_tab == *tab,
-                Action::Page(Page::Play) => self.catalog.page == Page::Play && self.home_tab != HomeTab::Multiplayer,
+                Action::Page(Page::Play) => self.catalog.page == Page::Play
+                    && !matches!(self.home_tab, HomeTab::Multiplayer | HomeTab::Console),
                 Action::Page(page) => self.catalog.page == *page,
                 _ => false,
             };
             if selected {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::CRIMSON_BADGE());
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 12.0, theme::CRIMSON());
             }
-            draw_centered_text(ui, Face::LauncherMedium, 12.5, rect,
-                if selected { theme::TEXT() } else { theme::MUTED() }, label);
+            let label = ui.fit_text(Face::LauncherMedium, 13.0, label, rect[2] - 8.0);
+            draw_centered_text(ui, Face::LauncherMedium, 13.0, rect,
+                if selected { theme::ON_CRIMSON() } else { theme::MUTED() }, &label);
             self.targets.push((rect, *action));
         }
-        draw_account_chip(ui, self.targets, [x + w - account_w, y, account_w, 38.0],
+        // A small gear keeps launcher Settings one tap away without crowding the bar.
+        let gear = [x + w - account_w - gear_w - 8.0, y, gear_w, h];
+        let (gx, gy) = (gear[0] + gear[2] * 0.5, gear[1] + gear[3] * 0.5);
+        let selected = self.catalog.page == Page::Settings;
+        if selected { ui.rounded(gear[0], gear[1], gear[2], gear[3], 12.0, theme::CRIMSON_BADGE()); }
+        ui.rounded(gx - 8.0, gy - 8.0, 16.0, 16.0, 8.0, theme::MUTED());
+        for (dx, dy) in [(0.0, -10.0), (0.0, 10.0), (-10.0, 0.0), (10.0, 0.0)] {
+            ui.rounded(gx + dx - 2.2, gy + dy - 2.2, 4.4, 4.4, 1.6, theme::MUTED());
+        }
+        ui.rounded(gx - 4.0, gy - 4.0, 8.0, 8.0, 4.0, if selected { theme::CRIMSON_BADGE() } else { theme::GLASS() });
+        self.targets.push((gear, Action::Page(Page::Settings)));
+        draw_account_chip(ui, self.targets, [x + w - account_w, y, account_w, h],
             account_status, self.login.signed_in);
     }
 
@@ -804,57 +900,71 @@ impl DrawCtx<'_> {
         let installed = horizon_client::official_install::ready(self.home);
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
-        // Instance title and controls mirror the proportions of the reference.
-        let logo = if compact { 38.0 } else { 48.0 };
-        ui.volt_logo(x + 2.0, y + 5.0, logo, logo);
-        let name_size = if compact { 29.0 } else { 38.0 };
-        let name = ui.fit_text(Face::Display, name_size, "Volt Launcher", (w - logo - 16.0).max(24.0));
-        ui.text(Face::Display, name_size, x + logo + 12.0, y, theme::TEXT(), &name);
-        let desc = if installing { "Preparing Minecraft 26.3" }
+        // Hero: logo, large instance name, then played-time subtitle.
+        let logo = if compact { 42.0 } else { 54.0 };
+        ui.volt_logo(x + 2.0, y + 4.0, logo, logo);
+        let profile = self.catalog.config.profile;
+        let title = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
+        let name_size = if compact { 30.0 } else { 40.0 };
+        let name = ui.fit_text(Face::Display, name_size, &title, (w - logo - 18.0).max(24.0));
+        ui.text(Face::Display, name_size, x + logo + 14.0, y - 2.0, theme::TEXT(), &name);
+        let state = if installing { "Preparing Minecraft 26.3" }
             else if installed { "Minecraft 26.3 · Native Rust edition" }
             else { "Minecraft 26.3 · Game files need to be downloaded" };
-        let desc = ui.fit_text(Face::LauncherRegular, 12.5, desc, w - 8.0);
-        ui.text(Face::LauncherRegular, 12.5, x + 4.0, y + 57.0, theme::TEXT(), &desc);
-        let ay = y + 82.0;
-        let play_w = if compact { 94.0 } else { 115.0 };
-        let label = if installing { "Installing" } else if installed { "Play" }
-            else if self.error.is_some() { "Retry" } else { "Download" };
-        styled_button(ui, self.targets, [x, ay, play_w, 42.0], label,
-            Action::Play, BtnStyle::Primary, true);
-        let profile_w = if compact { 112.0 } else { 176.0 };
-        styled_button(ui, self.targets, [x + play_w + 8.0, ay, profile_w, 42.0],
-            &format!("Profile {} · 26.3  v", self.catalog.config.profile), Action::Profile,
-            BtnStyle::Secondary, true);
-        if w >= play_w + profile_w + 124.0 {
-            styled_button(ui, self.targets, [x + play_w + profile_w + 16.0, ay, 106.0, 42.0],
+        let subtitle = format!("{} · {state}", played_summary(&self.catalog.config));
+        let subtitle = ui.fit_text(Face::LauncherRegular, 13.0, &subtitle, w - 8.0);
+        ui.text(Face::LauncherRegular, 13.0, x + 4.0, y + logo + 10.0, theme::MUTED(), &subtitle);
+        // Control row: version selector and Volt Boost; Play lives bottom right.
+        let ay = y + logo + 38.0;
+        let control_h = 48.0;
+        let version_w = if compact { 170.0 } else { 230.0 };
+        let version = [x, ay, version_w, control_h];
+        ui.rounded(version[0], version[1], version[2], version[3], 12.0, theme::GLASS());
+        ui.border(version[0], version[1], version[2], version[3], 12.0, theme::GLASS_BORDER());
+        ui.text(Face::LauncherRegular, 10.5, version[0] + 14.0, version[1] + 7.0, theme::DIM(), "Version");
+        let v_label = ui.fit_text(Face::LauncherMedium, 13.0,
+            &format!("native-26.3 · Profile {profile}"), version_w - 44.0);
+        ui.text(Face::LauncherMedium, 13.0, version[0] + 14.0, version[1] + 23.0, theme::TEXT(), &v_label);
+        ui.text(Face::LauncherMedium, 13.0, version[0] + version_w - 24.0,
+            text_vcenter(version[1], control_h, 13.0), theme::MUTED(), "v");
+        self.targets.push((version, Action::Profile));
+        if w >= version_w + 140.0 {
+            styled_button(ui, self.targets, [x + version_w + 10.0, ay, 128.0, control_h],
                 "Volt Boost", Action::OpenVoltBoost, BtnStyle::Secondary, true);
         }
-        let tabs_y = ay + 64.0;
+        // Tab bar: large, generously spaced chips.
+        let tabs_y = ay + control_h + 18.0;
         let tabs = [("Overview", Action::HomeTab(HomeTab::Overview)),
             ("Mods", Action::Page(Page::Mods)), ("Worlds", Action::HomeTab(HomeTab::Worlds)),
             ("Multiplayer", Action::HomeTab(HomeTab::Multiplayer)), ("Packs", Action::Page(Page::Packs)),
             ("Screenshots", Action::HomeTab(HomeTab::Screenshots)), ("Console", Action::HomeTab(HomeTab::Console))];
-        let tab_w = (w / tabs.len() as f32).min(105.0);
+        let tab_h = if compact { 38.0 } else { 42.0 };
+        let tab_w = (w / tabs.len() as f32).min(118.0);
         for (i, (label, action)) in tabs.iter().enumerate() {
-            let r = [x + i as f32 * tab_w, tabs_y, tab_w - 3.0, 34.0];
+            let r = [x + i as f32 * tab_w, tabs_y, tab_w - 6.0, tab_h];
             let selected = match action {
                 Action::HomeTab(tab) => self.catalog.page == Page::Play && self.home_tab == *tab,
                 Action::Page(page) => self.catalog.page == *page,
                 _ => false,
             };
             if selected {
-                ui.rounded(r[0], r[1], r[2], r[3], 9.0, theme::CRIMSON_BADGE());
-                ui.border(r[0], r[1], r[2], r[3], 9.0, theme::GLASS_BORDER());
+                ui.rounded(r[0], r[1], r[2], r[3], 11.0, theme::CRIMSON_BADGE());
+                ui.border(r[0], r[1], r[2], r[3], 11.0, theme::GLASS_BORDER());
             }
-            draw_centered_text(ui, Face::LauncherMedium, if compact { 11.0 } else { 12.5 }, r,
-                if selected { theme::TEXT() } else { theme::MUTED() }, label);
+            let label = ui.fit_text(Face::LauncherMedium, if compact { 11.5 } else { 13.0 }, label, r[2] - 6.0);
+            draw_centered_text(ui, Face::LauncherMedium, if compact { 11.5 } else { 13.0 }, r,
+                if selected { theme::TEXT() } else { theme::MUTED() }, &label);
             self.targets.push((r, *action));
         }
-        let body_y = tabs_y + 42.0;
+        let body_y = tabs_y + tab_h + 14.0;
         let body_h = (y + h - body_y).max(0.0);
+        let play_h = if compact { 50.0 } else { 56.0 };
+        let body_v_start = ui.batch_mut().vertices.len();
         if self.catalog.page == Page::Mods {
-            // Single-column list matches the reference and retains search, filters and toggles.
-            self.draw_mods_landing(ui, [x, body_y, w, body_h], account_status);
+            // Single-column list matches the reference and retains search, filters
+            // and toggles; it ends above the floating Play control so every
+            // toggle stays reachable.
+            self.draw_mods_landing(ui, [x, body_y, w, (body_h - play_h - 10.0).max(0.0)], account_status);
         } else if body_h >= 60.0 {
             if installing {
                 let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
@@ -869,6 +979,22 @@ impl DrawCtx<'_> {
             } else {
                 self.draw_home_tab(ui, [x, body_y, w, body_h], account_status, installed);
             }
+        }
+        // Slide/fade the tab body while a tab switch animation is running.
+        if let Some((dx, alpha)) = self.tab_anim {
+            ui.animate_vertices(body_v_start, dx, 0.0, 1.0,
+                [x + w * 0.5, body_y + body_h * 0.5], alpha);
+        }
+        // The large Play control is anchored at the bottom right, drawn above
+        // the tab body; its target goes first so it always wins the tap.
+        let play_w = if compact { 148.0 } else { 176.0 };
+        let play = [x + w - play_w, y + h - play_h, play_w, play_h];
+        ui.rounded(play[0] + 3.0, play[1] + 5.0, play[2], play[3], play_h * 0.28, theme::BACKDROP());
+        let label = if installing { "Installing" } else if installed { "Play" }
+            else if self.error.is_some() { "Retry" } else { "Download" };
+        styled_button(ui, self.targets, play, label, Action::Play, BtnStyle::Primary, true);
+        if let Some(entry) = self.targets.pop() {
+            self.targets.insert(0, entry);
         }
     }
 
@@ -902,6 +1028,24 @@ impl DrawCtx<'_> {
                     ui.text(Face::LauncherRegular, 11.5, dx + 14.0, y + 67.0, theme::MUTED(), &note);
                 }
                 self.targets.push(([dx, y, half, card_h], Action::Page(Page::Mods)));
+                // Quick links keep Shaders and Files one tap away now that the
+                // top bar follows the reference entries.
+                let link_y = y + card_h + 14.0;
+                let link_h = (h - card_h - 14.0).clamp(0.0, 72.0);
+                if link_h >= 48.0 {
+                    for (i, (label, note, action)) in [
+                        ("Shaders", "Volt Shaders & shader packs", Action::Page(Page::Shaders)),
+                        ("Files", "Imported content and folders", Action::Page(Page::Installed)),
+                    ].iter().enumerate() {
+                        let r = [x + i as f32 * (half + gap), link_y, half, link_h];
+                        ui.rounded(r[0], r[1], r[2], r[3], 12.0, theme::GLASS());
+                        ui.border(r[0], r[1], r[2], r[3], 12.0, theme::GLASS_BORDER());
+                        ui.text(Face::LauncherMedium, 14.0, r[0] + 14.0, r[1] + 10.0, theme::TEXT(), label);
+                        let note = ui.fit_text(Face::LauncherRegular, 11.5, note, half - 28.0);
+                        ui.text(Face::LauncherRegular, 11.5, r[0] + 14.0, r[1] + 34.0, theme::MUTED(), &note);
+                        self.targets.push((r, *action));
+                    }
+                }
             }
             HomeTab::Worlds => {
                 ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Worlds");
@@ -4576,6 +4720,12 @@ impl Launcher {
             return true;
         }
         if self
+            .tab_anim
+            .is_some_and(|(ts, _)| ts.elapsed().as_secs_f32() < 0.25)
+        {
+            return true;
+        }
+        if self
             .modal_anim
             .is_some_and(|ts| ts.elapsed().as_secs_f32() < 0.24)
         {
@@ -4633,6 +4783,11 @@ impl Launcher {
         self.sidebar_anim += (target_idx - self.sidebar_anim) * alpha;
         if (target_idx - self.sidebar_anim).abs() < 0.003 {
             self.sidebar_anim = target_idx;
+        }
+
+        // Retire finished home-tab switch transitions.
+        if self.tab_anim.is_some_and(|(start, _)| start.elapsed().as_secs_f32() >= 0.22) {
+            self.tab_anim = None;
         }
 
         // Detect modal pop-in transitions (Chooser / Microsoft Login / Update Prompt / Volt Boost)
@@ -4699,7 +4854,7 @@ impl Launcher {
         let full_h = ui.h;
         let scale = ui.density / ui.batch.scale;
         ui.batch.fill(&gui.atlas, 0.0, 0.0, full_w * scale, full_h * scale, theme::BG());
-        draw_launcher_scene(&mut ui, full_w, full_h);
+        draw_launcher_scene(&mut ui, full_w, full_h, self.launch_start.elapsed().as_secs_f32());
         let scene_end = ui.batch_mut().vertices.len();
         let mut offset = [0.0f32; 2];
         if let Some([left, top, right, bottom]) = crate::native_ime::launcher_visible_bounds() {
@@ -4745,18 +4900,25 @@ impl Launcher {
                 preview_vel_yaw: self.preview_vel_yaw,
                 sidebar_anim: self.sidebar_anim,
                 idle_phase,
+                tab_anim: self.tab_anim.and_then(|(start, dir)| {
+                    let el = start.elapsed().as_secs_f32();
+                    (el < 0.22).then(|| {
+                        let ease = ease_out_cubic(el / 0.22);
+                        (dir * (1.0 - ease) * 26.0, ease)
+                    })
+                }),
                 preview_rect: &mut self.preview_rect,
             };
             content_area = if compact {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
                 [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
-                let rail_w = 196.0;
+                let rail_w = 208.0;
                 ctx.draw_sidebar(&mut ui, 12.0, 12.0, rail_w, (h - 24.0).max(260.0));
-                let x = 12.0 + rail_w + 16.0;
-                let cw = (w - rail_w - 40.0).max(240.0);
-                ctx.draw_topbar(&mut ui, [x, 14.0, cw, 38.0], &account_status);
-                [x, 66.0, cw, (h - 80.0).max(120.0)]
+                let x = 12.0 + rail_w + 18.0;
+                let cw = (w - rail_w - 44.0).max(240.0);
+                ctx.draw_topbar(&mut ui, [x, 14.0, cw, 44.0], &account_status);
+                [x, 72.0, cw, (h - 86.0).max(120.0)]
             };
 
             page_v_start = ui.batch_mut().vertices.len();
@@ -5089,7 +5251,7 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::CycleAccent) => {
-                const COLORS: [u32; 8] = [0x6b4bff, 0x356cf6, 0x0e9fbd, 0x18a977, 0xe6ab32, 0xf26c5b, 0xd755ae, 0x8b5cf6];
+                const COLORS: [u32; 8] = [0x3b82f6, 0x6b4bff, 0x0e9fbd, 0x18a977, 0xe6ab32, 0xf26c5b, 0xd755ae, 0x8b5cf6];
                 let current = self.catalog.config.launcher_accent;
                 let index = COLORS.iter().position(|&c| c == current).map_or(0, |i| (i + 1) % COLORS.len());
                 self.catalog.config.launcher_accent = COLORS[index];
@@ -5268,6 +5430,16 @@ impl Launcher {
             Some(Action::ConfirmDeleteLocal) => {
                 self.catalog.remove_local(&self.home);
                 self.chooser = None;
+            }
+            Some(Action::PatchNotes) => {
+                self.catalog.status = if crate::platform::open_url(
+                    "https://github.com/entitybrian69-bit/Volt-launcher/releases",
+                ) {
+                    "Volt Launcher patch notes opened in browser."
+                } else {
+                    "No browser available to open the patch notes."
+                }
+                .into();
             }
             Some(Action::Repository) => {
                 self.catalog.status = if crate::platform::open_repository() {
@@ -5451,6 +5623,17 @@ impl Launcher {
             }
             Some(Action::LoginLink) => self.login.open_link(),
             Some(Action::HomeTab(tab)) => {
+                if self.catalog.page == Page::Play && tab != self.home_tab {
+                    let order = |t: HomeTab| match t {
+                        HomeTab::Overview => 0,
+                        HomeTab::Worlds => 2,
+                        HomeTab::Multiplayer => 3,
+                        HomeTab::Screenshots => 5,
+                        HomeTab::Console => 6,
+                    };
+                    let dir = if order(tab) >= order(self.home_tab) { 1.0 } else { -1.0 };
+                    self.tab_anim = Some((std::time::Instant::now(), dir));
+                }
                 if tab == HomeTab::Multiplayer {
                     let home = self.catalog.config.game_home(&self.home);
                     self.catalog.saved_servers = crate::server_list::List::load(&home).servers();
@@ -5510,6 +5693,17 @@ impl Launcher {
                 }
             }
             Some(Action::Play) => {
+                // Remember the launch for the hero subtitle; the elapsed session
+                // is folded into play_seconds when the launcher next loads.
+                let now_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                if now_secs > 0 {
+                    self.catalog.config.last_played = now_secs;
+                    self.catalog.config.session_mark = now_secs;
+                    self.catalog.config.save(&self.home)?;
+                }
                 self.pending_play = true;
                 self.needs_redraw = true;
             }

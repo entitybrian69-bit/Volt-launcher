@@ -68,6 +68,7 @@ pub(super) struct Launcher {
     prev_rendered_page: Page,
     sidebar_anim: f32,
     page_anim: Option<(Instant, f32)>,
+    pub(crate) tab_anim: Option<(Instant, f32)>,
     modal_was_open: bool,
     modal_anim: Option<Instant>,
     session_worker:
@@ -193,6 +194,7 @@ impl Launcher {
             prev_rendered_page: Page::Play,
             sidebar_anim: 0.0,
             page_anim: Some((Instant::now(), 1.0)),
+            tab_anim: None,
             modal_was_open: false,
             modal_anim: None,
             session_worker: None,
@@ -1089,10 +1091,10 @@ impl ApplicationHandler for Launcher {
             || (self.pending_play && !crate::engine_data_ready())
         {
             Duration::from_millis(16)
-        } else if matches!(self.catalog.page, Page::Play | Page::Account) {
-            Duration::from_millis(33)
         } else {
-            Duration::from_millis(50)
+            // The flowing backdrop is always in motion, so every launcher page
+            // redraws at a steady ~30 FPS while the launcher is foregrounded.
+            Duration::from_millis(33)
         };
         if self.needs_redraw {
             // Coalesce high-rate touch bursts to <= ~70 FPS so swapchain acquire/present
