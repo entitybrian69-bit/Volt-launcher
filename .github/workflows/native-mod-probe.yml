@@ -1,0 +1,74 @@
+name: Native mod compatibility probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'arena/**'
+    paths:
+      - .github/workflows/native-mod-probe.yml
+      - tools/native_mods/**
+
+# No signing secrets, release permissions, caches, or deployment. Run only on
+# disposable GitHub-hosted runners; native mods and Cargo build scripts are code.
+permissions:
+  contents: read
+
+jobs:
+  zoom-probe:
+    name: Official Zoom source / ${{ matrix.abi }} (type-check only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+          - abi: armeabi-v7a
+            target: armv7-linux-androideabi
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Run probe unit tests
+        run: python3 -m unittest discover -s tools/native_mods -v
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Rust targets
+        run: rustup target add "${{ matrix.target }}"
+      - name: Fetch pinned registry and reconstruct exact Zoom source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/registry" "$RUNNER_TEMP/zoom-source"
+          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/78853c19a6d48640ef500f3c8ff8988923576f3f | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/22c6f14ea60be2b17a642b44a2aff44a98e3733d | tar -xz -C "$RUNNER_TEMP/zoom-source" --strip-components=1
+          cd "$RUNNER_TEMP/zoom-source"
+          python3 native/tools/native.py package zoom
+      - name: Install exact pinned mixin compiler
+        shell: bash
+        run: |
+          cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
+            --rev 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
+      - name: Probe Zoom on ${{ matrix.abi }}
+        shell: bash
+        run: |
+          python3 tools/native_mods/compat.py probe \
+            --registry "$RUNNER_TEMP/registry" \
+            --id zoom --bundle "$RUNNER_TEMP/zoom-source/native/target/zoom-2.0.0.hnmod" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
+            --mixins-revision 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
+            --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/probe-result" --trust-native-code
+      - name: Upload probe report and logs (untrusted, not a release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-zoom-${{ matrix.abi }}
+          path: ${{ runner.temp }}/probe-result/
+          if-no-files-found: warn
+          retention-days: 14
