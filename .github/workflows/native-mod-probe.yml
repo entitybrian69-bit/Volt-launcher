@@ -29,7 +29,8 @@ jobs:
       fail-fast: false
       matrix:
         abi: [arm64-v8a, armeabi-v7a]
-        mod: [jei, jade, veinminer, horizon_physics]
+        mod: [jei, jade, veinminer, horizon_physics, appleskin, status_effect_hud,
+              toggle_sprint, inventory_profiles, shulker_peek, mousetricks, itemnew]
         include:
           - abi: arm64-v8a
             target: aarch64-linux-android
@@ -49,6 +50,34 @@ jobs:
           - mod: horizon_physics
             file: horizon_physics-0.15.1.hnmod
             tag: horizon_physics-0.15.1
+            raw_targets: "--experimental-raw-targets"
+          - mod: appleskin
+            file: appleskin-1.0.0.hnmod
+            tag: appleskin-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: status_effect_hud
+            file: status_effect_hud-1.0.0.hnmod
+            tag: status_effect_hud-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: toggle_sprint
+            file: toggle_sprint-1.0.0.hnmod
+            tag: toggle_sprint-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: inventory_profiles
+            file: inventory_profiles-1.0.0.hnmod
+            tag: inventory_profiles-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: shulker_peek
+            file: shulker_peek-0.1.0.hnmod
+            tag: shulker_peek-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: mousetricks
+            file: mousetricks-0.2.0.hnmod
+            tag: mousetricks-0.2.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: itemnew
+            file: itemnew-0.1.1.hnmod
+            tag: itemnew-0.1.1
             raw_targets: "--experimental-raw-targets"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
