@@ -272,35 +272,28 @@ jobs:
               env.write(f"JEI_MIXINS={revs['jei']}\n")
               env.write(f"PHYS_MIXINS={revs['horizon_physics']}\n")
           PYCODE
-      - name: Install the bundles' pinned mixin compilers
+      - name: Install the pinned mixin compiler
         run: |
-          set -euo pipefail
+          # Both mods inject shared hook points (native_mods), which must be
+          # woven in ONE compiler pass; sequential passes fail because the
+          # first mod's woven macros make the hook body opaque to the second
+          # compiler. Horizon Physics' pin is used for the whole set (it is
+          # the strictest consumer: raw AST targets), and JEI's differing pin
+          # is recorded in the report via --force-common-mixins.
           cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
-            --rev "$JEI_MIXINS" \
-            --root "$RUNNER_TEMP/mixins-jei" horizon-mixins-cli
-          if [ "$PHYS_MIXINS" != "$JEI_MIXINS" ]; then
-            cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
-              --rev "$PHYS_MIXINS" \
-              --root "$RUNNER_TEMP/mixins-phys" horizon-mixins-cli
-          fi
+            --rev "$PHYS_MIXINS" \
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
       - name: Weave and build the engine library
         run: |
           set -euo pipefail
-          # Physics weaves first: its raw targets must match the pristine
-          # sources, while JEI's registered hook injections stay stable on a
-          # woven tree. With one shared pin a single pass covers both.
-          MIXARGS=()
-          if [ "$PHYS_MIXINS" != "$JEI_MIXINS" ]; then
-            MIXARGS+=(--mixins "$RUNNER_TEMP/mixins-phys/bin/horizon-mixins" --mixins-revision "$PHYS_MIXINS")
-          fi
-          MIXARGS+=(--mixins "$RUNNER_TEMP/mixins-jei/bin/horizon-mixins" --mixins-revision "$JEI_MIXINS")
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
             --mod "jei=$RUNNER_TEMP/bundle/$JEI_FILE" \
             --mod "horizon_physics=$RUNNER_TEMP/bundle/$PHYS_FILE" \
-            "${MIXARGS[@]}" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
+            --mixins-revision "$PHYS_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
-            --trust-native-code --experimental-raw-targets
+            --trust-native-code --experimental-raw-targets --force-common-mixins
       - name: Show failure diagnostics
         if: failure()
         shell: bash

@@ -34,7 +34,7 @@ def selection(value: str) -> tuple[str, Path]:
 
 def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revisions: list[str],
                 root: Path, volt_revision: str, work: Path,
-                raw_targets: bool = False) -> list[dict]:
+                raw_targets: bool = False, force_common: bool = False) -> list[dict]:
     if not selections or len(selections) > MAX_MODS:
         raise compat.Rejected(f"select 1 to {MAX_MODS} native mods")
     ids = [mod_id for mod_id, _ in selections]
@@ -44,6 +44,8 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         mixins_revisions = [mixins_revisions]
     if not mixins_revisions or len(set(mixins_revisions)) != len(mixins_revisions):
         raise compat.Rejected("provide each trusted mixin compiler revision once")
+    if force_common and len(mixins_revisions) != 1:
+        raise compat.Rejected("--force-common-mixins takes exactly one trusted compiler")
     if any(not compat.REV.fullmatch(r) for r in mixins_revisions) or not compat.REV.fullmatch(volt_revision):
         raise compat.Rejected("invalid source or mixin revision")
     results = []
@@ -60,7 +62,7 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         extracted = work / "extracted" / mod_id
         data = compat.verified_extract(bundle, entry, extracted, registry)
         meta = data["meta"]
-        if meta["mixins"] not in mixins_revisions:
+        if meta["mixins"] not in mixins_revisions and not force_common:
             raise compat.Rejected(
                 f"{mod_id}: pins mixin compiler revision {meta['mixins'][:12]}, which is not trusted here")
         rebind = compat.check_hooks(data, root, volt_revision, raw_targets=raw_targets)
@@ -71,11 +73,15 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
             if text.count(old) != 1:
                 raise compat.Rejected(f"{mod_id}: cannot safely rebind hook revision")
             manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
-        group = mixins_revisions.index(meta["mixins"])
+        # Mods injecting the same hook must be woven in one compiler pass, so
+        # --force-common-mixins routes every bundle through the one trusted
+        # compiler and the report records both the pin and what was applied.
+        group = 0 if force_common else mixins_revisions.index(meta["mixins"])
         shutil.copytree(extracted / "mixins" / mod_id, work / "mixins" / str(group) / mod_id)
         entry_report = {"id": mod_id, "version": meta["version"], "sha256": data["sha256"],
                         "horizon_revision": meta["horizon"], "hook_revision_rebound": rebind,
                         "mixins_revision": meta["mixins"],
+                        "mixins_applied": mixins_revisions[group],
                         "raw_target_rebind": bool(raw_targets and rebind)}
         if raw_targets:
             entry_report["raw_targets"] = sorted(
@@ -105,7 +111,8 @@ def run(args: argparse.Namespace) -> dict:
     with tempfile.TemporaryDirectory(prefix="volt-native-set-") as tmp:
         work = Path(tmp)
         report["mods"] = prepare_set(args.registry, args.mod, mixins_revisions, compat.ROOT, rev, work,
-                                     raw_targets=getattr(args, "experimental_raw_targets", False))
+                                     raw_targets=getattr(args, "experimental_raw_targets", False),
+                                     force_common=getattr(args, "force_common_mixins", False))
         source = work / "source"
         source.mkdir()
         archive = work / "source.tar"
@@ -164,6 +171,10 @@ def main() -> int:
     parser.add_argument("--abi", choices=tuple(TARGETS), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trust-native-code", action="store_true")
+    parser.add_argument("--force-common-mixins", action="store_true",
+                        help="apply every bundle with the single provided compiler even when "
+                             "its pin differs; needed when mods share hook points, since those "
+                             "must be woven in one pass. The report records pin and applied.")
     parser.add_argument("--experimental-raw-targets", action="store_true",
                         help="probe-only: rebind revision-pinned bundles and let the mixin "
                              "compiler judge raw targets; output stays unsigned")

@@ -159,6 +159,27 @@ class BuildSetTests(unittest.TestCase):
         self.assertEqual([m['mixins_revision'] for m in report['mods']],
                          [self.compiler, 'd' * 40])
 
+    def test_force_common_mixins_weaves_mixed_pins_in_one_pass(self):
+        one = self.bundle('one')
+        two = self.bundle('two', compiler='d' * 40)
+        with self.assertRaisesRegex(compat.Rejected, 'not trusted here'):
+            build_set.prepare_set(self.registry, [('one', one), ('two', two)],
+                                  [self.compiler], compat.ROOT, self.revision, self.work)
+        import shutil
+        shutil.rmtree(self.work)
+        self.work.mkdir()
+        result = build_set.prepare_set(self.registry, [('one', one), ('two', two)],
+                                       [self.compiler], compat.ROOT, self.revision,
+                                       self.work, force_common=True)
+        self.assertTrue((self.work / 'mixins/0/one').is_dir())
+        self.assertTrue((self.work / 'mixins/0/two').is_dir())
+        self.assertEqual([m['mixins_revision'] for m in result], [self.compiler, 'd' * 40])
+        self.assertEqual([m['mixins_applied'] for m in result], [self.compiler] * 2)
+        with self.assertRaisesRegex(compat.Rejected, 'exactly one trusted compiler'):
+            build_set.prepare_set(self.registry, [('one', one)],
+                                  [self.compiler, 'e' * 40], compat.ROOT, self.revision,
+                                  self.work, force_common=True)
+
     def test_checksum_mismatch_rejected(self):
         bundle = self.bundle('one')
         with bundle.open('ab') as f:
