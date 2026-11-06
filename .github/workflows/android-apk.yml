@@ -196,9 +196,123 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Weave the pinned official registry mods (JEI, Horizon Physics) into the
+  # engine library on a disposable no-secrets runner. Native bundles and
+  # Cargo build scripts are code: this job has read-only permissions and no
+  # keystore; the signing job only verifies and packages its attested output
+  # and never executes mod code.
+  weave:
+    name: Weave registry mods (${{ matrix.abi }}, no secrets)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      REGISTRY_REV: 78853c19a6d48640ef500f3c8ff8988923576f3f
+      JEI_FILE: jei-0.1.0.hnmod
+      JEI_TAG: jei-0.1.0
+      PHYS_FILE: horizon_physics-0.15.1.hnmod
+      PHYS_TAG: horizon_physics-0.15.1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+          - abi: armeabi-v7a
+            target: armv7-linux-androideabi
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install signature verification dependency
+        run: python3 -m pip install cryptography
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.target }}"
+      - name: Fetch pinned registry snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/registry"
+          curl --retry 3 -fsSL "https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/$REGISTRY_REV" | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+      - name: Download published bundles and verify against the registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bundle"
+          for pair in "$JEI_TAG=$JEI_FILE" "$PHYS_TAG=$PHYS_FILE"; do
+            tag="${pair%%=*}"; file="${pair#*=}"
+            curl --retry 3 -fsSL -o "$RUNNER_TEMP/bundle/$file" \
+              "https://github.com/horizon-rust/horizon-mods/releases/download/$tag/$file"
+          done
+          python3 - <<'PYCODE'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools/native_mods')
+          import compat
+          temp = Path(os.environ['RUNNER_TEMP'])
+          registry = temp / 'registry'
+          revs = {}
+          for mod_id, file in (('jei', os.environ['JEI_FILE']),
+                               ('horizon_physics', os.environ['PHYS_FILE'])):
+              entry = compat.read_entry(registry, mod_id)
+              data = compat.verified_extract(temp / 'bundle' / file, entry,
+                                             temp / 'extract-check' / mod_id, registry)
+              revs[mod_id] = data['meta']['mixins']
+              if not compat.REV.fullmatch(revs[mod_id]):
+                  raise SystemExit(f'{mod_id}: bundle pins an invalid mixins revision')
+              print(f"{mod_id}: verified, pins mixins {revs[mod_id]}")
+          if len(set(revs.values())) != 1:
+              raise SystemExit(f'bundles pin different mixin compiler revisions: {revs}')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f"WEAVE_MIXINS={next(iter(revs.values()))}\n")
+          PYCODE
+      - name: Install the bundles' pinned mixin compiler
+        run: |
+          cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
+            --rev "$WEAVE_MIXINS" \
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
+      - name: Weave and build the engine library
+        run: |
+          python3 tools/native_mods/build_set.py \
+            --registry "$RUNNER_TEMP/registry" \
+            --mod "jei=$RUNNER_TEMP/bundle/$JEI_FILE" \
+            --mod "horizon_physics=$RUNNER_TEMP/bundle/$PHYS_FILE" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
+            --mixins-revision "$WEAVE_MIXINS" \
+            --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
+            --trust-native-code --experimental-raw-targets
+      - name: Show failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'woven-result'
+          text = '\n'.join(f'{name}:\n' + (root / name).read_text(errors='replace')[-2800:]
+                           for name in ('report.json', 'apply.log', 'build.log') if (root / name).is_file())
+          if text:
+              safe = text[-3500:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print('::error title=Native weave failed::' + safe)
+          PYCODE
+      - name: Upload woven engine library for packaging
+        uses: actions/upload-artifact@v4
+        with:
+          name: _internal-woven-engine-${{ matrix.abi }}
+          path: ${{ runner.temp }}/woven-result/
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build APK (${{ matrix.abi }})
-    needs: [plan, prepare]
+    needs: [plan, prepare, weave]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -496,7 +610,47 @@ jobs:
           ], check=True)
           PY
 
+      - name: Download woven engine library (pinned registry mods)
+        if: ${{ (matrix.abi == 'arm64-v8a' || matrix.abi == 'armeabi-v7a') && needs.plan.outputs.profile == 'release' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: _internal-woven-engine-${{ matrix.abi }}
+          path: ${{ runner.temp }}/woven
+
+      - name: Verify woven engine library before packaging
+        if: ${{ (matrix.abi == 'arm64-v8a' || matrix.abi == 'armeabi-v7a') && needs.plan.outputs.profile == 'release' }}
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY_VERIFY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "woven"
+          report = json.loads((root / "report.json").read_text(encoding="utf-8"))
+          assert report["status"] == "library_built", f"woven build status: {report['status']}"
+          assert report["volt_commit"] == os.environ["EXPECTED_COMMIT"], (
+              f"woven library built from {report['volt_commit']}, expected {os.environ['EXPECTED_COMMIT']}")
+          mods = {(m["id"], m["version"], m["sha256"]) for m in report["mods"]}
+          expected = {
+              ("jei", "0.1.0",
+               "c5590e0d4618d435fc0c56abcc9cdabf253be694710068a3dd4643ac25466b5b"),
+              ("horizon_physics", "0.15.1",
+               "d7cf1201f0a47a852aa1a4c9684ef9e658ec3c86852104d44716d05f11281ca3"),
+          }
+          assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
+          library = root / "libhorizon_android.so"
+          digest = hashlib.sha256(library.read_bytes()).hexdigest()
+          assert digest == report["library_sha256"], "library hash differs from the weave report"
+          print(f"Woven engine library verified: {digest}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"WOVEN_LIB={library}\n")
+          PY_VERIFY
+
       - name: Compile native Rust library (${{ matrix.abi }})
+        if: ${{ !((matrix.abi == 'arm64-v8a' || matrix.abi == 'armeabi-v7a') && needs.plan.outputs.profile == 'release') }}
         env:
           ABI: ${{ matrix.abi }}
           PROFILE: ${{ needs.plan.outputs.profile }}
@@ -600,6 +754,10 @@ jobs:
               "--java-home", os.environ["JAVA_HOME"],
               "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
           ]
+          if os.environ.get("WOVEN_LIB"):
+              # Attested no-secrets artifact with the pinned registry mods
+              # woven in; packaging must not compile over it.
+              cmd += ["--prebuilt-library", os.environ["WOVEN_LIB"]]
           rc = 1
           tail = deque(maxlen=40)
           for attempt in range(1, 4):

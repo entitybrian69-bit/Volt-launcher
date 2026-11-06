@@ -133,4 +133,20 @@ APK. No artifact from the worker is automatically signed or published. A
 production service still needs isolation, quota/abuse controls, a launcher
 submission and status API, conflict and license review, a separate trusted
 packaging/signing process, safe update distribution, and device validation.
-Author-signed bundles remain rejected until signature verification is added.
+Author-signed bundles are accepted when the registry publishes the author key
+and the minisign signature verifies over the exact archive bytes.
+
+## Shipping woven mods in release APKs
+
+Release APK builds run the worker in a dedicated `weave` job
+(`.github/workflows/android-apk.yml`) with read-only permissions and no
+signing keystore. It weaves the pinned registry bundles — JEI 0.1.0 and
+Horizon Physics 0.15.1, SHA-256-pinned against registry snapshot
+`78853c19a6d4` — and uploads the engine library plus its build report. The
+signing job verifies the report (Volt commit, mod set, bundle and library
+hashes) and packages the attested library via `--prebuilt-library`; it never
+executes mod code or build scripts. Horizon Physics declares no portable
+hook-API level, so the worker rebinds it under `--experimental-raw-targets`:
+every raw target must match Volt's sources exactly for the strict AST weave
+to apply, and all four of its named hooks are already served by Volt.
+Each player can turn either mod off per profile in-game under Mods.

@@ -167,6 +167,9 @@ pub(super) enum Action {
     VoltPreset(horizon_client::volt_features::VoltBoostPreset),
     /// Install or remove `bundled_native::BUNDLED[i]` for the active profile.
     ToggleBundled(usize),
+    /// Turn `bundled_native::WOVEN[i]` on or off for the active profile
+    /// (`mod.<id>:false` in `horizon-mods.txt`; the code ships in the APK).
+    ToggleWoven(usize),
     Studio(super::controls_studio::StudioAction),
 }
 
@@ -237,6 +240,8 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "fps_overlay" => "FPS Overlay",
         "keystrokes" => "Keystrokes",
         "minimap" => "Minimap",
+        "jei" => "JEI for Horizon",
+        "horizon_physics" => "Horizon Physics",
         _ => "Horizon Mod",
     }
 }
@@ -247,6 +252,8 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "fps_overlay" => "A small frames-per-second readout over the game.",
         "keystrokes" => "Shows movement keys and clicks as you press them.",
         "minimap" => "A corner map of the terrain around you.",
+        "jei" => "Browse every item and its recipes while you play.",
+        "horizon_physics" => "Blocks crumble, mobs ragdoll, water waves. Physics Settings appears in Options.",
         _ => "An official Horizon registry mod.",
     }
 }
@@ -2236,7 +2243,7 @@ impl DrawCtx<'_> {
         let _ = account_status;
         let [cx, cy, cw, ch] = area;
         ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), "Mods");
-        let hint = "Official Horizon registry mods compiled into Volt. Install per profile; turn on or off in-game under Mods.";
+        let hint = "Official Horizon registry mods compiled into Volt. Install or toggle per profile; configure in-game under Mods.";
         let fitted = ui.fit_text(Face::LauncherRegular, 12.0, hint, (cw - 8.0).max(120.0));
         ui.text(Face::LauncherRegular, 12.0, cx, cy + 24.0, theme::MUTED(), &fitted);
         let status_y = cy + 42.0;
@@ -2253,7 +2260,8 @@ impl DrawCtx<'_> {
         let row_h = 64.0;
         let step = 70.0;
         let bundled = horizon_client::bundled_native::BUNDLED;
-        let total = bundled.len() as f32 * step;
+        let woven = horizon_client::bundled_native::WOVEN;
+        let total = (bundled.len() + woven.len()) as f32 * step;
         let max_scroll = (total - view_h).max(0.0);
         self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
         *self.list_view = Some([top, bottom, max_scroll]);
@@ -2301,6 +2309,52 @@ impl DrawCtx<'_> {
                     if installed { "Remove" } else { "Install" },
                     Action::ToggleBundled(i),
                     if installed { BtnStyle::Secondary } else { BtnStyle::Primary },
+                    true,
+                );
+                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                    self.targets[first].0 = clipped;
+                } else {
+                    self.targets.truncate(first);
+                }
+            }
+            let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
+            ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+        }
+        for (i, &(id, version)) in woven.iter().enumerate() {
+            let ry = top + (bundled.len() + i) as f32 * step - self.catalog.scroll;
+            if ry + row_h < top || ry > bottom {
+                continue;
+            }
+            let start = ui.batch_mut().vertices.len();
+            ui.rounded(cx, ry, cw, row_h, 10.0, theme::CARD());
+            ui.border(cx, ry, cw, row_h, 10.0, theme::BORDER());
+            let icon = [cx + 8.0, ry + 11.0, 42.0, 42.0];
+            ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_GLOW_SOFT());
+            ui.border(icon[0], icon[1], icon[2], icon[3], 8.0, theme::BORDER());
+            let initial: String = bundled_mod_title(id).chars().take(1).collect();
+            draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), &initial);
+            let enabled = !self.catalog.bundled_disabled.contains(id);
+            let tx = cx + 58.0;
+            let text_w = (cw - 178.0).max(32.0);
+            let title = format!("{} {version}", bundled_mod_title(id));
+            let title = ui.fit_text(Face::LauncherMedium, 14.0, &title, text_w);
+            ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
+            let state = if enabled { "On in game" } else { "Off in game" };
+            let line = format!("Official Horizon mod · Built into this APK · {state}");
+            let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
+            ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
+            let blurb = ui.fit_text(Face::LauncherRegular, 11.0, bundled_mod_blurb(id), text_w);
+            ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
+            let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
+            if !self.catalog.busy() {
+                let first = self.targets.len();
+                styled_button(
+                    ui,
+                    self.targets,
+                    button,
+                    if enabled { "Turn off" } else { "Turn on" },
+                    Action::ToggleWoven(i),
+                    if enabled { BtnStyle::Secondary } else { BtnStyle::Primary },
                     true,
                 );
                 if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
@@ -5732,6 +5786,34 @@ impl Launcher {
                                 format!("Could not change {}: {e}", bundled_mod_title(id));
                         }
                     }
+                }
+            }
+            Some(Action::ToggleWoven(i)) => {
+                if let Some(&(id, version)) = horizon_client::bundled_native::WOVEN.get(i) {
+                    let game_dir = self.catalog.config.game_home(&self.home);
+                    let _ = std::fs::create_dir_all(&game_dir);
+                    let mut on = horizon_client::mod_list::ModList::load(&game_dir);
+                    let enable = on.disabled.contains(id);
+                    if enable {
+                        on.disabled.remove(id);
+                        on.enabled.insert(id.to_owned());
+                    } else {
+                        on.enabled.remove(id);
+                        on.disabled.insert(id.to_owned());
+                    }
+                    on.save(&game_dir);
+                    self.catalog.bundled_disabled = on.disabled.clone();
+                    self.catalog.status = if enable {
+                        format!(
+                            "{} {version} is on for this profile. Configure it in-game under Mods.",
+                            bundled_mod_title(id)
+                        )
+                    } else {
+                        format!(
+                            "{} {version} is off for this profile; its settings are kept.",
+                            bundled_mod_title(id)
+                        )
+                    };
                 }
             }
             Some(Action::Studio(sact)) => {

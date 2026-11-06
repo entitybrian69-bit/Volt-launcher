@@ -1332,6 +1332,29 @@ contain the official Horizon 2.0.0 runtimes from
 by Ludovic Marie and the Horizon contributors. The same MIT license printed
 above applies. Volt adds a per-profile state reset and Android integration.
 
+## JEI for Horizon native mod 0.1.0
+
+Release APKs weave the published registry bundle
+[`jei-0.1.0.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/jei-0.1.0)
+(SHA-256 `c5590e0d4618d435fc0c56abcc9cdabf253be694710068a3dd4643ac25466b5b`)
+into the engine library at build time. JEI for Horizon is by enderliker
+([source](https://github.com/enderliker/horizon-jei)), under the MIT License
+(the same license text printed above, Copyright (c) 2026 enderliker). The
+weave happens on a no-secrets CI runner and the player can turn the mod off
+per profile in-game under Mods.
+
+## Horizon Physics native mod 0.15.1
+
+Release APKs weave the published registry bundle
+[`horizon_physics-0.15.1.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/horizon_physics-0.15.1)
+(SHA-256 `d7cf1201f0a47a852aa1a4c9684ef9e658ec3c86852104d44716d05f11281ca3`)
+into the engine library at build time. Horizon Physics is by tariksabanuz
+([source](https://github.com/tariksabanuz/PhysicsModHorizon)), under the MIT
+License (the same license text printed above, Copyright (c) 2026
+tariksabanuz). It is a clean-room work inspired by PhysicsMod and contains
+none of its code or assets. The weave happens on a no-secrets CI runner and
+the player can turn the mod off per profile in-game under Mods.
+
 ## Horizon launcher typography
 
 The launcher display face `crates/horizon-theme/fonts/BricolageGrotesqueDisplay-SemiBold.ttf`

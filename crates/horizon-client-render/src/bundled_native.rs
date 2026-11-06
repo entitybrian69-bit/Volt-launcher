@@ -10,6 +10,15 @@ pub const BUNDLED: &[(&str, &str, &str)] = &[
     ("minimap", "2.0.0", "6f5dbca0699562b088a04b3f5abdc1b7faf8da51257a96da0a4ed639c6644ed9"),
 ];
 
+/// Official registry mods woven into the engine library at APK build time
+/// (`.github/workflows/android-apk.yml`, `weave` job). They register on the
+/// in-game Mods page through `native_mods` and are on until the player turns
+/// them off (`mod_list::ModList::disabled`); nothing is installed per profile.
+pub const WOVEN: &[(&str, &str)] = &[
+    ("jei", "0.1.0"),
+    ("horizon_physics", "0.15.1"),
+];
+
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {
     BUNDLED.iter().any(|&(i, v, h)| (id, version, sha256) == (i, v, h))
 }
