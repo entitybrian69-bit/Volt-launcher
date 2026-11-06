@@ -227,7 +227,7 @@ FORK_SOURCE_SHIMS = {
         ("runtime.rs",
          "stack.data_mut().custom_name = Some(WAND_NAME.to_owned());",
          "stack.data_mut().custom_name ="
-         " Some(horizon_world::nbt::Tag::String(WAND_NAME.to_owned()));"),
+         " Some(horizon_world::nbt::Tag::String(WAND_NAME.into()));"),
         ("runtime.rs",
          "stack.data().and_then(|data| data.custom_name.as_deref()) == Some(WAND_NAME)",
          "stack.data().and_then(|data| data.custom_name_plain()).as_deref() == Some(WAND_NAME)"),

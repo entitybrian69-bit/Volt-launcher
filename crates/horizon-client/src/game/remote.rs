@@ -8154,6 +8154,20 @@ impl Game<'_> {
     }
     /// Connected or connecting with no player yet: `ConnectScreen`, then
     /// `LevelLoadingScreen`, over the panorama with its blur.
+    /// Position of an entity by its network id (upstream: what a voice or an
+    /// entity sound speaks from). The local player is not a tracked entity.
+    pub(super) fn remote_entity_position(&self, id: i32) -> Option<[f64; 3]> {
+        let r = self.remote.as_ref()?;
+        if let Some(p) = self.player.as_ref()
+            && r.entity_id == id
+        {
+            return Some([p.position.x, p.position.y, p.position.z]);
+        }
+        if let Some(m) = self.mobs.iter().find(|m| m.id as i32 == id) {
+            return (!m.silent).then_some([m.position.x, m.position.y, m.position.z]);
+        }
+        r.entities.get(&id).map(|t| t.position)
+    }
     pub(super) fn remote_loading(&self) -> bool {
         use horizon_client::level_loading::Reason;
         self.remote.as_ref().is_some_and(|r| {

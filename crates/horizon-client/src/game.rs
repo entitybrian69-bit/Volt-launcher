@@ -2533,6 +2533,9 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// The native mod whose own screen is open (`native_mod_screen_open`,
+    /// upstream API 111): `Screen::Mod` without a WebAssembly mod screen.
+    native_mod_screen: Option<String>,
     /// The block the acting player is breaking (`break_block`): its destroy
     /// event, and the ones before it, are the player's own (`Level.levelEvent`
     /// with the player excluded); the events after it are not.
@@ -7818,6 +7821,9 @@ impl Game<'_> {
                 self.draw_creative(&mut batch);
             }
             Screen::Chat => self.draw_chat_screen(&mut batch),
+            // A native mod's own screen draws nothing of the game's: the
+            // mod paints it in `native_screen_render_post` below.
+            Screen::Mod if self.native_mod_screen.is_some() => {}
             Screen::Mod => self.draw_mod_screen(&mut batch),
             Screen::Playing | Screen::Options | Screen::Win => {}
         }
@@ -14635,6 +14641,9 @@ impl Game<'_> {
                 Screen::BlockEditor => self.close_block_editor(),
                 Screen::Chat => self.close_chat(chat::ChatExit::Intentional),
                 Screen::Win => self.close_win_screen()?,
+                Screen::Mod if self.native_mod_screen.is_some() => {
+                    self.close_native_mod_screen()
+                }
                 Screen::Mod => self.close_mod_screen(true),
             },
             KeyCode::Digit1
@@ -16209,6 +16218,9 @@ impl Game<'_> {
                             self.stats_click(size);
                         }
                         Screen::Stats if button == MouseButton::Left => self.stats_release(),
+                        // A native mod's own screen takes its clicks in the
+                        // screen mouse hooks above.
+                        Screen::Mod if self.native_mod_screen.is_some() => {}
                         Screen::Mod if pressed => self.mod_screen_click(button),
                         _ => {}
                     }
@@ -17419,6 +17431,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            native_mod_screen: None,
             lan_break_pos: None,
             guest_packets: Vec::new(),
             guest_cooldowns: Vec::new(),

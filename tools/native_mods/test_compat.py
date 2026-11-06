@@ -75,7 +75,7 @@ class CompatibilityTests(unittest.TestCase):
                 encoding='utf-8')
             self.assertEqual(compat.apply_fork_source_shims('worldedit', d), 2)
             text = (d / 'runtime.rs').read_text(encoding='utf-8')
-            self.assertIn('nbt::Tag::String(WAND_NAME.to_owned())', text)
+            self.assertIn('nbt::Tag::String(WAND_NAME.into())', text)
             self.assertIn('custom_name_plain()).as_deref()', text)
             with self.assertRaises(compat.Rejected):
                 compat.apply_fork_source_shims('worldedit', d)
