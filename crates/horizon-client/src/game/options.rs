@@ -195,12 +195,18 @@ impl Game<'_> {
         );
         let now_typing = ui.typing();
         self.ui.options = ui;
+        self.options_show_keyboard_on_focus(was_typing, now_typing);
+        self.handle_option_events(events)
+    }
+    /// Pops the soft keyboard when an options search box gains focus.
+    /// Kept out of [`Self::options_mouse`] so native-mod mixins can weave
+    /// that target without statement-level `cfg` attributes in its body.
+    fn options_show_keyboard_on_focus(&mut self, was_typing: bool, now_typing: bool) {
         #[cfg(target_os = "android")]
         if !was_typing && now_typing {
             self.android_show_keyboard();
         }
         let _ = (was_typing, now_typing);
-        self.handle_option_events(events)
     }
     pub(super) fn options_drag(&mut self) -> Result<()> {
         let size = self.gui_size();

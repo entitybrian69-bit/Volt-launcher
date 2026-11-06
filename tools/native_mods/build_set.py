@@ -65,9 +65,13 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
                 raise compat.Rejected(f"{mod_id}: cannot safely rebind hook revision")
             manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
         shutil.copytree(extracted / "mixins" / mod_id, mixins_dir / mod_id)
-        results.append({"id": mod_id, "version": meta["version"], "sha256": data["sha256"],
+        entry_report = {"id": mod_id, "version": meta["version"], "sha256": data["sha256"],
                         "horizon_revision": meta["horizon"], "hook_revision_rebound": rebind,
-                        "raw_target_rebind": bool(raw_targets and rebind)})
+                        "raw_target_rebind": bool(raw_targets and rebind)}
+        if raw_targets:
+            entry_report["raw_targets"] = sorted(
+                str(inj["target"]) for inj in data["manifest"].get("injection", []) if "target" in inj)
+        results.append(entry_report)
     return results
 
 
