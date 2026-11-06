@@ -212,10 +212,16 @@ def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
     if not found:
         raise Rejected("Volt source does not state its native hook API version")
     if not isinstance(hooks, int) or isinstance(hooks, bool) or hooks < 1:
+        injections = manifest.get("injection", [])
+        raw = [str(inj.get("target")) for inj in injections if "target" in inj]
+        named = [(inj.get("hook"), inj.get("hook_version")) for inj in injections if "target" not in inj]
+        available = json.loads((root / "native-hooks.json").read_text())["hooks"]
+        names = {(item["name"], item["version"]) for item in available}
+        missing = sorted({f"{h}/{v}" for (h, v) in named if (h, v) not in names})
         raise Rejected(
-            f"bundle does not declare a positive integer hook API (hooks={hooks!r}); "
-            f"it pins Horizon {meta.get('horizon', '')[:12]} exactly, "
-            f"manifest keys: {sorted(manifest)}"
+            f"bundle pins Horizon {meta.get('horizon', '')[:12]} exactly without a hook-API "
+            f"declaration; {len(raw)} raw target injections (first: {raw[:6]}), "
+            f"{len(named)} named hook injections, missing from Volt: {missing[:25]}"
         )
     served = int(found.group(1))
     if hooks > served:
