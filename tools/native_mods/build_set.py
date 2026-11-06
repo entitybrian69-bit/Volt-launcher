@@ -32,7 +32,7 @@ def selection(value: str) -> tuple[str, Path]:
     return mod_id, Path(path)
 
 
-def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revision: str,
+def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revisions: list[str],
                 root: Path, volt_revision: str, work: Path,
                 raw_targets: bool = False) -> list[dict]:
     if not selections or len(selections) > MAX_MODS:
@@ -40,11 +40,17 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
     ids = [mod_id for mod_id, _ in selections]
     if len(set(ids)) != len(ids):
         raise compat.Rejected("duplicate mod id")
-    if not compat.REV.fullmatch(mixins_revision) or not compat.REV.fullmatch(volt_revision):
+    if isinstance(mixins_revisions, str):
+        mixins_revisions = [mixins_revisions]
+    if not mixins_revisions or len(set(mixins_revisions)) != len(mixins_revisions):
+        raise compat.Rejected("provide each trusted mixin compiler revision once")
+    if any(not compat.REV.fullmatch(r) for r in mixins_revisions) or not compat.REV.fullmatch(volt_revision):
         raise compat.Rejected("invalid source or mixin revision")
     results = []
-    mixins_dir = work / "mixins"
-    mixins_dir.mkdir(parents=True)
+    # One staging folder per trusted compiler revision: bundles pinning
+    # different horizon-mixins revisions are applied by their own compiler.
+    for index in range(len(mixins_revisions)):
+        (work / "mixins" / str(index)).mkdir(parents=True)
     for mod_id, bundle in sorted(selections):
         if not compat.ID.fullmatch(mod_id):
             raise compat.Rejected("invalid mod id")
@@ -54,8 +60,9 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         extracted = work / "extracted" / mod_id
         data = compat.verified_extract(bundle, entry, extracted, registry)
         meta = data["meta"]
-        if meta["mixins"] != mixins_revision:
-            raise compat.Rejected(f"{mod_id}: mixin compiler revision differs")
+        if meta["mixins"] not in mixins_revisions:
+            raise compat.Rejected(
+                f"{mod_id}: pins mixin compiler revision {meta['mixins'][:12]}, which is not trusted here")
         rebind = compat.check_hooks(data, root, volt_revision, raw_targets=raw_targets)
         if rebind:
             manifest_path = data["manifest_path"]
@@ -64,9 +71,11 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
             if text.count(old) != 1:
                 raise compat.Rejected(f"{mod_id}: cannot safely rebind hook revision")
             manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
-        shutil.copytree(extracted / "mixins" / mod_id, mixins_dir / mod_id)
+        group = mixins_revisions.index(meta["mixins"])
+        shutil.copytree(extracted / "mixins" / mod_id, work / "mixins" / str(group) / mod_id)
         entry_report = {"id": mod_id, "version": meta["version"], "sha256": data["sha256"],
                         "horizon_revision": meta["horizon"], "hook_revision_rebound": rebind,
+                        "mixins_revision": meta["mixins"],
                         "raw_target_rebind": bool(raw_targets and rebind)}
         if raw_targets:
             entry_report["raw_targets"] = sorted(
@@ -81,7 +90,12 @@ def run(args: argparse.Namespace) -> dict:
     rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=compat.ROOT, text=True).strip()
     if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=compat.ROOT, text=True).strip():
         raise compat.Rejected("Volt tracked source is dirty; use a clean pinned checkout")
-    report = {"schema": 1, "volt_commit": rev, "mixins_revision": args.mixins_revision,
+    mixins_paths = args.mixins if isinstance(args.mixins, list) else [args.mixins]
+    mixins_revisions = (args.mixins_revision if isinstance(args.mixins_revision, list)
+                        else [args.mixins_revision])
+    if len(mixins_paths) != len(mixins_revisions):
+        raise compat.Rejected("pass one --mixins-revision per --mixins executable")
+    report = {"schema": 1, "volt_commit": rev, "mixins_revision": mixins_revisions,
               "abi": args.abi, "status": "not_built", "runtime_tested": False,
               "signed": False}
     args.output.mkdir(parents=True, exist_ok=True)
@@ -90,7 +104,7 @@ def run(args: argparse.Namespace) -> dict:
     library.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="volt-native-set-") as tmp:
         work = Path(tmp)
-        report["mods"] = prepare_set(args.registry, args.mod, args.mixins_revision, compat.ROOT, rev, work,
+        report["mods"] = prepare_set(args.registry, args.mod, mixins_revisions, compat.ROOT, rev, work,
                                      raw_targets=getattr(args, "experimental_raw_targets", False))
         source = work / "source"
         source.mkdir()
@@ -99,16 +113,30 @@ def run(args: argparse.Namespace) -> dict:
             subprocess.run(["git", "archive", rev], cwd=compat.ROOT, stdout=f, check=True)
         compat.extract_source_archive(archive, source)
         (source / ".horizon-revision").write_text(rev + "\n", encoding="utf-8")
-        stage = work / "stage"
         env = compat.sanitized_env()
         env["CARGO_TARGET_DIR"] = str(work / "target")
-        apply = subprocess.run([str(args.mixins.resolve()), "apply", "--workspace", str(source),
-                                "--mods", str(work / "mixins"), "--out", str(stage)],
-                               capture_output=True, text=True, env=env)
-        (args.output / "apply.log").write_text(apply.stdout + "\n" + apply.stderr, encoding="utf-8")
-        if apply.returncode:
-            report["status"] = "apply_failed"
-            return report
+        # Apply each trusted compiler's mods in the order the compilers were
+        # given, feeding each pass's output workspace into the next.
+        stage = source
+        apply_logs = []
+        for index, mixins_path in enumerate(mixins_paths):
+            mods_dir = work / "mixins" / str(index)
+            if not any(mods_dir.iterdir()):
+                continue
+            out = work / f"stage-{index}"
+            apply = subprocess.run([str(Path(mixins_path).resolve()), "apply", "--workspace", str(stage),
+                                    "--mods", str(mods_dir), "--out", str(out)],
+                                   capture_output=True, text=True, env=env)
+            apply_logs.append(f"[pass {index}: {mixins_revisions[index]}]\n"
+                              + apply.stdout + "\n" + apply.stderr)
+            if apply.returncode:
+                (args.output / "apply.log").write_text("\n".join(apply_logs), encoding="utf-8")
+                report["status"] = "apply_failed"
+                return report
+            stage = out
+        (args.output / "apply.log").write_text("\n".join(apply_logs), encoding="utf-8")
+        if stage == source:
+            raise compat.Rejected("no mixin pass ran; nothing was woven")
         build = subprocess.run([sys.executable, str(stage / "tools/android_build.py"), "--abi", args.abi,
                                 "--public", "--rust-only"], cwd=stage, capture_output=True, text=True, env=env)
         (args.output / "build.log").write_text(build.stdout + "\n" + build.stderr, encoding="utf-8")
@@ -128,8 +156,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, required=True)
     parser.add_argument("--mod", action="append", type=selection, required=True, help="registry ID=local verified bundle path; repeat for combinations")
-    parser.add_argument("--mixins", type=Path, required=True, help="trusted pinned horizon-mixins executable")
-    parser.add_argument("--mixins-revision", required=True)
+    parser.add_argument("--mixins", type=Path, action="append", required=True,
+                        help="trusted pinned horizon-mixins executable; repeat when the "
+                             "selected bundles pin different compiler revisions")
+    parser.add_argument("--mixins-revision", action="append", required=True,
+                        help="the pinned revision of each --mixins executable, in order")
     parser.add_argument("--abi", choices=tuple(TARGETS), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trust-native-code", action="store_true")

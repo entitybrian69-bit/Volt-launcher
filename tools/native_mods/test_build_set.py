@@ -53,8 +53,8 @@ class BuildSetTests(unittest.TestCase):
         one, two = self.bundle('one'), self.bundle('two')
         result = self.prepare([('two', two), ('one', one)])
         self.assertEqual([m['id'] for m in result], ['one', 'two'])
-        self.assertTrue((self.work / 'mixins/one/runtime.rs').is_file())
-        self.assertTrue((self.work / 'mixins/two/runtime.rs').is_file())
+        self.assertTrue((self.work / 'mixins/0/one/runtime.rs').is_file())
+        self.assertTrue((self.work / 'mixins/0/two/runtime.rs').is_file())
         self.assertFalse(any(m['hook_revision_rebound'] for m in result))
 
     def test_duplicate_and_builtin_rejected(self):
@@ -98,6 +98,7 @@ class BuildSetTests(unittest.TestCase):
             if 'apply' in command:
                 mixins = Path(command[command.index('--mods') + 1])
                 self.assertTrue((mixins / 'one').is_dir() and (mixins / 'two').is_dir())
+                self.assertEqual(mixins.name, '0')
                 Path(command[command.index('--out') + 1]).mkdir()
             else:
                 lib = Path(kwargs['env']['CARGO_TARGET_DIR']) / build_set.TARGETS[args.abi] / 'release/libhorizon_android.so'
@@ -114,6 +115,49 @@ class BuildSetTests(unittest.TestCase):
         self.assertEqual([x['id'] for x in report['mods']], ['one', 'two'])
         self.assertIn('--rust-only', calls[-1])
         self.assertIn('--public', calls[-1])
+
+    def test_bundles_with_different_pinned_compilers_weave_in_passes(self):
+        one = self.bundle('one')
+        two = self.bundle('two', compiler='d' * 40)
+        output = self.root / 'output-two-pass'
+        output.mkdir()
+        args = SimpleNamespace(trust_native_code=True, registry=self.registry,
+                               mod=[('one', one), ('two', two)],
+                               mixins_revision=[self.compiler, 'd' * 40],
+                               mixins=[self.root / 'mixin-a', self.root / 'mixin-b'],
+                               abi='arm64-v8a', output=output)
+        applies = []
+        def fake_check_output(command, **kwargs):
+            return self.revision + '\n' if 'rev-parse' in command else ''
+        def fake_run(command, **kwargs):
+            if command[:2] == ['git', 'archive']:
+                with tarfile.open(fileobj=kwargs['stdout'], mode='w') as archive:
+                    data = b'placeholder'
+                    info = tarfile.TarInfo('README')
+                    info.size = len(data)
+                    archive.addfile(info, io.BytesIO(data))
+                return SimpleNamespace(returncode=0)
+            if 'apply' in command:
+                mixins = Path(command[command.index('--mods') + 1])
+                applies.append((Path(command[0]).name, mixins.name,
+                                sorted(p.name for p in mixins.iterdir()),
+                                Path(command[command.index('--workspace') + 1]).name))
+                Path(command[command.index('--out') + 1]).mkdir()
+            else:
+                lib = Path(kwargs['env']['CARGO_TARGET_DIR']) / build_set.TARGETS[args.abi] / 'release/libhorizon_android.so'
+                lib.parent.mkdir(parents=True, exist_ok=True)
+                lib.write_bytes(b'two pass library')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        with patch.object(build_set.subprocess, 'check_output', side_effect=fake_check_output), \
+             patch.object(build_set.subprocess, 'run', side_effect=fake_run):
+            report = build_set.run(args)
+        self.assertEqual(report['status'], 'library_built')
+        # Pass 0 weaves 'one' with its own compiler on the pristine source;
+        # pass 1 weaves 'two' with its compiler on pass 0's output workspace.
+        self.assertEqual(applies, [('mixin-a', '0', ['one'], 'source'),
+                                   ('mixin-b', '1', ['two'], 'stage-0')])
+        self.assertEqual([m['mixins_revision'] for m in report['mods']],
+                         [self.compiler, 'd' * 40])
 
     def test_checksum_mismatch_rejected(self):
         bundle = self.bundle('one')
