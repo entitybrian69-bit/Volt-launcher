@@ -210,14 +210,30 @@ jobs:
       contents: read
     env:
       REGISTRY_REV: 78853c19a6d48640ef500f3c8ff8988923576f3f
-      JEI_FILE: jei-0.1.0.hnmod
-      JEI_TAG: jei-0.1.0
-      PHYS_FILE: horizon_physics-0.15.1.hnmod
-      PHYS_TAG: horizon_physics-0.15.1
-      JADE_FILE: jade-26.3.5.hnmod
-      JADE_TAG: jade-26.3.5
-      VEIN_FILE: veinminer-0.3.2.hnmod
-      VEIN_TAG: veinminer-0.3.2
+      # Every probe-green registry mod woven into release APKs, as
+      # id=file; the release tag is the file name without .hnmod.
+      WEAVE_SET: |
+        jei=jei-0.1.0.hnmod
+        horizon_physics=horizon_physics-0.15.1.hnmod
+        jade=jade-26.3.5.hnmod
+        veinminer=veinminer-0.3.2.hnmod
+        appleskin=appleskin-1.0.0.hnmod
+        status_effect_hud=status_effect_hud-1.0.0.hnmod
+        toggle_sprint=toggle_sprint-1.0.0.hnmod
+        inventory_profiles=inventory_profiles-1.0.0.hnmod
+        shulker_peek=shulker_peek-0.1.0.hnmod
+        mousetricks=mousetricks-0.2.0.hnmod
+        itemnew=itemnew-0.1.1.hnmod
+        eatinganimation=eatinganimation-0.1.0.hnmod
+        enchantmenthints=enchantmenthints-0.1.0.hnmod
+        light_overlay=light_overlay-1.0.0.hnmod
+        right_click_crops=right_click_crops-1.0.0.hnmod
+        smartf3=smartf3-0.1.0.hnmod
+        armor_status=armor_status-1.0.0.hnmod
+        crosshair_indicator=crosshair_indicator-1.0.0.hnmod
+        hitbox_plus=hitbox_plus-1.3.0.hnmod
+        invisible_frames=invisible_frames-0.1.1.hnmod
+        freelook=freelook-0.3.1.hnmod
     strategy:
       fail-fast: false
       matrix:
@@ -250,12 +266,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bundle"
-          for pair in "$JEI_TAG=$JEI_FILE" "$PHYS_TAG=$PHYS_FILE" \
-                      "$JADE_TAG=$JADE_FILE" "$VEIN_TAG=$VEIN_FILE"; do
-            tag="${pair%%=*}"; file="${pair#*=}"
+          while IFS='=' read -r mod_id file; do
+            [ -n "$mod_id" ] || continue
+            tag="${file%.hnmod}"
             curl --retry 3 -fsSL -o "$RUNNER_TEMP/bundle/$file" \
               "https://github.com/horizon-rust/horizon-mods/releases/download/$tag/$file"
-          done
+          done <<< "$WEAVE_SET"
           python3 - <<'PYCODE'
           import os, sys
           from pathlib import Path
@@ -264,10 +280,8 @@ jobs:
           temp = Path(os.environ['RUNNER_TEMP'])
           registry = temp / 'registry'
           revs = {}
-          for mod_id, file in (('jei', os.environ['JEI_FILE']),
-                               ('horizon_physics', os.environ['PHYS_FILE']),
-                               ('jade', os.environ['JADE_FILE']),
-                               ('veinminer', os.environ['VEIN_FILE'])):
+          pairs = [line.split('=', 1) for line in os.environ['WEAVE_SET'].split() if '=' in line]
+          for mod_id, file in pairs:
               entry = compat.read_entry(registry, mod_id)
               data = compat.verified_extract(temp / 'bundle' / file, entry,
                                              temp / 'extract-check' / mod_id, registry)
@@ -293,12 +307,14 @@ jobs:
       - name: Weave and build the engine library
         run: |
           set -euo pipefail
+          MOD_ARGS=()
+          while IFS='=' read -r mod_id file; do
+            [ -n "$mod_id" ] || continue
+            MOD_ARGS+=(--mod "$mod_id=$RUNNER_TEMP/bundle/$file")
+          done <<< "$WEAVE_SET"
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
-            --mod "jei=$RUNNER_TEMP/bundle/$JEI_FILE" \
-            --mod "horizon_physics=$RUNNER_TEMP/bundle/$PHYS_FILE" \
-            --mod "jade=$RUNNER_TEMP/bundle/$JADE_FILE" \
-            --mod "veinminer=$RUNNER_TEMP/bundle/$VEIN_FILE" \
+            "${MOD_ARGS[@]}" \
             --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
             --mixins-revision "$PHYS_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
@@ -658,6 +674,40 @@ jobs:
                "676a129f55db075284313a39ff4387674c426ebd9be04a8830ffb8955281c7ec"),
               ("veinminer", "0.3.2",
                "31a4249da1b35972ae8b34201373c86352f4adc2f5cb3e015749d1fbfecf00a0"),
+              ("appleskin", "1.0.0",
+               "3c25b916f74f47faf40070a8654c546d15cb79ac3947f140e257f4cb041aeb96"),
+              ("status_effect_hud", "1.0.0",
+               "afa30125bb8b402892f1719e550b66d4eb4d7264895f71bb9c98a4caf5c7b432"),
+              ("toggle_sprint", "1.0.0",
+               "b2a4190f9c19adbceae4a639342b7630bfc3047339eabf57673b7807db5edc6a"),
+              ("inventory_profiles", "1.0.0",
+               "1e5d1c75d05230172820b5bc016d7d3ac792adf473de7dbfb84394d8b795a633"),
+              ("shulker_peek", "0.1.0",
+               "e4e33cb698d91042b2ed2f93a1c935f279d16d83988115d53c0f33530cabeab5"),
+              ("mousetricks", "0.2.0",
+               "48c60955371963f8e320a9efbe8285bb276d255c29178a8a021e7e2b47535cbe"),
+              ("itemnew", "0.1.1",
+               "cdc68c9911736703ebc4b8b81895a719edd74ba9d08fe01ddb34fe09b8d490e9"),
+              ("eatinganimation", "0.1.0",
+               "07ef4fde3ebbc4f132aab593b12187bce15e1a46689ab40bd3067c685aca85b9"),
+              ("enchantmenthints", "0.1.0",
+               "6f1b80a7c22e02b086d5eea2ed6f7c5481b3e40d6a974bf9e382a3df4a2de9df"),
+              ("light_overlay", "1.0.0",
+               "b4aeb56b13d9c73df267a1dc7b1f588f4db39bfd55f7beaef97a014fffb5b076"),
+              ("right_click_crops", "1.0.0",
+               "681ce896c50dd041132900e7bbab71167f133b3f3862f86e8b1a0cac52754b97"),
+              ("smartf3", "0.1.0",
+               "666fc77a12411c8b525dca3d3d478595e760b73c48b62b936fb6026419547929"),
+              ("armor_status", "1.0.0",
+               "82c8672fa2c43d7946a26a560fd56fdd8f34beecf4bcb459c2d508b3d09eeee6"),
+              ("crosshair_indicator", "1.0.0",
+               "96beba1f7c94fca492b552fb12af0d20047dc1799f0801607841d56b12786226"),
+              ("hitbox_plus", "1.3.0",
+               "8d1b95e7461e38fc40994b35a82c1f753a58e9751ce27af1dc101a4717dba8a4"),
+              ("invisible_frames", "0.1.1",
+               "76128b48ce5c826007379c85634b934ae6bad51c134fbaead7c46b36fecd9274"),
+              ("freelook", "0.3.1",
+               "9c0c92ce9f0fc8e7bc1bd34349e26d42b32b8abd2c7a09ec710936f9b6ce9aaf"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libhorizon_android.so"

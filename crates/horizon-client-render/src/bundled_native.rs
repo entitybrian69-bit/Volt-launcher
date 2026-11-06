@@ -19,6 +19,23 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("horizon_physics", "0.15.1"),
     ("jade", "26.3.5"),
     ("veinminer", "0.3.2"),
+    ("appleskin", "1.0.0"),
+    ("status_effect_hud", "1.0.0"),
+    ("toggle_sprint", "1.0.0"),
+    ("inventory_profiles", "1.0.0"),
+    ("shulker_peek", "0.1.0"),
+    ("mousetricks", "0.2.0"),
+    ("itemnew", "0.1.1"),
+    ("eatinganimation", "0.1.0"),
+    ("enchantmenthints", "0.1.0"),
+    ("light_overlay", "1.0.0"),
+    ("right_click_crops", "1.0.0"),
+    ("smartf3", "0.1.0"),
+    ("armor_status", "1.0.0"),
+    ("crosshair_indicator", "1.0.0"),
+    ("hitbox_plus", "1.3.0"),
+    ("invisible_frames", "0.1.1"),
+    ("freelook", "0.3.1"),
 ];
 
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {

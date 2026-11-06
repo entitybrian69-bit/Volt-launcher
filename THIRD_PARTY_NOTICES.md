@@ -1387,6 +1387,32 @@ bundles no upstream mod code or artwork. The weave happens on a no-secrets
 CI runner and the player can turn the mod off per profile in-game under
 Mods.
 
+## Additional woven registry native mods (MIT)
+
+Release APKs also weave these published registry bundles into the engine
+library at build time, each under the MIT License (the same license text
+printed above, copyright their listed authors). The weave happens on a
+no-secrets CI runner and each mod can be turned off per profile in-game
+under Mods.
+
+- **appleskin 1.0.0** by soufi — [appleskin-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/appleskin-1.0.0), SHA-256 `3c25b916f74f47faf40070a8654c546d15cb79ac3947f140e257f4cb041aeb96`, [source](https://github.com/soufied/AppleSkin-Horizon)
+- **status_effect_hud 1.0.0** by CayMac — [status_effect_hud-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/status_effect_hud-1.0.0), SHA-256 `afa30125bb8b402892f1719e550b66d4eb4d7264895f71bb9c98a4caf5c7b432`, [source](https://github.com/CayMac97/status-effect-hud)
+- **toggle_sprint 1.0.0** by CayMac — [toggle_sprint-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/toggle_sprint-1.0.0), SHA-256 `b2a4190f9c19adbceae4a639342b7630bfc3047339eabf57673b7807db5edc6a`, [source](https://github.com/CayMac97/toggle-sprint)
+- **inventory_profiles 1.0.0** by CayMac — [inventory_profiles-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/inventory_profiles-1.0.0), SHA-256 `1e5d1c75d05230172820b5bc016d7d3ac792adf473de7dbfb84394d8b795a633`, [source](https://github.com/CayMac97/inventory-profiles)
+- **shulker_peek 0.1.0** by vstxx — [shulker_peek-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/shulker_peek-0.1.0), SHA-256 `e4e33cb698d91042b2ed2f93a1c935f279d16d83988115d53c0f33530cabeab5`, [source](https://github.com/vstxx/shulkerpeek)
+- **mousetricks 0.2.0** by d3grando — [mousetricks-0.2.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/mousetricks-0.2.0), SHA-256 `48c60955371963f8e320a9efbe8285bb276d255c29178a8a021e7e2b47535cbe`, [source](https://github.com/d3grando/mousetricks)
+- **itemnew 0.1.1** by d3grando — [itemnew-0.1.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/itemnew-0.1.1), SHA-256 `cdc68c9911736703ebc4b8b81895a719edd74ba9d08fe01ddb34fe09b8d490e9`, [source](https://github.com/d3grando/itemnew)
+- **eatinganimation 0.1.0** by soufi — [eatinganimation-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/eatinganimation-0.1.0), SHA-256 `07ef4fde3ebbc4f132aab593b12187bce15e1a46689ab40bd3067c685aca85b9`, [source](https://github.com/soufied/EatingAnimation-Horizon)
+- **enchantmenthints 0.1.0** by d3grando — [enchantmenthints-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/enchantmenthints-0.1.0), SHA-256 `6f1b80a7c22e02b086d5eea2ed6f7c5481b3e40d6a974bf9e382a3df4a2de9df`, [source](https://github.com/d3grando/enchantmenthints)
+- **light_overlay 1.0.0** by CayMac — [light_overlay-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/light_overlay-1.0.0), SHA-256 `b4aeb56b13d9c73df267a1dc7b1f588f4db39bfd55f7beaef97a014fffb5b076`, [source](https://github.com/CayMac97/light-overlay)
+- **right_click_crops 1.0.0** by AyanoKaito — [right_click_crops-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/right_click_crops-1.0.0), SHA-256 `681ce896c50dd041132900e7bbab71167f133b3f3862f86e8b1a0cac52754b97`, [source](https://github.com/AyanoKaito/horizon-right-click-crops)
+- **smartf3 0.1.0** by d3grando — [smartf3-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/smartf3-0.1.0), SHA-256 `666fc77a12411c8b525dca3d3d478595e760b73c48b62b936fb6026419547929`, [source](https://github.com/d3grando/smartf3)
+- **armor_status 1.0.0** by CayMac — [armor_status-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/armor_status-1.0.0), SHA-256 `82c8672fa2c43d7946a26a560fd56fdd8f34beecf4bcb459c2d508b3d09eeee6`, [source](https://github.com/CayMac97/armor-status)
+- **crosshair_indicator 1.0.0** by CayMac — [crosshair_indicator-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/crosshair_indicator-1.0.0), SHA-256 `96beba1f7c94fca492b552fb12af0d20047dc1799f0801607841d56b12786226`, [source](https://github.com/CayMac97/crosshair-indicator)
+- **hitbox_plus 1.3.0** by taxtii, itzglecni — [hitbox_plus-1.3.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/hitbox_plus-1.3.0), SHA-256 `8d1b95e7461e38fc40994b35a82c1f753a58e9751ce27af1dc101a4717dba8a4`, [source](https://github.com/taxtii/hitbox_plus)
+- **invisible_frames 0.1.1** by AltMugen — [invisible_frames-0.1.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/invisible_frames-0.1.1), SHA-256 `76128b48ce5c826007379c85634b934ae6bad51c134fbaead7c46b36fecd9274`, [source](https://github.com/AltMugen/horizon-invisible-frames)
+- **freelook 0.3.1** by Krzysix17 — [freelook-0.3.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/freelook-0.3.1), SHA-256 `9c0c92ce9f0fc8e7bc1bd34349e26d42b32b8abd2c7a09ec710936f9b6ce9aaf`, [source](https://github.com/Krzysix17/horizon-freelook)
+
 ## Horizon launcher typography
 
 The launcher display face `crates/horizon-theme/fonts/BricolageGrotesqueDisplay-SemiBold.ttf`
