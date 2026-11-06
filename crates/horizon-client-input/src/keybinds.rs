@@ -75,7 +75,6 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.debug.improvedTransparency", "key.keyboard.x", "debug"),
     // Native Volt actions are handled from physical inputs instead of through
     // vanilla key translation, so rebinding them cannot remap player movement.
-    ("key.volt.mod_menu", "key.keyboard.m", "volt_mods"),
     ("key.volt.freelook", "key.keyboard.left.alt", "volt_mods"),
     ("key.volt.zoom", "key.keyboard.c", "volt_mods"),
     ("key.volt.world_map", "key.keyboard.j", "volt_mods"),

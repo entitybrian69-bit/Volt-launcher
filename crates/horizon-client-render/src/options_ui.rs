@@ -2739,10 +2739,6 @@ impl OptionsUi {
                         open("volt.qol.button", Page::VoltQol),
                         Some(open("volt.chat.button", Page::VoltChat)),
                     ),
-                    Row::Buttons(
-                        open("volt.mods.button", Page::VoltMods),
-                        Some(open("volt.mod_menu.button", Page::ModMenu)),
-                    ),
                     Row::Header("World Navigation & Maps"),
                     Row::Buttons(
                         open("horizon.pages.open.waypoints", Page::Waypoints),
@@ -3317,7 +3313,7 @@ impl OptionsUi {
                     ("options.chat", Some(Page::Chat)),
                     ("options.resourcepack", Some(Page::Packs)),
                     ("options.accessibility", Some(Page::Accessibility)),
-                    ("volt.mod_menu.button", Some(Page::ModMenu)),
+                    ("horizon.pages.mods", Some(Page::Mods)),
                     ("horizon.pages.open.horizon_settings", Some(Page::VoltGlass)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
@@ -7144,7 +7140,7 @@ mod tests {
         assert!(main.contains(&Page::Graphics));
         assert_eq!(
             &main[main.len() - 3..],
-            [Page::ModMenu, Page::VoltGlass, Page::Credits]
+            [Page::Mods, Page::VoltGlass, Page::Credits]
         );
         ui.push(Page::Horizon);
         assert_eq!(
@@ -7154,8 +7150,6 @@ mod tests {
                 Page::VoltVisuals,
                 Page::VoltQol,
                 Page::VoltChat,
-                Page::VoltMods,
-                Page::ModMenu,
                 Page::Waypoints,
                 Page::Minimap,
                 Page::VoltAtlas,

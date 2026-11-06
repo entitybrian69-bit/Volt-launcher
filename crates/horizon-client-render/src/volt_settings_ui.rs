@@ -762,6 +762,11 @@ impl VoltSettingsUi {
                     let entries = entries
                         .into_iter()
                         .filter(|e| {
+                            // Volt's self-made mod catalog is retired: official
+                            // registry mods live on the Mods page instead.
+                            if matches!(e.kind, VoltRowKind::Mod(_) | VoltRowKind::OpenModMenu) {
+                                return false;
+                            }
                             if let VoltRowKind::Extra(it) = e.kind
                                 && let Some(parent) = it.parent()
                                 && parent.switch(&s.extras) == Some(false)

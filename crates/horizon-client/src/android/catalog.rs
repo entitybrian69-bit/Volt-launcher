@@ -257,7 +257,7 @@ impl Page {
         }
     }
     pub fn is_catalog(self) -> bool {
-        matches!(self, Self::Mods | Self::Packs | Self::Shaders)
+        matches!(self, Self::Packs | Self::Shaders)
     }
 }
 #[derive(Clone)]
@@ -288,13 +288,12 @@ pub struct Catalog {
     pub status: String,
     pub offset: usize,
     pub scroll: f32,
-    pub mod_filter: u8,
-    pub horizon_mod_browser: bool,
+    /// Ids of `bundled_native::BUNDLED` mods the profile turned off in-game.
+    pub bundled_disabled: std::collections::BTreeSet<String>,
     pub native_sources: std::collections::HashSet<String>,
     pub bundled_mods: std::collections::HashSet<String>,
     pub bundled_zoom_installed: bool,
     pub bundled_zoom_enabled: bool,
-    pub mod_born: std::time::Instant,
     pub volt_boost_modal: bool,
     pub volt_modal_scroll: f32,
     pub extras: horizon_client::extras::Extras,
@@ -351,13 +350,11 @@ impl Catalog {
             status: String::new(),
             offset: 0,
             scroll: 0.0,
-            mod_filter: 0,
-            horizon_mod_browser: true,
+            bundled_disabled: std::collections::BTreeSet::new(),
             native_sources: std::collections::HashSet::new(),
             bundled_mods: std::collections::HashSet::new(),
             bundled_zoom_installed: false,
             bundled_zoom_enabled: false,
-            mod_born: std::time::Instant::now(),
             volt_boost_modal: false,
             volt_modal_scroll: 0.0,
             extras: horizon_client::extras::Extras::default(),
@@ -438,6 +435,7 @@ impl Catalog {
         let on = horizon_client::mod_list::ModList::load(&game);
         self.bundled_zoom_installed = horizon_client::bundled_native::zoom_installed(&game);
         self.bundled_zoom_enabled = self.bundled_zoom_installed && !on.disabled.contains("zoom");
+        self.bundled_disabled = on.disabled.clone();
         let settings = horizon_client::settings::Settings::load(&game.join("options.txt"));
         self.extras = settings.extras.clone();
         horizon_client::volt_mods::sync_catalog_from_engine(&mut self.extras, &settings.horizon);
@@ -586,7 +584,7 @@ impl Catalog {
         if let Some(result) = result {
             self.search_worker = None;
             let visible = self.searches.finish(result.as_ref().ok().cloned());
-            if visible && self.page.is_catalog() && (self.page != Page::Mods || self.horizon_mod_browser) && !self.busy() {
+            if visible && self.page.is_catalog() && !self.busy() {
                 match result {
                     Ok(items) => self.show_results(items, home),
                     Err(error) => self.status = error,
@@ -608,7 +606,7 @@ impl Catalog {
         }
     }
     fn request_search(&mut self, home: &Path, refresh: bool) {
-        if !self.page.is_catalog() || (self.page == Page::Mods && !self.horizon_mod_browser) {
+        if !self.page.is_catalog() {
             return;
         }
         self.scroll = 0.0;

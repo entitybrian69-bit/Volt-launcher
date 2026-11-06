@@ -232,12 +232,6 @@ impl Game<'_> {
             self.extras.volt.zoom_toggle_active = !self.extras.volt.zoom_toggle_active;
             return true;
         }
-        if self.settings.keys.get("key.volt.mod_menu") == name
-            && self.settings.extras.mod_catalog.is_on(VoltModId::ModMenu)
-        {
-            self.open_options_at(false, horizon_client::options_ui::Page::ModMenu);
-            return true;
-        }
         if self.settings.keys.get("key.volt.world_map") == name
             && (self.settings.extras.volt_qol.atlas_enabled
                 || self.settings.extras.mod_catalog.is_on(VoltModId::XaerosWorldMap))

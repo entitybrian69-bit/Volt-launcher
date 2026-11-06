@@ -165,14 +165,8 @@ pub(super) enum Action {
     CloseVoltBoost,
     VoltExtra(horizon_client::extras::Item),
     VoltPreset(horizon_client::volt_features::VoltBoostPreset),
-    ToggleVoltMod(horizon_client::volt_mods::VoltModId),
-    InstallBundledZoom,
-    HorizonModBrowser(bool),
-    RemoveBundled(usize),
-    ModFilter(u8),
-    EnableModPack,
-    ResetModDefaults,
-    ClearModSearch,
+    /// Install or remove `bundled_native::BUNDLED[i]` for the active profile.
+    ToggleBundled(usize),
     Studio(super::controls_studio::StudioAction),
 }
 
@@ -233,8 +227,27 @@ fn toggle_key(action: Action) -> u32 {
         Action::ToggleLocal(i) => 1000 + i as u32,
         Action::ToggleSection(i) => 2000 + i as u32,
         Action::VoltExtra(item) => 3000 + item as u32,
-        Action::ToggleVoltMod(id) => 5000 + id.index() as u32,
         _ => 9999,
+    }
+}
+
+fn bundled_mod_title(id: &str) -> &'static str {
+    match id {
+        "zoom" => "Horizon Zoom",
+        "fps_overlay" => "FPS Overlay",
+        "keystrokes" => "Keystrokes",
+        "minimap" => "Minimap",
+        _ => "Horizon Mod",
+    }
+}
+
+fn bundled_mod_blurb(id: &str) -> &'static str {
+    match id {
+        "zoom" => "Hold Z to zoom. Add a Z button in Controls Studio for touch.",
+        "fps_overlay" => "A small frames-per-second readout over the game.",
+        "keystrokes" => "Shows movement keys and clicks as you press them.",
+        "minimap" => "A corner map of the terrain around you.",
+        _ => "An official Horizon registry mod.",
     }
 }
 
@@ -1145,7 +1158,7 @@ impl DrawCtx<'_> {
     fn draw_instance_page(&mut self, ui: &mut Ui, area: [f32; 4], compact: bool, account_status: &str) {
         use horizon_client::official_install::InstallStage;
         let [x, y, w, h] = area;
-        // Browse (dock) lands on the full mod catalog with search and filters.
+        // Browse (dock) lands on the bundled official-mods list.
         if self.catalog.page == Page::Mods {
             self.draw_mods_landing(ui, area, account_status);
             return;
@@ -2216,636 +2229,88 @@ impl DrawCtx<'_> {
         }
     }
 
-    /// Choose between Volt's switches and the live Horizon registry.
+    /// Official Horizon registry mods compiled into this APK: install or
+    /// remove each one per profile; they are turned on or off in-game under
+    /// Options > Mods.
     fn draw_mods_landing(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
-        let [x, y, w, h] = area;
-        let tab_w = (w * 0.5).min(160.0);
-        for (i, (label, browser)) in [("Horizon browser", true), ("Volt mods", false)].iter().enumerate() {
-            let rect = [x + i as f32 * (tab_w + 6.0), y, tab_w, 30.0];
-            styled_button(ui, self.targets, rect, label, Action::HorizonModBrowser(*browser),
-                if self.catalog.horizon_mod_browser == *browser { BtnStyle::Primary } else { BtnStyle::Secondary }, true);
-        }
-        let body = [x, y + 36.0, w, (h - 36.0).max(0.0)];
-        if self.catalog.horizon_mod_browser {
-            self.draw_horizon_mod_browser(ui, body);
-        } else {
-            self.draw_mods_page(ui, body, true, account_status);
-        }
-    }
-
-    /// A paged, in-app registry browser. Native downloads remain source-only
-    /// unless their exact bundle is already compiled into this APK.
-    fn draw_horizon_mod_browser(&mut self, ui: &mut Ui, area: [f32; 4]) {
-        let [x, y, w, h] = area;
-        if h < 52.0 || w < 180.0 { return; }
-        let input = [x, y, (w - 96.0).max(40.0), 32.0];
-        ui.rounded(input[0], input[1], input[2], input[3], 8.0, theme::CARD_INNER());
-        ui.border(input[0], input[1], input[2], input[3], 8.0, theme::BORDER());
-        let placeholder = self.catalog.query.is_empty() && self.catalog.editing != Some("search");
-        let text = if placeholder { "Search Horizon mods..." } else { &self.catalog.query };
-        let text = ui.fit_text(Face::LauncherRegular, 13.0, text, input[2] - 18.0);
-        ui.text(Face::LauncherRegular, 13.0, x + 9.0, y + 6.0,
-            if placeholder { theme::DIM() } else { theme::TEXT() }, &text);
-        self.targets.push((input, Action::Field("search")));
-        styled_button(ui, self.targets, [x + w - 90.0, y, 90.0, 32.0], "Search",
-            Action::Search, BtnStyle::Primary, true);
-        let status = ui.fit_text(Face::LauncherRegular, 11.0, &self.catalog.status, w - 8.0);
-        ui.text(Face::LauncherRegular, 11.0, x + 4.0, y + 37.0, theme::MUTED(), &status);
-        let top = y + 56.0;
-        let bottom = y + h - 35.0;
-        let view_h = (bottom - top).max(0.0);
-        if view_h < 1.0 { return; }
-        let row_h = 76.0;
-        let step = 83.0;
-        let total = self.catalog.results.len() as f32 * step;
-        let max_scroll = (total - view_h).max(0.0);
-        self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
-        *self.list_view = Some([top, bottom, max_scroll]);
-        if self.catalog.results.is_empty() {
-            let hint = if self.catalog.status.is_empty() { "Search the Horizon registry" } else { &self.catalog.status };
-            let hint = ui.fit_text(Face::LauncherRegular, 12.0, hint, w - 16.0);
-            ui.text(Face::LauncherRegular, 12.0, x + 8.0, top + 8.0, theme::MUTED(), &hint);
-        }
-        for (i, p) in self.catalog.results.iter().enumerate() {
-            let ry = top + i as f32 * step - self.catalog.scroll;
-            let button = [x + w - 108.0, ry + 8.0, 98.0, 29.0];
-            let native = crate::catalog::source_only_mod(p);
-            let installed = self.catalog.download_label(p);
-            let supported = !(p.kind == crate::browser::Kind::Mod && !native && !cfg!(target_pointer_width = "64"));
-            let prebuilt = native && horizon_client::bundled_native::supports(&p.id);
-            let remove_bundled = prebuilt && self.catalog.bundled_mods.contains(&p.id) && !self.catalog.busy();
-            let can_press = installed.is_none() && supported && !self.catalog.busy();
-            if can_press { self.list_targets.push((button, Action::Install(i))); }
-            if remove_bundled { self.list_targets.push((button, Action::RemoveBundled(i))); }
-            if ry + row_h < top || ry > bottom { continue; }
-            let start = ui.batch_mut().vertices.len();
-            ui.rounded(x, ry, w, row_h, 10.0, theme::CARD());
-            ui.border(x, ry, w, row_h, 10.0, theme::BORDER());
-            let icon = [x + 8.0, ry + 9.0, 42.0, 42.0];
-            ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_BG());
-            if let Some(img) = self.catalog.project_icon(p) {
-                ui.draw_dynamic_rgba(4 + i % 24, img.hash, 64, 64, &img.rgba,
-                    icon[0], icon[1], icon[2], icon[3], 255);
-            }
-            let tx = x + 58.0;
-            let title_width = (w - 178.0).max(32.0);
-            let title = ui.fit_text(Face::LauncherMedium, 14.0, &p.title, title_width);
-            ui.text(Face::LauncherMedium, 14.0, tx, ry + 8.0, theme::TEXT(), &title);
-            let kind = if native {
-                if prebuilt && self.catalog.bundled_mods.contains(&p.id) { "Native · bundled build installed" }
-                else if prebuilt { "Native · 2.0.0 prebuilt only" }
-                else if self.catalog.native_sources.contains(&p.id) { "Native source saved · no Volt build" }
-                else { "Native · source only, no Volt build" }
-            } else if supported { "Horizon mod · 64-bit" } else { "Horizon mod · 64-bit required" };
-            let subtitle = format!("{} · {}", p.author, kind);
-            let subtitle = ui.fit_text(Face::LauncherRegular, 11.0, &subtitle, title_width);
-            ui.text(Face::LauncherRegular, 11.0, tx, ry + 30.0, theme::DIM(), &subtitle);
-            let summary = if native && !prebuilt {
-                "Source only — needs a compatible Android build"
-            } else { &p.summary };
-            let summary = ui.fit_text(Face::LauncherRegular, 11.0, summary, (w - 70.0).max(30.0));
-            ui.text(Face::LauncherRegular, 11.0, tx, ry + 49.0, theme::MUTED(), &summary);
-            if remove_bundled {
-                let first = self.targets.len();
-                styled_button(ui, self.targets, button, "Remove", Action::RemoveBundled(i), BtnStyle::Secondary, true);
-                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
-                    self.targets[first].0 = clipped;
-                } else { self.targets.truncate(first); }
-            } else if let Some(label) = installed {
-                draw_centered_text(ui, Face::LauncherMedium, 11.0, button, theme::MUTED(), &label);
-            } else if can_press {
-                let first = self.targets.len();
-                styled_button(ui, self.targets, button, if native && !prebuilt { "Download" } else { "Install" },
-                    Action::Install(i), BtnStyle::Primary, true);
-                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
-                    self.targets[first].0 = clipped;
-                } else { self.targets.truncate(first); }
-            } else if !supported {
-                draw_centered_text(ui, Face::LauncherRegular, 11.0, button, theme::MUTED(), "64-bit only");
-            }
-            let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x + w), ui.to_batch(bottom)];
-            ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
-        }
-        let footer = y + h - 30.0;
-        let prev_start = self.targets.len();
-        let prev_active = self.catalog.offset > 0 && !self.catalog.busy();
-        styled_button(ui, self.targets, [x, footer, 86.0, 28.0], "Previous", Action::Previous,
-            if prev_active { BtnStyle::Secondary } else { BtnStyle::Subtle }, true);
-        if !prev_active { self.targets.truncate(prev_start); }
-        let page = format!("Page {}", self.catalog.offset / 12 + 1);
-        draw_centered_text(ui, Face::LauncherRegular, 11.0, [x + 88.0, footer, (w - 176.0).max(0.0), 28.0], theme::MUTED(), &page);
-        let next_start = self.targets.len();
-        let next_active = self.catalog.results.len() >= 11 && !self.catalog.busy();
-        styled_button(ui, self.targets, [x + w - 86.0, footer, 86.0, 28.0], "Next", Action::Next,
-            if next_active { BtnStyle::Secondary } else { BtnStyle::Subtle }, true);
-        if !next_active { self.targets.truncate(next_start); }
-    }
-
-    fn draw_mods_page(
-        &mut self,
-        ui: &mut Ui,
-        area: [f32; 4],
-        compact: bool,
-        account_status: &str,
-    ) {
-        use horizon_client::ui_theme::color::hex;
-        use horizon_client::volt_mods::{
-            CATALOG, TOTAL_VOLT_MODS, VoltModCategory, mod_logo_spec,
-        };
-
+        let _ = account_status;
         let [cx, cy, cw, ch] = area;
-        let enabled_total = self.catalog.extras.mod_catalog.enabled_count();
-
-        let filters: [(u8, &str); 8] = [
-            (0, "All"),
-            (1, "On"),
-            (2, "Off"),
-            (3, "PvP"),
-            (4, "HUD"),
-            (5, "Visual"),
-            (6, "Perf"),
-            (7, "QoL"),
-        ];
-
-        if !compact {
-            ui.text(Face::LauncherMedium, 24.0, cx, cy, theme::TEXT(), "Volt Native Mods");
-            let pill_txt = format!("{enabled_total} / {TOTAL_VOLT_MODS} Active");
-            let pill_w = ui.measure(Face::LauncherMedium, 12.0, &pill_txt) + 22.0;
-            let pill_x = cx + ui.measure(Face::LauncherMedium, 24.0, "Volt Native Mods") + 14.0;
-            ui.rounded(pill_x, cy + 4.0, pill_w, 24.0, 12.0, hex(0x0E2925, 235));
-            ui.border(pill_x, cy + 4.0, pill_w, 24.0, 12.0, hex(0x2DD4BF, 220));
-            draw_centered_text(
-                ui,
-                Face::LauncherMedium,
-                12.0,
-                [pill_x, cy + 4.0, pill_w, 24.0],
-                hex(0x5EEAD4, 255),
-                &pill_txt,
-            );
-
-            let acc_w = 186.0;
-            let hint =
-                "50 catalog entries • Native features are still being implemented";
-            let fitted_hint = ui.fit_text(Face::LauncherRegular, 13.0, hint, (cw - acc_w - 24.0).max(120.0));
-            ui.text(Face::LauncherRegular, 13.0, cx, cy + 30.0, theme::MUTED(), &fitted_hint);
-
-            draw_account_chip(
-                ui,
-                self.targets,
-                [cx + cw - acc_w, cy + 4.0, acc_w, 38.0],
-                account_status,
-                self.login.signed_in,
-            );
-        } else {
-            let hdr = format!("Volt Mods  ({enabled_total}/{TOTAL_VOLT_MODS} On)");
-            ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), &hdr);
+        ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), "Mods");
+        let hint = "Official Horizon registry mods compiled into Volt. Install per profile; turn on or off in-game under Mods.";
+        let fitted = ui.fit_text(Face::LauncherRegular, 12.0, hint, (cw - 8.0).max(120.0));
+        ui.text(Face::LauncherRegular, 12.0, cx, cy + 24.0, theme::MUTED(), &fitted);
+        let status_y = cy + 42.0;
+        if !self.catalog.status.is_empty() {
+            let status = ui.fit_text(Face::LauncherRegular, 11.0, &self.catalog.status, cw - 8.0);
+            ui.text(Face::LauncherRegular, 11.0, cx, status_y, theme::DIM(), &status);
         }
-
-        // Command Search + Category Filter Bar (no .hmod / Modrinth / CurseForge)
-        let bar_y = cy + if compact { 28.0 } else { 54.0 };
-        let bar_h = if compact { 84.0 } else { 88.0 };
-        ui.rounded(cx, bar_y, cw, bar_h, 12.0, theme::CARD());
-        ui.border(cx, bar_y, cw, bar_h, 12.0, theme::BORDER());
-
-        let placeholder = "Search 50 native mods by name, category, or feature...";
-        let query_is_placeholder =
-            self.catalog.query.is_empty() && self.catalog.editing != Some("search");
-        let display_query = if query_is_placeholder {
-            placeholder.to_owned()
-        } else {
-            self.catalog.query.clone()
-        };
-
-        if compact {
-            let clear_w = if self.catalog.query.is_empty() {
-                0.0
-            } else {
-                68.0
-            };
-            let s_w = (cw - 16.0 - if clear_w > 0.0 { clear_w + 6.0 } else { 0.0 }).max(80.0);
-            let srect = [cx + 8.0, bar_y + 7.0, s_w, 34.0];
-            ui.rounded(srect[0], srect[1], srect[2], srect[3], 8.0, theme::CARD_INNER());
-            ui.border(
-                srect[0],
-                srect[1],
-                srect[2],
-                srect[3],
-                8.0,
-                if self.catalog.editing == Some("search") {
-                    theme::CRIMSON_BRIGHT()
-                } else {
-                    theme::BORDER()
-                },
-            );
-            let qfit = ui.fit_text(Face::LauncherRegular, 13.0, &display_query, s_w - 22.0);
-            ui.text(
-                Face::LauncherRegular,
-                13.0,
-                srect[0] + 11.0,
-                text_vcenter(srect[1], srect[3], 13.0),
-                if query_is_placeholder {
-                    theme::DIM()
-                } else {
-                    theme::TEXT()
-                },
-                &qfit,
-            );
-            self.targets.push((srect, Action::Field("search")));
-            if clear_w > 0.0 {
-                styled_button(
-                    ui,
-                    self.targets,
-                    [srect[0] + s_w + 6.0, bar_y + 7.0, clear_w, 34.0],
-                    "Clear",
-                    Action::ClearModSearch,
-                    BtnStyle::Secondary,
-                    true,
-                );
-            }
-        } else {
-            let btn_pack_w = 148.0;
-            let btn_reset_w = 128.0;
-            let clear_w = if self.catalog.query.is_empty() {
-                0.0
-            } else {
-                74.0
-            };
-            let extra_clear = if clear_w > 0.0 { clear_w + 8.0 } else { 0.0 };
-            let input_w = (cw - btn_pack_w - btn_reset_w - extra_clear - 32.0).max(160.0);
-            let srect = [cx + 8.0, bar_y + 8.0, input_w, 36.0];
-            ui.rounded(srect[0], srect[1], srect[2], srect[3], 9.0, theme::CARD_INNER());
-            ui.border(
-                srect[0],
-                srect[1],
-                srect[2],
-                srect[3],
-                9.0,
-                if self.catalog.editing == Some("search") {
-                    theme::CRIMSON_BRIGHT()
-                } else {
-                    theme::BORDER()
-                },
-            );
-            let qfit = ui.fit_text(Face::LauncherRegular, 13.5, &display_query, input_w - 28.0);
-            ui.text(
-                Face::LauncherRegular,
-                13.5,
-                srect[0] + 14.0,
-                text_vcenter(srect[1], srect[3], 13.5),
-                if query_is_placeholder {
-                    theme::DIM()
-                } else {
-                    theme::TEXT()
-                },
-                &qfit,
-            );
-            self.targets.push((srect, Action::Field("search")));
-
-            let mut bx = srect[0] + input_w + 8.0;
-            if clear_w > 0.0 {
-                styled_button(
-                    ui,
-                    self.targets,
-                    [bx, bar_y + 8.0, clear_w, 36.0],
-                    "Clear",
-                    Action::ClearModSearch,
-                    BtnStyle::Secondary,
-                    true,
-                );
-                bx += clear_w + 8.0;
-            }
-            styled_button(
-                ui,
-                self.targets,
-                [bx, bar_y + 8.0, btn_pack_w, 36.0],
-                "Enable PvP + Perf",
-                Action::EnableModPack,
-                BtnStyle::Primary,
-                true,
-            );
-            bx += btn_pack_w + 8.0;
-            styled_button(
-                ui,
-                self.targets,
-                [bx, bar_y + 8.0, btn_reset_w, 36.0],
-                "Reset Defaults",
-                Action::ResetModDefaults,
-                BtnStyle::CrimsonOutline,
-                true,
-            );
-        }
-
-        // Filter row inside command card
-        let filt_y = bar_y + if compact { 46.0 } else { 50.0 };
-        let filt_w = (cw - 16.0 - (filters.len() - 1) as f32 * 5.0) / filters.len() as f32;
-        for (idx, &(code, label)) in filters.iter().enumerate() {
-            let fx = cx + 8.0 + idx as f32 * (filt_w + 5.0);
-            let frect = [fx, filt_y, filt_w, 30.0];
-            let active = self.catalog.mod_filter == code;
-            let hovered = point_in(ui.cursor, frect);
-            ui.rounded(
-                frect[0],
-                frect[1],
-                frect[2],
-                frect[3],
-                7.5,
-                if active {
-                    theme::CRIMSON_BADGE()
-                } else if hovered {
-                    theme::HOVER()
-                } else {
-                    theme::CARD_INNER()
-                },
-            );
-            ui.border(
-                frect[0],
-                frect[1],
-                frect[2],
-                frect[3],
-                7.5,
-                if active {
-                    theme::CRIMSON_BRIGHT()
-                } else {
-                    theme::BORDER()
-                },
-            );
-            draw_centered_text(
-                ui,
-                Face::LauncherMedium,
-                if compact { 11.5 } else { 12.5 },
-                frect,
-                if active {
-                    theme::ON_CRIMSON()
-                } else {
-                    theme::MUTED()
-                },
-                label,
-            );
-            self.targets.push((frect, Action::ModFilter(code)));
-        }
-
-        // Filter the 50 mods live
-        let q = self.catalog.query.trim().to_ascii_lowercase();
-        let filt = self.catalog.mod_filter;
-        let visible: Vec<_> = CATALOG
-            .iter()
-            .filter(|m| {
-                let on = self.catalog.extras.mod_catalog.is_on(m.id);
-                let cat_ok = match filt {
-                    1 => on,
-                    2 => !on,
-                    3 => m.category == VoltModCategory::PvpUtility,
-                    4 => m.category == VoltModCategory::PvpHud,
-                    5 => m.category == VoltModCategory::Visual,
-                    6 => m.category == VoltModCategory::Performance,
-                    7 => m.category == VoltModCategory::Additional,
-                    _ => true,
-                };
-                if !cat_ok {
-                    return false;
-                }
-                if q.is_empty() {
-                    return true;
-                }
-                m.title.to_ascii_lowercase().contains(&q)
-                    || m.slug.contains(&q)
-                    || m.category.label().to_ascii_lowercase().contains(&q)
-                    || m.summary.to_ascii_lowercase().contains(&q)
-            })
-            .collect();
-
-        let top = bar_y + bar_h + 10.0;
-        let bottom = cy + ch - 4.0;
+        let top = status_y + 18.0;
+        let bottom = cy + ch;
         let view_h = (bottom - top).max(0.0);
         if view_h < 1.0 {
             return;
         }
-
-        let native_installed = self.catalog.bundled_zoom_installed;
-        let native_enabled = self.catalog.bundled_zoom_enabled;
-        let native_visible = (q.is_empty() || "horizon zoom official native bundled".contains(&q))
-            && match filt { 0 | 3 => true, 1 => native_enabled, 2 => !native_enabled, _ => false };
-        if visible.is_empty() && !native_visible {
-            ui.rounded(cx, top, cw, view_h, 14.0, theme::CARD());
-            ui.border(cx, top, cw, view_h, 14.0, theme::BORDER());
-            draw_centered_text(
-                ui,
-                Face::LauncherMedium,
-                16.5,
-                [cx + 20.0, top + view_h * 0.5 - 18.0, cw - 40.0, 24.0],
-                theme::TEXT(),
-                "No native mods match your current filter",
-            );
-            draw_centered_text(
-                ui,
-                Face::LauncherRegular,
-                13.0,
-                [cx + 20.0, top + view_h * 0.5 + 8.0, cw - 40.0, 20.0],
-                theme::MUTED(),
-                "Try switching back to 'All' or clearing your search query.",
-            );
-            return;
-        }
-
-        let cols = if compact {
-            1usize
-        } else if cw >= 920.0 {
-            3usize
-        } else {
-            2usize
-        };
-        let gap = 10.0;
-        let card_w = (cw - (cols.saturating_sub(1) as f32) * gap) / cols as f32;
-        let card_h = if compact { 82.0 } else { 88.0 };
-        let row_step = card_h + gap;
-        let total_rows = (visible.len() + usize::from(native_visible)).div_ceil(cols);
-        let content_h = (total_rows as f32 * row_step - gap).max(0.0);
-        let max_scroll = (content_h - view_h).max(0.0);
+        let row_h = 64.0;
+        let step = 70.0;
+        let bundled = horizon_client::bundled_native::BUNDLED;
+        let total = bundled.len() as f32 * step;
+        let max_scroll = (total - view_h).max(0.0);
         self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
         *self.list_view = Some([top, bottom, max_scroll]);
-
-        let born_age = self.catalog.mod_born.elapsed().as_secs_f32();
-        for i in 0..(visible.len() + usize::from(native_visible)) {
-            let row = i / cols;
-            let col_idx = i % cols;
-            let x = cx + col_idx as f32 * (card_w + gap);
-            let y = top + row as f32 * row_step - self.catalog.scroll;
-            if native_visible && i == 0 {
-                let rect = [x, y, card_w, card_h];
-                self.list_targets.push((rect, Action::InstallBundledZoom));
-                if y + card_h < top - 4.0 || y > bottom + 4.0 { continue; }
-                let start = ui.batch_mut().vertices.len();
-                ui.rounded(x, y, card_w, card_h, 11.0, theme::CARD());
-                ui.border(x, y, card_w, card_h, 11.0, theme::BORDER());
-                let button_w = if native_installed { 92.0 } else { 98.0 };
-                let title_w = (card_w - button_w - 30.0).max(30.0);
-                let title = ui.fit_text(Face::LauncherMedium, 14.5, "Horizon Zoom 2.0.0", title_w);
-                ui.text(Face::LauncherMedium, 14.5, x + 12.0, y + 10.0, theme::TEXT(), &title);
-                let state = if self.catalog.status.starts_with("Could not change Horizon Zoom:") {
-                    self.catalog.status.as_str()
-                } else if native_installed {
-                    if native_enabled { "Installed · On in game" } else { "Installed · Off in game" }
-                } else { "Bundled · not installed" };
-                let state = ui.fit_text(Face::LauncherRegular, 11.0, state, title_w);
-                ui.text(Face::LauncherRegular, 11.0, x + 12.0, y + 30.0, theme::DIM(), &state);
-                let info = ui.fit_text(Face::LauncherRegular, 11.0, "Hold Z · add a Z touch button in Controls Studio", card_w - 24.0);
-                ui.text(Face::LauncherRegular, 11.0, x + 12.0, y + 52.0, theme::MUTED(), &info);
-                let b = [x + card_w - button_w - 10.0, y + 8.0, button_w, 29.0];
-                let target_start = self.targets.len();
-                styled_button(ui, self.targets, b, if native_installed { "Remove" } else { "Install" },
-                    Action::InstallBundledZoom, BtnStyle::Secondary, true);
-                if let Some(clipped) = super::gesture::clip_target_y(b, top, bottom) {
-                    self.targets[target_start].0 = clipped;
-                } else { self.targets.truncate(target_start); }
-                let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
-                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+        for (i, &(id, version, _)) in bundled.iter().enumerate() {
+            let ry = top + i as f32 * step - self.catalog.scroll;
+            if ry + row_h < top || ry > bottom {
                 continue;
             }
-            let m = visible[i - usize::from(native_visible)];
-            let sw_rect = [x + card_w - 58.0, y + 12.0, 46.0, 24.0];
-            let act = Action::ToggleVoltMod(m.id);
-            self.list_targets.push((sw_rect, act));
-
-            if y + card_h < top - 4.0 || y > bottom + 4.0 {
-                continue;
-            }
-
-            let card_v_start = ui.batch_mut().vertices.len();
-            let is_on = self.catalog.extras.mod_catalog.is_on(m.id);
-            let card_rect = [x, y, card_w, card_h];
-            let hovered = point_in(ui.cursor, card_rect);
-
-            ui.rounded(
-                x,
-                y,
-                card_w,
-                card_h,
-                11.0,
-                if is_on {
-                    hex(0x131922, 248)
-                } else if hovered {
-                    theme::HOVER()
+            let start = ui.batch_mut().vertices.len();
+            ui.rounded(cx, ry, cw, row_h, 10.0, theme::CARD());
+            ui.border(cx, ry, cw, row_h, 10.0, theme::BORDER());
+            let icon = [cx + 8.0, ry + 11.0, 42.0, 42.0];
+            ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_GLOW_SOFT());
+            ui.border(icon[0], icon[1], icon[2], icon[3], 8.0, theme::BORDER());
+            let initial: String = bundled_mod_title(id).chars().take(1).collect();
+            draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), &initial);
+            let installed = self.catalog.bundled_mods.contains(id);
+            let enabled = installed && !self.catalog.bundled_disabled.contains(id);
+            let tx = cx + 58.0;
+            let text_w = (cw - 178.0).max(32.0);
+            let title = format!("{} {version}", bundled_mod_title(id));
+            let title = ui.fit_text(Face::LauncherMedium, 14.0, &title, text_w);
+            ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
+            let state = if installed {
+                if enabled {
+                    "Installed · On in game"
                 } else {
-                    theme::CARD()
-                },
-            );
-            ui.border(
-                x,
-                y,
-                card_w,
-                card_h,
-                11.0,
-                if is_on {
-                    hex(0x2DD4BF, 175)
-                } else if hovered {
-                    theme::BORDER_CRIMSON()
+                    "Installed · Off in game"
+                }
+            } else {
+                "In this APK · not installed"
+            };
+            let line = format!("Official Horizon mod · {state}");
+            let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
+            ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
+            let blurb = ui.fit_text(Face::LauncherRegular, 11.0, bundled_mod_blurb(id), text_w);
+            ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
+            let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
+            if !self.catalog.busy() {
+                let first = self.targets.len();
+                styled_button(
+                    ui,
+                    self.targets,
+                    button,
+                    if installed { "Remove" } else { "Install" },
+                    Action::ToggleBundled(i),
+                    if installed { BtnStyle::Secondary } else { BtnStyle::Primary },
+                    true,
+                );
+                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                    self.targets[first].0 = clipped;
                 } else {
-                    theme::BORDER()
-                },
-            );
-            if is_on {
-                ui.rounded(x + 1.0, y + 12.0, 3.0, card_h - 24.0, 1.5, hex(0x2DD4BF, 255));
-            }
-
-            // Custom 8x8 Pixel-Art Mod Logo (horizontal-run merged for crisp zero-lag quads)
-            let logo_sz = 44.0f32;
-            let lx = x + 12.0;
-            let ly = y + (card_h - logo_sz) * 0.5;
-            let spec = mod_logo_spec(m.id);
-            ui.rounded(lx - 2.0, ly - 2.0, logo_sz + 4.0, logo_sz + 4.0, 9.0, hex(spec.bg, 255));
-            ui.border(
-                lx - 2.0,
-                ly - 2.0,
-                logo_sz + 4.0,
-                logo_sz + 4.0,
-                9.0,
-                hex(spec.primary, if is_on { 190 } else { 95 }),
-            );
-            let has_upstream_icon = horizon_client::volt_mods::upstream_icon(m.id)
-                .is_some_and(|(name, _)| ui.atlas_sprite(name, lx, ly, logo_sz, logo_sz));
-            let cell = logo_sz / 8.0;
-            let pri_col = hex(spec.primary, 255);
-            let acc_col = hex(spec.accent, 255);
-            for (ry_i, row_str) in spec.rows.iter().enumerate().filter(|_| !has_upstream_icon) {
-                let bytes = row_str.as_bytes();
-                let mut rx_i = 0usize;
-                while rx_i < bytes.len().min(8) {
-                    let b = bytes[rx_i];
-                    let pcol = match b {
-                        b'#' => Some(pri_col),
-                        b'+' | b'&' => Some(acc_col),
-                        _ => None,
-                    };
-                    if let Some(col) = pcol {
-                        let start = rx_i;
-                        rx_i += 1;
-                        while rx_i < bytes.len().min(8) && bytes[rx_i] == b {
-                            rx_i += 1;
-                        }
-                        let px = lx + start as f32 * cell;
-                        let py = ly + ry_i as f32 * cell;
-                        let pw = (rx_i - start) as f32 * cell;
-                        ui.rounded(px, py, pw, cell, 0.0, col);
-                    } else {
-                        rx_i += 1;
-                    }
+                    self.targets.truncate(first);
                 }
             }
-
-            // Title + Category badge + Summary
-            let tx = lx + logo_sz + 12.0;
-            let title_max = (card_w - (tx - x) - 66.0).max(56.0);
-            let tfit = ui.fit_text(Face::LauncherMedium, 14.5, m.title, title_max);
-            ui.text(Face::LauncherMedium, 14.5, tx, y + 11.0, theme::TEXT(), &tfit);
-
-            let cat_txt = format!("{} • v{}", m.category.short_label(), m.version);
-            let cfit = ui.fit_text(Face::LauncherRegular, 11.0, &cat_txt, title_max);
-            ui.text(
-                Face::LauncherRegular,
-                11.0,
-                tx,
-                y + 30.0,
-                if is_on {
-                    hex(0x5EEAD4, 240)
-                } else {
-                    theme::DIM()
-                },
-                &cfit,
-            );
-
-            let sum_max = (card_w - (tx - x) - 14.0).max(60.0);
-            let sfit = ui.fit_text(Face::LauncherRegular, 12.0, m.summary, sum_max);
-            ui.text(Face::LauncherRegular, 12.0, tx, y + 50.0, theme::MUTED(), &sfit);
-
-            // Clip touch regions as well as vertices; a partially scrolled row must
-            // not intercept the tabs, search field, or footer outside the viewport.
-            let target_start = self.targets.len();
-            toggle(ui, self.targets, sw_rect, is_on, act);
-            if let Some(rect) = super::gesture::clip_target_y(sw_rect, top, bottom) {
-                self.targets[target_start].0 = rect;
-            } else {
-                self.targets.truncate(target_start);
-            }
-            if let Some(rect) = super::gesture::clip_target_y(card_rect, top, bottom) {
-                self.targets.push((rect, act));
-            }
-
-            // Smooth staggered entrance animation
-            let delay = (i.min(12) as f32) * 0.018;
-            if born_age < delay + 0.22 {
-                let raw_t = ((born_age - delay) / 0.22).clamp(0.0, 1.0);
-                let ease = ease_out_cubic(raw_t);
-                ui.animate_vertices(
-                    card_v_start,
-                    0.0,
-                    (1.0 - ease) * 12.0,
-                    0.975 + 0.025 * ease,
-                    [x + card_w * 0.5, y + card_h * 0.5],
-                    ease,
-                );
-            }
             let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
-            ui.batch_mut().clip_since(card_v_start, bounds[0], bounds[1], bounds[2], bounds[3]);
+            ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
         }
     }
 
@@ -5956,7 +5421,6 @@ impl Launcher {
                 self.catalog.offset = 0;
                 if page == Page::Mods {
                     self.catalog.query.clear();
-                    self.catalog.mod_born = std::time::Instant::now();
                 }
                 self.catalog.browse(&self.home);
             }
@@ -6235,116 +5699,40 @@ impl Launcher {
                     );
                 }
             }
-            Some(Action::RemoveBundled(i)) => self.catalog.remove_bundled(&self.home, i),
-            Some(Action::HorizonModBrowser(show)) => {
-                self.catalog.horizon_mod_browser = show;
-                self.catalog.query.clear();
-                self.catalog.offset = 0;
-                self.catalog.scroll = 0.0;
-                self.catalog.results.clear();
-                self.catalog.editing = None;
-                if crate::platform::active() { crate::platform::hide(); }
-                self.catalog.browse(&self.home);
-            }
-            Some(Action::InstallBundledZoom) => {
-                let game_dir = self.catalog.config.game_home(&self.home);
-                let install = !self.catalog.bundled_zoom_installed;
-                match horizon_client::bundled_native::set_zoom_installed(&game_dir, install) {
-                    Ok(()) => {
-                        self.catalog.bundled_zoom_installed = install;
-                        self.catalog.bundled_zoom_enabled = install;
-                        if install { self.catalog.bundled_mods.insert("zoom".into()); }
-                        else { self.catalog.bundled_mods.remove("zoom"); }
-                        self.catalog.status = if install {
-                            "Horizon Zoom installed from the APK. Hold Z; add a Z button in Controls Studio. Settings: in-game Mods.".into()
-                        } else { "Horizon Zoom removed from this profile; its settings are kept.".into() };
-                    }
-                    Err(e) => self.catalog.status = format!("Could not change Horizon Zoom: {e}"),
-                }
-            }
-            Some(Action::ToggleVoltMod(id)) => {
-                let game_dir = self.catalog.config.game_home(&self.home);
-                let _ = std::fs::create_dir_all(&game_dir);
-                let mut gfx = horizon_client::graphics::Graphics::load(&game_dir);
-                let next = !self.catalog.extras.mod_catalog.is_on(id);
-                horizon_client::volt_mods::apply_mod_to_engine(
-                    id,
-                    next,
-                    &mut self.catalog.extras,
-                    &mut gfx,
-                );
-                self.catalog.extras.save(&game_dir);
-                gfx.save(&game_dir);
-                self.catalog.status = format!(
-                    "{} {} ({}/{} catalog switches on).",
-                    id.meta().title,
-                    if next { "enabled" } else { "disabled" },
-                    self.catalog.extras.mod_catalog.enabled_count(),
-                    horizon_client::volt_mods::TOTAL_VOLT_MODS
-                );
-            }
-            Some(Action::ModFilter(code)) => {
-                self.catalog.mod_filter = code;
-                self.catalog.scroll = 0.0;
-                self.catalog.mod_born = std::time::Instant::now();
-            }
-            Some(Action::ClearModSearch) => {
-                self.catalog.query.clear();
-                self.catalog.editing = None;
-                if crate::platform::active() {
-                    crate::platform::hide();
-                }
-                self.catalog.scroll = 0.0;
-            }
-            Some(Action::EnableModPack) => {
-                let game_dir = self.catalog.config.game_home(&self.home);
-                let _ = std::fs::create_dir_all(&game_dir);
-                let mut gfx = horizon_client::graphics::Graphics::load(&game_dir);
-                for m in &horizon_client::volt_mods::CATALOG {
-                    if matches!(
-                        m.category,
-                        horizon_client::volt_mods::VoltModCategory::Performance
-                            | horizon_client::volt_mods::VoltModCategory::PvpUtility
-                            | horizon_client::volt_mods::VoltModCategory::PvpHud
-                    ) && m.id != horizon_client::volt_mods::VoltModId::InventoryHudPlus
-                    {
-                        horizon_client::volt_mods::apply_mod_to_engine(
-                            m.id,
-                            true,
-                            &mut self.catalog.extras,
-                            &mut gfx,
-                        );
+            Some(Action::ToggleBundled(i)) => {
+                if let Some(&(id, version, _)) = horizon_client::bundled_native::BUNDLED.get(i) {
+                    let game_dir = self.catalog.config.game_home(&self.home);
+                    let _ = std::fs::create_dir_all(&game_dir);
+                    let install = !self.catalog.bundled_mods.contains(id);
+                    match horizon_client::bundled_native::set_installed(&game_dir, id, install) {
+                        Ok(()) => {
+                            if install {
+                                self.catalog.bundled_mods.insert(id.to_owned());
+                            } else {
+                                self.catalog.bundled_mods.remove(id);
+                            }
+                            if id == "zoom" {
+                                self.catalog.bundled_zoom_installed = install;
+                                self.catalog.bundled_zoom_enabled = install;
+                            }
+                            self.catalog.status = if install {
+                                format!(
+                                    "{} {version} installed from the APK. Toggle and configure it in-game under Mods.",
+                                    bundled_mod_title(id)
+                                )
+                            } else {
+                                format!(
+                                    "{} removed from this profile; its settings are kept.",
+                                    bundled_mod_title(id)
+                                )
+                            };
+                        }
+                        Err(e) => {
+                            self.catalog.status =
+                                format!("Could not change {}: {e}", bundled_mod_title(id));
+                        }
                     }
                 }
-                self.catalog.extras.save(&game_dir);
-                gfx.save(&game_dir);
-                self.catalog.status = format!(
-                    "Enabled PvP + Performance switches ({}/{} catalog switches on).",
-                    self.catalog.extras.mod_catalog.enabled_count(),
-                    horizon_client::volt_mods::TOTAL_VOLT_MODS
-                );
-            }
-            Some(Action::ResetModDefaults) => {
-                let game_dir = self.catalog.config.game_home(&self.home);
-                let _ = std::fs::create_dir_all(&game_dir);
-                let mut gfx = horizon_client::graphics::Graphics::load(&game_dir);
-                self.catalog.extras.mod_catalog =
-                    horizon_client::volt_mods::VoltModCatalogState::default();
-                for m in &horizon_client::volt_mods::CATALOG {
-                    horizon_client::volt_mods::apply_mod_to_engine(
-                        m.id,
-                        m.default_on,
-                        &mut self.catalog.extras,
-                        &mut gfx,
-                    );
-                }
-                self.catalog.extras.save(&game_dir);
-                gfx.save(&game_dir);
-                self.catalog.status = format!(
-                    "Reset native mods to default ({}/{} active).",
-                    self.catalog.extras.mod_catalog.enabled_count(),
-                    horizon_client::volt_mods::TOTAL_VOLT_MODS
-                );
             }
             Some(Action::Studio(sact)) => {
                 let profile_home = self.catalog.config.game_home(&self.home);
