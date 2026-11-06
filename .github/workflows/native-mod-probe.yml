@@ -1,4 +1,4 @@
-# Re-run after engine-side target fixes (e.g. horizon-android render dep) by pushing a
+# Re-run after engine-side target fixes (e.g. horizon-android render dep) by pushing a (probe rerun: Screen::id port)
 # change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 

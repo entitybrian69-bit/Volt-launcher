@@ -731,6 +731,35 @@ enum Screen {
     /// (game/mods.rs).
     Mod,
 }
+
+impl Screen {
+    /// The screen's stable id for the native screen hooks
+    /// (`NativeScreenView.id`): one per variant, the same from release to
+    /// release. A new variant must add one.
+    fn id(self) -> &'static str {
+        match self {
+            Screen::Playing => "playing",
+            Screen::GameModeSwitcher => "game_mode_switcher",
+            Screen::Paused => "paused",
+            Screen::Options => "options",
+            Screen::Chat => "chat",
+            Screen::Creative => "creative",
+            Screen::Inventory => "inventory",
+            Screen::Dead => "dead",
+            Screen::Stats => "stats",
+            Screen::Advancements => "advancements",
+            Screen::WorldOptions => "world_options",
+            Screen::Friends => "friends",
+            Screen::CommandBlock => "command_block",
+            Screen::BlockEditor => "block_editor",
+            Screen::ServerLinks => "server_links",
+            Screen::ConfirmLink => "confirm_link",
+            Screen::DialogWarning => "dialog_warning",
+            Screen::Win => "win",
+            Screen::Mod => "mod",
+        }
+    }
+}
 struct Mining {
     pos: [i32; 3],
     progress: f32,
