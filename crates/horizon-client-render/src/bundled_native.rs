@@ -17,6 +17,8 @@ pub const BUNDLED: &[(&str, &str, &str)] = &[
 pub const WOVEN: &[(&str, &str)] = &[
     ("jei", "0.1.0"),
     ("horizon_physics", "0.15.1"),
+    ("jade", "26.3.5"),
+    ("veinminer", "0.3.2"),
 ];
 
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {

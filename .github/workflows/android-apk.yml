@@ -214,6 +214,10 @@ jobs:
       JEI_TAG: jei-0.1.0
       PHYS_FILE: horizon_physics-0.15.1.hnmod
       PHYS_TAG: horizon_physics-0.15.1
+      JADE_FILE: jade-26.3.5.hnmod
+      JADE_TAG: jade-26.3.5
+      VEIN_FILE: veinminer-0.3.2.hnmod
+      VEIN_TAG: veinminer-0.3.2
     strategy:
       fail-fast: false
       matrix:
@@ -246,7 +250,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bundle"
-          for pair in "$JEI_TAG=$JEI_FILE" "$PHYS_TAG=$PHYS_FILE"; do
+          for pair in "$JEI_TAG=$JEI_FILE" "$PHYS_TAG=$PHYS_FILE" \
+                      "$JADE_TAG=$JADE_FILE" "$VEIN_TAG=$VEIN_FILE"; do
             tag="${pair%%=*}"; file="${pair#*=}"
             curl --retry 3 -fsSL -o "$RUNNER_TEMP/bundle/$file" \
               "https://github.com/horizon-rust/horizon-mods/releases/download/$tag/$file"
@@ -260,7 +265,9 @@ jobs:
           registry = temp / 'registry'
           revs = {}
           for mod_id, file in (('jei', os.environ['JEI_FILE']),
-                               ('horizon_physics', os.environ['PHYS_FILE'])):
+                               ('horizon_physics', os.environ['PHYS_FILE']),
+                               ('jade', os.environ['JADE_FILE']),
+                               ('veinminer', os.environ['VEIN_FILE'])):
               entry = compat.read_entry(registry, mod_id)
               data = compat.verified_extract(temp / 'bundle' / file, entry,
                                              temp / 'extract-check' / mod_id, registry)
@@ -290,6 +297,8 @@ jobs:
             --registry "$RUNNER_TEMP/registry" \
             --mod "jei=$RUNNER_TEMP/bundle/$JEI_FILE" \
             --mod "horizon_physics=$RUNNER_TEMP/bundle/$PHYS_FILE" \
+            --mod "jade=$RUNNER_TEMP/bundle/$JADE_FILE" \
+            --mod "veinminer=$RUNNER_TEMP/bundle/$VEIN_FILE" \
             --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
             --mixins-revision "$PHYS_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
@@ -645,6 +654,10 @@ jobs:
                "c5590e0d4618d435fc0c56abcc9cdabf253be694710068a3dd4643ac25466b5b"),
               ("horizon_physics", "0.15.1",
                "d7cf1201f0a47a852aa1a4c9684ef9e658ec3c86852104d44716d05f11281ca3"),
+              ("jade", "26.3.5",
+               "676a129f55db075284313a39ff4387674c426ebd9be04a8830ffb8955281c7ec"),
+              ("veinminer", "0.3.2",
+               "31a4249da1b35972ae8b34201373c86352f4adc2f5cb3e015749d1fbfecf00a0"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libhorizon_android.so"

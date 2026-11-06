@@ -1355,6 +1355,38 @@ tariksabanuz). It is a clean-room work inspired by PhysicsMod and contains
 none of its code or assets. The weave happens on a no-secrets CI runner and
 the player can turn the mod off per profile in-game under Mods.
 
+## Jade native mod 26.3.5
+
+Release APKs weave the published registry bundle
+[`jade-26.3.5.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/jade-26.3.5)
+(SHA-256 `676a129f55db075284313a39ff4387674c426ebd9be04a8830ffb8955281c7ec`)
+into the engine library at build time. Jade for Horizon is by Joeypc6
+([source](https://github.com/Joeypc6/Jade-Horizon)), an unofficial Rust port
+of [Jade](https://github.com/Snownee/Jade) by Snownee; no original Jade code
+runs, and the port is neither made nor endorsed by Snownee. Both the port and
+Jade are licensed under the Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International License
+(CC BY-NC-SA 4.0, <https://creativecommons.org/licenses/by-nc-sa/4.0/>):
+attribution to Snownee and Joeypc6 as above, noncommercial use only, and
+adaptations of the mod must carry the same license. Volt Launcher is
+distributed free of charge and noncommercially. The weave happens on a
+no-secrets CI runner and the player can turn the mod off per profile in-game
+under Mods.
+
+## Veinminer native mod 0.3.2
+
+Release APKs weave the published registry bundle
+[`veinminer-0.3.2.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/veinminer-0.3.2)
+(SHA-256 `31a4249da1b35972ae8b34201373c86352f4adc2f5cb3e015749d1fbfecf00a0`)
+into the engine library at build time. Veinminer for Horizon is by
+levzzz5154 ([source](https://github.com/levzzz5154/horizon-veinminer)),
+under the MIT License (the same license text printed above, Copyright (c)
+2026 levzzz5154). It is independently written Rust code inspired by
+[MiraculixxT's Veinminer](https://github.com/MiraculixxT/Veinminer) and
+bundles no upstream mod code or artwork. The weave happens on a no-secrets
+CI runner and the player can turn the mod off per profile in-game under
+Mods.
+
 ## Horizon launcher typography
 
 The launcher display face `crates/horizon-theme/fonts/BricolageGrotesqueDisplay-SemiBold.ttf`

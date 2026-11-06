@@ -242,6 +242,8 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "minimap" => "Minimap",
         "jei" => "JEI for Horizon",
         "horizon_physics" => "Horizon Physics",
+        "jade" => "Jade",
+        "veinminer" => "Veinminer",
         _ => "Horizon Mod",
     }
 }
@@ -254,6 +256,8 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "minimap" => "A corner map of the terrain around you.",
         "jei" => "Browse every item and its recipes while you play.",
         "horizon_physics" => "Blocks crumble, mobs ragdoll, water waves. Physics Settings appears in Options.",
+        "jade" => "The look-at tooltip: what you're pointing at, its details and state. Settings under Options > Mods.",
+        "veinminer" => "Mine a whole ore vein or tree at once. Use /veinminer toggle in game.",
         _ => "An official Horizon registry mod.",
     }
 }
