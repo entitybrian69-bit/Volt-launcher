@@ -1,3 +1,5 @@
+# Re-run after engine-side target fixes (e.g. mesher mut out) by pushing a
+# change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 
 on:
