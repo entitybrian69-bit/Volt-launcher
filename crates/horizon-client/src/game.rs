@@ -7673,7 +7673,6 @@ impl Game<'_> {
             Screen::Inventory => {
                 self.draw_inventory(&mut batch);
                 self.draw_mod_browser(&mut batch);
-                self.draw_volt_jei_sidebar(&mut batch);
             }
             Screen::Creative => {
                 self.draw_creative(&mut batch);
@@ -16000,9 +15999,6 @@ impl ApplicationHandler for Game<'_> {
                             }
                         }
                         Screen::Inventory if pressed => {
-                            if button == MouseButton::Left && self.try_click_volt_jei(self.cursor) {
-                                return Ok(());
-                            }
                             self.inventory_press(button == MouseButton::Right);
                             if let Some(key) = self.container {
                                 self.container_changed(key);

@@ -15,7 +15,7 @@ use horizon_client::{
     volt_features::project_waypoint,
     volt_mods::VoltModId,
     volt_qol::{
-        AtlasChunkTile, ClientTimeWeather, CrosshairStyle, JEI_RECIPES, VoltChatConfig,
+        AtlasChunkTile, ClientTimeWeather, CrosshairStyle, VoltChatConfig,
         VoltVoiceRuntime, eval_chat_math, is_slime_chunk, preset_blueprint_blocks,
     },
 };
@@ -41,8 +41,6 @@ pub(super) struct VoltRuntime {
     pub blueprint_dim: String,
     pub atlas_scope_dim: Option<(String, String)>,
     pub atlas_scan_cursor: i32,
-    pub jei_selected: usize,
-    pub jei_scroll: usize,
     pub replay_ring: VecDeque<([f64; 3], f32, f32)>,
     pub last_mob_hp: HashMap<u32, f32>,
     pub damage_popups: Vec<DamagePopup>,
@@ -78,8 +76,6 @@ impl Default for VoltRuntime {
             blueprint_dim: String::new(),
             atlas_scope_dim: None,
             atlas_scan_cursor: 0,
-            jei_selected: 0,
-            jei_scroll: 0,
             replay_ring: VecDeque::new(),
             last_mob_hp: HashMap::new(),
             damage_popups: Vec::new(),
@@ -1507,135 +1503,6 @@ impl Game<'_> {
             }
         }
         false
-    }
-
-    /// Draws `#18` **Volt JEI** Item & 3x3 Crafting Recipe Browser on the right side of `Screen::Inventory`!
-    pub(super) fn draw_volt_jei_sidebar(&self, batch: &mut HudBatch) {
-        if !self.settings.extras.volt_qol.jei_enabled || self.screen != Screen::Inventory {
-            return;
-        }
-        let (w, h) = (batch.width, batch.height);
-        let panel_w = 118.0;
-        if w < 312.0 {
-            return;
-        }
-        let px = w - panel_w - 4.0;
-        let py = 8.0;
-        let ph = (h - 16.0).max(140.0);
-        let atlas = &self.gui.atlas;
-
-        batch.fill(atlas, px, py, panel_w, ph, rgba(14, 16, 24, 228));
-        batch.fill(atlas, px, py, panel_w, 1.5, rgba(224, 48, 68, 245));
-        batch.text(
-            atlas,
-            "Volt JEI Recipes",
-            px + 6.0,
-            py + 4.0,
-            rgba(255, 220, 130, 255),
-            true,
-        );
-
-        let sel = self.extras.volt.jei_selected.min(JEI_RECIPES.len() - 1);
-        let rec = &JEI_RECIPES[sel];
-        // Selected 3x3 crafting recipe preview card at top
-        let card_y = py + 15.0;
-        batch.fill(atlas, px + 4.0, card_y, panel_w - 8.0, 56.0, rgba(22, 26, 38, 235));
-        batch.text(
-            atlas,
-            &format!("{} (x{})", rec.title, rec.count),
-            px + 7.0,
-            card_y + 3.0,
-            rgba(120, 240, 185, 255),
-            true,
-        );
-        for row in 0usize..3 {
-            for col in 0usize..3 {
-                let cell = rec.grid[row * 3 + col];
-                let gx = px + 8.0 + col as f32 * 33.0;
-                let gy = card_y + 14.0 + row as f32 * 13.0;
-                batch.fill(atlas, gx, gy, 31.0, 11.5, rgba(34, 38, 54, 245));
-                if !cell.is_empty() {
-                    let short: String = cell.chars().take(5).collect();
-                    batch.text(
-                        atlas,
-                        &short,
-                        gx + 2.0,
-                        gy + 2.0,
-                        rgba(240, 242, 252, 255),
-                        true,
-                    );
-                }
-            }
-        }
-
-        // Scrollable recipe catalog list below
-        let list_y = card_y + 60.0;
-        let max_rows = ((ph - 80.0) / 13.0).max(3.0) as usize;
-        let start = self
-            .extras
-            .volt
-            .jei_scroll
-            .min(JEI_RECIPES.len().saturating_sub(max_rows));
-        for (vis_i, idx) in (start..(start + max_rows).min(JEI_RECIPES.len())).enumerate() {
-            let ry = list_y + vis_i as f32 * 13.0;
-            let active = idx == sel;
-            batch.fill(
-                atlas,
-                px + 4.0,
-                ry,
-                panel_w - 8.0,
-                12.0,
-                if active {
-                    rgba(186, 40, 62, 225)
-                } else {
-                    rgba(24, 28, 40, 200)
-                },
-            );
-            batch.text(
-                atlas,
-                JEI_RECIPES[idx].title,
-                px + 7.0,
-                ry + 2.0,
-                rgba(245, 247, 255, 255),
-                true,
-            );
-        }
-    }
-
-    /// Handles clicks on the `#18` **Volt JEI** sidebar on `Screen::Inventory`.
-    pub(super) fn try_click_volt_jei(&mut self, cursor: (f32, f32)) -> bool {
-        if !self.settings.extras.volt_qol.jei_enabled || self.screen != Screen::Inventory {
-            return false;
-        }
-        let (w, h) = self.gui_size();
-        let panel_w = 118.0;
-        if w < 312.0 {
-            return false;
-        }
-        let px = w - panel_w - 4.0;
-        let py = 8.0;
-        let ph = (h - 16.0).max(140.0);
-        if cursor.0 < px || cursor.0 > px + panel_w || cursor.1 < py || cursor.1 > py + ph {
-            return false;
-        }
-        let list_y = py + 75.0;
-        let max_rows = ((ph - 80.0) / 13.0).max(3.0) as usize;
-        let start = self
-            .extras
-            .volt
-            .jei_scroll
-            .min(JEI_RECIPES.len().saturating_sub(max_rows));
-        if cursor.1 >= list_y {
-            let row = ((cursor.1 - list_y) / 13.0).floor() as usize;
-            if start + row < JEI_RECIPES.len() {
-                self.extras.volt.jei_selected = start + row;
-                self.audio.play_button_click();
-            }
-        } else {
-            self.extras.volt.jei_scroll = (self.extras.volt.jei_scroll + 4) % JEI_RECIPES.len();
-            self.audio.play_button_click();
-        }
-        true
     }
 
     /// Evaluates `= <math>` inline calculator expressions in chat when `ChatCalculator` is ON!

@@ -159,8 +159,6 @@ pub struct VoltQolConfig {
     pub atlas_enabled: bool,
     pub atlas_mode: AtlasViewMode,
     pub atlas_grid: bool,
-    // #18 Volt JEI Item & Crafting Browser
-    pub jei_enabled: bool,
     // #25 First-Person Hand & Viewmodel Customizer
     pub viewmodel_custom: bool,
     pub vm_offset_x: i16,
@@ -201,7 +199,6 @@ impl Default for VoltQolConfig {
             atlas_enabled: true,
             atlas_mode: AtlasViewMode::Surface,
             atlas_grid: true,
-            jei_enabled: true,
             viewmodel_custom: false,
             vm_offset_x: 0,
             vm_offset_y: 0,
@@ -1259,42 +1256,6 @@ pub fn preset_blueprint_blocks(preset: BlueprintPreset) -> Vec<BlueprintBlock> {
     }
     out
 }
-
-#[derive(Clone, Copy, Debug)]
-pub struct JeiRecipeEntry {
-    pub output_item: &'static str,
-    pub title: &'static str,
-    pub count: u8,
-    pub grid: [&'static str; 9],
-    pub station: &'static str,
-}
-
-pub const JEI_RECIPES: [JeiRecipeEntry; 24] = [
-    JeiRecipeEntry { output_item: "crafting_table", title: "Crafting Table", count: 1, grid: ["oak_planks", "oak_planks", "", "oak_planks", "oak_planks", "", "", "", ""], station: "2x2 Inventory" },
-    JeiRecipeEntry { output_item: "furnace", title: "Furnace", count: 1, grid: ["cobblestone", "cobblestone", "cobblestone", "cobblestone", "", "cobblestone", "cobblestone", "cobblestone", "cobblestone"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "chest", title: "Chest", count: 1, grid: ["oak_planks", "oak_planks", "oak_planks", "oak_planks", "", "oak_planks", "oak_planks", "oak_planks", "oak_planks"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "torch", title: "Torch", count: 4, grid: ["coal", "", "", "stick", "", "", "", "", ""], station: "2x2 Inventory" },
-    JeiRecipeEntry { output_item: "shield", title: "Shield", count: 1, grid: ["oak_planks", "iron_ingot", "oak_planks", "oak_planks", "oak_planks", "oak_planks", "", "oak_planks", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "diamond_pickaxe", title: "Diamond Pickaxe", count: 1, grid: ["diamond", "diamond", "diamond", "", "stick", "", "", "stick", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "diamond_sword", title: "Diamond Sword", count: 1, grid: ["", "diamond", "", "", "diamond", "", "", "stick", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "diamond_axe", title: "Diamond Axe", count: 1, grid: ["diamond", "diamond", "", "diamond", "stick", "", "", "stick", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "bow", title: "Bow", count: 1, grid: ["", "stick", "string", "stick", "", "string", "", "stick", "string"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "crossbow", title: "Crossbow", count: 1, grid: ["stick", "iron_ingot", "stick", "string", "tripwire_hook", "string", "", "stick", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "arrow", title: "Arrow", count: 4, grid: ["", "flint", "", "", "stick", "", "", "feather", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "bucket", title: "Iron Bucket", count: 1, grid: ["", "", "", "iron_ingot", "", "iron_ingot", "", "iron_ingot", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "hopper", title: "Hopper", count: 1, grid: ["iron_ingot", "", "iron_ingot", "iron_ingot", "chest", "iron_ingot", "", "iron_ingot", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "piston", title: "Piston", count: 1, grid: ["oak_planks", "oak_planks", "oak_planks", "cobblestone", "iron_ingot", "cobblestone", "cobblestone", "redstone", "cobblestone"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "observer", title: "Observer", count: 1, grid: ["cobblestone", "cobblestone", "cobblestone", "redstone", "redstone", "quartz", "cobblestone", "cobblestone", "cobblestone"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "repeater", title: "Redstone Repeater", count: 1, grid: ["", "", "", "redstone_torch", "redstone", "redstone_torch", "stone", "stone", "stone"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "comparator", title: "Redstone Comparator", count: 1, grid: ["", "redstone_torch", "", "redstone_torch", "quartz", "redstone_torch", "stone", "stone", "stone"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "enchanting_table", title: "Enchanting Table", count: 1, grid: ["", "book", "", "diamond", "obsidian", "diamond", "obsidian", "obsidian", "obsidian"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "anvil", title: "Anvil", count: 1, grid: ["iron_block", "iron_block", "iron_block", "", "iron_ingot", "", "iron_ingot", "iron_ingot", "iron_ingot"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "ender_chest", title: "Ender Chest", count: 1, grid: ["obsidian", "obsidian", "obsidian", "obsidian", "ender_eye", "obsidian", "obsidian", "obsidian", "obsidian"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "shulker_box", title: "Shulker Box", count: 1, grid: ["", "shulker_shell", "", "", "chest", "", "", "shulker_shell", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "golden_apple", title: "Golden Apple", count: 1, grid: ["gold_ingot", "gold_ingot", "gold_ingot", "gold_ingot", "apple", "gold_ingot", "gold_ingot", "gold_ingot", "gold_ingot"], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "spyglass", title: "Spyglass", count: 1, grid: ["", "amethyst_shard", "", "", "copper_ingot", "", "", "copper_ingot", ""], station: "3x3 Crafting" },
-    JeiRecipeEntry { output_item: "firework_rocket", title: "Flight Rockets", count: 3, grid: ["", "paper", "", "", "gunpowder", "", "", "", ""], station: "2x2 Inventory" },
-];
 
 #[cfg(test)]
 mod tests {

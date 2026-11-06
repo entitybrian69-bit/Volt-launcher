@@ -810,7 +810,6 @@ impl Extras {
                     }
                 }
                 "voltQolAtlasGrid" => e.volt_qol.atlas_grid = flag(e.volt_qol.atlas_grid),
-                "voltQolJei" => e.volt_qol.jei_enabled = flag(e.volt_qol.jei_enabled),
                 "voltQolVmCustom" => {
                     e.volt_qol.viewmodel_custom = flag(e.volt_qol.viewmodel_custom)
                 }
@@ -1311,7 +1310,6 @@ impl Extras {
         push("voltQolAtlas", bool_text(self.volt_qol.atlas_enabled));
         push("voltQolAtlasMode", self.volt_qol.atlas_mode.as_str());
         push("voltQolAtlasGrid", bool_text(self.volt_qol.atlas_grid));
-        push("voltQolJei", bool_text(self.volt_qol.jei_enabled));
         push("voltQolVmCustom", bool_text(self.volt_qol.viewmodel_custom));
         push("voltQolVmX", &self.volt_qol.vm_offset_x.to_string());
         push("voltQolVmY", &self.volt_qol.vm_offset_y.to_string());
