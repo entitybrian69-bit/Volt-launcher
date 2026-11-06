@@ -1042,9 +1042,11 @@ impl Mesher<'_> {
         &mut self,
         region: &[[Option<&Chunk>; 3]; 3],
         sy: i32,
-        out: SectionMesh,
+        mut out: SectionMesh,
         scratch: &mut MeshScratch,
     ) -> SectionMesh {
+        // `mut` keeps this a weavable target for native fluid-physics mixins
+        // that borrow `out` mutably before the forward call.
         self.mesh_reusing_with_volt_opts(region, sy, out, scratch, VoltMeshOpts::default())
     }
 
