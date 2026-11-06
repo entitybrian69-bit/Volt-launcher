@@ -218,6 +218,66 @@ def apply_fork_remaps(manifest_path: Path) -> bool:
     return False
 
 
+# Upstream API drift this fork cannot absorb behind a signature (a field
+# whose type moved on under an assignment in reviewed bundle source): the
+# staged source is adapted textually, each edit pinned to exactly one
+# occurrence so any other bundle content fails loudly.
+FORK_SOURCE_SHIMS = {
+    "worldedit": (
+        ("runtime.rs",
+         "stack.data_mut().custom_name = Some(WAND_NAME.to_owned());",
+         "stack.data_mut().custom_name ="
+         " Some(horizon_world::nbt::Tag::String(WAND_NAME.to_owned()));"),
+        ("runtime.rs",
+         "stack.data().and_then(|data| data.custom_name.as_deref()) == Some(WAND_NAME)",
+         "stack.data().and_then(|data| data.custom_name_plain()).as_deref() == Some(WAND_NAME)"),
+    ),
+}
+
+
+def apply_fork_source_shims(mod_id: str, mixins_dir: Path) -> int:
+    """Adapt a staged bundle's sources to this fork; the count of edits."""
+    edited = 0
+    for name, old, new in FORK_SOURCE_SHIMS.get(mod_id, ()):
+        path = mixins_dir / name
+        text = path.read_text(encoding="utf-8")
+        if text.count(old) != 1:
+            raise Rejected(f"{mod_id}: expected exactly one shim site in {name}")
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        edited += 1
+    return edited
+
+
+def propagate_bundle_crates(stage: Path) -> list[str]:
+    """List a bundle crate woven into horizon-client in horizon-android too.
+
+    horizon-android compiles horizon-client's sources as its own lib (its
+    [lib] path points into ../horizon-client/src), so a [[crate]] dependency
+    the mixin compiler writes into horizon-client's [dependencies] must also
+    be one of horizon-android's. Returns the packages it propagated.
+    """
+    client = stage / "crates" / "horizon-client" / "Cargo.toml"
+    android = stage / "crates" / "horizon-android" / "Cargo.toml"
+    if not client.is_file() or not android.is_file():
+        return []
+    android_text = android.read_text(encoding="utf-8")
+    added = []
+    for line in client.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        package = stripped.split("=", 1)[0].strip()
+        if ("native-crates/" in stripped and "path" in stripped and package
+                and f"\n{package} =" not in "\n" + android_text):
+            added.append(stripped)
+    if not added:
+        return []
+    marker = "[dependencies]"
+    if marker not in android_text:
+        raise Rejected("horizon-android has no [dependencies] table to extend")
+    android_text = android_text.replace(marker, marker + "\n" + "\n".join(added), 1)
+    android.write_text(android_text, encoding="utf-8")
+    return [entry.split("=", 1)[0].strip() for entry in added]
+
+
 def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False) -> bool:
     """Return whether the staged manifest needs safe hook-only revision rebinding."""
     meta, manifest = data["meta"], data["manifest"]
@@ -338,6 +398,7 @@ def run_probe(args) -> dict:
                 raise Rejected("cannot safely rebind revision in staged manifest")
             manifest_path.write_text(text.replace(original, f'horizon_revision = "{rev}"'), encoding="utf-8")
             apply_fork_remaps(manifest_path)
+            apply_fork_source_shims(entry["id"], manifest_path.parent)
         report["hook_revision_rebound"] = rebind
         # Mixins rejects symlinks. Archive the exact commit instead of copying a
         # working tree, omit tracked symlinks and label the source revision.
@@ -358,6 +419,9 @@ def run_probe(args) -> dict:
         if mixin.returncode:
             report["status"] = "apply_failed"
         else:
+            propagated = propagate_bundle_crates(stage)
+            if propagated:
+                report["propagated_crates"] = propagated
             check = subprocess.run([sys.executable, str(stage / "tools/android_build.py"),
                                     "--abi", args.abi, "--check"], cwd=stage,
                                    capture_output=True, text=True, env=env)

@@ -74,6 +74,7 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
                 raise compat.Rejected(f"{mod_id}: cannot safely rebind hook revision")
             manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
             compat.apply_fork_remaps(manifest_path)
+            compat.apply_fork_source_shims(mod_id, manifest_path.parent)
         # Mods injecting the same hook must be woven in one compiler pass, so
         # --force-common-mixins routes every bundle through the one trusted
         # compiler and the report records both the pin and what was applied.
@@ -145,6 +146,9 @@ def run(args: argparse.Namespace) -> dict:
         (args.output / "apply.log").write_text("\n".join(apply_logs), encoding="utf-8")
         if stage == source:
             raise compat.Rejected("no mixin pass ran; nothing was woven")
+        propagated = compat.propagate_bundle_crates(stage)
+        if propagated:
+            report["propagated_crates"] = propagated
         build = subprocess.run([sys.executable, str(stage / "tools/android_build.py"), "--abi", args.abi,
                                 "--public", "--rust-only"], cwd=stage, capture_output=True, text=True, env=env)
         (args.output / "build.log").write_text(build.stdout + "\n" + build.stderr, encoding="utf-8")

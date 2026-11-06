@@ -64,6 +64,47 @@ class CompatibilityTests(unittest.TestCase):
             self.assertIn('horizon_client_render::chat::ChatScreen::draw', text)
             self.assertFalse(compat.apply_fork_remaps(m))
 
+    def test_source_shims_edit_exactly_one_site(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / 'runtime.rs').write_text(
+                'stack.data_mut().custom_name = Some(WAND_NAME.to_owned());\n'
+                'stack.data().and_then(|data| data.custom_name.as_deref()) == Some(WAND_NAME)\n',
+                encoding='utf-8')
+            self.assertEqual(compat.apply_fork_source_shims('worldedit', d), 2)
+            text = (d / 'runtime.rs').read_text(encoding='utf-8')
+            self.assertIn('nbt::Tag::String(WAND_NAME.to_owned())', text)
+            self.assertIn('custom_name_plain()).as_deref()', text)
+            with self.assertRaises(compat.Rejected):
+                compat.apply_fork_source_shims('worldedit', d)
+            self.assertEqual(compat.apply_fork_source_shims('appleskin', d), 0)
+
+    def test_bundle_crates_propagate_to_horizon_android(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            stage = Path(td)
+            client = stage / 'crates' / 'horizon-client'
+            android = stage / 'crates' / 'horizon-android'
+            client.mkdir(parents=True)
+            android.mkdir(parents=True)
+            (client / 'Cargo.toml').write_text(
+                '[package]\nname = "horizon-client"\n\n[dependencies]\n'
+                'serde = "1"\n'
+                'voicechat_engine = { path = "../../native-crates/voicechat/engine" }\n',
+                encoding='utf-8')
+            (android / 'Cargo.toml').write_text(
+                '[package]\nname = "horizon-android"\n\n[dependencies]\n'
+                'horizon-client = { path = "../horizon-client" }\n',
+                encoding='utf-8')
+            self.assertEqual(compat.propagate_bundle_crates(stage), ['voicechat_engine'])
+            text = (android / 'Cargo.toml').read_text(encoding='utf-8')
+            self.assertIn('voicechat_engine = { path = "../../native-crates/voicechat/engine" }', text)
+            # Idempotent: already listed, nothing to add.
+            self.assertEqual(compat.propagate_bundle_crates(stage), [])
+
     def test_latest_prefers_the_newest_appended_version(self):
         entry = {'versions': [
             {'version': '1.0', 'game': '26.3', 'file': 'a-1.0.hnmod'},
