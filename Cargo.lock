@@ -1426,6 +1426,7 @@ dependencies = [
  "horizon-bench",
  "horizon-client",
  "horizon-client-input",
+ "horizon-client-render",
  "horizon-core",
  "horizon-friends",
  "horizon-hdr",
