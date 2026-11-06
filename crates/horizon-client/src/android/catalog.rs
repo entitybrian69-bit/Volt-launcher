@@ -47,7 +47,7 @@ impl RendererMode {
 }
 
 fn default_launcher_dark() -> bool { true }
-fn default_launcher_accent() -> u32 { 0x5b67f2 }
+fn default_launcher_accent() -> u32 { 0x79e59c }
 
 fn default_pack_source() -> crate::shader_catalog::Origin {
     crate::shader_catalog::Origin::Modrinth
@@ -163,7 +163,7 @@ impl Config {
         config.launcher_accent &= 0x00ff_ffff;
         // The launcher's stock look moved from violet to the reference blue;
         // carry installs that still sit on the old default across with it.
-        if config.launcher_accent == 0x6b4bff || config.launcher_accent == 0x3b82f6 {
+        if matches!(config.launcher_accent, 0x6b4bff | 0x3b82f6 | 0x5b67f2) {
             config.launcher_accent = default_launcher_accent();
         }
         // Fold a finished play session into the running total (capped per session).

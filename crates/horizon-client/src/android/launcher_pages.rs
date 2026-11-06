@@ -30,16 +30,16 @@ pub(crate) mod theme {
     pub fn dark() -> bool { look().dark }
     fn accent() -> u32 { hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
-    pub fn BG() -> u32 { choose(hex(0x10142c,255), hex(0xe9f0fb,255)) }
+    pub fn BG() -> u32 { choose(hex(0x0c0e13,255), hex(0xedf1f0,255)) }
     pub fn BACKDROP() -> u32 { hex(0x070a1a, 215) }
-    pub fn RAIL() -> u32 { choose(hex(0x1c2142,195), hex(0xfcfdff,225)) }
-    pub fn CARD() -> u32 { choose(hex(0x232951,205), hex(0xfcfdff,230)) }
-    pub fn CARD_INNER() -> u32 { choose(hex(0xdfe3f8,46), hex(0xe6ebf7,245)) }
-    pub fn HOVER() -> u32 { choose(hex(0xdfe3f8,72), hex(0xd6dff0,245)) }
+    pub fn RAIL() -> u32 { choose(hex(0x15181f,205), hex(0xfcfdfd,225)) }
+    pub fn CARD() -> u32 { choose(hex(0x1a1d25,215), hex(0xfcfdfd,230)) }
+    pub fn CARD_INNER() -> u32 { choose(hex(0x272c36,225), hex(0xe7ecea,245)) }
+    pub fn HOVER() -> u32 { choose(hex(0x343a46,235), hex(0xd8e0dd,245)) }
     pub fn HERO_BG() -> u32 { CARD() }
     pub fn HERO_GLOW() -> u32 { lerp(CARD(), accent(), 0.22) }
     pub fn HERO_GLOW_SOFT() -> u32 { lerp(CARD(), accent(), 0.12) }
-    pub fn BORDER() -> u32 { choose(hex(0xffffff,38), hex(0x3a4a74,34)) }
+    pub fn BORDER() -> u32 { choose(hex(0xffffff,30), hex(0x3c4a44,34)) }
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
     pub fn CRIMSON_BRIGHT() -> u32 {
@@ -47,23 +47,28 @@ pub(crate) mod theme {
         hex(if dark() { glass.accent_soft } else { glass.accent }, 255)
     }
     pub fn CRIMSON_SOFT() -> u32 { (accent() & 0x00ffffff) | (42u32 << 24) }
-    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xe8ebfb,64), hex(0x101a30,26)) }
-    pub fn ON_CRIMSON() -> u32 { hex(look().glass.on_accent,255) }
-    pub fn TEXT() -> u32 { choose(hex(0xf5f6ff,255), hex(0x161c33,255)) }
-    pub fn MUTED() -> u32 { choose(hex(0xd3d7ec,255), hex(0x4b5572,255)) }
-    pub fn DIM() -> u32 { choose(hex(0xa7adcc,255), hex(0x687291,255)) }
+    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xffffff,22), hex(0x101a14,22)) }
+    pub fn ON_CRIMSON() -> u32 {
+        let a = look().glass.accent;
+        let lum = 0.2126 * (a >> 16 & 255) as f32 + 0.7152 * (a >> 8 & 255) as f32
+            + 0.0722 * (a & 255) as f32;
+        if lum > 150.0 { hex(0x0c1a12, 255) } else { hex(look().glass.on_accent, 255) }
+    }
+    pub fn TEXT() -> u32 { choose(hex(0xf2f5f3,255), hex(0x151c18,255)) }
+    pub fn MUTED() -> u32 { choose(hex(0xc6ccc9,255), hex(0x4b5551,255)) }
+    pub fn DIM() -> u32 { choose(hex(0x8f969b,255), hex(0x68726d,255)) }
     pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
     pub fn GLASS() -> u32 {
         if !dark() { return hex(0xffffff, 214); }
-        // Deep indigo frost per the chosen concept, softened toward the
-        // upstream accent-derived plate so accents still tint the panels.
-        lerp(hex(0x1d2244, 196), {
+        // Neutral smoked glass per the chosen reference, faintly tinted by
+        // the upstream accent-derived plate so accents still colour panels.
+        lerp(hex(0x16191f, 202), {
             let glass = look().glass;
-            hex(glass.plate, 196)
-        }, 0.35)
+            hex(glass.plate, 202)
+        }, 0.18)
     }
-    pub fn GLASS_INNER() -> u32 { choose(hex(0xe8ebfb,30), hex(0x101a30,12)) }
-    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,42), hex(0x3a4a74,30)) }
+    pub fn GLASS_INNER() -> u32 { choose(hex(0xffffff,14), hex(0x101a14,12)) }
+    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -591,7 +596,7 @@ fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
         }
     }
     // A quiet dim layer keeps the frosted panels readable over the scene.
-    ui.rounded(0.0, 0.0, w, h, 0.0, if dark { hex(0x0b0f22, 92) } else { hex(0xffffff, 46) });
+    ui.rounded(0.0, 0.0, w, h, 0.0, if dark { hex(0x090b12, 128) } else { hex(0xffffff, 56) });
 }
 
 /// "You've played for 12 hours! Last played 2 hours ago", from persisted
@@ -627,6 +632,102 @@ fn played_summary(config: &crate::catalog::Config) -> String {
         format!("{} days ago", ago / 86_400)
     };
     format!("{played} Last played {last}.")
+}
+
+/// The big fully-rounded Play control with a triangle icon and press
+/// feedback; its target is inserted at the front so it always wins the tap.
+fn draw_play_pill(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    label: &str,
+) {
+    let [x, y, w, h] = rect;
+    let press_t = ACTIVE_FEEDBACK.with(|fb| {
+        fb.borrow().and_then(|(act, ts)| {
+            let el = ts.elapsed().as_secs_f32();
+            (act == Action::Play && el < 0.22).then_some(el / 0.22)
+        })
+    });
+    let v_start = ui.batch_mut().vertices.len();
+    let mut bg = theme::CRIMSON();
+    if let Some(t) = press_t {
+        bg = horizon_client::ui_theme::color::lerp(bg, theme::CRIMSON_BRIGHT(), (1.0 - t).powi(2) * 0.30);
+    }
+    ui.rounded(x, y, w, h, h * 0.5, bg);
+    let font = if h >= 50.0 { 19.0 } else { 16.5 };
+    let text_w = ui.measure(Face::LauncherMedium, font, label);
+    let tri = font * 0.62;
+    let start_x = x + (w - text_w - tri - 9.0) * 0.5;
+    let cy = y + h * 0.5;
+    {
+        let white = ui.atlas_ref().white;
+        let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
+        let color = theme::ON_CRIMSON();
+        let points = [
+            [ui.to_batch(start_x), ui.to_batch(cy - tri * 0.55)],
+            [ui.to_batch(start_x), ui.to_batch(cy + tri * 0.55)],
+            [ui.to_batch(start_x + tri), ui.to_batch(cy)],
+        ];
+        for pos in points {
+            ui.batch_mut().vertices.push(horizon_client::hud::HudVertex {
+                pos, uv, color, depth: 0.0, glint_uv: [0.0, 0.0],
+            });
+        }
+    }
+    ui.text(Face::LauncherMedium, font, start_x + tri + 9.0,
+        text_vcenter(y, h, font), theme::ON_CRIMSON(), label);
+    if let Some(t) = press_t {
+        let dip = (t * std::f32::consts::PI).sin() * (1.0 - t * 0.45);
+        ui.animate_vertices(v_start, 0.0, 0.0, 1.0 - 0.042 * dip, [x + w * 0.5, cy], 1.0);
+    }
+    targets.insert(0, (rect, Action::Play));
+}
+
+/// A small outlined status pill ("READY", "SELECTED"); returns its width.
+fn draw_badge(ui: &mut Ui, x: f32, y: f32, label: &str, color: u32) -> f32 {
+    let w = ui.measure(Face::LauncherMedium, 11.0, label) + 20.0;
+    ui.border(x, y, w, 22.0, 11.0, color);
+    draw_centered_text(ui, Face::LauncherMedium, 11.0, [x, y, w, 22.0], color, label);
+    w
+}
+
+/// Minimal line icons for home tiles that are not launcher pages, built from
+/// the same primitives as the page icons.
+fn draw_tile_icon(ui: &mut Ui, kind: u8, cx: f32, cy: f32, col: u32) {
+    match kind {
+        // Worlds: a globe ring with an equator.
+        0 => {
+            ui.border(cx - 8.0, cy - 8.0, 16.0, 16.0, 8.0, col);
+            ui.rounded(cx - 8.0, cy - 1.0, 16.0, 2.0, 1.0, col);
+            ui.rounded(cx - 1.0, cy - 8.0, 2.0, 16.0, 1.0, col);
+        }
+        // Multiplayer: two heads side by side.
+        1 => {
+            ui.rounded(cx - 8.0, cy - 6.0, 7.0, 7.0, 3.5, col);
+            ui.rounded(cx + 1.0, cy - 6.0, 7.0, 7.0, 3.5, col);
+            ui.rounded(cx - 8.5, cy + 3.0, 8.0, 5.0, 2.5, col);
+            ui.rounded(cx + 0.5, cy + 3.0, 8.0, 5.0, 2.5, col);
+        }
+        // Screenshots: a camera body with a lens dot.
+        2 => {
+            ui.border(cx - 8.5, cy - 6.0, 17.0, 12.5, 4.0, col);
+            ui.rounded(cx - 2.5, cy - 2.2, 5.0, 5.0, 2.5, col);
+            ui.rounded(cx - 6.0, cy - 8.5, 5.0, 3.0, 1.5, col);
+        }
+        // Logs: three text lines.
+        3 => {
+            for (i, lw) in [16.0, 12.0, 14.0].iter().enumerate() {
+                ui.rounded(cx - 8.0, cy - 6.0 + i as f32 * 5.5, *lw, 2.4, 1.2, col);
+            }
+        }
+        // Boost/settings bolt: a simple two-part lightning mark.
+        _ => {
+            ui.rounded(cx - 1.0, cy - 8.0, 4.5, 8.5, 1.5, col);
+            ui.rounded(cx - 3.5, cy - 0.5, 4.5, 8.5, 1.5, col);
+            ui.rounded(cx - 5.0, cy - 1.2, 10.0, 2.4, 1.2, col);
+        }
+    }
 }
 
 fn draw_account_chip(
@@ -752,6 +853,97 @@ struct DrawCtx<'a> {
 }
 
 impl DrawCtx<'_> {
+    /// Bottom shell per the chosen reference: account chip on the left, a
+    /// centred pill dock (Home · Instances · Browse · Settings) and round
+    /// Discord / Files buttons on the right. Targets are pushed before any
+    /// page content so the shell always wins its taps.
+    fn draw_shell(&mut self, ui: &mut Ui, w: f32, h: f32, account_status: &str) {
+        let bar_h = 62.0;
+        let by = h - bar_h - 12.0;
+        // Account chip, clamped so it can never run under the centred dock.
+        let dock_item = if w >= 900.0 { 102.0 } else { 88.0 };
+        let dock_left = (w - (dock_item * 4.0 + 20.0)) * 0.5;
+        let chip_w = 200.0_f32.min(w * 0.26).min(dock_left - 26.0).max(120.0);
+        let chip = [14.0, by, chip_w, bar_h];
+        ui.rounded(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS());
+        ui.border(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS_BORDER());
+        ui.rounded(chip[0] + 8.0, chip[1] + 8.0, bar_h - 16.0, bar_h - 16.0,
+            (bar_h - 16.0) * 0.5, theme::CARD_INNER());
+        let (name, badge) = account_status.split_once(" • ")
+            .map(|(n, b)| (n.to_owned(), b.to_owned()))
+            .unwrap_or_else(|| (account_status.to_owned(), "Offline".to_owned()));
+        let initial = name.chars().next().map(|c| c.to_ascii_uppercase()).unwrap_or('V');
+        draw_centered_text(ui, Face::LauncherMedium, 17.0,
+            [chip[0] + 8.0, chip[1] + 8.0, bar_h - 16.0, bar_h - 16.0],
+            theme::CRIMSON_BRIGHT(), &initial.to_string());
+        let text_x = chip[0] + bar_h + 2.0;
+        let name = ui.fit_text(Face::LauncherMedium, 14.0, &name, chip_w - bar_h - 16.0);
+        ui.text(Face::LauncherMedium, 14.0, text_x, chip[1] + 12.0, theme::TEXT(), &name);
+        let badge = ui.fit_text(Face::LauncherRegular, 11.5, &badge, chip_w - bar_h - 16.0);
+        ui.text(Face::LauncherRegular, 11.5, text_x, chip[1] + 33.0, theme::CRIMSON_BRIGHT(), &badge);
+        self.targets.push((chip, Action::Page(Page::Account)));
+        // Centred dock.
+        let item_w = dock_item;
+        let dock_w = item_w * 4.0 + 20.0;
+        let dock = [(w - dock_w) * 0.5, by, dock_w, bar_h];
+        ui.rounded(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS());
+        ui.border(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS_BORDER());
+        let items: [(&str, Page, Action); 4] = [
+            ("Home", Page::Play, Action::Page(Page::Play)),
+            ("Instances", Page::Installed, Action::Profile),
+            ("Browse", Page::Mods, Action::Page(Page::Mods)),
+            ("Settings", Page::Settings, Action::Page(Page::Settings)),
+        ];
+        for (i, (label, icon, action)) in items.iter().enumerate() {
+            let rect = [dock[0] + 10.0 + i as f32 * item_w, dock[1] + 5.0, item_w - 4.0, bar_h - 10.0];
+            let active = match i {
+                0 => self.catalog.page == Page::Play,
+                1 => false,
+                2 => matches!(self.catalog.page,
+                    Page::Mods | Page::Packs | Page::Shaders | Page::Installed),
+                _ => matches!(self.catalog.page, Page::Settings | Page::VoltSettings),
+            };
+            if active {
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], (bar_h - 10.0) * 0.5, theme::CRIMSON_BADGE());
+            }
+            let col = if active { theme::CRIMSON_BRIGHT() } else { theme::MUTED() };
+            draw_page_icon(ui, *icon, rect[0] + rect[2] * 0.5, rect[1] + 17.0, col);
+            draw_centered_text(ui, Face::LauncherMedium, 10.5,
+                [rect[0], rect[1] + 28.0, rect[2], 18.0],
+                if active { theme::TEXT() } else { theme::MUTED() }, label);
+            self.targets.push((rect, *action));
+        }
+        // Round Discord and Files buttons.
+        let fab = bar_h - 6.0;
+        let discord = [w - 14.0 - fab * 2.0 - 10.0, by + 3.0, fab, fab];
+        let discord_bg = horizon_client::ui_theme::color::hex(0x5865f2, 255);
+        ui.rounded(discord[0], discord[1], discord[2], discord[3], fab * 0.5, discord_bg);
+        draw_discord_icon(ui, discord[0] + fab * 0.5, discord[1] + fab * 0.5, theme::TEXT(), discord_bg);
+        self.targets.push((discord, Action::Discord));
+        let files = [w - 14.0 - fab, by + 3.0, fab, fab];
+        ui.rounded(files[0], files[1], files[2], files[3], fab * 0.5, theme::GLASS());
+        ui.border(files[0], files[1], files[2], files[3], fab * 0.5, theme::GLASS_BORDER());
+        let (fx, fy) = (files[0] + fab * 0.5, files[1] + fab * 0.5);
+        ui.rounded(fx - 1.6, fy - 9.0, 3.2, 12.0, 1.6, theme::MUTED());
+        {
+            let white = ui.atlas_ref().white;
+            let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
+            let color = theme::MUTED();
+            let points = [
+                [ui.to_batch(fx - 6.0), ui.to_batch(fy + 1.0)],
+                [ui.to_batch(fx + 6.0), ui.to_batch(fy + 1.0)],
+                [ui.to_batch(fx), ui.to_batch(fy + 8.0)],
+            ];
+            for pos in points {
+                ui.batch_mut().vertices.push(horizon_client::hud::HudVertex {
+                    pos, uv, color, depth: 0.0, glint_uv: [0.0, 0.0],
+                });
+            }
+        }
+        self.targets.push((files, Action::Page(Page::Installed)));
+    }
+
+    #[allow(dead_code)]
     fn draw_sidebar(&mut self, ui: &mut Ui, rx: f32, ry: f32, rw: f32, rh: f32) {
         ui.rounded(rx, ry, rw, rh, 18.0, theme::GLASS());
         ui.border(rx, ry, rw, rh, 18.0, theme::GLASS_BORDER());
@@ -848,6 +1040,7 @@ impl DrawCtx<'_> {
     /// destination: Wardrobe opens the Account wardrobe, Versions opens the
     /// profile/version chooser, Patch notes opens the release history, and
     /// Build log opens the Console tab.
+    #[allow(dead_code)]
     fn draw_topbar(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
         let [x, y, w, h] = area;
         // The whole navigation sits on one rounded frosted bar.
@@ -952,157 +1145,157 @@ impl DrawCtx<'_> {
     fn draw_instance_page(&mut self, ui: &mut Ui, area: [f32; 4], compact: bool, account_status: &str) {
         use horizon_client::official_install::InstallStage;
         let [x, y, w, h] = area;
-        // When the keyboard or a very short viewport is open, keep the mod search
-        // and its results reachable instead of consuming the screen with the header.
-        if self.catalog.page == Page::Mods && h < 320.0 {
+        // Browse (dock) lands on the full mod catalog with search and filters.
+        if self.catalog.page == Page::Mods {
             self.draw_mods_landing(ui, area, account_status);
             return;
         }
         let installed = horizon_client::official_install::ready(self.home);
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
-        // Hero: large instance name with the logo on its right, then the
-        // played-time subtitle with the personal part in the accent colour.
-        let logo = if compact { 42.0 } else { 54.0 };
+        let play_label = if installing { "Installing" } else if installed { "Play" }
+            else if self.error.is_some() { "Retry" } else { "Download" };
+
+        // Secondary home views (Worlds, Multiplayer, Shots, Logs): a back
+        // chip and title, then the existing tab content.
+        if self.home_tab != HomeTab::Overview {
+            let back = [x, y, 92.0, 38.0];
+            ui.rounded(back[0], back[1], back[2], back[3], 19.0, theme::GLASS());
+            ui.border(back[0], back[1], back[2], back[3], 19.0, theme::GLASS_BORDER());
+            draw_centered_text(ui, Face::LauncherMedium, 13.0, back, theme::TEXT(), "< Home");
+            self.targets.push((back, Action::HomeTab(HomeTab::Overview)));
+            let title = match self.home_tab {
+                HomeTab::Worlds => "Worlds",
+                HomeTab::Multiplayer => "Multiplayer",
+                HomeTab::Screenshots => "Screenshots",
+                _ => "Launcher log",
+            };
+            ui.text(Face::Display, 21.0, x + 106.0, y + 5.0, theme::TEXT(), title);
+            let body = [x, y + 50.0, w, (h - 50.0).max(0.0)];
+            let body_v_start = ui.batch_mut().vertices.len();
+            self.draw_home_tab(ui, body, account_status, installed);
+            if let Some((dx, alpha)) = self.tab_anim {
+                ui.animate_vertices(body_v_start, dx, 0.0, 1.0,
+                    [x + w * 0.5, body[1] + body[3] * 0.5], alpha);
+            }
+            return;
+        }
+
+        // ----- Home overview, as in the chosen reference -----
+        // Brand row with instance count and a "+ New" pill.
+        let mut instances = 1 + std::fs::read_dir(self.home.join("profiles")).into_iter()
+            .flatten().flatten().filter(|entry| entry.path().is_dir()).count();
+        instances = instances.max(1);
+        ui.volt_logo(x, y + 2.0, 36.0, 36.0);
+        ui.text(Face::Display, 21.0, x + 46.0, y, theme::TEXT(), "VOLT LAUNCHER");
+        let sub = format!("Native Rust · Minecraft 26.3 · {instances} instance{}",
+            if instances == 1 { "" } else { "s" });
+        ui.text(Face::LauncherRegular, 11.5, x + 46.0, y + 27.0, theme::MUTED(), &sub);
+        let new_pill = [x + w - 96.0, y + 1.0, 96.0, 38.0];
+        ui.rounded(new_pill[0], new_pill[1], new_pill[2], new_pill[3], 19.0, theme::GLASS());
+        ui.border(new_pill[0], new_pill[1], new_pill[2], new_pill[3], 19.0, theme::GLASS_BORDER());
+        draw_centered_text(ui, Face::LauncherMedium, 13.0, new_pill, theme::TEXT(), "+ New");
+        self.targets.push((new_pill, Action::Profile));
+
+        // Selected-instance card on the left, with Play inside it.
+        let top = y + 50.0;
+        let body_h = (y + h - top).max(120.0);
+        let card_w = if compact { (w * 0.38).clamp(200.0, 260.0) } else { (w * 0.32).clamp(230.0, 300.0) };
+        let card = [x, top, card_w, body_h];
+        ui.rounded(card[0], card[1], card[2], card[3], 22.0, theme::GLASS());
+        ui.border(card[0], card[1], card[2], card[3], 22.0, theme::BORDER_CRIMSON());
+        ui.rounded(card[0] + 14.0, card[1] + 14.0, 48.0, 48.0, 13.0,
+            horizon_client::ui_theme::color::hex(0xf2f3fb, 230));
+        ui.volt_logo(card[0] + 19.0, card[1] + 19.0, 38.0, 38.0);
         let profile = self.catalog.config.profile;
         let title = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
-        let name_size = if compact { 30.0 } else { 40.0 };
-        let name = ui.fit_text(Face::Display, name_size, &title, (w - logo - 18.0).max(24.0));
-        ui.text(Face::Display, name_size, x + 2.0, y - 2.0, theme::TEXT(), &name);
-        let name_w = ui.measure(Face::Display, name_size, &name);
-        ui.volt_logo(x + name_w + 18.0, y + 2.0, logo, logo);
-        let state = if installing { "Preparing Minecraft 26.3" }
-            else if installed { "Minecraft 26.3" }
-            else { "Minecraft 26.3 · Game files need to be downloaded" };
-        let played = ui.fit_text(Face::LauncherRegular, 13.0, &played_summary(&self.catalog.config), w - 8.0);
-        ui.text(Face::LauncherRegular, 13.0, x + 4.0, y + logo + 10.0, theme::CRIMSON_BRIGHT(), &played);
-        let played_w = ui.measure(Face::LauncherRegular, 13.0, &played);
-        if w - played_w - 20.0 > 80.0 {
-            let state = ui.fit_text(Face::LauncherRegular, 13.0, &format!(" · {state}"), w - played_w - 12.0);
-            ui.text(Face::LauncherRegular, 13.0, x + 4.0 + played_w, y + logo + 10.0, theme::MUTED(), &state);
+        let title = ui.fit_text(Face::Display, 19.0, &title, card_w - 90.0);
+        ui.text(Face::Display, 19.0, card[0] + 72.0, card[1] + 14.0, theme::TEXT(), &title);
+        ui.text(Face::LauncherRegular, 12.0, card[0] + 72.0, card[1] + 40.0, theme::DIM(), "26.3 · Native");
+        let badge_y = card[1] + 72.0;
+        let badge = if installing { "INSTALLING" } else if installed { "READY" } else { "NOT INSTALLED" };
+        let bw = draw_badge(ui, card[0] + 14.0, badge_y, badge,
+            if installed || installing { theme::CRIMSON_BRIGHT() } else { theme::DIM() });
+        if card_w - bw >= 118.0 {
+            draw_badge(ui, card[0] + 20.0 + bw, badge_y, "SELECTED", theme::DIM());
         }
-        // Control row: version selector and Volt Boost; Play lives bottom right.
-        let ay = y + logo + 38.0;
-        let control_h = 48.0;
-        let version_w = if compact { 170.0 } else { 230.0 };
-        let version = [x, ay, version_w, control_h];
-        ui.rounded(version[0], version[1], version[2], version[3], 12.0, theme::GLASS());
-        ui.border(version[0], version[1], version[2], version[3], 12.0, theme::GLASS_BORDER());
-        ui.text(Face::LauncherRegular, 10.5, version[0] + 14.0, version[1] + 7.0, theme::DIM(), "Version");
-        let v_label = ui.fit_text(Face::LauncherMedium, 13.0,
-            &format!("native-26.3 · Profile {profile}"), version_w - 44.0);
-        ui.text(Face::LauncherMedium, 13.0, version[0] + 14.0, version[1] + 23.0, theme::TEXT(), &v_label);
-        ui.text(Face::LauncherMedium, 13.0, version[0] + version_w - 24.0,
-            text_vcenter(version[1], control_h, 13.0), theme::MUTED(), "v");
-        self.targets.push((version, Action::Profile));
-        if w >= version_w + 140.0 {
-            styled_button(ui, self.targets, [x + version_w + 10.0, ay, 128.0, control_h],
-                "Volt Boost", Action::OpenVoltBoost, BtnStyle::Secondary, true);
+        let played = if self.catalog.config.last_played == 0 { "Never played".to_owned() }
+            else { played_summary(&self.catalog.config) };
+        let played = ui.fit_text(Face::LauncherRegular, 12.0, &played, card_w - 28.0);
+        ui.text(Face::LauncherRegular, 12.0, card[0] + 14.0, badge_y + 30.0, theme::MUTED(), &played);
+        if installing {
+            let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
+            let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
+            let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
+            let bar = [card[0] + 14.0, card[1] + card[3] - 78.0, card_w - 28.0, 6.0];
+            ui.rounded(bar[0], bar[1], bar[2], bar[3], 3.0, theme::CARD_INNER());
+            ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(6.0), bar[3], 3.0, theme::CRIMSON());
+        } else if let Some(error) = self.error.as_deref() {
+            let error = ui.fit_text(Face::LauncherRegular, 11.0, error, card_w - 28.0);
+            ui.text(Face::LauncherRegular, 11.0, card[0] + 14.0, card[1] + card[3] - 82.0,
+                theme::CRIMSON_BRIGHT(), &error);
         }
-        // Tab bar: large, generously spaced chips.
-        let tabs_y = ay + control_h + 18.0;
-        let tabs = [("Overview", Action::HomeTab(HomeTab::Overview)),
-            ("Mods", Action::Page(Page::Mods)), ("Worlds", Action::HomeTab(HomeTab::Worlds)),
-            ("Multiplayer", Action::HomeTab(HomeTab::Multiplayer)), ("Packs", Action::Page(Page::Packs)),
-            ("Screenshots", Action::HomeTab(HomeTab::Screenshots)), ("Console", Action::HomeTab(HomeTab::Console))];
-        let tab_h = if compact { 38.0 } else { 42.0 };
-        let tab_w = (w / tabs.len() as f32).min(118.0);
-        for (i, (label, action)) in tabs.iter().enumerate() {
-            let r = [x + i as f32 * tab_w, tabs_y, tab_w - 6.0, tab_h];
-            let selected = match action {
-                Action::HomeTab(tab) => self.catalog.page == Page::Play && self.home_tab == *tab,
-                Action::Page(page) => self.catalog.page == *page,
-                _ => false,
-            };
-            ui.rounded(r[0], r[1], r[2], r[3], 11.0,
-                if selected { theme::CRIMSON_BADGE() } else { theme::GLASS_INNER() });
-            ui.border(r[0], r[1], r[2], r[3], 11.0, theme::GLASS_BORDER());
-            if selected {
-                ui.rounded(r[0] + 10.0, r[1] + r[3] - 4.0, (r[2] - 20.0).max(12.0), 3.0, 1.5, theme::CRIMSON());
+        draw_play_pill(ui, self.targets,
+            [card[0] + 14.0, card[1] + card[3] - 64.0, card_w - 28.0, 50.0], play_label);
+
+        // Quick tiles on the right: every launcher area, two rows.
+        let gx = x + card_w + 16.0;
+        let gw = (x + w - gx).max(180.0);
+        let columns = if gw >= 540.0 { 4.0 } else { 2.0 };
+        let gap = 10.0;
+        let tile_w = (gw - (columns - 1.0) * gap) / columns;
+        let device_h = 92.0;
+        let rows = (8.0 / columns).ceil();
+        let tile_h = ((body_h - device_h - 18.0 - (rows - 1.0) * gap) / rows).clamp(42.0, 64.0);
+        let tiles: [(&str, Option<Page>, u8, Action); 8] = [
+            ("Mods", Some(Page::Mods), 0, Action::Page(Page::Mods)),
+            ("Packs", Some(Page::Packs), 0, Action::Page(Page::Packs)),
+            ("Shaders", Some(Page::Shaders), 0, Action::Page(Page::Shaders)),
+            ("Worlds", None, 0, Action::HomeTab(HomeTab::Worlds)),
+            ("Multiplayer", None, 1, Action::HomeTab(HomeTab::Multiplayer)),
+            ("Shots", None, 2, Action::HomeTab(HomeTab::Screenshots)),
+            ("Logs", None, 3, Action::HomeTab(HomeTab::Console)),
+            ("Volt Settings", None, 4, Action::Page(Page::VoltSettings)),
+        ];
+        for (i, (label, page, glyph, action)) in tiles.iter().enumerate() {
+            let col = i as f32 % columns;
+            let row = (i as f32 / columns).floor();
+            let rect = [gx + col * (tile_w + gap), top + row * (tile_h + gap), tile_w, tile_h];
+            if rect[1] + rect[3] > y + h { continue; }
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], rect[3] * 0.5, theme::GLASS());
+            ui.border(rect[0], rect[1], rect[2], rect[3], rect[3] * 0.5, theme::GLASS_BORDER());
+            let icon_x = rect[0] + 26.0;
+            match page {
+                Some(page) => draw_page_icon(ui, *page, icon_x, rect[1] + rect[3] * 0.5, theme::MUTED()),
+                None => draw_tile_icon(ui, *glyph, icon_x, rect[1] + rect[3] * 0.5, theme::MUTED()),
             }
-            let label = ui.fit_text(Face::LauncherMedium, if compact { 11.5 } else { 13.0 }, label, r[2] - 6.0);
-            draw_centered_text(ui, Face::LauncherMedium, if compact { 11.5 } else { 13.0 }, r,
-                if selected { theme::TEXT() } else { theme::MUTED() }, &label);
-            self.targets.push((r, *action));
+            let label = ui.fit_text(Face::LauncherMedium, 13.5, label, tile_w - 62.0);
+            ui.text(Face::LauncherMedium, 13.5, rect[0] + 46.0,
+                text_vcenter(rect[1], rect[3], 13.5), theme::TEXT(), &label);
+            self.targets.push((rect, *action));
         }
-        let body_y = tabs_y + tab_h + 14.0;
-        let body_h = (y + h - body_y).max(0.0);
-        let play_h = if compact { 50.0 } else { 56.0 };
-        let body_v_start = ui.batch_mut().vertices.len();
-        if self.catalog.page == Page::Mods {
-            // Single-column list matches the reference and retains search, filters
-            // and toggles; it ends above the floating Play control so every
-            // toggle stays reachable.
-            self.draw_mods_landing(ui, [x, body_y, w, (body_h - play_h - 10.0).max(0.0)], account_status);
-        } else if body_h >= 60.0 {
-            if installing {
-                let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
-                let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
-                let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
-                let stage = ui.fit_text(Face::LauncherMedium, 14.0, progress.stage.label(), w - 32.0);
-                ui.text(Face::LauncherMedium, 14.0, x + 14.0, body_y + 12.0, theme::TEXT(), &stage);
-                ui.rounded(x + 14.0, body_y + 42.0, w - 28.0, 7.0, 3.0, theme::CARD_INNER());
-                if fraction > 0.0 {
-                    ui.rounded(x + 14.0, body_y + 42.0, ((w - 28.0) * fraction).max(7.0), 7.0, 3.0, theme::CRIMSON());
-                }
-            } else {
-                self.draw_home_tab(ui, [x, body_y, w, body_h], account_status, installed);
-            }
-        }
-        // Slide/fade the tab body while a tab switch animation is running.
-        if let Some((dx, alpha)) = self.tab_anim {
-            ui.animate_vertices(body_v_start, dx, 0.0, 1.0,
-                [x + w * 0.5, body_y + body_h * 0.5], alpha);
-        }
-        // The large Play control is anchored at the bottom right, drawn above
-        // the tab body; its target goes first so it always wins the tap.
-        let play_w = if compact { 148.0 } else { 176.0 };
-        let play = [x + w - play_w, y + h - play_h, play_w, play_h];
-        ui.rounded(play[0] + 2.0, play[1] + 5.0, play[2], play[3], play_h * 0.5, theme::BACKDROP());
-        let label = if installing { "Installing" } else if installed { "Play" }
-            else if self.error.is_some() { "Retry" } else { "Download" };
-        let press_t = ACTIVE_FEEDBACK.with(|fb| {
-            fb.borrow().and_then(|(act, ts)| {
-                let el = ts.elapsed().as_secs_f32();
-                (act == Action::Play && el < 0.22).then_some(el / 0.22)
-            })
-        });
-        let v_start = ui.batch_mut().vertices.len();
-        let mut bg = theme::CRIMSON();
-        if let Some(t) = press_t {
-            bg = horizon_client::ui_theme::color::lerp(bg, theme::CRIMSON_BRIGHT(), (1.0 - t).powi(2) * 0.30);
-        }
-        ui.rounded(play[0], play[1], play[2], play[3], play_h * 0.5, bg);
-        ui.border(play[0], play[1], play[2], play[3], play_h * 0.5, theme::CRIMSON_BRIGHT());
-        let font = 19.5;
-        let text_w = ui.measure(Face::LauncherMedium, font, label);
-        let tri = 13.0;
-        let start_x = play[0] + (play_w - text_w - tri - 9.0) * 0.5;
-        let cy = play[1] + play_h * 0.5;
-        // The triangle icon, as three raw vertices on the solid white texel.
-        {
-            let white = ui.atlas_ref().white;
-            let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
-            let color = theme::ON_CRIMSON();
-            let points = [
-                [ui.to_batch(start_x), ui.to_batch(cy - tri * 0.55)],
-                [ui.to_batch(start_x), ui.to_batch(cy + tri * 0.55)],
-                [ui.to_batch(start_x + tri), ui.to_batch(cy)],
+        // DEVICE rows under the tiles.
+        let dev_y = top + rows * tile_h + (rows - 1.0) * gap + 6.0;
+        if dev_y + device_h <= y + h + 2.0 {
+            ui.text(Face::LauncherMedium, 11.0, gx + 4.0, dev_y, theme::DIM(), "DEVICE");
+            let dcard = [gx, dev_y + 16.0, gw, device_h - 20.0];
+            ui.rounded(dcard[0], dcard[1], dcard[2], dcard[3], 16.0, theme::GLASS());
+            ui.border(dcard[0], dcard[1], dcard[2], dcard[3], 16.0, theme::GLASS_BORDER());
+            let rows_def: [(&str, String, Action); 2] = [
+                ("Renderer", self.catalog.config.renderer.label().to_owned(), Action::Renderer),
+                ("Volt Boost", "Presets".to_owned(), Action::OpenVoltBoost),
             ];
-            for pos in points {
-                ui.batch_mut().vertices.push(horizon_client::hud::HudVertex {
-                    pos, uv, color, depth: 0.0, glint_uv: [0.0, 0.0],
-                });
+            let row_h = dcard[3] / 2.0;
+            for (i, (label, value, action)) in rows_def.iter().enumerate() {
+                let rect = [dcard[0], dcard[1] + i as f32 * row_h, dcard[2], row_h];
+                ui.text(Face::LauncherRegular, 12.5, rect[0] + 16.0,
+                    text_vcenter(rect[1], row_h, 12.5), theme::MUTED(), label);
+                let vw = ui.measure(Face::LauncherMedium, 12.5, value);
+                ui.text(Face::LauncherMedium, 12.5, rect[0] + rect[2] - vw - 16.0,
+                    text_vcenter(rect[1], row_h, 12.5), theme::TEXT(), value);
+                self.targets.push((rect, *action));
             }
         }
-        ui.text(Face::LauncherMedium, font, start_x + tri + 9.0,
-            text_vcenter(play[1], play_h, font), theme::ON_CRIMSON(), label);
-        if let Some(t) = press_t {
-            let dip = (t * std::f32::consts::PI).sin() * (1.0 - t * 0.45);
-            ui.animate_vertices(v_start, 0.0, 0.0, 1.0 - 0.042 * dip,
-                [play[0] + play_w * 0.5, cy], 1.0);
-        }
-        self.targets.insert(0, (play, Action::Play));
     }
 
     fn draw_home_tab(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str, installed: bool) {
@@ -5020,12 +5213,8 @@ impl Launcher {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
                 [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
-                let rail_w = 208.0;
-                ctx.draw_sidebar(&mut ui, 12.0, 12.0, rail_w, (h - 24.0).max(260.0));
-                let x = 12.0 + rail_w + 18.0;
-                let cw = (w - rail_w - 44.0).max(240.0);
-                ctx.draw_topbar(&mut ui, [x, 14.0, cw, 44.0], &account_status);
-                [x, 72.0, cw, (h - 86.0).max(120.0)]
+                ctx.draw_shell(&mut ui, w, h, &account_status);
+                [16.0, 14.0, (w - 32.0).max(240.0), (h - 102.0).max(120.0)]
             };
 
             page_v_start = ui.batch_mut().vertices.len();
@@ -5358,7 +5547,7 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::CycleAccent) => {
-                const COLORS: [u32; 8] = [0x5b67f2, 0x3b82f6, 0x0e9fbd, 0x18a977, 0xe6ab32, 0xf26c5b, 0xd755ae, 0x8b5cf6];
+                const COLORS: [u32; 8] = [0x79e59c, 0x5b67f2, 0x3b82f6, 0x0e9fbd, 0xe6ab32, 0xf26c5b, 0xd755ae, 0x8b5cf6];
                 let current = self.catalog.config.launcher_accent;
                 let index = COLORS.iter().position(|&c| c == current).map_or(0, |i| (i + 1) % COLORS.len());
                 self.catalog.config.launcher_accent = COLORS[index];
