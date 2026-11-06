@@ -1,4 +1,4 @@
-# Re-run after engine-side target fixes (e.g. horizon-android render dep) by pushing a (probe rerun: jade Game helpers)
+# Re-run after engine-side target fixes (e.g. horizon-android render dep) by pushing a (probe rerun: Jukebox::record accessor)
 # change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 
