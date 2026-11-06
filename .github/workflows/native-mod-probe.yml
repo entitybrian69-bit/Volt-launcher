@@ -30,7 +30,10 @@ jobs:
       matrix:
         abi: [arm64-v8a, armeabi-v7a]
         mod: [jei, jade, veinminer, horizon_physics, appleskin, status_effect_hud,
-              toggle_sprint, inventory_profiles, shulker_peek, mousetricks, itemnew]
+              toggle_sprint, inventory_profiles, shulker_peek, mousetricks, itemnew,
+              voicechat, worldedit, horizonmatica, visuality_horizon, eatinganimation,
+              enchantmenthints, held_item_info, light_overlay, right_click_crops,
+              carryblock, chatheads, smartf3, fast_items]
         include:
           - abi: arm64-v8a
             target: aarch64-linux-android
@@ -78,6 +81,58 @@ jobs:
           - mod: itemnew
             file: itemnew-0.1.1.hnmod
             tag: itemnew-0.1.1
+            raw_targets: "--experimental-raw-targets"
+          - mod: voicechat
+            file: voicechat-1.0.0.hnmod
+            tag: voicechat-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: worldedit
+            file: worldedit-1.2.1.hnmod
+            tag: worldedit-1.2.1
+            raw_targets: "--experimental-raw-targets"
+          - mod: horizonmatica
+            file: horizonmatica-0.1.1.hnmod
+            tag: horizonmatica-0.1.1
+            raw_targets: "--experimental-raw-targets"
+          - mod: visuality_horizon
+            file: visuality_horizon-1.0.2.hnmod
+            tag: visuality_horizon-1.0.2
+            raw_targets: "--experimental-raw-targets"
+          - mod: eatinganimation
+            file: eatinganimation-0.1.0.hnmod
+            tag: eatinganimation-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: enchantmenthints
+            file: enchantmenthints-0.1.0.hnmod
+            tag: enchantmenthints-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: held_item_info
+            file: held_item_info-0.1.0.hnmod
+            tag: held_item_info-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: light_overlay
+            file: light_overlay-1.0.0.hnmod
+            tag: light_overlay-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: right_click_crops
+            file: right_click_crops-1.0.0.hnmod
+            tag: right_click_crops-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: carryblock
+            file: carryblock-0.1.2.hnmod
+            tag: carryblock-0.1.2
+            raw_targets: "--experimental-raw-targets"
+          - mod: chatheads
+            file: chatheads-0.1.0.hnmod
+            tag: chatheads-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: smartf3
+            file: smartf3-0.1.0.hnmod
+            tag: smartf3-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: fast_items
+            file: fast_items-0.1.0.hnmod
+            tag: fast_items-0.1.0
             raw_targets: "--experimental-raw-targets"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
