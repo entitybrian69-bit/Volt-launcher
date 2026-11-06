@@ -760,6 +760,37 @@ impl Screen {
         }
     }
 }
+/// The block a ray along the view meets (`native_view_hit`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHit {
+    pub block_x: i32,
+    pub block_y: i32,
+    pub block_z: i32,
+    /// Where the ray meets the block.
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    /// The block's id (`minecraft:stone`).
+    pub block: String,
+}
+/// A tank as a side reaches it (`native_fluid_tanks`).
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeFluidTank {
+    /// Its number, for the mod's own use.
+    pub(crate) tank: usize,
+    /// `minecraft:water` or `minecraft:lava`; none when the tank is empty.
+    pub(crate) fluid: Option<String>,
+    /// In millibuckets: a bucket is a thousand.
+    pub(crate) amount: i32,
+    pub(crate) capacity: i32,
+    /// Whether a fill may reach it through this side.
+    pub(crate) can_fill: bool,
+    /// Whether a drain may take it through this side.
+    pub(crate) can_drain: bool,
+}
+/// The farthest `native_view_hit` looks, in blocks.
+pub(crate) const RAYCAST_MAX: f32 = 1024.0;
 struct Mining {
     pos: [i32; 3],
     progress: f32,
@@ -2819,6 +2850,56 @@ impl Game<'_> {
         self.clip_ray(origin, dir, self.reach())
     }
     /// The first block outline hit within `reach` along the unit `dir`.
+    /// The first block along the view within `RAYCAST_MAX`, and its
+    /// distance (`native_raycast`'s view half): what a look-at tooltip
+    /// shows. No distant-terrain fallback: LOD is off in this fork's
+    /// profiles, so the ray ends with the loaded chunks. API 116.
+    #[allow(dead_code)]
+    fn native_view_hit(&self) -> Option<(f32, NativeHit)> {
+        self.player.as_ref()?;
+        let eye = self.eye_position()?;
+        let dir = view_vector(self.yaw, self.pitch);
+        let hit = self.clip_ray(eye, dir, f64::from(RAYCAST_MAX))?;
+        let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+        let distance = (0..3)
+            .map(|i| (hit.point[i] - eye[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        Some((
+            distance as f32,
+            NativeHit {
+                block_x: hit.pos[0],
+                block_y: hit.pos[1],
+                block_z: hit.pos[2],
+                x: hit.point[0],
+                y: hit.point[1],
+                z: hit.point[2],
+                block: self.res.facts().get(state).name.to_string(),
+            },
+        ))
+    }
+    /// The tanks of the block at `pos` that its side `face` reaches
+    /// (API 54). This fork has no native fluid-tank registry: no mod can
+    /// declare tanks, so every block answers None, as upstream does for a
+    /// block without tanks.
+    #[allow(dead_code)]
+    fn native_fluid_tanks(
+        &self,
+        dimension: &str,
+        pos: [i32; 3],
+        face: horizon_core::geometry::Direction,
+    ) -> Option<Vec<NativeFluidTank>> {
+        let _ = (dimension, pos, face);
+        None
+    }
+    /// `GameNarrator.saySystemNow(message)`: this fork ships no narrator
+    /// backend (no text-to-speech on the Android build), so nothing is
+    /// spoken; the caller's text is simply dropped, as upstream does with
+    /// the narrator off.
+    #[allow(dead_code)]
+    fn say_system_now(&self, message: &horizon_client::text::Text) {
+        let _ = message;
+    }
     fn clip_ray(&self, origin: [f64; 3], dir: [f64; 3], reach: f64) -> Option<Hit> {
         let mut pos = origin.map(|v| v.floor() as i32);
         let step = dir.map(|d| if d > 0.0 { 1 } else { -1 });
