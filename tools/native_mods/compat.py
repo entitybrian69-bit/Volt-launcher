@@ -209,8 +209,14 @@ def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
     hooks = meta.get("hooks")
     source = (root / "crates/horizon-client/src/game/native_hooks.rs").read_text()
     found = re.search(r"const NATIVE_HOOKS_API: u32 = (\d+);", source)
-    if not isinstance(hooks, int) or isinstance(hooks, bool) or not found or hooks < 1:
-        raise Rejected("hook API unavailable or above Volt's version")
+    if not found:
+        raise Rejected("Volt source does not state its native hook API version")
+    if not isinstance(hooks, int) or isinstance(hooks, bool) or hooks < 1:
+        raise Rejected(
+            f"bundle does not declare a positive integer hook API (hooks={hooks!r}); "
+            f"it pins Horizon {meta.get('horizon', '')[:12]} exactly, "
+            f"manifest keys: {sorted(manifest)}"
+        )
     served = int(found.group(1))
     if hooks > served:
         raise Rejected(
