@@ -30,16 +30,16 @@ pub(crate) mod theme {
     pub fn dark() -> bool { look().dark }
     fn accent() -> u32 { hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
-    pub fn BG() -> u32 { choose(hex(0x071127,255), hex(0xe7eefb,255)) }
-    pub fn BACKDROP() -> u32 { hex(0x040a19, 215) }
-    pub fn RAIL() -> u32 { choose(hex(0x0f1d3a,235), hex(0xfcfdff,225)) }
-    pub fn CARD() -> u32 { choose(hex(0x0f1d3a,225), hex(0xfcfdff,230)) }
-    pub fn CARD_INNER() -> u32 { choose(hex(0x1b2e52,235), hex(0xe6edf9,245)) }
-    pub fn HOVER() -> u32 { choose(hex(0x2a3f68,230), hex(0xd4e0f2,245)) }
+    pub fn BG() -> u32 { choose(hex(0x10142c,255), hex(0xe9f0fb,255)) }
+    pub fn BACKDROP() -> u32 { hex(0x070a1a, 215) }
+    pub fn RAIL() -> u32 { choose(hex(0x1c2142,195), hex(0xfcfdff,225)) }
+    pub fn CARD() -> u32 { choose(hex(0x232951,205), hex(0xfcfdff,230)) }
+    pub fn CARD_INNER() -> u32 { choose(hex(0xdfe3f8,46), hex(0xe6ebf7,245)) }
+    pub fn HOVER() -> u32 { choose(hex(0xdfe3f8,72), hex(0xd6dff0,245)) }
     pub fn HERO_BG() -> u32 { CARD() }
     pub fn HERO_GLOW() -> u32 { lerp(CARD(), accent(), 0.22) }
     pub fn HERO_GLOW_SOFT() -> u32 { lerp(CARD(), accent(), 0.12) }
-    pub fn BORDER() -> u32 { choose(hex(0xa9c7ff,42), hex(0x29569e,38)) }
+    pub fn BORDER() -> u32 { choose(hex(0xffffff,38), hex(0x3a4a74,34)) }
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
     pub fn CRIMSON_BRIGHT() -> u32 {
@@ -47,19 +47,23 @@ pub(crate) mod theme {
         hex(if dark() { glass.accent_soft } else { glass.accent }, 255)
     }
     pub fn CRIMSON_SOFT() -> u32 { (accent() & 0x00ffffff) | (42u32 << 24) }
-    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xffffff,26), hex(0x0a1626,26)) }
+    pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xe8ebfb,64), hex(0x101a30,26)) }
     pub fn ON_CRIMSON() -> u32 { hex(look().glass.on_accent,255) }
-    pub fn TEXT() -> u32 { choose(hex(0xf2f7ff,255), hex(0x122036,255)) }
-    pub fn MUTED() -> u32 { choose(hex(0xc3d2ec,255), hex(0x4a5a74,255)) }
-    pub fn DIM() -> u32 { choose(hex(0x93a7c9,255), hex(0x64748b,255)) }
+    pub fn TEXT() -> u32 { choose(hex(0xf5f6ff,255), hex(0x161c33,255)) }
+    pub fn MUTED() -> u32 { choose(hex(0xd3d7ec,255), hex(0x4b5572,255)) }
+    pub fn DIM() -> u32 { choose(hex(0xa7adcc,255), hex(0x687291,255)) }
     pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
     pub fn GLASS() -> u32 {
         if !dark() { return hex(0xffffff, 214); }
-        let glass = look().glass;
-        hex(glass.plate, (glass.plate_alpha * 255.0).round() as u8)
+        // Deep indigo frost per the chosen concept, softened toward the
+        // upstream accent-derived plate so accents still tint the panels.
+        lerp(hex(0x1d2244, 196), {
+            let glass = look().glass;
+            hex(glass.plate, 196)
+        }, 0.35)
     }
-    pub fn GLASS_INNER() -> u32 { choose(hex(0xffffff,16), hex(0x0a1626,12)) }
-    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,34), hex(0x29569e,30)) }
+    pub fn GLASS_INNER() -> u32 { choose(hex(0xe8ebfb,30), hex(0x101a30,12)) }
+    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,42), hex(0x3a4a74,30)) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -482,118 +486,112 @@ fn wrap_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32, max_lines:
 
 /// A low-cost mobile approximation of Nightly's pixel-sunset backdrop.
 /// Its palette is taken from the pinned upstream scene; it is not the desktop renderer.
-/// One smooth organic shape: a triangle fan around a wavy ellipse with a
-/// feathered (alpha-0) outer rim so the silhouette has no visible stepping.
-/// Coordinates are dp; vertices are pushed straight into the HUD batch.
-fn draw_scene_blob(
-    ui: &mut Ui,
-    cx: f32,
-    cy: f32,
-    rx: f32,
-    ry: f32,
-    rot: f32,
-    phase: f32,
-    center_color: u32,
-    edge_color: u32,
-) {
-    const N: usize = 30;
-    let white = ui.atlas_ref().white;
-    let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
-    let (rs, rc) = rot.sin_cos();
-    let mut ring = [[0.0f32; 2]; N];
-    for (i, point) in ring.iter_mut().enumerate() {
-        let th = i as f32 / N as f32 * std::f32::consts::TAU;
-        // Two slow sine harmonics make the outline organic and keep it moving.
-        let wobble = 1.0 + 0.10 * (2.0 * th + phase).sin() + 0.06 * (3.0 * th - phase * 0.7).sin();
-        let (sn, cs) = th.sin_cos();
-        let ex = cs * rx * wobble;
-        let ey = sn * ry * wobble;
-        *point = [
-            ui.to_batch(cx + ex * rc - ey * rs),
-            ui.to_batch(cy + ex * rs + ey * rc),
-        ];
-    }
-    let center = [ui.to_batch(cx), ui.to_batch(cy)];
-    let feather = 1.06;
-    let rim_color = edge_color & 0x00ff_ffff; // same hue, alpha 0
-    let vertex = |pos: [f32; 2], color: u32| horizon_client::hud::HudVertex {
-        pos,
-        uv,
-        color,
-        depth: 0.0,
-        glint_uv: [0.0, 0.0],
-    };
-    let vertices = &mut ui.batch_mut().vertices;
-    for i in 0..N {
-        let a = ring[i];
-        let b = ring[(i + 1) % N];
-        let oa = [center[0] + (a[0] - center[0]) * feather, center[1] + (a[1] - center[1]) * feather];
-        let ob = [center[0] + (b[0] - center[0]) * feather, center[1] + (b[1] - center[1]) * feather];
-        // Core wedge with a soft radial gradient…
-        vertices.push(vertex(center, center_color));
-        vertices.push(vertex(a, edge_color));
-        vertices.push(vertex(b, edge_color));
-        // …and the feathered rim fading to fully transparent.
-        vertices.push(vertex(a, edge_color));
-        vertices.push(vertex(oa, rim_color));
-        vertices.push(vertex(b, edge_color));
-        vertices.push(vertex(b, edge_color));
-        vertices.push(vertex(oa, rim_color));
-        vertices.push(vertex(ob, rim_color));
-    }
+/// Deterministic per-column terrain noise for the backdrop, 0..1.
+fn terra_noise(column: i32, seed: u32) -> f32 {
+    let mut x = (column as u32).wrapping_mul(0x9e37_79b9) ^ seed;
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x85eb_ca6b);
+    x ^= x >> 13;
+    (x & 0xff) as f32 / 255.0
 }
 
-/// Continuously animated backdrop in the reference style: a near-black navy
-/// wash with a few huge, slowly drifting smooth blue shapes. `phase` is
-/// seconds since launch; everything stays cheap (a few hundred triangles).
+/// Continuously animated live-world backdrop: an original blocky voxel
+/// landscape at dusk — gradient sky, a pixel sun, drifting block clouds and
+/// three parallax block-stepped ridges — all plain rectangles, so it stays
+/// cheap on mobile GPUs. `phase` is seconds since launch.
 fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
-    const NIGHT: [u32; 5] = [0x01040c, 0x020812, 0x03101f, 0x051831, 0x072044];
-    const DAY: [u32; 5] = [0xe9f1fc, 0xdde9fa, 0xcfdff8, 0xc0d4f5, 0xb0c8f2];
-    let stops: &[u32] = if theme::dark() { &NIGHT } else { &DAY };
-    for row in 0..40 {
-        let t = (row as f32 / 39.0) * (stops.len() - 1) as f32;
-        let index = (t as usize).min(stops.len() - 2);
-        let color = lerp(hex(stops[index], 255), hex(stops[index + 1], 255), t - index as f32);
-        ui.rounded(0.0, row as f32 * h / 40.0, w, h / 40.0 + 1.0, 0.0, color);
+    let dark = theme::dark();
+    // Sky wash with a warm band near the horizon.
+    let stops: &[(f32, u32)] = if dark {
+        &[(0.0, 0x111533), (0.40, 0x272e55), (0.62, 0x4a3c63), (0.78, 0x87565c), (1.0, 0xb06a4a)]
+    } else {
+        &[(0.0, 0x82b4f1), (0.45, 0x9fc6f5), (0.75, 0xc6def9), (1.0, 0xeaf3fe)]
+    };
+    let rows = 36;
+    for row in 0..rows {
+        let t = row as f32 / (rows - 1) as f32;
+        let mut color = hex(stops[stops.len() - 1].1, 255);
+        for pair in stops.windows(2) {
+            let ((t0, c0), (t1, c1)) = (pair[0], pair[1]);
+            if t >= t0 && t <= t1 {
+                color = lerp(hex(c0, 255), hex(c1, 255), (t - t0) / (t1 - t0).max(0.001));
+                break;
+            }
+        }
+        ui.rounded(0.0, row as f32 * h / (rows - 1) as f32 - 1.0, w, h / (rows - 1) as f32 + 2.0, 0.0, color);
     }
-    // (cx, cy, rx, ry, rot, drift speed, seed, center colour, edge colour).
-    let shapes: [(f32, f32, f32, f32, f32, f32, f32, u32, u32); 4] = if theme::dark() {
+    if dark {
+        for i in 0..44 {
+            let x = w * (((i * 73 + 19) % 101) as f32 / 101.0);
+            let y = h * 0.42 * (((i * 37 + 11) % 64) as f32 / 64.0);
+            let size = if i % 9 == 0 { 2.0 } else { 1.2 };
+            ui.rounded(x, y, size, size, 0.0, hex(0xdfe4ff, if i % 3 == 0 { 150 } else { 85 }));
+        }
+    }
+    // A blocky sun low over the ridge line, with a soft warm halo.
+    let sun_x = w * 0.58;
+    let sun_y = h * 0.55;
+    let radius = h * 0.075;
+    let grid = (radius / 3.0).max(2.0);
+    let (core, rim) = if dark { (0xffe9a8, 0xff8a4e) } else { (0xfff6c8, 0xffd27a) };
+    ui.rounded(sun_x - radius * 2.6, sun_y - radius * 1.6, radius * 5.2, radius * 3.2,
+        radius * 1.6, hex(rim, if dark { 30 } else { 44 }));
+    for band in 0..6 {
+        let yy = (band as f32 + 0.5) / 3.0 - 1.0;
+        let half = ((1.0 - yy * yy).max(0.0).sqrt() * radius / grid).round() * grid;
+        if half <= 0.0 { continue; }
+        let color = lerp(hex(core, 255), hex(rim, 255), (yy + 1.0) * 0.5);
+        ui.rounded(sun_x - half, sun_y + yy * radius, half * 2.0, radius / 3.0 + 1.0, 0.0, color);
+    }
+    // Blocky clouds drifting on three bands; each is a few stacked rectangles.
+    let cloud_body = if dark { hex(0x3c4368, 205) } else { hex(0xffffff, 235) };
+    let cloud_glow = if dark { hex(0x8a5f6b, 150) } else { hex(0xdbe9fb, 235) };
+    for k in 0..5u32 {
+        let speed = 3.0 + k as f32 * 1.4;
+        let span = w + 180.0;
+        let x = span - ((phase * speed + k as f32 * 263.0) % span);
+        let y = h * (0.10 + 0.085 * k as f32);
+        let s = 1.0 + (k % 3) as f32 * 0.35;
+        ui.rounded(x - 180.0 + 26.0 * s, y - 9.0 * s, 34.0 * s, 10.0 * s, 0.0, cloud_body);
+        ui.rounded(x - 180.0, y, 86.0 * s, 12.0 * s, 0.0, cloud_body);
+        ui.rounded(x - 180.0 + 10.0 * s, y + 12.0 * s, 62.0 * s, 5.0 * s, 0.0, cloud_glow);
+    }
+    // Three parallax ridges of discrete blocks; the front one keeps a grassy lip.
+    let bs = (w / 46.0).max(8.0);
+    let layers: [(f32, f32, f32, u32, Option<u32>); 3] = if dark {
         [
-            // A dim leaf high right, behind everything.
-            (0.74, 0.16, 0.16, 0.26, -0.5, 0.06, 1.9, 0x10306e, 0x071633),
-            // Large side bloom on the right.
-            (0.86, 0.60, 0.34, 0.50, -0.45, 0.05, 4.0, 0x163d8c, 0x081b40),
-            // Deep companion shape lower left.
-            (0.16, 0.92, 0.30, 0.42, 0.55, 0.045, 2.2, 0x123374, 0x061330),
-            // The dominant bloom across the bottom centre.
-            (0.50, 1.02, 0.46, 0.55, -0.18, 0.04, 0.0, 0x1d4fae, 0x0a2050),
+            (1.6, 0.56, 5.0, 0x2c3153, None),
+            (3.4, 0.68, 4.0, 0x20253f, None),
+            (6.5, 0.80, 3.0, 0x141828, Some(0x3c5137)),
         ]
     } else {
         [
-            (0.74, 0.16, 0.16, 0.26, -0.5, 0.06, 1.9, 0xbcd4f6, 0xd8e6fb),
-            (0.86, 0.60, 0.34, 0.50, -0.45, 0.05, 4.0, 0x9dbdf0, 0xcadcf9),
-            (0.16, 0.92, 0.30, 0.42, 0.55, 0.045, 2.2, 0xa8c4f2, 0xd2e2fa),
-            (0.50, 1.02, 0.46, 0.55, -0.18, 0.04, 0.0, 0x8fb4ee, 0xc2d7f8),
+            (1.6, 0.56, 5.0, 0x9ec49a, None),
+            (3.4, 0.68, 4.0, 0x7db077, None),
+            (6.5, 0.80, 3.0, 0x5d9c58, Some(0x6fb166)),
         ]
     };
-    let scale = w.min(h * 1.5);
-    for &(cx, cy, rx, ry, rot, speed, seed, center, edge) in &shapes {
-        let drift_x = (phase * speed + seed).sin() * 0.030;
-        let drift_y = (phase * speed * 0.8 + seed * 1.7).cos() * 0.022;
-        let breathe = 1.0 + 0.05 * (phase * speed * 1.5 + seed).sin();
-        draw_scene_blob(
-            ui,
-            (cx + drift_x) * w,
-            (cy + drift_y) * h,
-            rx * scale * breathe,
-            ry * scale * breathe,
-            rot + (phase * speed * 0.3 + seed).sin() * 0.05,
-            phase * (0.25 + speed) + seed,
-            hex(center, 235),
-            hex(edge, 235),
-        );
+    for (li, &(speed, base, amp, color, lip)) in layers.iter().enumerate() {
+        let seed = 0x5eed_0001u32.wrapping_mul(li as u32 + 1);
+        let scroll = phase * speed;
+        let first = (scroll / bs).floor() as i32;
+        let frac = scroll - first as f32 * bs;
+        let columns = (w / bs) as i32 + 2;
+        for i in 0..columns {
+            let column = first + i;
+            let n = (terra_noise(column, seed) + terra_noise(column + 1, seed)) * 0.5;
+            let blocks = (n * amp).round();
+            let y_top = h * base - blocks * bs;
+            let x = i as f32 * bs - frac;
+            ui.rounded(x, y_top, bs + 0.5, (h - y_top).max(0.0), 0.0, hex(color, 255));
+            if let Some(lip_color) = lip {
+                ui.rounded(x, y_top, bs + 0.5, bs * 0.55, 0.0, hex(lip_color, 255));
+            }
+        }
     }
+    // A quiet dim layer keeps the frosted panels readable over the scene.
+    ui.rounded(0.0, 0.0, w, h, 0.0, if dark { hex(0x0b0f22, 92) } else { hex(0xffffff, 46) });
 }
 
 /// "You've played for 12 hours! Last played 2 hours ago", from persisted
@@ -780,16 +778,22 @@ impl DrawCtx<'_> {
         }
         for (index, id) in ids.iter().enumerate() {
             let row = [rx + 10.0, ry + 58.0 + index as f32 * row_step, rw - 20.0, 56.0];
-            if *id == self.catalog.config.profile {
-                ui.rounded(row[0], row[1], row[2], row[3], 12.0, theme::CRIMSON_SOFT());
-                ui.border(row[0], row[1], row[2], row[3], 12.0, theme::BORDER_CRIMSON());
-            }
-            ui.volt_logo(row[0] + 9.0, row[1] + 10.0, 36.0, 36.0);
+            // Every instance is a frosted card; the active one is brighter
+            // with an accent border, as in the chosen concept.
+            let selected = *id == self.catalog.config.profile;
+            ui.rounded(row[0], row[1], row[2], row[3], 14.0,
+                if selected { theme::CRIMSON_BADGE() } else { theme::GLASS_INNER() });
+            ui.border(row[0], row[1], row[2], row[3], 14.0,
+                if selected { theme::BORDER_CRIMSON() } else { theme::GLASS_BORDER() });
+            let chip = [row[0] + 8.0, row[1] + 8.0, 40.0, 40.0];
+            ui.rounded(chip[0], chip[1], chip[2], chip[3], 11.0,
+                horizon_client::ui_theme::color::hex(0xf2f3fb, 230));
+            ui.volt_logo(chip[0] + 4.0, chip[1] + 4.0, 32.0, 32.0);
             let name = if *id == 0 { "Volt".to_owned() } else { format!("Profile {id}") };
-            let name = ui.fit_text(Face::LauncherMedium, 13.5, &name, rw - 86.0);
-            ui.text(Face::LauncherMedium, 13.5, row[0] + 54.0, row[1] + 9.0, theme::TEXT(), &name);
-            ui.rounded(row[0] + 54.0, row[1] + 37.0, 6.0, 6.0, 3.0, theme::ONLINE());
-            ui.text(Face::LauncherRegular, 11.0, row[0] + 64.0, row[1] + 31.0, theme::MUTED(), "Native build · 26.3");
+            let name = ui.fit_text(Face::LauncherMedium, 13.5, &name, rw - 96.0);
+            ui.text(Face::LauncherMedium, 13.5, row[0] + 58.0, row[1] + 9.0, theme::TEXT(), &name);
+            ui.rounded(row[0] + 58.0, row[1] + 37.0, 6.0, 6.0, 3.0, theme::ONLINE());
+            ui.text(Face::LauncherRegular, 11.0, row[0] + 68.0, row[1] + 31.0, theme::MUTED(), "Native build · 26.3");
             self.targets.push((row, Action::ChooseProfile(*id)));
         }
 
@@ -806,7 +810,7 @@ impl DrawCtx<'_> {
         let discord_h = if short { 32.0 } else { 42.0 };
         let discord = [rx + 12.0, foot_y + 2.0 * foot_step + 4.0, rw - 24.0, discord_h];
         let discord_bg = horizon_client::ui_theme::color::hex(0x5865f2, 255);
-        ui.rounded(discord[0], discord[1], discord[2], discord[3], 12.0, discord_bg);
+        ui.rounded(discord[0], discord[1], discord[2], discord[3], discord[3] * 0.5, discord_bg);
         draw_discord_icon(ui, discord[0] + 26.0, discord[1] + discord[3] * 0.5, theme::TEXT(), discord_bg);
         draw_centered_text(ui, Face::LauncherMedium, 13.5,
             [discord[0] + 26.0, discord[1], discord[2] - 26.0, discord[3]], theme::TEXT(), "Join the Discord");
@@ -846,6 +850,9 @@ impl DrawCtx<'_> {
     /// Build log opens the Console tab.
     fn draw_topbar(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
         let [x, y, w, h] = area;
+        // The whole navigation sits on one rounded frosted bar.
+        ui.rounded(x - 8.0, y - 7.0, w + 16.0, h + 14.0, 16.0, theme::GLASS());
+        ui.border(x - 8.0, y - 7.0, w + 16.0, h + 14.0, 16.0, theme::GLASS_BORDER());
         let account_w = if w >= 760.0 { 158.0 } else { 112.0 };
         let gear_w = h;
         let tabs = [("Home", Action::Page(Page::Play)), ("Mods", Action::Page(Page::Mods)),
@@ -864,7 +871,7 @@ impl DrawCtx<'_> {
                 _ => false,
             };
             if selected {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 12.0, theme::CRIMSON());
+                ui.rounded(rect[0], rect[1] + 2.0, rect[2], rect[3] - 4.0, (rect[3] - 4.0) * 0.5, theme::CRIMSON());
             }
             let label = ui.fit_text(Face::LauncherMedium, 13.0, label, rect[2] - 8.0);
             draw_centered_text(ui, Face::LauncherMedium, 13.0, rect,
@@ -954,20 +961,26 @@ impl DrawCtx<'_> {
         let installed = horizon_client::official_install::ready(self.home);
         let installing = self.worker.is_some();
         let progress = *self.install.lock().unwrap();
-        // Hero: logo, large instance name, then played-time subtitle.
+        // Hero: large instance name with the logo on its right, then the
+        // played-time subtitle with the personal part in the accent colour.
         let logo = if compact { 42.0 } else { 54.0 };
-        ui.volt_logo(x + 2.0, y + 4.0, logo, logo);
         let profile = self.catalog.config.profile;
         let title = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
         let name_size = if compact { 30.0 } else { 40.0 };
         let name = ui.fit_text(Face::Display, name_size, &title, (w - logo - 18.0).max(24.0));
-        ui.text(Face::Display, name_size, x + logo + 14.0, y - 2.0, theme::TEXT(), &name);
+        ui.text(Face::Display, name_size, x + 2.0, y - 2.0, theme::TEXT(), &name);
+        let name_w = ui.measure(Face::Display, name_size, &name);
+        ui.volt_logo(x + name_w + 18.0, y + 2.0, logo, logo);
         let state = if installing { "Preparing Minecraft 26.3" }
-            else if installed { "Minecraft 26.3 · Native Rust edition" }
+            else if installed { "Minecraft 26.3" }
             else { "Minecraft 26.3 · Game files need to be downloaded" };
-        let subtitle = format!("{} · {state}", played_summary(&self.catalog.config));
-        let subtitle = ui.fit_text(Face::LauncherRegular, 13.0, &subtitle, w - 8.0);
-        ui.text(Face::LauncherRegular, 13.0, x + 4.0, y + logo + 10.0, theme::MUTED(), &subtitle);
+        let played = ui.fit_text(Face::LauncherRegular, 13.0, &played_summary(&self.catalog.config), w - 8.0);
+        ui.text(Face::LauncherRegular, 13.0, x + 4.0, y + logo + 10.0, theme::CRIMSON_BRIGHT(), &played);
+        let played_w = ui.measure(Face::LauncherRegular, 13.0, &played);
+        if w - played_w - 20.0 > 80.0 {
+            let state = ui.fit_text(Face::LauncherRegular, 13.0, &format!(" · {state}"), w - played_w - 12.0);
+            ui.text(Face::LauncherRegular, 13.0, x + 4.0 + played_w, y + logo + 10.0, theme::MUTED(), &state);
+        }
         // Control row: version selector and Volt Boost; Play lives bottom right.
         let ay = y + logo + 38.0;
         let control_h = 48.0;
@@ -1001,9 +1014,11 @@ impl DrawCtx<'_> {
                 Action::Page(page) => self.catalog.page == *page,
                 _ => false,
             };
+            ui.rounded(r[0], r[1], r[2], r[3], 11.0,
+                if selected { theme::CRIMSON_BADGE() } else { theme::GLASS_INNER() });
+            ui.border(r[0], r[1], r[2], r[3], 11.0, theme::GLASS_BORDER());
             if selected {
-                ui.rounded(r[0], r[1], r[2], r[3], 11.0, theme::CRIMSON_BADGE());
-                ui.border(r[0], r[1], r[2], r[3], 11.0, theme::GLASS_BORDER());
+                ui.rounded(r[0] + 10.0, r[1] + r[3] - 4.0, (r[2] - 20.0).max(12.0), 3.0, 1.5, theme::CRIMSON());
             }
             let label = ui.fit_text(Face::LauncherMedium, if compact { 11.5 } else { 13.0 }, label, r[2] - 6.0);
             draw_centered_text(ui, Face::LauncherMedium, if compact { 11.5 } else { 13.0 }, r,
@@ -1043,13 +1058,51 @@ impl DrawCtx<'_> {
         // the tab body; its target goes first so it always wins the tap.
         let play_w = if compact { 148.0 } else { 176.0 };
         let play = [x + w - play_w, y + h - play_h, play_w, play_h];
-        ui.rounded(play[0] + 3.0, play[1] + 5.0, play[2], play[3], play_h * 0.28, theme::BACKDROP());
+        ui.rounded(play[0] + 2.0, play[1] + 5.0, play[2], play[3], play_h * 0.5, theme::BACKDROP());
         let label = if installing { "Installing" } else if installed { "Play" }
             else if self.error.is_some() { "Retry" } else { "Download" };
-        styled_button(ui, self.targets, play, label, Action::Play, BtnStyle::Primary, true);
-        if let Some(entry) = self.targets.pop() {
-            self.targets.insert(0, entry);
+        let press_t = ACTIVE_FEEDBACK.with(|fb| {
+            fb.borrow().and_then(|(act, ts)| {
+                let el = ts.elapsed().as_secs_f32();
+                (act == Action::Play && el < 0.22).then_some(el / 0.22)
+            })
+        });
+        let v_start = ui.batch_mut().vertices.len();
+        let mut bg = theme::CRIMSON();
+        if let Some(t) = press_t {
+            bg = horizon_client::ui_theme::color::lerp(bg, theme::CRIMSON_BRIGHT(), (1.0 - t).powi(2) * 0.30);
         }
+        ui.rounded(play[0], play[1], play[2], play[3], play_h * 0.5, bg);
+        ui.border(play[0], play[1], play[2], play[3], play_h * 0.5, theme::CRIMSON_BRIGHT());
+        let font = 19.5;
+        let text_w = ui.measure(Face::LauncherMedium, font, label);
+        let tri = 13.0;
+        let start_x = play[0] + (play_w - text_w - tri - 9.0) * 0.5;
+        let cy = play[1] + play_h * 0.5;
+        // The triangle icon, as three raw vertices on the solid white texel.
+        {
+            let white = ui.atlas_ref().white;
+            let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
+            let color = theme::ON_CRIMSON();
+            let points = [
+                [ui.to_batch(start_x), ui.to_batch(cy - tri * 0.55)],
+                [ui.to_batch(start_x), ui.to_batch(cy + tri * 0.55)],
+                [ui.to_batch(start_x + tri), ui.to_batch(cy)],
+            ];
+            for pos in points {
+                ui.batch_mut().vertices.push(horizon_client::hud::HudVertex {
+                    pos, uv, color, depth: 0.0, glint_uv: [0.0, 0.0],
+                });
+            }
+        }
+        ui.text(Face::LauncherMedium, font, start_x + tri + 9.0,
+            text_vcenter(play[1], play_h, font), theme::ON_CRIMSON(), label);
+        if let Some(t) = press_t {
+            let dip = (t * std::f32::consts::PI).sin() * (1.0 - t * 0.45);
+            ui.animate_vertices(v_start, 0.0, 0.0, 1.0 - 0.042 * dip,
+                [play[0] + play_w * 0.5, cy], 1.0);
+        }
+        self.targets.insert(0, (play, Action::Play));
     }
 
     fn draw_home_tab(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str, installed: bool) {
@@ -5305,7 +5358,7 @@ impl Launcher {
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::CycleAccent) => {
-                const COLORS: [u32; 8] = [0x3b82f6, 0x6b4bff, 0x0e9fbd, 0x18a977, 0xe6ab32, 0xf26c5b, 0xd755ae, 0x8b5cf6];
+                const COLORS: [u32; 8] = [0x5b67f2, 0x3b82f6, 0x0e9fbd, 0x18a977, 0xe6ab32, 0xf26c5b, 0xd755ae, 0x8b5cf6];
                 let current = self.catalog.config.launcher_accent;
                 let index = COLORS.iter().position(|&c| c == current).map_or(0, |i| (i + 1) % COLORS.len());
                 self.catalog.config.launcher_accent = COLORS[index];
