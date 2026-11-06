@@ -3,9 +3,11 @@
 The launcher Mods tab now opens the live Horizon registry. Search by name or
 author, page through results, and download from inside the launcher; use
 **Volt mods** to return to the existing 50-switch catalog. `.hmod` files are
-installed on the 64-bit APK through the registry's checked installer. The
-32-bit build does not include the sandboxed mod runtime, so `.hmod` installation
-is disabled there.
+installed on the 64-bit APK through the registry's checked installer and are
+turned on for the selected profile right away, by the manifest id inside the
+package (the id the game checks); the Installed list's toggles use the same
+manifest id. The 32-bit build does not include the sandboxed mod runtime, so
+`.hmod` installation is disabled there.
 
 Native `.hnmod` projects require compilation into the Android game library.
 The **Source** button downloads a validated source bundle into the selected

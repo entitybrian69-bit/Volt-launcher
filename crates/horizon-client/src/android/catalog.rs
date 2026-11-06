@@ -5,6 +5,11 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
 };
+/// The manifest id inside an installed `.hmod` package, if readable.
+fn read_hmod_id(path: &std::path::Path) -> Option<String> {
+    horizon_mods::Package::read(path).ok().map(|p| p.manifest.id)
+}
+
 pub fn source_only_mod(project: &Project) -> bool {
     project.source == browser::SourceId::Horizon
         && project.loaders.iter().any(|loader| loader == "hnmod")
@@ -304,6 +309,9 @@ pub struct Catalog {
     pub ely_pass_input: String,
     pub ely_totp_input: String,
     pub skin_query_input: String,
+    /// Installed `.hmod` file name -> its manifest id, read once per file.
+    /// The game turns mods on by manifest id, so toggles must use it too.
+    hmod_ids: std::collections::HashMap<String, String>,
     icon_cache: std::collections::HashMap<String, Option<ProjectIcon>>,
     icon_pending: std::collections::HashSet<String>,
     icon_tx: mpsc::Sender<(String, Option<(u64, Vec<u8>)>)>,
@@ -364,6 +372,7 @@ impl Catalog {
             ely_pass_input: String::new(),
             ely_totp_input: String::new(),
             skin_query_input: String::new(),
+            hmod_ids: std::collections::HashMap::new(),
             icon_cache: std::collections::HashMap::new(),
             icon_pending: std::collections::HashSet::new(),
             icon_tx,
@@ -374,6 +383,17 @@ impl Catalog {
         };
         result.refresh(home);
         result
+    }
+    /// The manifest id of the installed `.hmod` at `path`, cached per file
+    /// name; the file stem when the package can't be read.
+    fn hmod_id(&mut self, path: &std::path::Path, file: &str) -> String {
+        if let Some(id) = self.hmod_ids.get(file) {
+            return id.clone();
+        }
+        let id = read_hmod_id(path)
+            .unwrap_or_else(|| file.trim_end_matches(".hmod").to_owned());
+        self.hmod_ids.insert(file.to_owned(), id.clone());
+        id
     }
     pub fn refresh_screenshots(&mut self, home: &Path) {
         self.screenshots = std::fs::read_dir(self.config.game_home(home).join("screenshots"))
@@ -443,9 +463,10 @@ impl Catalog {
                     horizon_client::content_files::Kind::Shaders => {
                         settings.horizon.shader_pack == name
                     }
-                    horizon_client::content_files::Kind::Mods => name
-                        .strip_suffix(".hmod")
-                        .is_some_and(|id| on.enabled.contains(id)),
+                    horizon_client::content_files::Kind::Mods => {
+                        let id = self.hmod_id(&entry.path(), &name);
+                        on.enabled.contains(&id)
+                    }
                 };
                 self.local.push(LocalItem {
                     kind,
@@ -805,16 +826,40 @@ impl Catalog {
                     }
                 })?
             } else {
-                browser::installed::install(source.as_ref(), &project, true, &game, &|_name, p| {
+                let entries = browser::installed::install(source.as_ref(), &project, true, &game, &|_name, p| {
                     if p.is_finite() {
                         *progress.lock().unwrap_or_else(|e| e.into_inner()) = p.clamp(0.0, 1.0);
                     }
-                })?
-                .len()
+                })?;
+                if project.kind == Kind::Mod {
+                    // Sandboxed mods are off until turned on; installing one
+                    // from the browser is that choice, so turn it on now by
+                    // the manifest id the game checks.
+                    let mut on = horizon_client::mod_list::ModList::load(&game);
+                    let mut turned_on = false;
+                    for entry in &entries {
+                        if !entry.file.ends_with(".hmod") {
+                            continue;
+                        }
+                        let id = read_hmod_id(&game.join(&entry.file)).or_else(|| {
+                            std::path::Path::new(&entry.file)
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().into_owned())
+                        });
+                        if let Some(id) = id {
+                            turned_on |= on.enabled.insert(id);
+                        }
+                    }
+                    if turned_on {
+                        on.save(&game);
+                    }
+                    return Ok(Reply::NativeSource(format!(
+                        "{} installed and turned on for this profile. Press Play.",
+                        project.title
+                    )));
+                }
+                entries.len()
             };
-            if project.kind == Kind::Mod {
-                return Ok(Reply::NativeSource(format!("Installed {count} item(s). Open Play to load this profile.")));
-            }
             Ok(Reply::Done(
                 format!("Installed {count} item(s). Open Play to load this profile."),
                 match project.kind {
@@ -849,12 +894,12 @@ impl Catalog {
                     return;
                 }
                 let mut on = horizon_client::mod_list::ModList::load(&game);
-                if let Some(id) = item.file.strip_suffix(".hmod") {
-                    if item.enabled {
-                        on.enabled.remove(id);
-                    } else {
-                        on.enabled.insert(id.to_owned());
-                    }
+                let dir = game.join(horizon_client::mod_list::DIR);
+                let id = self.hmod_id(&dir.join(&item.file), &item.file);
+                if item.enabled {
+                    on.enabled.remove(&id);
+                } else {
+                    on.enabled.insert(id);
                 }
                 on.save(&game);
             }
