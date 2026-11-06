@@ -349,6 +349,26 @@
       "name": "perform_console_command",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_perform_console_command"
+    },
+    {
+      "name": "gui_layer_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_gui_layer_pre"
+    },
+    {
+      "name": "gui_layer_post",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_gui_layer_post"
+    },
+    {
+      "name": "world_drawn",
+      "version": 1,
+      "target": "horizon_client_render::gfx::native_render::native_world_drawn"
+    },
+    {
+      "name": "render_needs",
+      "version": 1,
+      "target": "horizon_client_render::gfx::native_render::native_render_needs"
     }
   ]
 }

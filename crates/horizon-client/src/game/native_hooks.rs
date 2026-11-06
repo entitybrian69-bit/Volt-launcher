@@ -1306,6 +1306,45 @@ fn dimension_id(dimension: LevelDimension) -> &'static str {
     }
 }
 
+    /// Before one of vanilla's HUD layers draws, by id: hide it by setting
+    /// `canceled`, or draw under it. Layer ids are `minecraft:crosshair`,
+    /// `minecraft:hotbar`, `minecraft:effects`, `minecraft:boss_overlay`,
+    /// `minecraft:selected_item_name`, `minecraft:chat`, `minecraft:tab_list`
+    /// and the rest of the vanilla paint order, as upstream API 139 names
+    /// them. A hidden layer still runs its game logic and `post` still
+    /// fires.
+    pub(super) fn native_gui_layer_pre(
+        &mut self,
+        layer: &str,
+        batch: &mut HudBatch,
+        canceled: &mut bool,
+    ) {
+        let _ = (layer, batch, canceled);
+    }
+    /// After one of vanilla's HUD layers (or after the layer a mod hid),
+    /// with the ids of `native_gui_layer_pre`: draw here to put something
+    /// above the layer. API 139.
+    pub(super) fn native_gui_layer_post(&mut self, layer: &str, batch: &mut HudBatch) {
+        let _ = (layer, batch);
+    }
+    /// Draws one vanilla HUD layer between the mods' hooks:
+    /// `native_gui_layer_pre` (which may hide it), the layer, then
+    /// `native_gui_layer_post`. `None` when a mod hid the layer.
+    pub(super) fn gui_layer<R>(
+        &mut self,
+        layer: &str,
+        batch: &mut HudBatch,
+        draw: impl FnOnce(&mut Self, &mut HudBatch) -> R,
+    ) -> Option<R> {
+        let mut canceled = false;
+        self.native_gui_layer_pre(layer, batch, &mut canceled);
+        let mut drawn = None;
+        if !canceled {
+            drawn = Some(draw(self, batch));
+        }
+        self.native_gui_layer_post(layer, batch);
+        drawn
+    }
 /// Server-level helpers for native mods.
 #[allow(dead_code)]
 impl GameLevel<'_> {
@@ -2711,6 +2750,8 @@ mod tests {
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
+        let render_source = include_str!("../../../horizon-client-render/src/gfx/native_render.rs");
+        let mut render_names = BTreeSet::new();
         for hook in hooks {
             let name = hook["name"].as_str().unwrap();
             let version = hook["version"].as_u64().unwrap();
@@ -2718,6 +2759,17 @@ mod tests {
                 version > 0 && contracts.insert((name, version)),
                 "invalid or duplicate hook: {name} v{version}"
             );
+            let target = hook["target"].as_str().unwrap();
+            // Render-crate hook points live in gfx/native_render.rs; the
+            // game-crate ones in this file or GameLevel's section below.
+            if target == format!("horizon_client_render::gfx::native_render::native_{name}") {
+                assert!(
+                    render_source.contains(&format!("pub fn native_{name}(")),
+                    "render hook point missing: {name}"
+                );
+                render_names.insert(name);
+                continue;
+            }
             names.insert(name);
             let owner = if level_hooks.contains(name) {
                 "GameLevel"
@@ -2725,7 +2777,7 @@ mod tests {
                 "Game"
             };
             assert_eq!(
-                hook["target"].as_str().unwrap(),
+                target,
                 format!("horizon_client::game::native_hooks::{owner}<'_>::native_{name}")
             );
         }

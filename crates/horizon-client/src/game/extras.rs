@@ -812,8 +812,7 @@ impl Game<'_> {
         let map = self.minimap_shown();
         let visible = |corner| !(self.debug && corner == Corner::TopLeft);
         let mut corners = Corners::new(batch.width, batch.height, self.effect_rows_height());
-        #[cfg(target_os = "android")]
-        corners.reserve(Corner::TopLeft, 26.0);
+        reserve_android_inset(&mut corners);
         if self.settings.extras.perf_hud != horizon_client::volt_features::PerfHudMode::Off
             && visible(self.settings.extras.perf_hud_corner)
         {
@@ -904,3 +903,13 @@ impl Game<'_> {
         if harmful { 50.0 } else { 25.0 }
     }
 }
+
+/// Android leaves room for the system inset in the top-left corner. A plain
+/// call keeps `draw_extras` free of statement-level cfg, so compile-time
+/// mixins can instrument it.
+#[cfg(target_os = "android")]
+fn reserve_android_inset(corners: &mut Corners) {
+    corners.reserve(Corner::TopLeft, 26.0);
+}
+#[cfg(not(target_os = "android"))]
+fn reserve_android_inset(_corners: &mut Corners) {}

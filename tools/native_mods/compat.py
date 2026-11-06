@@ -45,7 +45,7 @@ def read_entry(registry: Path, mod_id: str) -> dict:
 def latest(entry: dict) -> dict | None:
     """The newest 26.3 bundle: registry entries append new versions last."""
     matching = [v for v in entry.get("versions", [])
-                if v.get("game") == "26.3" and str(v.get("file", "")).endswith(".hnmod")]
+                if v.get("game") == "26.3" and str(v.get("file", "")).endswith((".hnmod", ".hmod"))]
     return matching[-1] if matching else None
 
 def inventory(registry: Path) -> dict:
@@ -197,6 +197,27 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
         raise Rejected("mixin and bundle Horizon revisions differ")
     return {"meta": meta, "manifest": manifest, "sha256": digest, "manifest_path": manifest_path}
 
+# This fork keeps the official chat screen in the render crate
+# (crates/horizon-client-render/src/chat.rs, re-exported as
+# horizon_client::chat): bundles built against the official layout are
+# remapped to it when their revision is rebound.
+FORK_REMAPS = (
+    ("crates/horizon-client/src/chat.rs", "crates/horizon-client-render/src/chat.rs"),
+    ("horizon_client::chat::", "horizon_client_render::chat::"),
+)
+
+
+def apply_fork_remaps(manifest_path: Path) -> bool:
+    """Rewrite official source paths this fork keeps elsewhere; True when changed."""
+    text = original = manifest_path.read_text(encoding="utf-8")
+    for old_path, new_path in FORK_REMAPS:
+        text = text.replace(old_path, new_path)
+    if text != original:
+        manifest_path.write_text(text, encoding="utf-8")
+        return True
+    return False
+
+
 def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False) -> bool:
     """Return whether the staged manifest needs safe hook-only revision rebinding."""
     meta, manifest = data["meta"], data["manifest"]
@@ -204,7 +225,12 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
         raise Rejected("post-build commands are not supported")
     if meta["horizon"] == volt_rev:
         return False
-    if set(manifest) - {"mod", "compatibility", "injection", "module"}:
+    allowed = {"mod", "compatibility", "injection", "module"}
+    if raw_targets:
+        # Experimental probe path: a bundle may vendor whole crates; the mixin
+        # compiler stages them and the compiler's checks decide the rest.
+        allowed.add("crate")
+    if set(manifest) - allowed:
         raise Rejected("non-hook transformations need exact pinned Horizon source")
     hooks = meta.get("hooks")
     source = (root / "crates/horizon-client/src/game/native_hooks.rs").read_text()
@@ -311,6 +337,7 @@ def run_probe(args) -> dict:
             if text.count(original) != 1:
                 raise Rejected("cannot safely rebind revision in staged manifest")
             manifest_path.write_text(text.replace(original, f'horizon_revision = "{rev}"'), encoding="utf-8")
+            apply_fork_remaps(manifest_path)
         report["hook_revision_rebound"] = rebind
         # Mixins rejects symlinks. Archive the exact commit instead of copying a
         # working tree, omit tracked symlinks and label the source revision.

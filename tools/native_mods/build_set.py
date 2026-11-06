@@ -73,6 +73,7 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
             if text.count(old) != 1:
                 raise compat.Rejected(f"{mod_id}: cannot safely rebind hook revision")
             manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
+            compat.apply_fork_remaps(manifest_path)
         # Mods injecting the same hook must be woven in one compiler pass, so
         # --force-common-mixins routes every bundle through the one trusted
         # compiler and the report records both the pin and what was applied.

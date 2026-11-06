@@ -7556,9 +7556,13 @@ impl Game<'_> {
                     }
                 }
             }
-            horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_effect_icons(b));
+            self.gui_layer("minecraft:effects", &mut batch, |g, batch| {
+                horizon_client::hud::inset_overlay(batch, margins, |b| g.draw_effect_icons(b));
+            });
             // Hud: the action bar and titles draw over the hotbar (nextStratum).
-            horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_boss_bars(b));
+            self.gui_layer("minecraft:boss_overlay", &mut batch, |g, batch| {
+                horizon_client::hud::inset_overlay(batch, margins, |b| g.draw_boss_bars(b));
+            });
             horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_extras(b));
             self.draw_mod_shapes(&mut batch);
         }
@@ -7721,7 +7725,10 @@ impl Game<'_> {
                 hud_layout::paint(&mut batch, &self.gui.atlas, &draws);
             }
             if !spectator {
-                self.draw_selected_name(&mut batch, bar_height, !self.creative);
+                self.gui_layer("minecraft:selected_item_name", &mut batch, |g, batch| {
+                    let survival = !g.creative;
+                    g.draw_selected_name(batch, bar_height, survival);
+                });
             }
         }
         // Hud.extractSleepOverlay: over all health/food bars, under titles and chat.
@@ -7742,8 +7749,8 @@ impl Game<'_> {
             let tw = HudBatch::text_width(atlas, text);
             batch.text(atlas, text, (w - tw) / 2.0, h - 59.0, u32::MAX, true);
         }
-        self.draw_chat(&mut batch);
-        self.draw_tab_list(&mut batch);
+        self.gui_layer("minecraft:chat", &mut batch, |g, batch| g.draw_chat(batch));
+        self.gui_layer("minecraft:tab_list", &mut batch, |g, batch| g.draw_tab_list(batch));
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.
         batch.blur_at = batch.vertices.len() as u32;
@@ -9766,18 +9773,17 @@ impl Game<'_> {
                     .filter(|(pos, _, _)| !nearby_only || (*pos - camera).length_squared() <= 256.0)
                     .collect();
             if !nearby_only {
-                let fixed = |id: &'static str| (id, horizon_client::shadows::shadow_params(id).0);
-                let (item, item_radius) = fixed("minecraft:item");
+                let item = horizon_client::shadows::shadow_params("minecraft:item");
                 casters.extend(
                     self.dropped
                         .iter()
-                        .map(|i| (lerp(i.previous, i.position), item, item_radius)),
+                        .map(|i| (lerp(i.previous, i.position), "minecraft:item", item.0)),
                 );
-                let (orb, orb_radius) = fixed("minecraft:experience_orb");
+                let orb = horizon_client::shadows::shadow_params("minecraft:experience_orb");
                 casters.extend(
                     self.orbs
                         .iter()
-                        .map(|o| (lerp(o.previous, o.position), orb, orb_radius)),
+                        .map(|o| (lerp(o.previous, o.position), "minecraft:experience_orb", orb.0)),
                 );
             }
             for (pos, id, radius) in casters {
@@ -14738,9 +14744,19 @@ impl Game<'_> {
         Ok(())
     }
     /// A mouse button while playing (window or control socket).
+    /// Android's custom mouse buttons consume their release; a plain call
+    /// keeps `play_mouse` free of statement-level cfg, so compile-time
+    /// mixins can instrument it.
+    #[cfg(target_os = "android")]
+    fn custom_mouse_consumes(&mut self, button: MouseButton, pressed: bool) -> bool {
+        !pressed && self.android_custom_mouse_held(button)
+    }
+    #[cfg(not(target_os = "android"))]
+    fn custom_mouse_consumes(&mut self, _button: MouseButton, _pressed: bool) -> bool {
+        false
+    }
     fn play_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {
-        #[cfg(target_os = "android")]
-        if !pressed && self.android_custom_mouse_held(button) {
+        if self.custom_mouse_consumes(button, pressed) {
             return Ok(());
         }
         // A mod's claimed item takes the use button (capability `input`).
@@ -15125,91 +15141,8 @@ impl Game<'_> {
         }
     }
 }
-impl ApplicationHandler for Game<'_> {
-    #[cfg(target_os = "android")]
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
-        // Android may recreate the surface while the IME changes window size.
-        // Preserve the text session; Android hides its window on real backgrounding.
-        self.android_release_touch_keys(true);
-        self.capture(false);
-        self.keys.clear();
-        self.physical_keys.clear();
-        self.pad.touch.clear();
-        if self.title.is_none() && self.screen == Screen::Playing {
-            self.screen = Screen::Paused;
-        }
-        if let Some(renderer) = &mut self.renderer {
-            renderer.suspend_surface();
-        }
-    }
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        #[cfg(target_os = "android")]
-        if let Some(renderer) = &mut self.renderer {
-            if let Some(window) = &self.window {
-                match crate::display::prepare(window) {
-                    Ok(Some(size)) => renderer.resize(size[0], size[1]),
-                    Ok(None) => {}
-                    Err(error) => log::warn!("Android display scale on resume: {error}"),
-                }
-            }
-            if let Err(error) = renderer.recreate_surface() {
-                self.error = Some(error);
-                crate::game::exit_app(event_loop);
-            } else if let Some(window) = &self.window {
-                let size = window.inner_size();
-                renderer.resize(size.width, size.height);
-            }
-            self.previous = Instant::now();
-            return;
-        }
-        if self.window.is_some() {
-            return;
-        }
-        // The Window constructor: created fullscreen when options.txt or --fullscreen says so.
-        let fullscreen = self.settings.fullscreen || self.options.fullscreen;
-        let size = self.options.window_size.map(f64::from);
-        self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
-        let attributes = Window::default_attributes()
-            .with_title("Horizon")
-            .with_window_icon(horizon_client::window::icon());
-        // Wayland names the window by its app id, which the horizon.desktop entry matches.
-        #[cfg(target_os = "linux")]
-        let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
-            attributes, "horizon", "horizon",
-        );
-        // `--offscreen` renders into a texture: its window would only show white.
-        let window = match event_loop.create_window(
-            attributes
-                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
-                .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)))
-                .with_visible(!self.options.offscreen),
-        ) {
-            Ok(w) => Arc::new(w),
-            Err(e) => {
-                self.error = Some(e.into());
-                crate::game::exit_app(event_loop);
-                return;
-            }
-        };
-        horizon_client::telemetry::note_display(&window);
-        match self.new_renderer(window.clone()) {
-            Ok(r) => {
-                self.renderer = Some(r);
-                self.world_renderer_ready = true;
-            }
-            Err(e) => {
-                self.error = Some(e);
-                crate::game::exit_app(event_loop);
-                return;
-            }
-        }
-        self.window = Some(window);
-        self.ime_allowed = false;
-        self.ime_area = None;
-        self.apply_settings();
-        self.previous = Instant::now();
-    }
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
+impl Game<'_> {
+    pub(crate) fn window_event_impl(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
             return;
         }
@@ -16799,6 +16732,97 @@ impl ApplicationHandler for Game<'_> {
             self.error = Some(e);
             crate::game::exit_app(event_loop);
         }
+    }
+}
+
+impl ApplicationHandler for Game<'_> {
+    #[cfg(target_os = "android")]
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        // Android may recreate the surface while the IME changes window size.
+        // Preserve the text session; Android hides its window on real backgrounding.
+        self.android_release_touch_keys(true);
+        self.capture(false);
+        self.keys.clear();
+        self.physical_keys.clear();
+        self.pad.touch.clear();
+        if self.title.is_none() && self.screen == Screen::Playing {
+            self.screen = Screen::Paused;
+        }
+        if let Some(renderer) = &mut self.renderer {
+            renderer.suspend_surface();
+        }
+    }
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        if let Some(renderer) = &mut self.renderer {
+            if let Some(window) = &self.window {
+                match crate::display::prepare(window) {
+                    Ok(Some(size)) => renderer.resize(size[0], size[1]),
+                    Ok(None) => {}
+                    Err(error) => log::warn!("Android display scale on resume: {error}"),
+                }
+            }
+            if let Err(error) = renderer.recreate_surface() {
+                self.error = Some(error);
+                crate::game::exit_app(event_loop);
+            } else if let Some(window) = &self.window {
+                let size = window.inner_size();
+                renderer.resize(size.width, size.height);
+            }
+            self.previous = Instant::now();
+            return;
+        }
+        if self.window.is_some() {
+            return;
+        }
+        // The Window constructor: created fullscreen when options.txt or --fullscreen says so.
+        let fullscreen = self.settings.fullscreen || self.options.fullscreen;
+        let size = self.options.window_size.map(f64::from);
+        self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
+        let attributes = Window::default_attributes()
+            .with_title("Horizon")
+            .with_window_icon(horizon_client::window::icon());
+        // Wayland names the window by its app id, which the horizon.desktop entry matches.
+        #[cfg(target_os = "linux")]
+        let attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
+            attributes, "horizon", "horizon",
+        );
+        // `--offscreen` renders into a texture: its window would only show white.
+        let window = match event_loop.create_window(
+            attributes
+                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
+                .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)))
+                .with_visible(!self.options.offscreen),
+        ) {
+            Ok(w) => Arc::new(w),
+            Err(e) => {
+                self.error = Some(e.into());
+                crate::game::exit_app(event_loop);
+                return;
+            }
+        };
+        horizon_client::telemetry::note_display(&window);
+        match self.new_renderer(window.clone()) {
+            Ok(r) => {
+                self.renderer = Some(r);
+                self.world_renderer_ready = true;
+            }
+            Err(e) => {
+                self.error = Some(e);
+                crate::game::exit_app(event_loop);
+                return;
+            }
+        }
+        self.window = Some(window);
+        self.ime_allowed = false;
+        self.ime_area = None;
+        self.apply_settings();
+        self.previous = Instant::now();
+    }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        // A plain wrapper keeps this hookable by compile-time mixins (the
+        // body below holds cfg attributes mixins cannot carry).
+        self.window_event_impl(event_loop, id, event);
     }
     fn device_event(&mut self, _: &ActiveEventLoop, device: DeviceId, event: DeviceEvent) {
         #[cfg(target_os = "android")]

@@ -118,6 +118,7 @@ mod oit_features;
 #[cfg(any(target_os = "android", test))]
 mod opaque_output;
 mod pack_atlas;
+pub mod native_render;
 pub mod pack_draw;
 mod pack_entities;
 mod pack_hand;

@@ -1150,6 +1150,10 @@ impl Game<'_> {
     }
     /// Chat lines over the HUD (focused while the chat screen is open).
     pub(super) fn draw_chat(&mut self, batch: &mut HudBatch) {
+        // A plain wrapper keeps this hookable by compile-time mixins.
+        self.draw_chat_impl(batch);
+    }
+    fn draw_chat_impl(&mut self, batch: &mut HudBatch) {
         let focused = self.screen == Screen::Chat;
         if self.ui.hide_gui && !focused {
             return;

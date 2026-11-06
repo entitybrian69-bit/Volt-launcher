@@ -50,6 +50,26 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(compat.Rejected, 'signature'):
             self.extract(archive, entry)
 
+    def test_latest_accepts_hmod_file_extension(self):
+        entry = {'id': 'b', 'versions': [
+            {'version': '0.1.0', 'game': '26.3', 'file': 'b-0.1.0.hmod'},
+        ]}
+        self.assertEqual(compat.latest(entry)['version'], '0.1.0')
+
+    def test_fork_remaps_rewrite_official_chat_paths(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            m = Path(td) / 'horizon-mixin.toml'
+            m.write_text('destination = "crates/horizon-client/src/chat.rs"\n'
+                         'target = "horizon_client::chat::ChatScreen::draw"\n',
+                         encoding='utf-8')
+            self.assertTrue(compat.apply_fork_remaps(m))
+            text = m.read_text(encoding='utf-8')
+            self.assertIn('crates/horizon-client-render/src/chat.rs', text)
+            self.assertIn('horizon_client_render::chat::ChatScreen::draw', text)
+            self.assertFalse(compat.apply_fork_remaps(m))
+
     def test_latest_prefers_the_newest_appended_version(self):
         entry = {'versions': [
             {'version': '1.0', 'game': '26.3', 'file': 'a-1.0.hnmod'},
