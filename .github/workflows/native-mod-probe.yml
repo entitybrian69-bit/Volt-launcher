@@ -27,7 +27,7 @@ jobs:
       fail-fast: false
       matrix:
         abi: [arm64-v8a, armeabi-v7a]
-        mod: [jei, jade, veinminer]
+        mod: [jei, jade, veinminer, horizon_physics]
         include:
           - abi: arm64-v8a
             target: aarch64-linux-android
@@ -42,6 +42,9 @@ jobs:
           - mod: veinminer
             file: veinminer-0.3.2.hnmod
             tag: veinminer-0.3.2
+          - mod: horizon_physics
+            file: horizon_physics-0.15.1.hnmod
+            tag: horizon_physics-0.15.1
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
