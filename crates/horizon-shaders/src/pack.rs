@@ -16,6 +16,9 @@ const ROOT: &str = "shaders";
 pub struct Pack {
     name: String,
     files: Files,
+    /// The values the player chose for the pack's options, applied to its sources as they are
+    /// read (`options::apply`).
+    chosen: BTreeMap<String, String>,
 }
 
 enum Files {
@@ -69,7 +72,11 @@ impl Pack {
         } else {
             Self::zip_files(fs::read(path)?)?
         };
-        Ok(Self { name, files })
+        Ok(Self {
+            name,
+            files,
+            chosen: BTreeMap::new(),
+        })
     }
 
     /// An archive held in memory; `name` is what [`Pack::name`] returns.
@@ -78,6 +85,7 @@ impl Pack {
         Ok(Self {
             name: name.to_owned(),
             files,
+            chosen: BTreeMap::new(),
         })
     }
 
@@ -102,6 +110,18 @@ impl Pack {
         &self.name
     }
 
+    /// The pack with options at the values in `chosen` (name to value, `true` or `false` for a
+    /// switch) instead of their defaults. A value the option doesn't list (a file edited by
+    /// hand) is left out.
+    pub fn with_chosen(mut self, chosen: BTreeMap<String, String>) -> Self {
+        let options = crate::options(&self);
+        self.chosen = chosen
+            .into_iter()
+            .filter(|(name, value)| options.get(name).is_some_and(|o| o.values.contains(value)))
+            .collect();
+        self
+    }
+
     /// The bytes of a file, by its path inside `shaders` (`lang/en_us.lang`). `None` when it
     /// doesn't exist or the path leaves the folder.
     pub fn read(&self, path: &str) -> Option<Vec<u8>> {
@@ -119,11 +139,18 @@ impl Pack {
         }
     }
 
-    /// A text file, decoded as UTF-8 (invalid bytes replaced) without its byte-order mark.
+    /// A text file, decoded as UTF-8 (invalid bytes replaced) without its byte-order mark, with
+    /// the chosen option values in its sources.
     pub fn read_text(&self, path: &str) -> Option<String> {
         let bytes = self.read(path)?;
         let text = String::from_utf8_lossy(&bytes);
-        Some(text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned())
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        let source = !path.ends_with(".properties") && !path.ends_with(".lang");
+        Some(if source && !self.chosen.is_empty() {
+            crate::options::apply(text, &self.chosen)
+        } else {
+            text.to_owned()
+        })
     }
 
     pub fn exists(&self, path: &str) -> bool {

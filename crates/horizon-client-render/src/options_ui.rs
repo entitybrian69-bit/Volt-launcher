@@ -1550,6 +1550,11 @@ pub enum Page {
     NativeMod(usize),
     /// Horizon's shader packs, either kind (`shader_pack_list`).
     ShaderPacks,
+    /// The options of `s.shader_packs[.0]`, a Horizon pack: its `[[pages]]` entry `.1`, the
+    /// first the one the button opens.
+    NativePackOptions(usize, u8),
+    /// The picked `shaders/` pack's options (`shader_options`), one of its screens at a time.
+    ShaderOptions,
     /// Horizon's graphics settings (`graphics_ui`).
     Graphics,
     GraphicsAdvanced,
@@ -1603,6 +1608,20 @@ enum Act {
     /// Pick `s.shader_packs[i]`, or turn it off when it is the pick.
     PickShaderPack(usize),
     OpenShaderPackFolder,
+    /// Open the picked pack's Shader Options page.
+    ShaderOptions,
+    /// Open the options page of the Horizon pack `s.shader_packs[.0]`.
+    NativePackOptions(usize),
+    /// Option `.1` of that pack: its next value.
+    NativePackOption(usize, usize),
+    /// Every option of that pack back to its default.
+    NativePackReset(usize),
+    /// Shader Options: the next value of an option, a screen of the pack, the next profile,
+    /// every option back to its default.
+    ShaderOption(String),
+    ShaderScreen(String),
+    ShaderProfile,
+    ShaderReset,
     /// The installed mod's own settings page (capability `ui`), shown as a
     /// screen: `Event::ModSettings` has the game open it.
     ModSettings(usize),
@@ -1632,6 +1651,12 @@ enum WKind {
         label: Text,
         value: f32,
         opt: Opt,
+    },
+    /// An option of a shader pack the pack shows as a slider: its value's place in its list.
+    ShaderSlider {
+        label: Text,
+        value: f32,
+        name: String,
     },
     Text {
         text: Text,
@@ -1682,6 +1707,13 @@ pub enum Event {
     /// A shader pack was picked or turned off: save and apply it.
     ShaderPack,
     OpenShaderPackFolder,
+    /// The Shader Options page opened: read the picked pack's options into `shader_options`.
+    OpenShaderOptions,
+    /// The Shader Options page closed with changes: save them and load the pack again.
+    ShaderOptions,
+    /// The options of `shader_packs[.0]`, a Horizon pack, changed: save them (the pack reloads
+    /// with them).
+    NativePackOptions(usize),
     /// Open the mod's own settings page (capability `ui`): the installed
     /// mod's index in `mods.installed`.
     ModSettings(usize),
@@ -1721,6 +1753,8 @@ pub struct OptionsUi {
     pub stack: Vec<Page>,
     scroll: f32,
     pub(crate) dragging: Option<Opt>,
+    /// The shader pack option slider held, and where its handle sits.
+    shader_dragging: Option<(String, f32)>,
     /// The pressed slider's own position (`AbstractSliderButton.value`) and
     /// when it last moved: the handle follows the pointer while the option
     /// keeps its stepped value, then snaps to it (`resetValue`).
@@ -1792,6 +1826,7 @@ impl Default for OptionsUi {
             stack: vec![Page::Main],
             scroll: 0.0,
             dragging: None,
+            shader_dragging: None,
             slider_value: None,
             scrollbar_drag_y: None,
             selected_key: None,
@@ -1905,6 +1940,121 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     })
 }
 /// Rows of an OptionsList: (big?, options) or a header.
+/// A list's slot with nothing in it: text takes no clicks.
+fn blank_slot(w: f32) -> Widget {
+    Widget {
+        x: 0.0,
+        y: 0.0,
+        w,
+        h: 20.0,
+        kind: WKind::Text {
+            text: Text::literal(""),
+            color: 0,
+            centered: false,
+        },
+        list: false,
+    }
+}
+/// Page `at` of the options of the Horizon pack `s.shader_packs[i]`: the pack's own layout,
+/// else every option two a row.
+fn native_pack_option_rows(s: &Settings, i: usize, at: u8) -> Vec<Row> {
+    use horizon_shader_api::PageItem;
+    let Some(pack) = s.shader_packs.get(i) else {
+        return Vec::new();
+    };
+    let count = pack.options.len().min(pack.values.len());
+    let (columns, items) = match pack.pages.get(usize::from(at)) {
+        Some(page) => (usize::from(page.columns), page.items.clone()),
+        None => (2, (0..count).map(PageItem::Option).collect()),
+    };
+    let width = if columns == 1 { 310.0 } else { 150.0 };
+    let widget = |item: &PageItem| match *item {
+        PageItem::Option(o) if o < count => {
+            let option = &pack.options[o];
+            let value = crate::shader_pack_list::show_value(&option.kind, pack.values[o]);
+            let label = Text::literal(format!("{}: {value}", option.name));
+            button(0.0, 0.0, width, label, Act::NativePackOption(i, o))
+        }
+        PageItem::Page(p) if p < pack.pages.len() => {
+            let label = Text::literal(format!("{}...", pack.pages[p].name));
+            let page = Page::NativePackOptions(i, p as u8);
+            button(0.0, 0.0, width, label, Act::Push(page))
+        }
+        _ => blank_slot(width),
+    };
+    let mut rows = Vec::new();
+    if at == 0 {
+        rows.push(Row::Note(pack.title.clone()));
+    }
+    rows.extend(
+        items
+            .chunks(columns)
+            .map(|row| Row::Buttons(widget(&row[0]), row.get(1).map(widget))),
+    );
+    rows
+}
+/// The open screen of the picked pack: its title, then its items two to a row (one when the
+/// pack asks for a single column).
+fn shader_option_rows(s: &Settings) -> Vec<Row> {
+    let Some(options) = &s.shader_options else {
+        return vec![Row::Header("horizon.shader_options.loading")];
+    };
+    let columns = options
+        .screens
+        .screen(options.screen())
+        .map_or(2, |(_, c)| c);
+    let blank = || blank_slot(150.0);
+    let width = if columns == 1 { 310.0 } else { 150.0 };
+    let widget = |item: &horizon_shaders::ScreenItem| -> Option<Widget> {
+        use horizon_shaders::ScreenItem;
+        Some(match item {
+            ScreenItem::Empty if columns > 2 => return None,
+            ScreenItem::Empty => blank(),
+            ScreenItem::Profile => {
+                button(0.0, 0.0, width, options.profile_label(), Act::ShaderProfile)
+            }
+            ScreenItem::Screen(name) => button(
+                0.0,
+                0.0,
+                width,
+                options.screen_label(name),
+                Act::ShaderScreen(name.clone()),
+            ),
+            ScreenItem::Option(name) => match options.slider_position(name) {
+                Some(value) => Widget {
+                    x: 0.0,
+                    y: 0.0,
+                    w: width,
+                    h: 20.0,
+                    kind: WKind::ShaderSlider {
+                        label: options.option_label(name),
+                        value,
+                        name: name.clone(),
+                    },
+                    list: false,
+                },
+                None => button(
+                    0.0,
+                    0.0,
+                    width,
+                    options.option_label(name),
+                    Act::ShaderOption(name.clone()),
+                ),
+            },
+        })
+    };
+    let widgets: Vec<Widget> = options.items().iter().filter_map(widget).collect();
+    let mut rows = vec![Row::Note(options.title().strip_legacy().plain())];
+    if columns == 1 {
+        rows.extend(widgets.into_iter().map(|w| Row::Buttons(w, None)));
+        return rows;
+    }
+    let mut widgets = widgets.into_iter();
+    while let Some(a) = widgets.next() {
+        rows.push(Row::Buttons(a, widgets.next()));
+    }
+    rows
+}
 enum Row {
     Big(Opt),
     Pair(Opt, Option<Opt>),
@@ -2228,6 +2378,14 @@ impl OptionsUi {
             _ => None,
         }
     }
+    /// The name of a Horizon pack's options page past its first, as the page's title.
+    fn pack_page_title(s: &Settings, page: Page) -> Option<Text> {
+        let Page::NativePackOptions(pack, at @ 1..) = page else {
+            return None;
+        };
+        let page = s.shader_packs.get(pack)?.pages.get(usize::from(at))?;
+        Some(Text::literal(&page.name))
+    }
     fn title(page: Page) -> &'static str {
         match page {
             Page::Main => "options.title",
@@ -2246,6 +2404,7 @@ impl OptionsUi {
             Page::Mods => "horizon.pages.mods",
             Page::NativeMod(_) => "Mod Settings",
             Page::ShaderPacks => "horizon.pages.shader_packs",
+            Page::ShaderOptions | Page::NativePackOptions(..) => "horizon.pages.shader_options",
             Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr => "options.videoTitle",
             Page::Controller => "horizon.pages.controller",
             Page::PadBinds => "horizon.pages.controller_binds",
@@ -2894,10 +3053,23 @@ impl OptionsUi {
                 if s.shader_packs.is_empty() {
                     return vec![Row::Header("horizon.shader_packs.empty")];
                 }
-                s.shader_packs
+                let picked = s
+                    .shader_packs
                     .iter()
-                    .enumerate()
-                    .map(|(i, pack)| {
+                    .position(|p| p.file == s.horizon.shader_pack);
+                let options = picked.and_then(|i| {
+                    let pack = &s.shader_packs[i];
+                    let act = match pack.kind {
+                        crate::shader_pack_list::Kind::Classic => Act::ShaderOptions,
+                        _ if pack.options.is_empty() => return None,
+                        crate::shader_pack_list::Kind::Horizon => Act::NativePackOptions(i),
+                    };
+                    let label = tr("horizon.shader_options.open");
+                    Some(Row::Buttons(button(0.0, 0.0, 310.0, label, act), None))
+                });
+                options
+                    .into_iter()
+                    .chain(s.shader_packs.iter().enumerate().map(|(i, pack)| {
                         let kind = match pack.kind {
                             crate::shader_pack_list::Kind::Horizon => {
                                 lang::get("horizon.shader_packs.kind_horizon")
@@ -2907,9 +3079,11 @@ impl OptionsUi {
                         let label = Text::literal(format!("{}{kind}: ", pack.title))
                             .append(on_off(s.horizon.shader_pack == pack.file));
                         Row::Buttons(button(0.0, 0.0, 310.0, label, Act::PickShaderPack(i)), None)
-                    })
+                    }))
                     .collect()
             }
+            Page::ShaderOptions => shader_option_rows(s),
+            Page::NativePackOptions(i, at) => native_pack_option_rows(s, i, at),
             _ => {
                 let _ = s;
                 Vec::new()
@@ -3624,7 +3798,8 @@ impl OptionsUi {
                     w,
                     h: 9.0,
                     kind: WKind::Text {
-                        text: tr(Self::title(page)),
+                        text: Self::pack_page_title(s, page)
+                            .unwrap_or_else(|| tr(Self::title(page))),
                         color: u32::MAX,
                         centered: true,
                     },
@@ -3713,6 +3888,10 @@ impl OptionsUi {
                 let folder = match page {
                     Page::Mods => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
                     Page::ShaderPacks => Some(("pack.openFolder", Act::OpenShaderPackFolder)),
+                    Page::ShaderOptions => Some(("controls.reset", Act::ShaderReset)),
+                    Page::NativePackOptions(i, _) => {
+                        Some(("controls.reset", Act::NativePackReset(i)))
+                    }
                     _ => None,
                 };
                 if let Some((label, act)) = folder {
@@ -3869,6 +4048,75 @@ impl OptionsUi {
             let start = batch.vertices.len();
             let hover = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
                 && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            // A pack's option: its label within the widget (the name shortened), and on hover
+            // the whole label when it was, then what the pack says of it.
+            let shader = s.shader_options.as_ref();
+            let shader_option = match &wd.kind {
+                WKind::Button {
+                    act: Act::ShaderOption(name),
+                    ..
+                }
+                | WKind::ShaderSlider { name, .. } => Some(name),
+                _ => None,
+            };
+            let fitted = shader.zip(shader_option).map(|(o, name)| {
+                o.option_label_within(name, wd.w - 8.0, |t| atlas.font.width_text(t))
+            });
+            if hover && let Some(o) = shader {
+                let comment = match (&wd.kind, shader_option) {
+                    (_, Some(name)) => o.comment(&format!("option.{name}")),
+                    (
+                        WKind::Button {
+                            act: Act::ShaderScreen(screen),
+                            ..
+                        },
+                        _,
+                    ) => o.comment(&format!("screen.{screen}")),
+                    (
+                        WKind::Button {
+                            act: Act::ShaderProfile,
+                            ..
+                        },
+                        _,
+                    ) => o.comment("profile"),
+                    _ => None,
+                };
+                let whole = shader_option
+                    .filter(|_| fitted.as_ref().is_some_and(|f| f.1))
+                    .map(|name| o.option_label(name));
+                let lines: Vec<Text> = whole
+                    .into_iter()
+                    .chain(comment)
+                    .flat_map(|t| atlas.font.split(&t, 200.0))
+                    .collect();
+                if !lines.is_empty() {
+                    tooltip = Some(lines);
+                }
+            }
+            if hover {
+                let pack_text = match &wd.kind {
+                    WKind::Button {
+                        act: Act::NativePackOption(pack, option),
+                        ..
+                    } => s
+                        .shader_packs
+                        .get(*pack)
+                        .and_then(|p| p.options.get(*option))
+                        .map(|o| &o.description),
+                    WKind::Button {
+                        act: Act::Push(Page::NativePackOptions(pack, at)),
+                        ..
+                    } => s
+                        .shader_packs
+                        .get(*pack)
+                        .and_then(|p| p.pages.get(usize::from(*at)))
+                        .map(|p| &p.description),
+                    _ => None,
+                };
+                if let Some(text) = pack_text.filter(|t| !t.is_empty()) {
+                    tooltip = Some(atlas.font.split(&Text::literal(text), 170.0));
+                }
+            }
             if hover {
                 if let WKind::Button {
                     act: Act::Extra(item),
@@ -3944,6 +4192,7 @@ impl OptionsUi {
             }
             match &wd.kind {
                 WKind::Button { label, active, act } => {
+                    let label = fitted.as_ref().map_or(label, |f| &f.0);
                     ui::button(batch, atlas, wd.x, wd.y, wd.w, wd.h, label, *active, hover);
                     if hover && let Act::Key(name) = act {
                         let conflicts = s.keys.conflicts(name);
@@ -3977,6 +4226,23 @@ impl OptionsUi {
                         wd.w,
                         label,
                         shown,
+                        hover || dragging,
+                        true,
+                        dragging,
+                    );
+                }
+                WKind::ShaderSlider { label, value, name } => {
+                    let label = fitted.as_ref().map_or(label, |f| &f.0);
+                    let held = self.shader_dragging.as_ref().filter(|(n, _)| n == name);
+                    let dragging = held.is_some();
+                    ui::slider(
+                        batch,
+                        atlas,
+                        wd.x,
+                        wd.y,
+                        wd.w,
+                        label,
+                        held.map_or(*value, |h| h.1),
                         hover || dragging,
                         true,
                         dragging,
@@ -4353,6 +4619,15 @@ impl OptionsUi {
                 }
                 return events;
             }
+            if let Some((name, at)) = &mut self.shader_dragging
+                && let Some(wd) = widgets
+                    .iter()
+                    .find(|wd| matches!(&wd.kind, WKind::ShaderSlider { name: n, .. } if n == name))
+                && let Some(options) = &mut s.shader_options
+            {
+                *at = ui::slider_value(wd.x, wd.w, x);
+                options.set_position(name, *at);
+            }
             if let Some(opt) = self.dragging
                 && let Some(wd) = widgets
                     .iter()
@@ -4378,8 +4653,46 @@ impl OptionsUi {
             return self.bind_mouse(s, button);
         }
         // AbstractWidget accepts only the primary button. Rebinding above
-        // accepts other mouse buttons, but is not a widget activation.
+        // accepts other mouse buttons, but is not a widget activation. A pack's option steps
+        // back with the other one.
         if right {
+            let name = widgets.iter().find_map(|wd| match &wd.kind {
+                WKind::Button {
+                    active: true,
+                    act: Act::ShaderOption(name),
+                    ..
+                } if ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h)
+                    && !(wd.list && (y < top || y >= bottom)) =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            });
+            if let Some(name) = name
+                && let Some(options) = &mut s.shader_options
+            {
+                options.cycle(&name, true);
+                events.push(Event::ButtonClick);
+            }
+            let native = widgets.iter().find_map(|wd| match wd.kind {
+                WKind::Button {
+                    active: true,
+                    act: Act::NativePackOption(pack, option),
+                    ..
+                } if ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h)
+                    && !(wd.list && (y < top || y >= bottom)) =>
+                {
+                    Some((pack, option))
+                }
+                _ => None,
+            });
+            if let Some((pack, option)) = native
+                && let Some(entry) = s.shader_packs.get_mut(pack)
+                && entry.step_option(option, true, false)
+            {
+                events.push(Event::ButtonClick);
+                events.push(Event::NativePackOptions(pack));
+            }
             return events;
         }
         if ui::scrollbar_thumb(top, bottom, content, self.scroll).is_some()
@@ -4501,6 +4814,48 @@ impl OptionsUi {
                             }
                         }
                         Act::OpenShaderPackFolder => events.push(Event::OpenShaderPackFolder),
+                        Act::ShaderOptions => {
+                            s.shader_options = None;
+                            self.push(Page::ShaderOptions);
+                            events.push(Event::OpenShaderOptions);
+                        }
+                        Act::ShaderOption(name) => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.cycle(&name, false);
+                            }
+                        }
+                        Act::ShaderScreen(screen) => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.path.push(screen);
+                                self.scroll = 0.0;
+                            }
+                        }
+                        Act::ShaderProfile => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.next_profile();
+                            }
+                        }
+                        Act::ShaderReset => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.reset();
+                            }
+                        }
+                        Act::NativePackOptions(i) => {
+                            self.push(Page::NativePackOptions(i, 0));
+                        }
+                        Act::NativePackOption(pack, option) => {
+                            if let Some(entry) = s.shader_packs.get_mut(pack)
+                                && entry.step_option(option, false, false)
+                            {
+                                events.push(Event::NativePackOptions(pack));
+                            }
+                        }
+                        Act::NativePackReset(pack) => {
+                            if let Some(entry) = s.shader_packs.get_mut(pack) {
+                                entry.reset_options();
+                                events.push(Event::NativePackOptions(pack));
+                            }
+                        }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
                         Act::AddWaypoint => {
@@ -4545,6 +4900,13 @@ impl OptionsUi {
                         Act::None => {}
                     }
                 }
+                WKind::ShaderSlider { name, .. } => {
+                    let at = ui::slider_value(wd.x, wd.w, x);
+                    if let Some(options) = &mut s.shader_options {
+                        options.set_position(&name, at);
+                    }
+                    self.shader_dragging = Some((name, at));
+                }
                 WKind::Slider { opt, .. } => {
                     self.dragging = Some(opt);
                     let v = ui::slider_value(wd.x, wd.w, x);
@@ -4580,7 +4942,7 @@ impl OptionsUi {
         }
         // AbstractSliderButton suppresses the press sound and plays once on
         // release, even if the pointer has left the widget or its value stayed.
-        let slider = self.dragging.take().is_some();
+        let slider = self.dragging.take().is_some() | self.shader_dragging.take().is_some();
         let graphics_slider = self.graphics.release();
         let volt_slider = self.volt_glass.release();
         self.mod_menu.release();
@@ -4757,6 +5119,14 @@ impl OptionsUi {
     /// Escape or Done: leave the current page, applying page results.
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
         let mut events = Vec::new();
+        // A pack's screen goes back to the one that opened it.
+        if self.page() == Page::ShaderOptions
+            && let Some(options) = &mut s.shader_options
+            && options.path.pop().is_some()
+        {
+            self.scroll = 0.0;
+            return events;
+        }
         let page = self.stack.pop().unwrap_or(Page::Main);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
@@ -4765,6 +5135,13 @@ impl OptionsUi {
         self.selected_key = None;
         self.selected_pad_action = None;
         match page {
+            Page::ShaderOptions => {
+                if s.shader_options.as_ref().is_some_and(|o| o.changed) {
+                    events.push(Event::ShaderOptions);
+                } else {
+                    s.shader_options = None;
+                }
+            }
             Page::Language => {
                 if let Some(code) = self.language_choice.take()
                     && code != s.language

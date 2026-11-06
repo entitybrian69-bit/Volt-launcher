@@ -204,6 +204,8 @@ pub struct Settings {
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
     /// `horizon.shader_pack`.
     pub shader_packs: Vec<crate::shader_pack_list::Entry>,
+    /// The picked `shaders/` pack's options while its Shader Options page is open.
+    pub shader_options: Option<crate::shader_options::ShaderOptions>,
     /// Saved Volt Waypoints (`volt-waypoints.json`).
     pub volt_waypoints: crate::volt_features::WaypointStore,
 }
@@ -291,6 +293,7 @@ impl Default for Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            shader_options: None,
             volt_waypoints: Default::default(),
         }
     }
@@ -488,6 +491,7 @@ impl Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            shader_options: None,
             volt_waypoints: Default::default(),
             auto_jump: f.bool("autoJump"),
             language: f.string("lang"),

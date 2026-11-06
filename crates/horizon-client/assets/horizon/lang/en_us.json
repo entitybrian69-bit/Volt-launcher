@@ -28,6 +28,7 @@
   "horizon.options.search": "Search settings...",
   "horizon.pages.mods": "Mods",
   "horizon.pages.shader_packs": "Shader Packs",
+  "horizon.pages.shader_options": "Shader Options",
   "horizon.pages.controller": "Controller Settings",
   "horizon.pages.controller_binds": "Controller Binds",
   "horizon.pages.extras": "Volt Extras",
@@ -259,5 +260,8 @@
   "key.volt.mod_menu": "Open Mod Menu",
   "key.volt.freelook": "Activate Freelook",
   "key.volt.zoom": "Zoom (Hold)",
-  "key.volt.world_map": "Open World Map"
+  "key.volt.world_map": "Open World Map",
+  "horizon.shader_options.open": "Shader Options...",
+  "horizon.shader_options.profile": "Profile",
+  "horizon.shader_options.loading": "Reading the shader pack's options..."
 }
