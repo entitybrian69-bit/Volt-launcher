@@ -14,6 +14,13 @@ macro_rules! world_items {
         }
     };
 }
+/// The biome table the world plays with, as a field-level borrow (this fork
+/// keeps one table per game; mods use the macro like upstream's).
+macro_rules! world_biomes {
+    ($s:expr) => {
+        $s.res.biomes()
+    };
+}
 macro_rules! world_recipes {
     ($s:ident) => {
         match &$s.world_tables {
@@ -2625,6 +2632,22 @@ impl Dim {
             Self::Nether => LevelShape::NETHER,
             Self::End => LevelShape::END,
         }
+    }
+    /// `Level.getMinY`: the dimension type's minimum y.
+    #[allow(dead_code)]
+    fn min_y(self) -> i32 {
+        self.shape().min_y
+    }
+    /// `DimensionType.logicalHeight`: how high portals and chorus fruit reach.
+    #[allow(dead_code)]
+    fn logical_height(self) -> i32 {
+        self.shape().logical_height
+    }
+    /// `Level.getMaxY`: the dimension type's minimum y plus height, less one.
+    #[allow(dead_code)]
+    fn max_y(self) -> i32 {
+        let shape = self.shape();
+        shape.min_y + shape.height - 1
     }
 }
 fn facing_offset(facing: &str) -> [i32; 3] {

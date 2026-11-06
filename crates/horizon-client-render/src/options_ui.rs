@@ -4214,7 +4214,7 @@ impl OptionsUi {
                 WKind::Slider { label, value, opt } => {
                     let dragging = self.dragging == Some(*opt);
                     let shown = self.slider_shown(*opt, *value);
-                    ui::slider(
+                    ui::slider_dragging(
                         batch,
                         atlas,
                         wd.x,
@@ -4231,7 +4231,7 @@ impl OptionsUi {
                     let label = fitted.as_ref().map_or(label, |f| &f.0);
                     let held = self.shader_dragging.as_ref().filter(|(n, _)| n == name);
                     let dragging = held.is_some();
-                    ui::slider(
+                    ui::slider_dragging(
                         batch,
                         atlas,
                         wd.x,

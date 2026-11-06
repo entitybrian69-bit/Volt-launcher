@@ -145,8 +145,8 @@ jobs:
             tag: customhud-1.6.0
             raw_targets: "--experimental-raw-targets"
           - mod: coords_hud
-            file: coords_hud-0.1.0.hmod
-            tag: coords_hud-0.1.0
+            file: coords_hud-2.0.0.hnmod
+            tag: coords_hud-2.0.0
             raw_targets: "--experimental-raw-targets"
           - mod: crosshair_indicator
             file: crosshair_indicator-1.0.0.hnmod
@@ -240,11 +240,27 @@ jobs:
           import os
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP']) / 'worker-result'
+          def emit(title, body):
+              safe = body[:3500].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title={title}::' + safe)
           text = '\n'.join(f'{name}:\n' + (root / name).read_text(errors='replace')[-2800:]
                            for name in ('report.json', 'apply.log', 'build.log') if (root / name).is_file())
           if text:
-              safe = text[-3500:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print('::error title=Native worker failed::' + safe)
+              emit('Native worker failed', text[-3500:])
+          # Every compiler error with context, chunked into further annotations.
+          build = root / 'build.log'
+          if build.is_file():
+              lines = build.read_text(errors='replace').splitlines()
+              blocks, keep = [], 0
+              for i, line in enumerate(lines):
+                  if line.startswith('error'):
+                      keep = 13
+                  if keep:
+                      blocks.append(line)
+                      keep -= 1
+              errors = '\n'.join(blocks)
+              for n in range(0, min(len(errors), 8 * 3400), 3400):
+                  emit(f'Compiler errors {n // 3400 + 1}', errors[n:n + 3400])
           PYCODE
       - name: Upload worker report and unsigned library (not an APK)
         if: always()

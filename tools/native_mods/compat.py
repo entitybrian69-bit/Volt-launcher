@@ -45,7 +45,7 @@ def read_entry(registry: Path, mod_id: str) -> dict:
 def latest(entry: dict) -> dict | None:
     """The newest 26.3 bundle: registry entries append new versions last."""
     matching = [v for v in entry.get("versions", [])
-                if v.get("game") == "26.3" and str(v.get("file", "")).endswith((".hnmod", ".hmod"))]
+                if v.get("game") == "26.3" and str(v.get("file", "")).endswith(".hnmod")]
     return matching[-1] if matching else None
 
 def inventory(registry: Path) -> dict:

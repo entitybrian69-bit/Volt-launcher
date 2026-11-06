@@ -1851,6 +1851,16 @@ impl Game<'_> {
             .chat
             .add(atlas, line, None, ChatSource::Client, self.ticks, focused);
     }
+    /// The rain and thunder levels of the world in place, each 0.0 to 1.0
+    /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
+    /// or a wind turbine reads. Both 0 in the Nether and the End, which have
+    /// no weather (`Level.canHaveWeather`). API 97.
+    pub(super) fn native_weather(&self) -> (f32, f32) {
+        if self.dim.id() != "minecraft:overworld" {
+            return (0.0, 0.0);
+        }
+        self.world.weather.levels(1.0)
+    }
     /// A native mod's own folder: `horizon-mods/.horizon-mod-data/<id>/`,
     /// where the WebAssembly mod of the same id kept its storage, so a
     /// player's settings carry over. Not created here.

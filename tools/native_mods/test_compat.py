@@ -50,12 +50,6 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(compat.Rejected, 'signature'):
             self.extract(archive, entry)
 
-    def test_latest_accepts_hmod_file_extension(self):
-        entry = {'id': 'b', 'versions': [
-            {'version': '0.1.0', 'game': '26.3', 'file': 'b-0.1.0.hmod'},
-        ]}
-        self.assertEqual(compat.latest(entry)['version'], '0.1.0')
-
     def test_fork_remaps_rewrite_official_chat_paths(self):
         import tempfile
         from pathlib import Path
