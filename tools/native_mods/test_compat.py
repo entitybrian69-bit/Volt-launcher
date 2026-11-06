@@ -126,7 +126,7 @@ class CompatibilityTests(unittest.TestCase):
 
     def test_hook_version_and_unknown_target_rejected(self):
         data = {'meta': dict(self.meta, hooks=41), 'manifest': {'injection': [{'target': 'not_a_hook'}]}}
-        with self.assertRaisesRegex(compat.Rejected, 'hook API'):
+        with self.assertRaisesRegex(compat.Rejected, r'needs native hook API 41; Volt serves \d+'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40)
         data['meta']['hooks'] = 1
         with self.assertRaisesRegex(compat.Rejected, 'non-hook'):

@@ -209,8 +209,14 @@ def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
     hooks = meta.get("hooks")
     source = (root / "crates/horizon-client/src/game/native_hooks.rs").read_text()
     found = re.search(r"const NATIVE_HOOKS_API: u32 = (\d+);", source)
-    if not isinstance(hooks, int) or isinstance(hooks, bool) or not found or hooks < 1 or hooks > int(found.group(1)):
+    if not isinstance(hooks, int) or isinstance(hooks, bool) or not found or hooks < 1:
         raise Rejected("hook API unavailable or above Volt's version")
+    served = int(found.group(1))
+    if hooks > served:
+        raise Rejected(
+            f"needs native hook API {hooks}; Volt serves {served} "
+            "(the mod targets a newer Horizon than this fork has ported)"
+        )
     available = json.loads((root / "native-hooks.json").read_text())["hooks"]
     targets = {item["target"] for item in available}
     names = {(item["name"], item["version"]) for item in available}
