@@ -132,6 +132,23 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(compat.Rejected, 'non-hook'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40)
 
+    def test_revision_pinned_bundle_rejected_unless_raw_targets_probe(self):
+        import json as _json
+        hook = _json.loads((compat.ROOT / 'native-hooks.json').read_text())['hooks'][0]
+        manifest = {'mod': {}, 'compatibility': {}, 'module': {},
+                    'injection': [{'target': 'horizon_client::game::Game::attack'},
+                                  {'hook': hook['name'], 'hook_version': hook['version']}]}
+        data = {'meta': dict(self.meta), 'manifest': manifest}
+        data['meta'].pop('hooks', None)
+        with self.assertRaisesRegex(compat.Rejected, 'pins Horizon .* exactly without a hook-API'):
+            compat.check_hooks(data, compat.ROOT, 'c' * 40)
+        # The probe-only flag lets the mixin compiler judge raw targets instead.
+        self.assertTrue(compat.check_hooks(data, compat.ROOT, 'c' * 40, raw_targets=True))
+        # But a named hook Volt does not serve still fails closed.
+        manifest['injection'][1] = {'hook': 'definitely_not_served', 'hook_version': 1}
+        with self.assertRaisesRegex(compat.Rejected, 'missing from Volt'):
+            compat.check_hooks(data, compat.ROOT, 'c' * 40, raw_targets=True)
+
     def test_source_archive_rejects_traversal_and_skips_symlinks(self):
         archive_path = self.root / 'source.tar'
         source = self.root / 'source'

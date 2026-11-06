@@ -197,7 +197,7 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
         raise Rejected("mixin and bundle Horizon revisions differ")
     return {"meta": meta, "manifest": manifest, "sha256": digest, "manifest_path": manifest_path}
 
-def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
+def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False) -> bool:
     """Return whether the staged manifest needs safe hook-only revision rebinding."""
     meta, manifest = data["meta"], data["manifest"]
     if manifest.get("post_build") or manifest.get("post-build"):
@@ -218,6 +218,11 @@ def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
         available = json.loads((root / "native-hooks.json").read_text())["hooks"]
         names = {(item["name"], item["version"]) for item in available}
         missing = sorted({f"{h}/{v}" for (h, v) in named if (h, v) not in names})
+        if raw_targets and not missing and injections:
+            # Experimental probe-only path: rebind the revision and let the
+            # mixin compiler's strict AST matching decide whether each raw
+            # target still exists unchanged in Volt. Never used for signing.
+            return True
         raise Rejected(
             f"bundle pins Horizon {meta.get('horizon', '')[:12]} exactly without a hook-API "
             f"declaration; {len(raw)} raw target injections (first: {raw[:6]}), "
@@ -237,7 +242,7 @@ def check_hooks(data: dict, root: Path, volt_rev: str) -> bool:
         raise Rejected("no explicit hook injections; exact Volt revision required")
     for inj in injections:
         if "target" in inj:
-            if inj["target"] not in targets:
+            if inj["target"] not in targets and not raw_targets:
                 raise Rejected("non-hook target needs its exact pinned Horizon source")
         elif (inj.get("hook"), inj.get("hook_version")) not in names:
             raise Rejected("named hook unavailable")
@@ -293,7 +298,8 @@ def run_probe(args) -> dict:
                       horizon_revision=meta["horizon"], mixins_revision=meta["mixins"])
         if args.mixins_revision != meta["mixins"]:
             raise Rejected("mixin tool revision must match the bundle")
-        rebind = check_hooks(data, ROOT, rev)
+        rebind = check_hooks(data, ROOT, rev, raw_targets=getattr(args, "experimental_raw_targets", False))
+        report["raw_target_rebind"] = bool(getattr(args, "experimental_raw_targets", False) and rebind)
         if rebind:
             manifest_path = data["manifest_path"]
             text = manifest_path.read_text(encoding="utf-8")
@@ -344,6 +350,9 @@ def main() -> int:
     probe.add_argument("--abi", choices=ABIS, required=True)
     probe.add_argument("--output", type=Path, required=True)
     probe.add_argument("--trust-native-code", action="store_true")
+    probe.add_argument("--experimental-raw-targets", action="store_true",
+                       help="probe-only: rebind revision-pinned bundles and let the mixin "
+                            "compiler judge raw targets; output stays unsigned")
     args = p.parse_args()
     try:
         if args.command == "inventory":

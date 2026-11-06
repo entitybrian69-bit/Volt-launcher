@@ -45,6 +45,7 @@ jobs:
           - mod: horizon_physics
             file: horizon_physics-0.15.1.hnmod
             tag: horizon_physics-0.15.1
+            raw_targets: "--experimental-raw-targets"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -107,7 +108,8 @@ jobs:
             --mod "${{ matrix.mod }}=$RUNNER_TEMP/bundle/${{ matrix.file }}" \
             --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
             --mixins-revision "$PROBE_MIXINS" \
-            --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/worker-result" --trust-native-code
+            --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/worker-result" --trust-native-code \
+            ${{ matrix.raw_targets }}
       - name: Show failure diagnostics
         if: failure()
         shell: bash

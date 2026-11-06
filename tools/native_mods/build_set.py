@@ -33,7 +33,8 @@ def selection(value: str) -> tuple[str, Path]:
 
 
 def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revision: str,
-                root: Path, volt_revision: str, work: Path) -> list[dict]:
+                root: Path, volt_revision: str, work: Path,
+                raw_targets: bool = False) -> list[dict]:
     if not selections or len(selections) > MAX_MODS:
         raise compat.Rejected(f"select 1 to {MAX_MODS} native mods")
     ids = [mod_id for mod_id, _ in selections]
@@ -55,7 +56,7 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         meta = data["meta"]
         if meta["mixins"] != mixins_revision:
             raise compat.Rejected(f"{mod_id}: mixin compiler revision differs")
-        rebind = compat.check_hooks(data, root, volt_revision)
+        rebind = compat.check_hooks(data, root, volt_revision, raw_targets=raw_targets)
         if rebind:
             manifest_path = data["manifest_path"]
             text = manifest_path.read_text(encoding="utf-8")
@@ -65,7 +66,8 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
             manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
         shutil.copytree(extracted / "mixins" / mod_id, mixins_dir / mod_id)
         results.append({"id": mod_id, "version": meta["version"], "sha256": data["sha256"],
-                        "horizon_revision": meta["horizon"], "hook_revision_rebound": rebind})
+                        "horizon_revision": meta["horizon"], "hook_revision_rebound": rebind,
+                        "raw_target_rebind": bool(raw_targets and rebind)})
     return results
 
 
@@ -84,7 +86,8 @@ def run(args: argparse.Namespace) -> dict:
     library.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="volt-native-set-") as tmp:
         work = Path(tmp)
-        report["mods"] = prepare_set(args.registry, args.mod, args.mixins_revision, compat.ROOT, rev, work)
+        report["mods"] = prepare_set(args.registry, args.mod, args.mixins_revision, compat.ROOT, rev, work,
+                                     raw_targets=getattr(args, "experimental_raw_targets", False))
         source = work / "source"
         source.mkdir()
         archive = work / "source.tar"
@@ -126,6 +129,9 @@ def main() -> int:
     parser.add_argument("--abi", choices=tuple(TARGETS), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trust-native-code", action="store_true")
+    parser.add_argument("--experimental-raw-targets", action="store_true",
+                        help="probe-only: rebind revision-pinned bundles and let the mixin "
+                             "compiler judge raw targets; output stays unsigned")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     for name in ("report.json", "apply.log", "build.log", "libhorizon_android.so"):
