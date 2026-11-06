@@ -229,11 +229,15 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
             f"{len(named)} named hook injections, missing from Volt: {missing[:25]}"
         )
     served = int(found.group(1))
-    if hooks > served:
+    if hooks > served and not raw_targets:
         raise Rejected(
             f"needs native hook API {hooks}; Volt serves {served} "
             "(the mod targets a newer Horizon than this fork has ported)"
         )
+    # Experimental probe-only path (raw_targets): a declared level above
+    # Volt's falls through to the per-injection checks below. Named hooks
+    # must exist in native-hooks.json; raw targets are left to the mixin
+    # compiler's strict AST matching. Never used for signing.
     available = json.loads((root / "native-hooks.json").read_text())["hooks"]
     targets = {item["target"] for item in available}
     names = {(item["name"], item["version"]) for item in available}

@@ -132,6 +132,22 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(compat.Rejected, 'non-hook'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40)
 
+    def test_newer_hook_level_falls_through_on_raw_targets_probe(self):
+        import json as _json
+        hook = _json.loads((compat.ROOT / 'native-hooks.json').read_text())['hooks'][0]
+        manifest = {'mod': {}, 'compatibility': {}, 'module': {},
+                    'injection': [{'target': 'horizon_client::game::Game::attack'},
+                                  {'hook': hook['name'], 'hook_version': hook['version']}]}
+        data = {'meta': dict(self.meta, hooks=9999), 'manifest': manifest}
+        with self.assertRaisesRegex(compat.Rejected, r'needs native hook API 9999'):
+            compat.check_hooks(data, compat.ROOT, 'c' * 40)
+        # The probe-only flag checks each injection instead of the level.
+        self.assertTrue(compat.check_hooks(data, compat.ROOT, 'c' * 40, raw_targets=True))
+        # But a named hook Volt does not serve still fails closed.
+        manifest['injection'][1] = {'hook': 'definitely_not_served', 'hook_version': 1}
+        with self.assertRaisesRegex(compat.Rejected, 'named hook unavailable'):
+            compat.check_hooks(data, compat.ROOT, 'c' * 40, raw_targets=True)
+
     def test_revision_pinned_bundle_rejected_unless_raw_targets_probe(self):
         import json as _json
         hook = _json.loads((compat.ROOT / 'native-hooks.json').read_text())['hooks'][0]
