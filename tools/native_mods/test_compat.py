@@ -50,6 +50,63 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(compat.Rejected, 'signature'):
             self.extract(archive, entry)
 
+    def test_latest_prefers_the_newest_appended_version(self):
+        entry = {'versions': [
+            {'version': '1.0', 'game': '26.3', 'file': 'a-1.0.hnmod'},
+            {'version': '2.0', 'game': '26.2', 'file': 'a-2.0.hnmod'},
+            {'version': '1.2', 'game': '26.3', 'file': 'a-1.2.hnmod'},
+        ]}
+        self.assertEqual(compat.latest(entry)['version'], '1.2')
+
+    def sign(self, archive, entry, tamper_sig=False, wrong_key_id=False):
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        secret = Ed25519PrivateKey.generate()
+        public = secret.public_key().public_bytes_raw()
+        key_id = b'\x07' * 8
+        entry['key'] = base64.b64encode(b'Ed' + key_id + public).decode()
+        digest = hashlib.blake2b(archive.read_bytes(), digest_size=64).digest()
+        sig = secret.sign(digest)
+        if tamper_sig:
+            sig = bytes([sig[0] ^ 1]) + sig[1:]
+        trusted = 'test 1.0 for Horizon 26.3'
+        global_sig = secret.sign(sig + trusted.encode())
+        record_id = (b'\x08' * 8) if wrong_key_id else key_id
+        entry['versions'][0]['signature'] = (
+            'untrusted comment: signature from minisign secret key\n'
+            + base64.b64encode(b'ED' + record_id + sig).decode()
+            + '\ntrusted comment: ' + trusted + '\n'
+            + base64.b64encode(global_sig).decode())
+
+    def test_valid_minisign_signature_accepted(self):
+        try:
+            import cryptography  # noqa: F401
+        except ImportError:
+            self.skipTest('cryptography not installed')
+        archive, entry = self.bundle()
+        self.sign(archive, entry)
+        self.assertEqual(self.extract(archive, entry)['meta'], self.meta)
+
+    def test_bad_minisign_signature_rejected(self):
+        try:
+            import cryptography  # noqa: F401
+        except ImportError:
+            self.skipTest('cryptography not installed')
+        archive, entry = self.bundle()
+        self.sign(archive, entry, tamper_sig=True)
+        with self.assertRaisesRegex(compat.Rejected, 'does not verify'):
+            self.extract(archive, entry)
+
+    def test_minisign_key_id_mismatch_rejected(self):
+        try:
+            import cryptography  # noqa: F401
+        except ImportError:
+            self.skipTest('cryptography not installed')
+        archive, entry = self.bundle()
+        self.sign(archive, entry, wrong_key_id=True)
+        with self.assertRaisesRegex(compat.Rejected, 'different key'):
+            self.extract(archive, entry)
+
     def test_revoked_bundle(self):
         archive, entry = self.bundle()
         (self.root / 'revoked.toml').write_text('[[revoked]]\nid = "test_mod"\n')

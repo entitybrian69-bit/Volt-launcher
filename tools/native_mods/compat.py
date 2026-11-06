@@ -43,8 +43,10 @@ def read_entry(registry: Path, mod_id: str) -> dict:
     return entry
 
 def latest(entry: dict) -> dict | None:
-    return next((v for v in entry.get("versions", [])
-                 if v.get("game") == "26.3" and str(v.get("file", "")).endswith(".hnmod")), None)
+    """The newest 26.3 bundle: registry entries append new versions last."""
+    matching = [v for v in entry.get("versions", [])
+                if v.get("game") == "26.3" and str(v.get("file", "")).endswith(".hnmod")]
+    return matching[-1] if matching else None
 
 def inventory(registry: Path) -> dict:
     projects = []
@@ -82,6 +84,56 @@ def check_revoked(registry: Path, mod_id: str, digest: str) -> None:
             raise Rejected("bundle is revoked in pinned registry")
 
 
+def verify_minisign(data: bytes, key_b64: str, signature: str) -> None:
+    """Verify a minisign signature block over `data` with the author key.
+
+    Supports the two minisign algorithms: `Ed` (signature over the raw file)
+    and `ED` (signature over the file's Blake2b-512 digest). The trusted
+    comment's global signature is verified too. Fails closed on anything
+    unexpected, including a missing cryptography backend.
+    """
+    import base64
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        raise Rejected("signed bundle: minisign verification needs the 'cryptography' package")
+    try:
+        raw_key = base64.b64decode(key_b64.strip(), validate=True)
+    except (ValueError, TypeError):
+        raise Rejected("signed bundle: author key is not valid base64")
+    if len(raw_key) != 42 or raw_key[:2] != b"Ed":
+        raise Rejected("signed bundle: unsupported author key format")
+    key_id, public = raw_key[2:10], raw_key[10:]
+    lines = [line.strip() for line in signature.strip().splitlines() if line.strip()]
+    payloads = [line for line in lines if not line.startswith(("untrusted comment:", "trusted comment:"))]
+    trusted = [line[len("trusted comment:"):].strip() for line in lines
+               if line.startswith("trusted comment:")]
+    if len(payloads) != 2 or len(trusted) != 1:
+        raise Rejected("signed bundle: malformed minisign signature block")
+    try:
+        record = base64.b64decode(payloads[0], validate=True)
+        global_sig = base64.b64decode(payloads[1], validate=True)
+    except (ValueError, TypeError):
+        raise Rejected("signed bundle: signature is not valid base64")
+    if len(record) != 74 or len(global_sig) != 64:
+        raise Rejected("signed bundle: malformed minisign signature record")
+    alg, sig_key_id, sig = record[:2], record[2:10], record[10:]
+    if sig_key_id != key_id:
+        raise Rejected("signed bundle: signature was made with a different key")
+    if alg == b"ED":
+        message = hashlib.blake2b(data, digest_size=64).digest()
+    elif alg == b"Ed":
+        message = data
+    else:
+        raise Rejected("signed bundle: unsupported minisign algorithm")
+    verifier = Ed25519PublicKey.from_public_bytes(public)
+    try:
+        verifier.verify(sig, message)
+        verifier.verify(global_sig, sig + trusted[0].encode())
+    except InvalidSignature:
+        raise Rejected("signed bundle: minisign signature does not verify")
+
 def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> dict:
     ver = latest(entry)
     if not ver or not SHA.fullmatch(str(ver.get("sha256", ""))):
@@ -92,10 +144,15 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
     if digest != ver["sha256"]:
         raise Rejected("bundle SHA-256 does not match pinned registry entry")
     check_revoked(registry, entry["id"], digest)
-    # Signed entries must not silently lose author verification. They need an
-    # independent minisign-verification path before they can be built here.
-    if ver.get("signature") or entry.get("key"):
-        raise Rejected("signed bundle: author signature verification not implemented")
+    # Signed entries must not silently lose author verification: when the
+    # registry publishes an author key or a signature, both must be present
+    # and the minisign signature must verify over the exact archive bytes.
+    signature = str(ver.get("signature") or "")
+    key = str(entry.get("key") or "")
+    if signature or key:
+        if not signature or not key:
+            raise Rejected("signed bundle: signature and author key must both be present")
+        verify_minisign(archive.read_bytes(), key, signature)
     seen = set()
     total = 0
     with zipfile.ZipFile(archive) as z:

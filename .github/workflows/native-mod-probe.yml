@@ -15,24 +15,39 @@ permissions:
   contents: read
 
 jobs:
-  # Zoom is already integrated into Volt; re-injecting it can duplicate its
-  # module. Its original type-check remains documented in compatibility.md.
-  combination-build:
-    name: Native build worker / ${{ matrix.abi }} (unsigned library only)
+  # Each candidate registry mod builds alone against Volt's engine revision,
+  # with the mixin compiler revision its published bundle pins. The bundle is
+  # fetched from the registry's release assets and checked against the pinned
+  # registry snapshot (SHA-256 and revocations) before anything is extracted.
+  registry-mod:
+    name: ${{ matrix.mod }} / ${{ matrix.abi }} (unsigned library only)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
+        abi: [arm64-v8a, armeabi-v7a]
+        mod: [jei, jade, veinminer]
         include:
           - abi: arm64-v8a
             target: aarch64-linux-android
           - abi: armeabi-v7a
             target: armv7-linux-androideabi
+          - mod: jei
+            file: jei-0.1.0.hnmod
+            tag: jei-0.1.0
+          - mod: jade
+            file: jade-26.3.5.hnmod
+            tag: jade-26.3.5
+          - mod: veinminer
+            file: veinminer-0.3.2.hnmod
+            tag: veinminer-0.3.2
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Install signature verification dependency
+        run: python3 -m pip install cryptography
       - name: Test worker
         run: python3 -m unittest discover -s tools/native_mods -v
       - name: Set up Java 17
@@ -42,29 +57,53 @@ jobs:
           java-version: '17'
       - name: Install Rust target
         run: rustup target add "${{ matrix.target }}"
-      - name: Fetch pinned registry and reconstruct exact official bundles
+      - name: Fetch pinned registry snapshot
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/registry" "$RUNNER_TEMP/coords-source" "$RUNNER_TEMP/recipes-source"
+          mkdir -p "$RUNNER_TEMP/registry"
           curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/78853c19a6d48640ef500f3c8ff8988923576f3f | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
-          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/7fd746624af4 | tar -xz -C "$RUNNER_TEMP/coords-source" --strip-components=1
-          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/7ce014f8a93c | tar -xz -C "$RUNNER_TEMP/recipes-source" --strip-components=1
-          (cd "$RUNNER_TEMP/coords-source" && python3 native/tools/native.py package coords-hud)
-          (cd "$RUNNER_TEMP/recipes-source" && python3 native/tools/native.py package recipes)
-      - name: Install pinned mixin compiler
+      - name: Download published bundle and verify against the registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bundle"
+          curl --retry 3 -fsSL -o "$RUNNER_TEMP/bundle/${{ matrix.file }}" \
+            "https://github.com/horizon-rust/horizon-mods/releases/download/${{ matrix.tag }}/${{ matrix.file }}"
+          python3 - <<'PYCODE'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools/native_mods')
+          import compat
+          temp = Path(os.environ['RUNNER_TEMP'])
+          mod_id = os.environ['PROBE_MOD']
+          registry = temp / 'registry'
+          entry = compat.read_entry(registry, mod_id)
+          data = compat.verified_extract(
+              temp / 'bundle' / os.environ['PROBE_FILE'], entry,
+              temp / 'extract-check' / mod_id, registry)
+          mixins = data['meta']['mixins']
+          if not compat.REV.fullmatch(mixins):
+              raise SystemExit(f'{mod_id}: bundle pins an invalid mixins revision')
+          print(f'{mod_id}: verified, pins mixins {mixins}')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f'PROBE_MIXINS={mixins}\n')
+          PYCODE
+        env:
+          PROBE_MOD: ${{ matrix.mod }}
+          PROBE_FILE: ${{ matrix.file }}
+      - name: Install the bundle's pinned mixin compiler
         run: |
           cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
-            --rev 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
+            --rev "$PROBE_MIXINS" \
             --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
       - name: Build reviewed source on disposable runner
         run: |
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
-            --mod "coords_hud=$RUNNER_TEMP/coords-source/native/target/coords_hud-2.0.0.hnmod" \
-            --mod "recipes=$RUNNER_TEMP/recipes-source/native/target/recipes-2.0.0.hnmod" \
+            --mod "${{ matrix.mod }}=$RUNNER_TEMP/bundle/${{ matrix.file }}" \
             --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
-            --mixins-revision 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
+            --mixins-revision "$PROBE_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/worker-result" --trust-native-code
       - name: Show failure diagnostics
         if: failure()
@@ -84,7 +123,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-worker-combination-${{ matrix.abi }}
+          name: native-worker-${{ matrix.mod }}-${{ matrix.abi }}
           path: ${{ runner.temp }}/worker-result/
           if-no-files-found: warn
           retention-days: 14
