@@ -41,9 +41,11 @@ jobs:
           - mod: jade
             file: jade-26.3.5.hnmod
             tag: jade-26.3.5
+            raw_targets: "--experimental-raw-targets"
           - mod: veinminer
             file: veinminer-0.3.2.hnmod
             tag: veinminer-0.3.2
+            raw_targets: "--experimental-raw-targets"
           - mod: horizon_physics
             file: horizon_physics-0.15.1.hnmod
             tag: horizon_physics-0.15.1
