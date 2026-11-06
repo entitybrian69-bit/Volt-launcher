@@ -100,6 +100,25 @@ impl Game<'_> {
 
     /// Text the input method committed (`WindowEvent::Ime(Commit)`).
     pub(super) fn ime_commit(&mut self, text: &str) {
+        if self.screen != Screen::Playing && self.title.is_none() && !text.is_empty() {
+            let mut all_canceled = true;
+            if let Some(view_batch) = self.screen_view_batch() {
+                let view = self.screen_view(&view_batch, self.screen);
+                let bits = super::native_hooks::glfw_modifier_bits(self.modifiers);
+                for c in text.chars() {
+                    let mut canceled = false;
+                    self.native_screen_char_typed_pre(&view, c, bits, &mut canceled);
+                    if !canceled {
+                        all_canceled = false;
+                    }
+                }
+            } else {
+                all_canceled = false;
+            }
+            if all_canceled {
+                return;
+            }
+        }
         preedit::set_preedit(None);
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if text.is_empty() || !self.text_field_focused() {

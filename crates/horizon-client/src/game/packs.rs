@@ -253,6 +253,7 @@ impl Game<'_> {
         self.pack_reload = None;
         let result =
             staged.and_then(|staged| self.apply_staged_pack(staged).map_err(|e| e.to_string()));
+        let reloaded = result.is_ok();
         match kind {
             ReloadKind::Selection => {
                 if let Err(e) = result {
@@ -265,6 +266,9 @@ impl Game<'_> {
                 }
                 self.finish_pack_reload(result.is_ok());
             }
+        }
+        if reloaded {
+            self.native_client_resources_reloaded();
         }
     }
     /// The render-thread half: the renderer on the new pack's textures, then

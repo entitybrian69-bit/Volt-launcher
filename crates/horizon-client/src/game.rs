@@ -7681,6 +7681,10 @@ impl Game<'_> {
             Screen::Mod => self.draw_mod_screen(&mut batch),
             Screen::Playing | Screen::Options | Screen::Win => {}
         }
+        if screen != Screen::Playing && screen != Screen::Options && screen != Screen::Win {
+            let view = self.screen_view(&batch, screen);
+            self.native_screen_render_post(&mut batch, &view);
+        }
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_saving_indicator(b));
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_toasts(b, !show_hud));
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| {
@@ -15735,6 +15739,26 @@ impl ApplicationHandler for Game<'_> {
                         }) * wheel_sensitivity
                     };
                     let d = scaled(raw_y) as f32;
+                    if self.screen != Screen::Playing
+                        && self.title.is_none()
+                        && !self.dialog_open()
+                        && self.code_of_conduct.is_none()
+                    {
+                        let mut canceled = false;
+                        if let Some(view_batch) = self.screen_view_batch() {
+                            let view = self.screen_view(&view_batch, self.screen);
+                            let bits = native_hooks::glfw_modifier_bits(self.modifiers);
+                            self.native_screen_mouse_scrolled_pre(
+                                &view,
+                                [scaled(raw_x), scaled(raw_y)],
+                                bits,
+                                &mut canceled,
+                            );
+                        }
+                        if canceled {
+                            return Ok(());
+                        }
+                    }
                     if self.dialog_open() {
                         self.dialog_scroll(d);
                     } else if self.code_of_conduct.is_some() {
@@ -15863,6 +15887,30 @@ impl ApplicationHandler for Game<'_> {
                     }
                 }
                 WindowEvent::MouseInput { state, button, .. } if self.screen == Screen::Options => {
+                    let mut canceled = false;
+                    if let Some(view_batch) = self.screen_view_batch() {
+                        let view = self.screen_view(&view_batch, self.screen);
+                        let glfw_button = native_hooks::glfw_mouse_button(button);
+                        let bits = native_hooks::glfw_modifier_bits(self.modifiers);
+                        if state == ElementState::Pressed {
+                            self.native_screen_mouse_button_pressed_pre(
+                                &view,
+                                glfw_button,
+                                bits,
+                                &mut canceled,
+                            );
+                        } else {
+                            self.native_screen_mouse_button_released_pre(
+                                &view,
+                                glfw_button,
+                                bits,
+                                &mut canceled,
+                            );
+                        }
+                    }
+                    if canceled {
+                        return Ok(());
+                    }
                     if self.options_waiting_for_key() && state == ElementState::Pressed {
                         self.options_bind_mouse(button)?;
                     } else if matches!(button, MouseButton::Left | MouseButton::Right) {
@@ -15930,6 +15978,32 @@ impl ApplicationHandler for Game<'_> {
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     let pressed = state == ElementState::Pressed;
+                    if self.screen != Screen::Playing && self.title.is_none() {
+                        let mut canceled = false;
+                        if let Some(view_batch) = self.screen_view_batch() {
+                            let view = self.screen_view(&view_batch, self.screen);
+                            let glfw_button = native_hooks::glfw_mouse_button(button);
+                            let bits = native_hooks::glfw_modifier_bits(self.modifiers);
+                            if pressed {
+                                self.native_screen_mouse_button_pressed_pre(
+                                    &view,
+                                    glfw_button,
+                                    bits,
+                                    &mut canceled,
+                                );
+                            } else {
+                                self.native_screen_mouse_button_released_pre(
+                                    &view,
+                                    glfw_button,
+                                    bits,
+                                    &mut canceled,
+                                );
+                            }
+                        }
+                        if canceled {
+                            return Ok(());
+                        }
+                    }
                     if pressed && self.volt_mod_input(&horizon_client::keybinds::mouse_name(button)) {
                         return Ok(());
                     }
@@ -16299,6 +16373,27 @@ impl ApplicationHandler for Game<'_> {
                     let PhysicalKey::Code(key) = event.physical_key else {
                         return Ok(());
                     };
+                    if event.state == ElementState::Pressed
+                        && self.screen != Screen::Playing
+                        && self.title.is_none()
+                        && let Some(name) = horizon_client::keybinds::key_name(key)
+                    {
+                        let mut canceled = false;
+                        if let Some(view_batch) = self.screen_view_batch() {
+                            let view = self.screen_view(&view_batch, self.screen);
+                            let bits = native_hooks::glfw_modifier_bits(self.modifiers);
+                            self.native_screen_key_pressed_pre(
+                                &view,
+                                name,
+                                event.repeat,
+                                bits,
+                                &mut canceled,
+                            );
+                        }
+                        if canceled {
+                            return Ok(());
+                        }
+                    }
                     if event.state == ElementState::Pressed
                         && !event.repeat
                         && horizon_client::keybinds::key_name(key)

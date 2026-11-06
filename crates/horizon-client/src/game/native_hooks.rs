@@ -636,6 +636,37 @@ const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.use", None),
 ];
 
+/// The open screen, for the screen hooks (`native_screen_render_post`, the
+/// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre`
+/// and `native_screen_mouse_scrolled_pre`, and the key ones
+/// `native_screen_key_pressed_pre` and `native_screen_char_typed_pre`): what
+/// it is, its menu and title, where its container panel is, how many slots
+/// its menu has, and where the mouse and the frame's partial tick are.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeScreenView<'a> {
+    /// One id per `Screen` (`Screen::id`): `inventory`, `creative`, `paused`,
+    /// `stats`, `options`, `win`… Every container, station and mod window
+    /// draws on the inventory screen and so reports `inventory`: tell them
+    /// apart by `menu` and `title` and by `slots`.
+    pub id: &'static str,
+    /// The type id of the menu the server opened for this screen
+    /// (`minecraft:generic_9x3`, `minecraft:furnace`, a mod's own id). None
+    /// on a screen without one.
+    pub menu: Option<&'a str>,
+    /// The title the server gave the open menu, if it has one. None when the
+    /// server gave none and on a screen the client opened.
+    pub title: Option<&'a Text>,
+    /// The screen's container panel in GUI pixels, `[x, y, width, height]`;
+    /// the whole window for a screen with none.
+    pub rect: [f32; 4],
+    /// The slots the open menu has, as `Game::slots` counts them.
+    pub slots: usize,
+    /// The pointer in GUI pixels, as `native_cursor` gives it.
+    pub mouse: [f32; 2],
+    /// This frame's partial tick, 0 to 1.
+    pub partial_tick: f32,
+}
+
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// Once a frame, in a world or not, after Horizon's extras.
@@ -1144,6 +1175,127 @@ impl Game<'_> {
     pub(super) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         let _ = (slot, new);
     }
+    /// The open screen has drawn itself and its tooltips (`Screen.render`,
+    /// the point of `ScreenEvent.Render.Post`): draw over it with the batch,
+    /// `screen.rect` being its container panel (or the whole window) and
+    /// `screen.id` the screen it is. Once a frame on the window, never while
+    /// playing with no screen; `&self`, so it reads and draws only. API 78.
+    pub(super) fn native_screen_render_post(
+        &self,
+        batch: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+    ) {
+        let _ = (batch, screen);
+    }
+    /// A mouse button went down over the open screen
+    /// (`ScreenEvent.MouseButtonPressed.Pre`): `screen.mouse` is where the
+    /// pointer is, `button` the button's GLFW index (0 left, 1 right, 2
+    /// middle, 3 back, 4 forward) and `modifiers` GLFW's bits (shift 1,
+    /// control 2, alt 4, super 8). Set `canceled` and the press goes no
+    /// further: no slot, no screen button, no drag. API 80.
+    pub(super) fn native_screen_mouse_button_pressed_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, button, modifiers, canceled);
+    }
+    /// A mouse button went up over the open screen
+    /// (`ScreenEvent.MouseButtonReleased.Pre`), with the same `screen`,
+    /// `button` and `modifiers` as the press. Set `canceled` and the release
+    /// goes no further; cancel one only when its press was cancelled too.
+    /// API 80.
+    pub(super) fn native_screen_mouse_button_released_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, button, modifiers, canceled);
+    }
+    /// The wheel turned over the open screen (`ScreenEvent.MouseScrolled.Pre`):
+    /// `scroll` is the wheel's movement in x and y as the game's own scroll
+    /// handler scales it. Set `canceled` and the screen never sees it. API 80.
+    pub(super) fn native_screen_mouse_scrolled_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        scroll: [f64; 2],
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, scroll, modifiers, canceled);
+    }
+    /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`):
+    /// `key` is vanilla's name for it (`key.keyboard.e`), `repeat` whether it
+    /// is the keyboard's auto-repeat of a held press. Set `canceled` and the
+    /// screen never sees it. API 80.
+    pub(super) fn native_screen_key_pressed_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        repeat: bool,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, key, repeat, modifiers, canceled);
+    }
+    /// A character was typed over the open screen (`ScreenEvent.CharacterTyped.Pre`):
+    /// `c` is the character the text field would take. Set `canceled` and the
+    /// screen never sees it. API 80.
+    pub(super) fn native_screen_char_typed_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        c: char,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, c, modifiers, canceled);
+    }
+    /// Render-thread notification after a resource-pack reload has applied
+    /// successfully: atlas, models, renderer and client caches already refer
+    /// to the new resources. Selection and server-pack reloads share this
+    /// point; initial startup does not fire it. API 99.
+    pub(super) fn native_client_resources_reloaded(&mut self) {}
+    /// A command a mod registered, typed on the dedicated server's console,
+    /// without its slash: set `ran` when it is yours. A name no mod
+    /// registered goes to vanilla's dispatcher as before. API 99.
+    pub(super) fn native_perform_console_command(&mut self, command: &str, ran: &mut bool) {
+        let _ = (command, ran);
+    }
+}
+
+/// A winit mouse button as GLFW numbers it (0 left, 1 right, 2 middle,
+/// 3 back, 4 forward), for the screen mouse hooks.
+pub(super) fn glfw_mouse_button(button: MouseButton) -> i32 {
+    match button {
+        MouseButton::Left => 0,
+        MouseButton::Right => 1,
+        MouseButton::Middle => 2,
+        MouseButton::Back => 3,
+        MouseButton::Forward => 4,
+        MouseButton::Other(n) => i32::from(n),
+    }
+}
+
+/// Winit modifiers as GLFW's bits: shift 1, control 2, alt 4, super 8.
+pub(super) fn glfw_modifier_bits(m: winit::keyboard::ModifiersState) -> u32 {
+    let mut bits = 0;
+    if m.shift_key() {
+        bits |= 1;
+    }
+    if m.control_key() {
+        bits |= 2;
+    }
+    if m.alt_key() {
+        bits |= 4;
+    }
+    if m.super_key() {
+        bits |= 8;
+    }
+    bits
 }
 
 fn dimension_id(dimension: LevelDimension) -> &'static str {
@@ -2297,6 +2449,39 @@ impl Game<'_> {
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
         }
+    }
+    /// The open screen as a native mod sees it (`NativeScreenView`): its id,
+    /// the open menu's type and title, its slot count, and its panel's
+    /// rectangle, with the mouse and the partial tick.
+    pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> NativeScreenView<'_> {
+        NativeScreenView {
+            id: screen.id(),
+            menu: self.remote_menu_type().filter(|m| !m.is_empty()),
+            title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
+            rect: self.screen_rect(batch, screen),
+            slots: self.slots().len(),
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        }
+    }
+    /// The open screen's container panel in GUI pixels, or the whole window
+    /// for a screen with none (`NativeScreenView.rect`).
+    pub(super) fn screen_rect(&self, batch: &HudBatch, screen: Screen) -> [f32; 4] {
+        if screen != Screen::Inventory && screen != Screen::Creative {
+            return [0.0, 0.0, batch.width, batch.height];
+        }
+        let image = self.container_image(batch);
+        [
+            image.left as f32,
+            image.top as f32,
+            image.width as f32,
+            image.height as f32,
+        ]
+    }
+    /// A GUI-sized batch for building a `NativeScreenView` outside drawing.
+    pub(super) fn screen_view_batch(&self) -> Option<HudBatch> {
+        let r = self.renderer.as_ref()?;
+        Some(HudBatch::new([r.config.width, r.config.height]))
     }
     /// A key event for `native_key`.
     pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {

@@ -309,6 +309,46 @@
       "name": "player_tick",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_tick"
+    },
+    {
+      "name": "screen_render_post",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_render_post"
+    },
+    {
+      "name": "screen_mouse_button_pressed_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_button_pressed_pre"
+    },
+    {
+      "name": "screen_mouse_button_released_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_button_released_pre"
+    },
+    {
+      "name": "screen_mouse_scrolled_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_scrolled_pre"
+    },
+    {
+      "name": "screen_key_pressed_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_key_pressed_pre"
+    },
+    {
+      "name": "screen_char_typed_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_char_typed_pre"
+    },
+    {
+      "name": "client_resources_reloaded",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_client_resources_reloaded"
+    },
+    {
+      "name": "perform_console_command",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_perform_console_command"
     }
   ]
 }
