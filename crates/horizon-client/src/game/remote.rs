@@ -653,6 +653,7 @@ impl Game<'_> {
             },
             |a| (a.name.clone(), a.uuid),
         );
+        let uuid = user.1;
         self.server_packs_connect(local.is_none().then_some(address), user);
         // Volt Replay: record the session when the setting is on; a replay
         // being watched is never itself recorded.
@@ -661,7 +662,7 @@ impl Game<'_> {
                 std::path::Path::new("replays"),
                 address,
                 name,
-                user.1,
+                uuid,
             )
         } else {
             None
