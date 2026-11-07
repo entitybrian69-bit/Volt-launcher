@@ -303,17 +303,19 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
               env.write(f"JEI_MIXINS={revs['jei']}\n")
               env.write(f"PHYS_MIXINS={revs['horizon_physics']}\n")
+              env.write(f"COMMON_MIXINS={revs['fast_items']}\n")
           PYCODE
       - name: Install the pinned mixin compiler
         run: |
-          # Both mods inject shared hook points (native_mods), which must be
+          # The mods inject shared hook points (native_mods), which must be
           # woven in ONE compiler pass; sequential passes fail because the
           # first mod's woven macros make the hook body opaque to the second
-          # compiler. Horizon Physics' pin is used for the whole set (it is
-          # the strictest consumer: raw AST targets), and JEI's differing pin
-          # is recorded in the report via --force-common-mixins.
+          # compiler. Fast Items' pin drives the whole set: it is the newest
+          # consumer, and its MODIFY_VARIABLE locals need the compiler's
+          # closure-tolerant store scan; every other pin is older and its
+          # manifest is rebound (--force-common-mixins records the rebinds).
           cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
-            --rev "$PHYS_MIXINS" \
+            --rev "$COMMON_MIXINS" \
             --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
       - name: Weave and build the engine library
         run: |
@@ -327,7 +329,7 @@ jobs:
             --registry "$RUNNER_TEMP/registry" \
             "${MOD_ARGS[@]}" \
             --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
-            --mixins-revision "$PHYS_MIXINS" \
+            --mixins-revision "$COMMON_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
             --trust-native-code --experimental-raw-targets --force-common-mixins
       - name: Show failure diagnostics
