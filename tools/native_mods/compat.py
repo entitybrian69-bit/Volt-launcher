@@ -232,6 +232,19 @@ FORK_SOURCE_SHIMS = {
          "stack.data().and_then(|data| data.custom_name.as_deref()) == Some(WAND_NAME)",
          "stack.data().and_then(|data| data.custom_name_plain()).as_deref() == Some(WAND_NAME)"),
     ),
+    "biomecompass": (
+        ("item.rs",
+         "d.custom_name = Some(bc::ITEM_NAME.to_owned());",
+         "d.custom_name ="
+         " Some(horizon_world::nbt::Tag::String(bc::ITEM_NAME.into()));"),
+    ),
+    "carryblock": (
+        # The fork's Slots (official parity) grew a Native-menu variant after
+        # the bundle's pinned era; a native mod's menu opens no world block.
+        ("native.rs",
+         "Slots::Ender => Vec::new(),",
+         "Slots::Ender | Slots::Native => Vec::new(),"),
+    ),
 }
 
 

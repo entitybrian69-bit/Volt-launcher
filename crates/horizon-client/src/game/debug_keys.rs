@@ -722,11 +722,15 @@ impl Game<'_> {
                 self.debug_charts.toggle_lightmap(&mut self.debug);
                 true
             }
-            // Screens and overlays Horizon does not draw yet (the debug
-            // options screen, the profiler and its chart, the texture dump):
-            // the keys are used up as in vanilla.
-            DebugAction::DebugOptions
-            | DebugAction::DumpDynamicTextures
+            // F3+F6: the debug options screen (game/debug_options.rs).
+            DebugAction::DebugOptions => {
+                self.toggle_debug_options();
+                true
+            }
+            // Screens and overlays Horizon does not draw yet (the profiler
+            // and its chart, the texture dump): the keys are used up as in
+            // vanilla.
+            DebugAction::DumpDynamicTextures
             | DebugAction::Profiling
             | DebugAction::ProfilingChart => true,
             DebugAction::ShowHitboxes
