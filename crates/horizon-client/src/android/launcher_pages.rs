@@ -72,7 +72,7 @@ pub(crate) mod theme {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum HomeTab { Overview, Worlds, Multiplayer, Screenshots, Console }
+pub(super) enum HomeTab { Overview, Worlds, Multiplayer, Screenshots, Replays, Console }
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Action {
@@ -81,6 +81,8 @@ pub(super) enum Action {
     CycleAccent,
     ConnectServer(usize),
     SaveServer,
+    WatchReplay(usize),
+    DeleteReplay(usize),
     PatchNotes,
     Page(Page),
     Play,
@@ -1315,6 +1317,7 @@ impl DrawCtx<'_> {
                 HomeTab::Worlds => "Worlds",
                 HomeTab::Multiplayer => "Multiplayer",
                 HomeTab::Screenshots => "Screenshots",
+                HomeTab::Replays => "Replays",
                 _ => "Launcher log",
             };
             ui.text(Face::Display, 21.0, x + 106.0, y + 5.0, theme::TEXT(), title);
@@ -1435,9 +1438,10 @@ impl DrawCtx<'_> {
         }
 
         // ---- Right rail: the quieter destinations as small chips ----
-        let chips: [(&str, u8, Action); 6] = [
+        let chips: [(&str, u8, Action); 7] = [
             ("Worlds", 0, Action::HomeTab(HomeTab::Worlds)),
             ("Servers", 1, Action::HomeTab(HomeTab::Multiplayer)),
+            ("Replays", 2, Action::HomeTab(HomeTab::Replays)),
             ("Shots", 2, Action::HomeTab(HomeTab::Screenshots)),
             ("Logs", 3, Action::HomeTab(HomeTab::Console)),
             ("Packs", 5, Action::Page(Page::Packs)),
@@ -1708,6 +1712,47 @@ impl DrawCtx<'_> {
                     ui.text(Face::LauncherRegular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT(), &label);
                 }
                 let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x+w), ui.to_batch(bottom)];
+                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+            }
+            HomeTab::Replays => {
+                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Volt Replays");
+                let replays = &self.catalog.replays;
+                let summary = if replays.is_empty() {
+                    "No replays yet. Turn on Replay Recording in Volt Settings > Volt QoL, play, and your sessions appear here.".to_owned()
+                } else {
+                    format!("{} recorded sessions \u{2022} Tap one to watch it", replays.len())
+                };
+                let summary = ui.fit_text(Face::LauncherRegular, 12.5, &summary, w - 16.0);
+                ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), &summary);
+                let top = y + 58.0;
+                let bottom = y + h;
+                let max = (replays.len() as f32 * 54.0 - (bottom - top).max(0.0)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max);
+                *self.list_view = Some([top, bottom, max]);
+                let start = ui.batch_mut().vertices.len();
+                for (i, replay) in replays.iter().enumerate() {
+                    let row_y = top + i as f32 * 54.0 - self.catalog.scroll;
+                    let row = [x + 8.0, row_y, w - 16.0, 48.0];
+                    if row_y < top || row_y + 48.0 > bottom { continue; }
+                    ui.rounded(row[0], row[1], row[2], row[3], 12.0, theme::GLASS_INNER());
+                    let title = if replay.server.is_empty() { &replay.file_name } else { &replay.server };
+                    let title = ui.fit_text(Face::LauncherMedium, 13.0, title, row[2] - 150.0);
+                    ui.text(Face::LauncherMedium, 13.0, row[0] + 12.0, row[1] + 4.0, theme::TEXT(), &title);
+                    let mib = replay.size as f32 / (1024.0 * 1024.0);
+                    let sub = format!(
+                        "{} \u{2022} {} \u{2022} {:.1} MiB",
+                        horizon_client::replay::format_time(replay.duration_ms),
+                        replay.name,
+                        mib,
+                    );
+                    let sub = ui.fit_text(Face::LauncherRegular, 11.5, &sub, row[2] - 150.0);
+                    ui.text(Face::LauncherRegular, 11.5, row[0] + 12.0, row[1] + 25.0, theme::MUTED(), &sub);
+                    let watch = [row[0] + row[2] - 128.0, row[1] + 8.0, 70.0, 32.0];
+                    styled_button(ui, self.targets, watch, "Watch", Action::WatchReplay(i), BtnStyle::Primary, true);
+                    let del = [row[0] + row[2] - 50.0, row[1] + 8.0, 42.0, 32.0];
+                    styled_button(ui, self.targets, del, "Del", Action::DeleteReplay(i), BtnStyle::Secondary, true);
+                }
+                let bounds = [ui.to_batch(x), ui.to_batch(top), ui.to_batch(x + w), ui.to_batch(bottom)];
                 ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
             }
             HomeTab::Console => {
@@ -5706,6 +5751,7 @@ impl Launcher {
                         HomeTab::Overview => 0,
                         HomeTab::Worlds => 2,
                         HomeTab::Multiplayer => 3,
+                        HomeTab::Replays => 4,
                         HomeTab::Screenshots => 5,
                         HomeTab::Console => 6,
                     };
@@ -5717,6 +5763,8 @@ impl Launcher {
                     self.catalog.saved_servers = crate::server_list::List::load(&home).servers();
                 } else if tab == HomeTab::Screenshots {
                     self.catalog.refresh_screenshots(&self.home);
+                } else if tab == HomeTab::Replays {
+                    self.catalog.refresh_replays(&self.home);
                 }
                 self.home_tab = tab;
                 self.catalog.page = Page::Play;
@@ -5762,6 +5810,7 @@ impl Launcher {
             Some(Action::ConnectServer(index)) => {
                 if let Some(server) = self.catalog.saved_servers.get(index) {
                     self.catalog.config.server = server.ip.clone();
+                    self.catalog.config.replay.clear();
                     self.catalog.config.save(&self.home)?;
                     self.pending_play = true;
                     self.needs_redraw = true;
@@ -5769,7 +5818,31 @@ impl Launcher {
                     self.catalog.status = "Server list changed; please choose again.".into();
                 }
             }
+            Some(Action::WatchReplay(index)) => {
+                if let Some(replay) = self.catalog.replays.get(index) {
+                    self.catalog.config.replay = replay.path.to_string_lossy().into_owned();
+                    self.catalog.config.save(&self.home)?;
+                    self.pending_play = true;
+                    self.needs_redraw = true;
+                } else {
+                    self.catalog.status = "Replay list changed; please choose again.".into();
+                }
+            }
+            Some(Action::DeleteReplay(index)) => {
+                if let Some(replay) = self.catalog.replays.get(index) {
+                    self.catalog.status = match std::fs::remove_file(&replay.path) {
+                        Ok(()) => "Replay deleted.".into(),
+                        Err(error) => format!("Could not delete the replay: {error}"),
+                    };
+                    self.catalog.refresh_replays(&self.home);
+                }
+            }
             Some(Action::Play) => {
+                // An ordinary Play never resumes a replay.
+                if !self.catalog.config.replay.is_empty() {
+                    self.catalog.config.replay.clear();
+                    self.catalog.config.save(&self.home)?;
+                }
                 // Remember the launch for the hero subtitle; the elapsed session
                 // is folded into play_seconds when the launcher next loads.
                 let now_secs = std::time::SystemTime::now()

@@ -69,6 +69,10 @@ pub struct Config {
     pub proxy: Option<String>,
     pub name: String,
     pub server: String,
+    /// Volt Replay: a recorded session to watch on the next launch instead
+    /// of joining a server; cleared by an ordinary Play.
+    #[serde(default)]
+    pub replay: String,
     #[serde(skip)]
     pub microsoft_client_id: String,
     pub renderer: RendererMode,
@@ -105,7 +109,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             profile: 0, launcher_dark: default_launcher_dark(), launcher_accent: default_launcher_accent(),
-            proxy: None, name: String::new(), server: String::new(), microsoft_client_id: String::new(),
+            proxy: None, name: String::new(), server: String::new(), replay: String::new(),
+            microsoft_client_id: String::new(),
             renderer: Default::default(), render_scale: Default::default(), orientation: Default::default(),
             screen: Default::default(), input_host: Default::default(), keypad_controls: false,
             record_performance: false, device: Default::default(), shader_source: Default::default(),
@@ -274,6 +279,8 @@ enum Reply {
 pub struct Catalog {
     pub saved_servers: Vec<crate::server_list::Server>,
     pub screenshots: Vec<String>,
+    /// Volt Replays in this instance, newest first.
+    pub replays: Vec<horizon_client::replay::Meta>,
     pub local: Vec<LocalItem>,
     pub sections: [bool; 3],
     pub pending_delete: Option<LocalItem>,
@@ -336,6 +343,7 @@ impl Catalog {
         let mut result = Self {
             saved_servers: vec![],
             screenshots: vec![],
+            replays: vec![],
             local: vec![],
             sections: [true, true, true],
             pending_delete: None,
@@ -391,6 +399,10 @@ impl Catalog {
             .unwrap_or_else(|| file.trim_end_matches(".hmod").to_owned());
         self.hmod_ids.insert(file.to_owned(), id.clone());
         id
+    }
+    pub fn refresh_replays(&mut self, home: &Path) {
+        self.replays =
+            horizon_client::replay::list(&self.config.game_home(home).join("replays"));
     }
     pub fn refresh_screenshots(&mut self, home: &Path) {
         self.screenshots = std::fs::read_dir(self.config.game_home(home).join("screenshots"))

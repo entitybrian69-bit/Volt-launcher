@@ -417,6 +417,8 @@ struct Options {
     window_size: [u32; 2],
     /// Multiplayer: `--server HOST[:PORT]` joins at start; `--name` is the offline player name.
     server: Option<String>,
+    /// Volt Replay: `--replay PATH` watches a recorded session at start.
+    replay: Option<String>,
     /// `--name`, `HORIZON_PLAYER_NAME` or the signed-in account's name; else
     /// [`Options::player_name`] uses the kept offline name.
     player_name: Option<String>,
@@ -559,6 +561,7 @@ impl Options {
                 .ok()
                 .and_then(|v| v.parse().ok()),
             server: None,
+            replay: None,
             player_name: std::env::var("HORIZON_PLAYER_NAME")
                 .ok()
                 .filter(|n| !n.is_empty()),
@@ -676,6 +679,7 @@ impl Options {
                                 o.benchmark = Some(value);
                             }
                             "--server" | "--quickPlayMultiplayer" => o.server = Some(value),
+                            "--replay" => o.replay = Some(value),
                             "--name" => o.player_name = Some(value),
                             "--session-file" => o.session_file = Some(value),
                             "--control-socket" => o.control = Some(value.into()),
@@ -18989,6 +18993,10 @@ fn start_game<'a>(
         return Ok(None);
     }
     match game.options.world.clone() {
+        _ if game.options.replay.is_some() => {
+            let path = game.options.replay.clone().unwrap_or_default();
+            game.connect_replay(std::path::PathBuf::from(path))?;
+        }
         _ if game.options.server.is_some() => {
             let (address, name) = (
                 game.options.server.clone().unwrap_or_default(),

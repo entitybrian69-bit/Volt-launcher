@@ -186,7 +186,10 @@ pub(crate) fn android_arguments() -> horizon_client::Result<Vec<String>> {
         // Offline identity must never override a licensed session's profile.
         args.extend(["--name".into(), config.name.clone()]);
     }
-    if !config.server.is_empty() {
+    if !config.replay.is_empty() {
+        // Volt Replay: watch the chosen recording instead of joining.
+        args.extend(["--replay".into(), config.replay.clone()]);
+    } else if !config.server.is_empty() {
         args.extend(["--server".into(), config.server.clone()]);
     }
     if !PUBLIC_BUILD {

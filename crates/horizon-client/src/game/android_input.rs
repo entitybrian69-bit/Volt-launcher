@@ -471,7 +471,8 @@ impl Game<'_> {
         }
         if !self.pad_in_menu()
             && t.phase == TouchPhase::Started
-            && (self.try_click_waypoint_hud_button((p[0], p[1]))
+            && (self.try_click_replay_hud((p[0], p[1]), true)
+                || self.try_click_waypoint_hud_button((p[0], p[1]))
                 || self.try_click_volt_hud((p[0], p[1]), true))
         {
             self.pad.touch.clear();

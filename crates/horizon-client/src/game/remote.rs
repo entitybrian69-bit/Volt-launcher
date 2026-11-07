@@ -261,6 +261,35 @@ enum Received {
     Chunk(Arc<ChunkFormat>),
 }
 
+/// Volt Replay playback state: the control shared with the feeder thread,
+/// the recorder's recent recorded path, and whether the free-camera body
+/// entity currently exists.
+pub(super) struct ReplayUi {
+    pub(super) control: Arc<horizon_client::replay::Control>,
+    /// (milliseconds into the recording, position, yaw, pitch).
+    pub(super) poses: horizon_client::replay::PoseBuffer,
+    /// The synthetic body entity is spawned (free camera shows the
+    /// recorder as its own player).
+    pub(super) body: bool,
+    /// The mode `replay_frame` last saw, to notice POV <-> free camera flips.
+    pub(super) was_pov: bool,
+}
+
+impl ReplayUi {
+    fn new(control: Arc<horizon_client::replay::Control>) -> Self {
+        Self {
+            control,
+            poses: Default::default(),
+            body: false,
+            was_pov: true,
+        }
+    }
+}
+
+/// The free-camera body's entity id: far above anything a server assigns
+/// before an i32 overflow, and stable for removal.
+pub(super) const REPLAY_BODY_ID: i32 = i32::MAX - 100;
+
 pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
@@ -421,6 +450,8 @@ pub(super) struct Remote {
     /// Inventory, off hand and armour as last synchronised, for creative-mode
     /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
+    /// Volt Replay: this session is a recorded one being watched.
+    pub(super) replay: Option<ReplayUi>,
     decode_errors: u32,
     clock: Option<i32>,
     /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
@@ -534,7 +565,7 @@ impl Game<'_> {
             return Ok(());
         }
         self.join_world_rest()?;
-        if let Err(error) = self.join_server(address, name, None, cookies) {
+        if let Err(error) = self.join_server(address, name, None, cookies, None) {
             log::warn!("Horizon: could not join server: {error}");
             if self.title.is_none() {
                 self.title = Some(
@@ -560,7 +591,29 @@ impl Game<'_> {
         pipe: horizon_protocol::connection::Pipe,
         name: &str,
     ) -> Result<()> {
-        self.join_server("local", name, Some(pipe), None)
+        self.join_server("local", name, Some(pipe), None, None)
+    }
+    /// Volt Replay: watch a recorded session. The world loads from the
+    /// recorded packet stream instead of a connection.
+    pub(super) fn connect_replay(&mut self, path: std::path::PathBuf) -> Result<()> {
+        let name = self.options.player_name();
+        if let Err(error) = self.join_server("replay", &name, None, None, Some(path)) {
+            log::warn!("Horizon: could not open replay: {error}");
+            if self.title.is_none() {
+                self.title = Some(
+                    horizon_client::title::Title::new(
+                        std::env::current_dir()?.join("saves"),
+                        &self.options.resources,
+                    )
+                    .with_user(|| self.options.player_name()),
+                );
+            }
+            if let Some(title) = &mut self.title {
+                title.failed(error);
+            }
+            self.capture(false);
+        }
+        Ok(())
     }
     fn join_server(
         &mut self,
@@ -568,6 +621,7 @@ impl Game<'_> {
         name: &str,
         local: Option<horizon_protocol::connection::Pipe>,
         cookies: Option<horizon_client::net::Cookies>,
+        replay: Option<std::path::PathBuf>,
     ) -> Result<()> {
         self.reset_tutorial();
         self.perf.world_opening();
@@ -600,30 +654,57 @@ impl Game<'_> {
             |a| (a.name.clone(), a.uuid),
         );
         self.server_packs_connect(local.is_none().then_some(address), user);
-        let session = match local {
-            Some(pipe) => {
-                Session::connect_local(pipe, name, info.clone(), lang.clone(), root.clone())
-            }
-            None => {
-                self.extras_connecting(address, name);
-                match cookies {
-                    Some(cookies) => Session::connect_transferred(
-                        address,
-                        name,
-                        auth.clone(),
-                        info.clone(),
-                        lang.clone(),
-                        cookies,
-                        root.clone(),
-                    ),
-                    None => Session::connect(
-                        address,
-                        name,
-                        auth.clone(),
-                        info.clone(),
-                        lang.clone(),
-                        root.clone(),
-                    ),
+        // Volt Replay: record the session when the setting is on; a replay
+        // being watched is never itself recorded.
+        let recorder = if replay.is_none() && self.settings.extras.volt_qol.replay_buffer {
+            horizon_client::replay::Recorder::create(
+                std::path::Path::new("replays"),
+                address,
+                name,
+                user.1,
+            )
+        } else {
+            None
+        };
+        let mut replay_control = None;
+        let session = if let Some(path) = replay {
+            let (session, control) =
+                Session::replay(&path).ok_or("This file is not a Volt replay.")?;
+            replay_control = Some(control);
+            session
+        } else {
+            match local {
+                Some(pipe) => Session::connect_local(
+                    pipe,
+                    name,
+                    info.clone(),
+                    lang.clone(),
+                    root.clone(),
+                    recorder,
+                ),
+                None => {
+                    self.extras_connecting(address, name);
+                    match cookies {
+                        Some(cookies) => Session::connect_transferred(
+                            address,
+                            name,
+                            auth.clone(),
+                            info.clone(),
+                            lang.clone(),
+                            cookies,
+                            root.clone(),
+                            recorder,
+                        ),
+                        None => Session::connect(
+                            address,
+                            name,
+                            auth.clone(),
+                            info.clone(),
+                            lang.clone(),
+                            root.clone(),
+                            recorder,
+                        ),
+                    }
                 }
             }
         };
@@ -777,6 +858,7 @@ impl Game<'_> {
             show_death_screen: true,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
+            replay: replay_control.map(ReplayUi::new),
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -1342,6 +1424,7 @@ impl Game<'_> {
     /// A chunk packet still decoding holds
     /// back what follows it.
     pub(super) fn poll_remote(&mut self) -> Result<()> {
+        self.replay_frame();
         let Some(r) = self.remote.as_mut() else {
             return Ok(());
         };
@@ -1456,6 +1539,21 @@ impl Game<'_> {
                 Event::Status(s) => {
                     if let Some(r) = self.remote.as_mut() {
                         r.status = s;
+                    }
+                }
+                Event::ReplayPose {
+                    at,
+                    position,
+                    yaw,
+                    pitch,
+                } => {
+                    if let Some(r) = self.remote.as_mut()
+                        && let Some(rp) = r.replay.as_mut()
+                    {
+                        rp.poses.push_back((at, position, yaw, pitch));
+                        if rp.poses.len() > 400 {
+                            rp.poses.pop_front();
+                        }
                     }
                 }
                 Event::Joined {
@@ -3656,7 +3754,18 @@ impl Game<'_> {
                 }
                 3 => {
                     let mode = p.param as i32;
-                    self.set_mode_id(mode);
+                    // Volt Replay's free camera stays in spectator; the
+                    // recorded mode is remembered for the recorded view.
+                    let freecam = self
+                        .remote
+                        .as_ref()
+                        .and_then(|r| r.replay.as_ref())
+                        .is_some_and(|rp| {
+                            !rp.control.pov.load(std::sync::atomic::Ordering::Relaxed)
+                        });
+                    if !freecam {
+                        self.set_mode_id(mode);
+                    }
                     if let Some(r) = self.remote.as_mut() {
                         r.game_mode = mode;
                     }
@@ -4881,9 +4990,133 @@ impl Game<'_> {
             .unwrap_or(p.target);
         (self.yaw, self.pitch) = look_at_rotation(from, to);
     }
+    /// Volt Replay: drive the recorded view (or the free camera's body)
+    /// each frame, interpolating between the recorded movement packets at
+    /// the playback clock.
+    pub(super) fn replay_frame(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(r) = self.remote.as_mut() else { return };
+        let Some(rp) = r.replay.as_mut() else { return };
+        let control = rp.control.clone();
+        let t = control.time_ms.load(Relaxed);
+        let pov = control.pov.load(Relaxed);
+        let switched = rp.was_pov != pov;
+        rp.was_pov = pov;
+        while rp.poses.len() > 2 && rp.poses[1].0.saturating_add(1500) < t {
+            rp.poses.pop_front();
+        }
+        let pose = {
+            let poses = &rp.poses;
+            match poses.iter().position(|(at, ..)| *at >= t) {
+                Some(0) => poses.front().map(|&(_, p, yaw, pitch)| (p, yaw, pitch)),
+                Some(i) => {
+                    let (t0, p0, y0, pi0) = poses[i - 1];
+                    let (t1, p1, y1, pi1) = poses[i];
+                    let f = if t1 > t0 {
+                        (f64::from(t.saturating_sub(t0)) / f64::from(t1 - t0)).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let lerp = |a: f64, b: f64| a + (b - a) * f;
+                    let fa = f as f32;
+                    let angle = |a: f32, b: f32| {
+                        let mut d = (b - a) % 360.0;
+                        if d > 180.0 {
+                            d -= 360.0;
+                        }
+                        if d < -180.0 {
+                            d += 360.0;
+                        }
+                        a + d * fa
+                    };
+                    Some((
+                        [lerp(p0[0], p1[0]), lerp(p0[1], p1[1]), lerp(p0[2], p1[2])],
+                        angle(y0, y1),
+                        pi0 + (pi1 - pi0) * fa,
+                    ))
+                }
+                None => poses.back().map(|&(_, p, yaw, pitch)| (p, yaw, pitch)),
+            }
+        };
+        let body = rp.body;
+        let profile = (r.profile, r.profile_name.clone());
+        let recorded_mode = r.game_mode;
+        if pov {
+            if switched {
+                // Free camera ends: back to the recorded view and mode.
+                self.set_mode_id(recorded_mode);
+                if body {
+                    self.remove_entity(REPLAY_BODY_ID);
+                    if let Some(r) = self.remote.as_mut() {
+                        r.level_players.remove(&REPLAY_BODY_ID);
+                        r.level_player_names.remove(&REPLAY_BODY_ID);
+                        r.level_player_textures.remove(&REPLAY_BODY_ID);
+                        if let Some(rp) = r.replay.as_mut() {
+                            rp.body = false;
+                        }
+                    }
+                }
+            }
+            if let Some((p, yaw, pitch)) = pose {
+                if let Some(player) = self.player.as_mut() {
+                    player.position = Vec3::new(p[0], p[1], p[2]);
+                    player.velocity = Vec3::ZERO;
+                }
+                self.yaw = yaw;
+                self.pitch = pitch;
+            }
+        } else {
+            if switched {
+                // Free camera: spectator flight, through walls, unseen.
+                self.set_mode_id(3);
+            }
+            let Some((p, yaw, pitch)) = pose else { return };
+            if !body {
+                // The recorder appears as its own player, with its skin
+                // from the recorded player list.
+                if let Some(r) = self.remote.as_mut() {
+                    r.level_players.insert(REPLAY_BODY_ID, profile.0);
+                    r.level_player_names.insert(REPLAY_BODY_ID, profile.1.clone());
+                }
+                self.spawn_entity(REPLAY_BODY_ID, "minecraft:player", p, [yaw, pitch, yaw]);
+                if let Some(r) = self.remote.as_mut()
+                    && let Some(rp) = r.replay.as_mut()
+                {
+                    rp.body = true;
+                }
+            } else if let Some(m) = self
+                .mobs
+                .iter_mut()
+                .find(|m| m.id == REPLAY_BODY_ID as u32)
+            {
+                m.previous = m.position;
+                m.position = Vec3::new(p[0], p[1], p[2]);
+                m.previous_yaw = m.yaw;
+                m.yaw = yaw;
+                m.previous_body_yaw = m.body_yaw;
+                m.body_yaw = yaw;
+                m.previous_head_yaw = m.head_yaw;
+                m.head_yaw = yaw;
+                m.previous_head_pitch = m.head_pitch;
+                m.head_pitch = pitch;
+            }
+        }
+    }
+    /// Playback control when a replay is being watched.
+    pub(super) fn replay_control(&self) -> Option<Arc<horizon_client::replay::Control>> {
+        Some(self.remote.as_ref()?.replay.as_ref()?.control.clone())
+    }
     /// ClientPacketListener.handleMovePlayer.
     fn remote_teleport(&mut self, p: &play::PlayerPosition) -> Result<()> {
         use play::relative as rel;
+        // Volt Replay's free camera: the recorded view's teleports must not
+        // yank the detached camera around.
+        if let Some(r) = self.remote.as_ref()
+            && let Some(rp) = r.replay.as_ref()
+            && !rp.control.pov.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(());
+        }
         let current = self
             .player
             .as_ref()

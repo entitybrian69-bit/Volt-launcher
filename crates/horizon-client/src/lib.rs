@@ -88,6 +88,7 @@ pub mod moved_extras;
 pub mod multiplayer;
 pub mod music;
 pub mod net;
+pub mod replay;
 pub mod nether_portal;
 pub mod no_resources;
 pub mod official_install;

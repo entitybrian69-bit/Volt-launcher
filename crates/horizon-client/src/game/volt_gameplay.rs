@@ -834,6 +834,7 @@ impl Game<'_> {
         if self.title.is_some() || self.ui.hide_gui {
             return;
         }
+        self.draw_replay_hud(batch);
         let now = self.started.elapsed().as_secs_f64();
         let (w, h) = (batch.width, batch.height);
         let my_name = self.options.player_name();
@@ -1479,6 +1480,199 @@ impl Game<'_> {
 
     pub(super) fn voice_ptt_rect(w: f32, h: f32) -> [f32; 4] {
         [(w - 58.0).max(4.0), (h * 0.52).floor(), 52.0, 18.0]
+    }
+
+    /// Volt Replay's playback bar: (bar, six buttons, timeline track).
+    /// Buttons: back 10s, play/pause, forward 10s, speed, POV/free camera,
+    /// leave.
+    pub(super) fn replay_hud_rects(w: f32, h: f32) -> ([f32; 4], [[f32; 4]; 6], [f32; 4]) {
+        let bar_w = (w * 0.72).clamp(220.0, 430.0);
+        let bar = [((w - bar_w) * 0.5).floor(), h - 46.0, bar_w, 42.0];
+        let (bw, bh) = (30.0, 15.0);
+        let total = 6.0 * bw + 5.0 * 4.0;
+        let mut bx = bar[0] + (bar_w - total) * 0.5;
+        let mut buttons = [[0.0f32; 4]; 6];
+        for rect in &mut buttons {
+            *rect = [bx, bar[1] + 4.0, bw, bh];
+            bx += bw + 4.0;
+        }
+        let track = [bar[0] + 10.0, bar[1] + 27.0, bar_w - 20.0, 9.0];
+        (bar, buttons, track)
+    }
+
+    /// The playback bar while a replay is being watched.
+    fn draw_replay_hud(&mut self, batch: &mut HudBatch) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        let (w, h) = (batch.width, batch.height);
+        let (bar, buttons, track) = Self::replay_hud_rects(w, h);
+        let t = ctl.time_ms.load(Relaxed);
+        let d = ctl.duration_ms.load(Relaxed).max(1);
+        let paused = ctl.paused.load(Relaxed);
+        let pov = ctl.pov.load(Relaxed);
+        let speed = ctl.speed_pct.load(Relaxed);
+        batch.fill(
+            &self.gui.atlas,
+            bar[0],
+            bar[1],
+            bar[2],
+            bar[3],
+            rgba(10, 14, 22, 205),
+        );
+        batch.fill(
+            &self.gui.atlas,
+            bar[0],
+            bar[1],
+            bar[2],
+            1.0,
+            rgba(121, 229, 156, 235),
+        );
+        let speed_label = format!(
+            "x{}",
+            match speed {
+                25 => "0.25",
+                50 => "0.5",
+                200 => "2",
+                400 => "4",
+                800 => "8",
+                _ => "1",
+            }
+        );
+        let labels: [&str; 6] = [
+            "<<",
+            if paused { "|>" } else { "||" },
+            ">>",
+            &speed_label,
+            if pov { "POV" } else { "CAM" },
+            "X",
+        ];
+        for (rect, label) in buttons.iter().zip(labels) {
+            batch.fill(
+                &self.gui.atlas,
+                rect[0],
+                rect[1],
+                rect[2],
+                rect[3],
+                rgba(28, 36, 52, 235),
+            );
+            let tw = HudBatch::text_width(&self.gui.atlas, label);
+            batch.text(
+                &self.gui.atlas,
+                label,
+                rect[0] + ((rect[2] - tw) * 0.5).max(1.0),
+                rect[1] + 4.0,
+                rgba(235, 240, 250, 255),
+                true,
+            );
+        }
+        batch.fill(
+            &self.gui.atlas,
+            track[0],
+            track[1],
+            track[2],
+            track[3],
+            rgba(30, 38, 54, 225),
+        );
+        let frac = (t as f32 / d as f32).clamp(0.0, 1.0);
+        if frac > 0.0 {
+            batch.fill(
+                &self.gui.atlas,
+                track[0],
+                track[1],
+                track[2] * frac,
+                track[3],
+                rgba(121, 229, 156, 240),
+            );
+        }
+        let time = format!(
+            "{} / {}",
+            horizon_client::replay::format_time(t),
+            horizon_client::replay::format_time(d),
+        );
+        batch.text(
+            &self.gui.atlas,
+            &time,
+            bar[0] + 2.0,
+            bar[1] - 11.0,
+            rgba(235, 240, 250, 235),
+            true,
+        );
+        let tag = if ctl.finished.load(Relaxed) {
+            "REPLAY \u{2022} END"
+        } else {
+            "REPLAY"
+        };
+        let tag_w = HudBatch::text_width(&self.gui.atlas, tag);
+        batch.text(
+            &self.gui.atlas,
+            tag,
+            bar[0] + bar[2] - tag_w - 2.0,
+            bar[1] - 11.0,
+            rgba(121, 229, 156, 235),
+            true,
+        );
+    }
+
+    /// Taps on the replay playback bar.
+    pub(super) fn try_click_replay_hud(&mut self, cursor: (f32, f32), pressed: bool) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        if !pressed {
+            return false;
+        }
+        let Some(ctl) = self.replay_control() else {
+            return false;
+        };
+        if self.title.is_some() || self.ui.hide_gui || self.screen != Screen::Playing {
+            return false;
+        }
+        let (w, h) = self.gui_size();
+        let (bar, buttons, track) = Self::replay_hud_rects(w, h);
+        let hit = |r: &[f32; 4]| {
+            cursor.0 >= r[0] && cursor.0 <= r[0] + r[2] && cursor.1 >= r[1] && cursor.1 <= r[1] + r[3]
+        };
+        let t = ctl.time_ms.load(Relaxed);
+        let d = ctl.duration_ms.load(Relaxed);
+        let acted = if hit(&buttons[0]) {
+            ctl.request_seek(t.saturating_sub(10_000));
+            true
+        } else if hit(&buttons[1]) {
+            let paused = ctl.paused.load(Relaxed);
+            ctl.paused.store(!paused, Relaxed);
+            true
+        } else if hit(&buttons[2]) {
+            ctl.request_seek(t.saturating_add(10_000).min(d));
+            true
+        } else if hit(&buttons[3]) {
+            let next = match ctl.speed_pct.load(Relaxed) {
+                25 => 50,
+                50 => 100,
+                100 => 200,
+                200 => 400,
+                400 => 800,
+                _ => 25,
+            };
+            ctl.speed_pct.store(next, Relaxed);
+            true
+        } else if hit(&buttons[4]) {
+            let pov = ctl.pov.load(Relaxed);
+            ctl.pov.store(!pov, Relaxed);
+            true
+        } else if hit(&buttons[5]) {
+            ctl.exit.store(true, Relaxed);
+            true
+        } else if hit(&track) {
+            let frac = ((cursor.0 - track[0]) / track[2]).clamp(0.0, 1.0);
+            ctl.request_seek((frac * d as f32) as u32);
+            true
+        } else {
+            hit(&bar)
+        };
+        if acted {
+            self.audio.play_button_click();
+        }
+        acted
     }
 
     /// Handles touch/mouse press on the HUD Push-to-Talk `[MIC]` button.
