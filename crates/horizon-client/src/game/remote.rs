@@ -1359,18 +1359,65 @@ impl Game<'_> {
                 event => Received::Event(event),
             });
         }
-        let overdue = r
+        let backlog_age = r
             .backlog_since
-            .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
+            .map_or(Duration::ZERO, |since| since.elapsed());
+        let overdue = backlog_age >= BACKLOG_LIMIT;
         // A mobile frame must not drain an arbitrarily large overdue burst:
         // a decoder that needed >50 ms otherwise turns its whole queue into
         // one long main-thread stall. Boost progress without changing order.
         let bounded = cfg!(target_os = "android") || !overdue;
         let chunk_budget = if cfg!(target_os = "android") && overdue {
-            Duration::from_millis(4)
+            // The budget escalates with the backlog's age. A teleport or a
+            // world join floods the queue with chunk columns, and every
+            // event behind them (command feedback, the teleport itself,
+            // entity moves) waits in order; the keepalive answers on the
+            // network thread, so the ping looks fine while the game feels
+            // seconds behind. A flat 4 ms never caught up on slower phones:
+            // draining faster the longer the queue has existed clears the
+            // burst within a few frames while still bounding each frame.
+            if backlog_age >= Duration::from_millis(600) {
+                Duration::from_millis(10)
+            } else if backlog_age >= Duration::from_millis(250) {
+                Duration::from_millis(7)
+            } else {
+                Duration::from_millis(4)
+            }
         } else {
             CHUNK_PACKETS_PER_FRAME
         };
+        // Command feedback and other unsigned system lines are display-only
+        // and independent of the chunk stream: with columns queued ahead,
+        // handle them now (in their own order) so a command never looks
+        // seconds slow behind a chunk burst. Signed player chat keeps its
+        // place: its signature chain and sender info must stay in order.
+        if events
+            .iter()
+            .any(|item| matches!(item, Received::Chunk(_)))
+        {
+            let mut fast = Vec::new();
+            let mut i = 0;
+            while i < events.len() {
+                let is_fast = matches!(
+                    &events[i],
+                    Received::Event(Event::Packet(p))
+                        if matches!(&**p, C::SystemChat(_) | C::DisguisedChat(_))
+                );
+                if is_fast {
+                    if let Some(Received::Event(Event::Packet(p))) = events.remove(i) {
+                        fast.push(p);
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            for packet in fast {
+                self.handle_packet(*packet)?;
+                if self.remote.is_none() {
+                    return Ok(());
+                }
+            }
+        }
         let mut chunks = Duration::ZERO;
         while let Some(item) = events.pop_front() {
             let chunk = matches!(item, Received::Chunk(_));
@@ -4294,7 +4341,7 @@ impl Game<'_> {
     /// `PlayerInfo.getSkin` for every player entity, including NPCs that are
     /// never in the tab list: resolve each profile's textures and give the
     /// level's player models their skin.
-    fn update_remote_skins(&mut self) {
+    pub(super) fn update_remote_skins(&mut self) {
         let Some(r) = self.remote.as_mut() else {
             return;
         };
@@ -4466,10 +4513,13 @@ impl Game<'_> {
                 continue;
             };
             let (skin, is_slim) = self.drawn_skin(uuid, skin_of(&skins, uuid));
+            let kind = self.mobs[i].kind.clone();
+            let skin_3d = self.skin_3d_model(&kind, &skin, is_slim);
             let cape = capes.get(&uuid).filter(|c| self.again_skin(c)).cloned();
             let mob = &mut self.mobs[i];
             mob.skin = Some(skin);
             mob.slim = is_slim;
+            mob.skin_3d = skin_3d;
             mob.cape = cape;
         }
         if self.player_model.is_some() {
@@ -4480,9 +4530,14 @@ impl Game<'_> {
                 .filter(|_| self.settings.file.bool("modelPart_cape") || has_custom_cape)
                 .filter(|c| self.again_skin(c))
                 .cloned();
+            let kind = self.player_model.as_ref().map(|m| m.kind.clone());
+            let skin_3d = kind
+                .as_ref()
+                .and_then(|kind| self.skin_3d_model(kind, &skin, is_slim));
             if let Some(mob) = self.player_model.as_mut() {
                 mob.skin = Some(skin);
                 mob.slim = is_slim;
+                mob.skin_3d = skin_3d;
                 mob.cape = cape;
             }
         }
@@ -4621,6 +4676,20 @@ impl Game<'_> {
     /// `drawn_skin` for a face in the player list or spectator menu.
     pub(super) fn face_skin(&mut self, uuid: u128, skin: &str) -> String {
         self.drawn_skin(uuid, (skin.to_owned(), false)).0
+    }
+    /// The 3D skin layers model for a player: upstream builds `kind`'s outer
+    /// layer with one slab per painted texel (`threeDSkinLayers`). This fork
+    /// keeps the function as a native mod's hook point only — the built-in
+    /// builder is not ported, so without a mod the flat layer draws as
+    /// always and this costs nothing.
+    fn skin_3d_model(
+        &self,
+        kind: &std::sync::Arc<horizon_client::mobs::MobType>,
+        skin: &str,
+        slim: bool,
+    ) -> Option<std::sync::Arc<horizon_client::mobs::Part>> {
+        let _ = (kind, skin, slim);
+        None
     }
     /// ChatType decoration: `chat.translation_key` with sender/content parameters.
     /// ChatType.Bound.decorate: the chat type's translation, with the

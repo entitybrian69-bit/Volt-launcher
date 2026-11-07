@@ -255,6 +255,33 @@ FORK_SOURCE_SHIMS = {
          "ui::slider_dragging(self.batch, &game.gui.atlas, r[0], r[1], r[2],"
          " &Text::literal(label), shown, hover, true, dragging);"),
     ),
+    "skins_3d": (
+        # Upstream moved NativeMod from game::native_hooks to a mod_api
+        # module after this fork's era; the struct itself is identical.
+        ("horizon-mixin.toml",
+         'ty = "&mut Vec<crate::mod_api::NativeMod>"',
+         'ty = "&mut Vec<crate::game::native_hooks::NativeMod>"'),
+        ("hooks/list.rs",
+         "fn skins3d_listed(mods: &mut Vec<crate::mod_api::NativeMod>) {",
+         "fn skins3d_listed(mods: &mut Vec<crate::game::native_hooks::NativeMod>) {"),
+        ("glue.rs",
+         "pub(super) fn listed(mods: &mut Vec<horizon_client::mod_api::NativeMod>) {\n"
+         "    mods.push(horizon_client::mod_api::NativeMod {",
+         "pub(super) fn listed(mods: &mut Vec<horizon_client::game::native_hooks::NativeMod>) {\n"
+         "    mods.push(horizon_client::game::native_hooks::NativeMod {"),
+        # native_camera (the extracted world frame's camera) postdates this
+        # fork; the mod only needs a position for its reach cull, and the
+        # player's eye is that camera for every drawn player model.
+        ("glue.rs",
+         "let camera = game.native_camera().map(|c| c.position);",
+         "let camera = game.eye_position();"),
+        # Polygon grew a cull_back field upstream after this fork's era.
+        ("cache.rs",
+         "part.polygons = built.into_iter().map(|(normal, vertices)|"
+         " Polygon { normal, vertices, cull_back: false }).collect();",
+         "part.polygons = built.into_iter().map(|(normal, vertices)|"
+         " Polygon { normal, vertices }).collect();"),
+    ),
 }
 
 

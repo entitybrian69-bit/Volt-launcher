@@ -1127,6 +1127,10 @@ pub struct Mob {
     pub skin: Option<String>,
     /// `PlayerSkin.model` is `SLIM`: the player model with 3-pixel arms.
     pub slim: bool,
+    /// The 3D skin layers feature's model for this player: its outer layer
+    /// with every painted texel extruded (off by default; a native mod's
+    /// hook fills it).
+    pub skin_3d: Option<Arc<Part>>,
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
@@ -2296,6 +2300,7 @@ impl Mob {
             outbox: Vec::new(),
             skin: None,
             slim: false,
+            skin_3d: None,
             cape: None,
             profile: None,
             attrs: Attrs {

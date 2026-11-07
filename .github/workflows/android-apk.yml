@@ -209,7 +209,7 @@ jobs:
     permissions:
       contents: read
     env:
-      REGISTRY_REV: 78853c19a6d48640ef500f3c8ff8988923576f3f
+      REGISTRY_REV: 63daa89bcbdcb80282c29970d743d6d00918a6ce
       # Every probe-green registry mod woven into release APKs, as
       # id=file; the release tag is the file name without .hnmod.
       WEAVE_SET: |
@@ -245,6 +245,7 @@ jobs:
         customhud=customhud-1.6.0.hnmod
         coords_hud=coords_hud-2.0.0.hnmod
         biomecompass=biomecompass-0.2.2.hnmod
+        skins_3d=skins_3d-1.1.0.hnmod
     strategy:
       fail-fast: false
       matrix:
@@ -743,6 +744,8 @@ jobs:
                "432376fad3062b3517e274d3b8c0d0b52fc5d6de2aee20a0b340c8cab5a8cf08"),
               ("biomecompass", "0.2.2",
                "d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5"),
+              ("skins_3d", "1.1.0",
+               "ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libhorizon_android.so"

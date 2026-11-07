@@ -272,6 +272,7 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "customhud" => "Beautiful Day Counter",
         "coords_hud" => "Coordinates HUD",
         "biomecompass" => "BiomeCompass",
+        "skins_3d" => "3D Skins",
         _ => "Horizon Mod",
     }
 }
@@ -314,6 +315,7 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "customhud" => "A day counter, clock and day/night cycle bar on the HUD.",
         "coords_hud" => "Your coordinates and facing in a corner of the screen; /coords hides it.",
         "biomecompass" => "Craft a Biome Compass, pick a biome and its needle points to the nearest one.",
+        "skins_3d" => "Every player's hat, jacket, sleeves and pants as real 3D pixels.",
         _ => "An official Horizon registry mod.",
     }
 }
@@ -1404,7 +1406,7 @@ impl DrawCtx<'_> {
             .map(|a| a.name.clone())
             .unwrap_or_else(|| self.catalog.config.name.clone());
         let cards: [(&str, String, Page, u32, u32, Action); 3] = [
-            ("MODS", "32 built in".to_owned(), Page::Mods,
+            ("MODS", "33 built in".to_owned(), Page::Mods,
                 hex(0xd8455f, 255), hex(0xa32a44, 255), Action::Page(Page::Mods)),
             ("MY SKIN", skin_sub, Page::Account,
                 hex(0x3f7bea, 255), hex(0x2a54c0, 255), Action::Page(Page::Account)),

@@ -1423,6 +1423,7 @@ under Mods.
 - **customhud 1.6.0** by SCARABOCCHIO100 — [customhud-1.6.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/customhud-1.6.0), SHA-256 `ab255d3c722b40f4d068a762857d6c027c11381308bfe23196e2974307814a7f`, [source](https://github.com/sonoFrangu/CustomHUD-Horizon)
 - **coords_hud 2.0.0** by Horizon — [coords_hud-2.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/coords_hud-2.0.0), SHA-256 `432376fad3062b3517e274d3b8c0d0b52fc5d6de2aee20a0b340c8cab5a8cf08`, [source](https://github.com/horizon-rust/horizon-mods/tree/main/native/coords-hud)
 - **biomecompass 0.2.2** by d3grando — [biomecompass-0.2.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/biomecompass-0.2.2), SHA-256 `d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5`, [source](https://github.com/d3grando/biomecompass)
+- **skins_3d 1.1.0** by _idom_ (MIT) — [skins_3d-1.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/skins_3d-1.1.0), SHA-256 `ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602`, [source](https://github.com/umbx-dot/horizon-3d-skins)
 
 ## Horizon launcher typography
 
