@@ -2,7 +2,7 @@
 # change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 
-# Probe pass: closure-free injection sites for fast_items' locals.
+# Probe pass: special_block_model restored, horizonmatica slider shim.
 on:
   workflow_dispatch:
   push:

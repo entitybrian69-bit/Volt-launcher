@@ -245,6 +245,16 @@ FORK_SOURCE_SHIMS = {
          "Slots::Ender => Vec::new(),",
          "Slots::Ender | Slots::Native => Vec::new(),"),
     ),
+    "horizonmatica": (
+        # ui::slider lost its tenth (dragging) argument when the fork
+        # restored the upstream signature; the drag-aware track moved to
+        # ui::slider_dragging.
+        ("menus_game.rs",
+         "ui::slider(self.batch, &game.gui.atlas, r[0], r[1], r[2],"
+         " &Text::literal(label), shown, hover, true, dragging);",
+         "ui::slider_dragging(self.batch, &game.gui.atlas, r[0], r[1], r[2],"
+         " &Text::literal(label), shown, hover, true, dragging);"),
+    ),
 }
 
 
