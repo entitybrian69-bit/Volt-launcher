@@ -43,10 +43,19 @@ def read_entry(registry: Path, mod_id: str) -> dict:
     return entry
 
 def latest(entry: dict) -> dict | None:
-    """The newest 26.3 bundle: registry entries append new versions last."""
+    """The newest 26.3 bundle. Most registry entries append new versions
+    last, but some list them newest-first (skins_3d), so position alone
+    lies: the published date decides, the version's numbers break ties,
+    and the list position only settles entries carrying neither."""
     matching = [v for v in entry.get("versions", [])
                 if v.get("game") == "26.3" and str(v.get("file", "")).endswith(".hnmod")]
-    return matching[-1] if matching else None
+    if not matching:
+        return None
+    def key(item):
+        index, v = item
+        numbers = [int(n) for n in re.findall(r"\d+", str(v.get("version", "")))]
+        return (str(v.get("published", "")), numbers, index)
+    return max(enumerate(matching), key=key)[1]
 
 def inventory(registry: Path) -> dict:
     projects = []
@@ -135,14 +144,20 @@ def verify_minisign(data: bytes, key_b64: str, signature: str) -> None:
         raise Rejected("signed bundle: minisign signature does not verify")
 
 def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> dict:
-    ver = latest(entry)
-    if not ver or not SHA.fullmatch(str(ver.get("sha256", ""))):
-        raise Rejected("no SHA-256-pinned 26.3 native bundle")
+    # The archive must be a published 26.3 bundle of this entry: the version
+    # record is located by the archive's own digest rather than by list
+    # position, because this fork pins exact versions deliberately and the
+    # registry orders [[versions]] inconsistently (some entries append new
+    # versions last, newer ones list them first). Revocation and the
+    # author's signature still come from the pinned registry snapshot.
     if archive.stat().st_size > MAX_ARCHIVE:
         raise Rejected("archive too large")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != ver["sha256"]:
-        raise Rejected("bundle SHA-256 does not match pinned registry entry")
+    ver = next((v for v in entry.get("versions", [])
+                if v.get("game") == "26.3" and str(v.get("file", "")).endswith(".hnmod")
+                and SHA.fullmatch(str(v.get("sha256", ""))) and v["sha256"] == digest), None)
+    if ver is None:
+        raise Rejected("bundle SHA-256 does not match any pinned registry version")
     check_revoked(registry, entry["id"], digest)
     # Signed entries must not silently lose author verification: when the
     # registry publishes an author key or a signature, both must be present
