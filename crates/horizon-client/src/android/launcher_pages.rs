@@ -716,6 +716,7 @@ fn played_summary(config: &crate::catalog::Config) -> String {
 
 /// The big fully-rounded Play control with a triangle icon and press
 /// feedback; its target is inserted at the front so it always wins the tap.
+#[allow(dead_code)]
 fn draw_play_pill(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
@@ -765,11 +766,80 @@ fn draw_play_pill(
 }
 
 /// A small outlined status pill ("READY", "SELECTED"); returns its width.
+#[allow(dead_code)]
 fn draw_badge(ui: &mut Ui, x: f32, y: f32, label: &str, color: u32) -> f32 {
     let w = ui.measure(Face::LauncherMedium, 11.0, label) + 20.0;
     ui.border(x, y, w, 22.0, 11.0, color);
     draw_centered_text(ui, Face::LauncherMedium, 11.0, [x, y, w, 22.0], color, label);
     w
+}
+
+/// Chunky "Minecraft slab" panel for the lobby home, per the chosen
+/// reference: a notched pixel silhouette with a dark outline, a soft drop
+/// shadow, a two-tone fill and a bright bevel along the top edge.
+fn pixel_panel(ui: &mut Ui, rect: [f32; 4], top: u32, bottom: u32) {
+    use horizon_client::ui_theme::color::{hex, lerp};
+    let [x, y, w, h] = rect;
+    let n = 5.0_f32.min(w * 0.12).min(h * 0.2); // corner notch size
+    let b = 2.5; // outline thickness
+    // Soft drop shadow (single pass so overlaps never double up).
+    ui.rounded(x + 2.0, y + 4.0, w - 2.0, h, 3.0, hex(0x04060a, 95));
+    // Notched outline silhouette: two overlapping rectangles.
+    let outline = hex(0x10131a, 240);
+    ui.rounded(x + n, y, w - 2.0 * n, h, 0.0, outline);
+    ui.rounded(x, y + n, w, h - 2.0 * n, 0.0, outline);
+    // Fill, inset by the outline, same notched union.
+    let (fx, fy, fw, fh) = (x + b, y + b, w - 2.0 * b, h - 2.0 * b);
+    ui.rounded(fx + n, fy, fw - 2.0 * n, fh, 0.0, bottom);
+    ui.rounded(fx, fy + n, fw, fh - 2.0 * n, 0.0, bottom);
+    // Brighter top half for the two-tone slab look.
+    let split = fh * 0.46;
+    ui.rounded(fx + n, fy, fw - 2.0 * n, split, 0.0, top);
+    if split > n {
+        ui.rounded(fx, fy + n, fw, split - n, 0.0, top);
+    }
+    // Bevel highlight along the top edge.
+    ui.rounded(fx + n, fy, fw - 2.0 * n, 2.5, 0.0, lerp(top, hex(0xffffff, 255), 0.32));
+}
+
+/// Tap feedback for lobby slabs: briefly dips the vertices drawn since
+/// `v_start` toward the slab centre, matching the pill/button behaviour.
+fn press_scale(ui: &mut Ui, v_start: usize, rect: [f32; 4], action: Action) {
+    let press_t = ACTIVE_FEEDBACK.with(|fb| {
+        fb.borrow().and_then(|(act, ts)| {
+            let el = ts.elapsed().as_secs_f32();
+            (act == action && el < 0.22).then_some(el / 0.22)
+        })
+    });
+    if let Some(t) = press_t {
+        let dip = (t * std::f32::consts::PI).sin() * (1.0 - t * 0.45);
+        ui.animate_vertices(v_start, 0.0, 0.0, 1.0 - 0.05 * dip,
+            [rect[0] + rect[2] * 0.5, rect[1] + rect[3] * 0.5], 1.0);
+    }
+}
+
+/// A small filled "play" triangle with its left edge at `x`, centred on `cy`.
+fn draw_play_triangle(ui: &mut Ui, x: f32, cy: f32, size: f32, color: u32) {
+    let white = ui.atlas_ref().white;
+    let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
+    let points = [
+        [ui.to_batch(x), ui.to_batch(cy - size * 0.55)],
+        [ui.to_batch(x), ui.to_batch(cy + size * 0.55)],
+        [ui.to_batch(x + size), ui.to_batch(cy)],
+    ];
+    for pos in points {
+        ui.batch_mut().vertices.push(horizon_client::hud::HudVertex {
+            pos, uv, color, depth: 0.0, glint_uv: [0.0, 0.0],
+        });
+    }
+}
+
+/// Headset glyph for the lobby Help button.
+fn draw_headset_icon(ui: &mut Ui, cx: f32, cy: f32, col: u32) {
+    ui.border(cx - 7.5, cy - 7.5, 15.0, 14.5, 7.0, col);
+    ui.rounded(cx - 9.0, cy - 1.0, 4.5, 8.0, 2.0, col);
+    ui.rounded(cx + 4.5, cy - 1.0, 4.5, 8.0, 2.0, col);
+    ui.rounded(cx + 1.5, cy + 6.2, 6.0, 2.2, 1.1, col);
 }
 
 /// Minimal line icons for home tiles that are not launcher pages, built from
@@ -1222,8 +1292,7 @@ impl DrawCtx<'_> {
     }
 
     /// The instance header, actions and tabs shared by Home and its Mods tab.
-    fn draw_instance_page(&mut self, ui: &mut Ui, area: [f32; 4], compact: bool, account_status: &str) {
-        use horizon_client::official_install::InstallStage;
+    fn draw_instance_page(&mut self, ui: &mut Ui, area: [f32; 4], _compact: bool, account_status: &str) {
         let [x, y, w, h] = area;
         // Browse (dock) lands on the bundled official-mods list.
         if self.catalog.page == Page::Mods {
@@ -1231,10 +1300,6 @@ impl DrawCtx<'_> {
             return;
         }
         let installed = horizon_client::official_install::ready(self.home);
-        let installing = self.worker.is_some();
-        let progress = *self.install.lock().unwrap();
-        let play_label = if installing { "Installing" } else if installed { "Play" }
-            else if self.error.is_some() { "Retry" } else { "Download" };
 
         // Secondary home views (Worlds, Multiplayer, Shots, Logs): a back
         // chip and title, then the existing tab content.
@@ -1261,121 +1326,252 @@ impl DrawCtx<'_> {
             return;
         }
 
-        // ----- Home overview, as in the chosen reference -----
-        // Brand row with instance count and a "+ New" pill.
-        let mut instances = 1 + std::fs::read_dir(self.home.join("profiles")).into_iter()
-            .flatten().flatten().filter(|entry| entry.path().is_dir()).count();
-        instances = instances.max(1);
-        ui.volt_logo(x, y + 2.0, 36.0, 36.0);
-        ui.text(Face::Display, 21.0, x + 46.0, y, theme::TEXT(), "VOLT LAUNCHER");
-        let sub = format!("Native Rust · Minecraft 26.3 · {instances} instance{}",
-            if instances == 1 { "" } else { "s" });
-        ui.text(Face::LauncherRegular, 11.5, x + 46.0, y + 27.0, theme::MUTED(), &sub);
-        let new_pill = [x + w - 96.0, y + 1.0, 96.0, 38.0];
-        ui.rounded(new_pill[0], new_pill[1], new_pill[2], new_pill[3], 19.0, theme::GLASS());
-        ui.border(new_pill[0], new_pill[1], new_pill[2], new_pill[3], 19.0, theme::GLASS_BORDER());
-        draw_centered_text(ui, Face::LauncherMedium, 13.0, new_pill, theme::TEXT(), "+ New");
-        self.targets.push((new_pill, Action::Profile));
+        // ----- Home overview: the full-screen lobby, per the chosen reference -----
+        self.draw_lobby_home(ui, area, account_status);
+    }
 
-        // Selected-instance card on the left, with Play inside it.
-        let top = y + 50.0;
-        let body_h = (y + h - top).max(120.0);
-        let card_w = if compact { (w * 0.38).clamp(200.0, 260.0) } else { (w * 0.32).clamp(230.0, 300.0) };
-        let card = [x, top, card_w, body_h];
-        ui.rounded(card[0], card[1], card[2], card[3], 22.0, theme::GLASS());
-        ui.border(card[0], card[1], card[2], card[3], 22.0, theme::BORDER_CRIMSON());
-        ui.rounded(card[0] + 14.0, card[1] + 14.0, 48.0, 48.0, 13.0,
-            horizon_client::ui_theme::color::hex(0xf2f3fb, 230));
-        ui.volt_logo(card[0] + 19.0, card[1] + 19.0, 38.0, 38.0);
-        let profile = self.catalog.config.profile;
-        let title = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
-        let title = ui.fit_text(Face::Display, 19.0, &title, card_w - 90.0);
-        ui.text(Face::Display, 19.0, card[0] + 72.0, card[1] + 14.0, theme::TEXT(), &title);
-        ui.text(Face::LauncherRegular, 12.0, card[0] + 72.0, card[1] + 40.0, theme::DIM(), "26.3 · Native");
-        let badge_y = card[1] + 72.0;
-        let badge = if installing { "INSTALLING" } else if installed { "READY" } else { "NOT INSTALLED" };
-        let bw = draw_badge(ui, card[0] + 14.0, badge_y, badge,
-            if installed || installing { theme::CRIMSON_BRIGHT() } else { theme::DIM() });
-        if card_w - bw >= 118.0 {
-            draw_badge(ui, card[0] + 20.0 + bw, badge_y, "SELECTED", theme::DIM());
-        }
-        let played = if self.catalog.config.last_played == 0 { "Never played".to_owned() }
-            else { played_summary(&self.catalog.config) };
-        let played = ui.fit_text(Face::LauncherRegular, 12.0, &played, card_w - 28.0);
-        ui.text(Face::LauncherRegular, 12.0, card[0] + 14.0, badge_y + 30.0, theme::MUTED(), &played);
-        if installing {
-            let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
-            let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
-            let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32).clamp(0.0, 1.0);
-            let bar = [card[0] + 14.0, card[1] + card[3] - 78.0, card_w - 28.0, 6.0];
-            ui.rounded(bar[0], bar[1], bar[2], bar[3], 3.0, theme::CARD_INNER());
-            ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(6.0), bar[3], 3.0, theme::CRIMSON());
-        } else if let Some(error) = self.error.as_deref() {
-            let error = ui.fit_text(Face::LauncherRegular, 11.0, error, card_w - 28.0);
-            ui.text(Face::LauncherRegular, 11.0, card[0] + 14.0, card[1] + card[3] - 82.0,
-                theme::CRIMSON_BRIGHT(), &error);
-        }
-        draw_play_pill(ui, self.targets,
-            [card[0] + 14.0, card[1] + card[3] - 64.0, card_w - 28.0, 50.0], play_label);
+    /// The lobby home, as in the chosen reference: the player's 3D character
+    /// takes centre stage over the live world, flanked by chunky pixel-art
+    /// destination slabs on the left, quiet icon squares top-right, and a
+    /// bottom bar with the profile selector, a big green Play (with playtime)
+    /// and a Help button. The dock shell is intentionally absent here.
+    fn draw_lobby_home(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
+        use horizon_client::official_install::InstallStage;
+        use horizon_client::ui_theme::color::hex;
+        let [ax, ay, w, h] = area;
+        let installed = horizon_client::official_install::ready(self.home);
+        let installing = self.worker.is_some();
+        let progress = *self.install.lock().unwrap();
+        let compact = w < 760.0;
+        let m = if compact { 10.0 } else { 16.0 };
 
-        // Quick tiles on the right: every launcher area, two rows.
-        let gx = x + card_w + 16.0;
-        let gw = (x + w - gx).max(180.0);
-        let columns = if gw >= 540.0 { 4.0 } else { 2.0 };
-        let gap = 10.0;
-        let tile_w = (gw - (columns - 1.0) * gap) / columns;
-        let device_h = 92.0;
-        let rows = (8.0 / columns).ceil();
-        let tile_h = ((body_h - device_h - 18.0 - (rows - 1.0) * gap) / rows).clamp(42.0, 64.0);
-        let tiles: [(&str, Option<Page>, u8, Action); 8] = [
-            ("Mods", Some(Page::Mods), 0, Action::Page(Page::Mods)),
-            ("Packs", Some(Page::Packs), 0, Action::Page(Page::Packs)),
-            ("Shaders", Some(Page::Shaders), 0, Action::Page(Page::Shaders)),
-            ("Worlds", None, 0, Action::HomeTab(HomeTab::Worlds)),
-            ("Multiplayer", None, 1, Action::HomeTab(HomeTab::Multiplayer)),
-            ("Shots", None, 2, Action::HomeTab(HomeTab::Screenshots)),
-            ("Logs", None, 3, Action::HomeTab(HomeTab::Console)),
-            ("Volt Settings", None, 4, Action::Page(Page::VoltSettings)),
+        // ---- Brand, top-left ----
+        ui.volt_logo(ax + m + 2.0, ay + m, 32.0, 32.0);
+        ui.text(Face::Display, 19.0, ax + m + 42.0, ay + m + 1.0, theme::TEXT(), "VOLT");
+        ui.text(Face::LauncherRegular, 10.5, ax + m + 42.0, ay + m + 22.0, theme::MUTED(),
+            "Minecraft 26.3 · Native Rust");
+
+        // ---- Quiet icon squares, top-right ----
+        let sq = if compact { 38.0 } else { 42.0 };
+        let squares: [(Page, Action); 4] = [
+            (Page::Installed, Action::Page(Page::Installed)),
+            (Page::VoltSettings, Action::Page(Page::VoltSettings)),
+            (Page::Account, Action::Page(Page::Account)),
+            (Page::Settings, Action::Page(Page::Settings)),
         ];
-        for (i, (label, page, glyph, action)) in tiles.iter().enumerate() {
-            let col = i as f32 % columns;
-            let row = (i as f32 / columns).floor();
-            let rect = [gx + col * (tile_w + gap), top + row * (tile_h + gap), tile_w, tile_h];
-            if rect[1] + rect[3] > y + h { continue; }
-            ui.rounded(rect[0], rect[1], rect[2], rect[3], rect[3] * 0.5, theme::GLASS());
-            ui.border(rect[0], rect[1], rect[2], rect[3], rect[3] * 0.5, theme::GLASS_BORDER());
-            let icon_x = rect[0] + 26.0;
-            match page {
-                Some(page) => draw_page_icon(ui, *page, icon_x, rect[1] + rect[3] * 0.5, theme::MUTED()),
-                None => draw_tile_icon(ui, *glyph, icon_x, rect[1] + rect[3] * 0.5, theme::MUTED()),
-            }
-            let label = ui.fit_text(Face::LauncherMedium, 13.5, label, tile_w - 62.0);
-            ui.text(Face::LauncherMedium, 13.5, rect[0] + 46.0,
-                text_vcenter(rect[1], rect[3], 13.5), theme::TEXT(), &label);
+        for (i, (page, action)) in squares.iter().enumerate() {
+            let rect = [ax + w - m - (squares.len() - i) as f32 * (sq + 8.0) + 8.0, ay + m, sq, sq];
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::GLASS());
+            ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::GLASS_BORDER());
+            draw_page_icon(ui, *page, rect[0] + sq * 0.5, rect[1] + sq * 0.5, theme::TEXT());
             self.targets.push((rect, *action));
         }
-        // DEVICE rows under the tiles.
-        let dev_y = top + rows * tile_h + (rows - 1.0) * gap + 6.0;
-        if dev_y + device_h <= y + h + 2.0 {
-            ui.text(Face::LauncherMedium, 11.0, gx + 4.0, dev_y, theme::DIM(), "DEVICE");
-            let dcard = [gx, dev_y + 16.0, gw, device_h - 20.0];
-            ui.rounded(dcard[0], dcard[1], dcard[2], dcard[3], 16.0, theme::GLASS());
-            ui.border(dcard[0], dcard[1], dcard[2], dcard[3], 16.0, theme::GLASS_BORDER());
-            let rows_def: [(&str, String, Action); 2] = [
-                ("Renderer", self.catalog.config.renderer.label().to_owned(), Action::Renderer),
-                ("Volt Boost", "Presets".to_owned(), Action::OpenVoltBoost),
-            ];
-            let row_h = dcard[3] / 2.0;
-            for (i, (label, value, action)) in rows_def.iter().enumerate() {
-                let rect = [dcard[0], dcard[1] + i as f32 * row_h, dcard[2], row_h];
-                ui.text(Face::LauncherRegular, 12.5, rect[0] + 16.0,
-                    text_vcenter(rect[1], row_h, 12.5), theme::MUTED(), label);
-                let vw = ui.measure(Face::LauncherMedium, 12.5, value);
-                ui.text(Face::LauncherMedium, 12.5, rect[0] + rect[2] - vw - 16.0,
-                    text_vcenter(rect[1], row_h, 12.5), theme::TEXT(), value);
-                self.targets.push((rect, *action));
+
+        // ---- Bottom bar metrics (the character is sized around them) ----
+        let bar_h = if compact { 64.0 } else { 76.0 };
+        let bar_y = ay + h - m - bar_h;
+
+        // ---- The star of the show: the rotatable 3D character ----
+        let char_w = (w * 0.34).clamp(170.0, 360.0);
+        let char_top = ay + m + sq + 4.0;
+        let char_h = (bar_y - 10.0 - char_top).max(60.0);
+        let char_rect = [ax + (w - char_w) * 0.5, char_top, char_w, char_h];
+        let default_uuid = self.volt_accounts.active().map(|a| a.uuid_u128()).unwrap_or(0);
+        crate::skin_preview::draw_player_3d(
+            ui,
+            char_rect,
+            self.preview_yaw,
+            self.preview_pitch,
+            self.idle_phase,
+            self.preview_vel_yaw,
+            2,
+            3,
+            self.volt_accounts.active_skin_preview(),
+            self.volt_accounts.active_cape_preview(),
+            default_uuid,
+        );
+        *self.preview_rect = Some(char_rect);
+
+        // ---- Pixel-art destination slabs, left column ----
+        let card_w = (w * 0.24).clamp(164.0, 236.0);
+        let gap = 10.0;
+        let cards_top = ay + m + 50.0;
+        let region = (bar_y - 10.0 - cards_top).max(120.0);
+        let card_h = ((region - 2.0 * gap) / 3.0).clamp(44.0, 84.0);
+        let skin_sub = self
+            .volt_accounts
+            .active()
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| self.catalog.config.name.clone());
+        let cards: [(&str, String, Page, u32, u32, Action); 3] = [
+            ("MODS", "32 built in".to_owned(), Page::Mods,
+                hex(0xd8455f, 255), hex(0xa32a44, 255), Action::Page(Page::Mods)),
+            ("MY SKIN", skin_sub, Page::Account,
+                hex(0x3f7bea, 255), hex(0x2a54c0, 255), Action::Page(Page::Account)),
+            ("SHADERS", "Volt Visuals".to_owned(), Page::Shaders,
+                hex(0x58b956, 255), hex(0x398f3f, 255), Action::Page(Page::Shaders)),
+        ];
+        for (i, (title, sub, page, top, bottom, action)) in cards.iter().enumerate() {
+            let rect = [ax + m, cards_top + i as f32 * (card_h + gap), card_w, card_h];
+            if rect[1] + rect[3] > bar_y - 6.0 {
+                break;
             }
+            let v_start = ui.batch_mut().vertices.len();
+            pixel_panel(ui, rect, *top, *bottom);
+            let cy = rect[1] + card_h * 0.5;
+            draw_page_icon(ui, *page, rect[0] + 26.0, cy, hex(0xffffff, 235));
+            if card_h >= 56.0 {
+                ui.text(Face::Display, 15.0, rect[0] + 46.0, cy - 17.0, hex(0xffffff, 255), title);
+                let sub = ui.fit_text(Face::LauncherRegular, 10.5, sub, card_w - 60.0);
+                ui.text(Face::LauncherRegular, 10.5, rect[0] + 46.0, cy + 2.0, hex(0xffffff, 190), &sub);
+            } else {
+                ui.text(Face::Display, 14.5, rect[0] + 46.0,
+                    text_vcenter(rect[1], card_h, 14.5), hex(0xffffff, 255), title);
+            }
+            press_scale(ui, v_start, rect, *action);
+            self.targets.push((rect, *action));
         }
+
+        // ---- Right rail: the quieter destinations as small chips ----
+        let chips: [(&str, u8, Action); 6] = [
+            ("Worlds", 0, Action::HomeTab(HomeTab::Worlds)),
+            ("Servers", 1, Action::HomeTab(HomeTab::Multiplayer)),
+            ("Shots", 2, Action::HomeTab(HomeTab::Screenshots)),
+            ("Logs", 3, Action::HomeTab(HomeTab::Console)),
+            ("Packs", 5, Action::Page(Page::Packs)),
+            ("Boost", 4, Action::OpenVoltBoost),
+        ];
+        let chip_w = 96.0;
+        let chip_h = 27.0;
+        let mut chip_y = ay + m + sq + 12.0;
+        let chip_x = ax + w - m - chip_w;
+        for (label, glyph, action) in chips {
+            if chip_y + chip_h > bar_y - 6.0 {
+                break;
+            }
+            let rect = [chip_x, chip_y, chip_w, chip_h];
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS());
+            ui.border(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS_BORDER());
+            if glyph == 5 {
+                draw_page_icon(ui, Page::Packs, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
+            } else {
+                draw_tile_icon(ui, glyph, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
+            }
+            ui.text(Face::LauncherMedium, 11.5, rect[0] + 29.0,
+                text_vcenter(rect[1], chip_h, 11.5), theme::TEXT(), label);
+            self.targets.push((rect, action));
+            chip_y += chip_h + 6.0;
+        }
+
+        // ---- Bottom centre: profile selector + the big green Play ----
+        let play_w = if compact { 150.0 } else { 188.0 };
+        let sel_w = (w * 0.30).clamp(if compact { 200.0 } else { 240.0 }, 360.0);
+        let group_w = sel_w + 12.0 + play_w;
+        let gx = ax + ((w - group_w) * 0.5).max(m);
+
+        // Blue profile selector slab.
+        let sel = [gx, bar_y, sel_w, bar_h];
+        let v_start = ui.batch_mut().vertices.len();
+        pixel_panel(ui, sel, hex(0x3b63d6, 255), hex(0x2947ab, 255));
+        let logo_sq = bar_h - 24.0;
+        ui.rounded(sel[0] + 10.0, bar_y + 12.0, logo_sq, logo_sq, 8.0, hex(0x1b2d66, 220));
+        ui.volt_logo(sel[0] + 10.0 + logo_sq * 0.5 - 14.0, bar_y + 12.0 + logo_sq * 0.5 - 14.0, 28.0, 28.0);
+        let tx = sel[0] + logo_sq + 20.0;
+        ui.text(Face::LauncherMedium, 9.5, tx, bar_y + 9.0, hex(0xaec2ff, 255), "SELECTED PROFILE");
+        let profile = self.catalog.config.profile;
+        let pname = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
+        let pname = ui.fit_text(Face::Display, 16.0, &pname, sel_w - logo_sq - 36.0);
+        ui.text(Face::Display, 16.0, tx, bar_y + 21.0, hex(0xffffff, 255), &pname);
+        let played = if self.catalog.config.last_played == 0 { "Horizon · 26.3 · Native".to_owned() }
+            else { played_summary(&self.catalog.config) };
+        let played = ui.fit_text(Face::LauncherRegular, 10.0, &played, sel_w - logo_sq - 36.0);
+        ui.text(Face::LauncherRegular, 10.0, tx, bar_y + bar_h - 20.0, hex(0xc7d4ff, 230), &played);
+        press_scale(ui, v_start, sel, Action::Profile);
+        self.targets.push((sel, Action::Profile));
+
+        // Green Play slab (or the install-progress slab while downloading).
+        let px0 = gx + sel_w + 12.0;
+        if installing {
+            let slab = [px0, bar_y, play_w, bar_h];
+            pixel_panel(ui, slab, hex(0x62c759, 255), hex(0x3f9e42, 255));
+            let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
+            let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
+            let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32)
+                .clamp(0.0, 1.0);
+            draw_centered_text(ui, Face::LauncherMedium, 10.0,
+                [slab[0], bar_y + 8.0, play_w, 12.0], hex(0x0d3a16, 220), "INSTALLING");
+            draw_centered_text(ui, Face::Display, 19.0,
+                [slab[0], bar_y + 20.0, play_w, 24.0], hex(0x0d3a16, 255),
+                &format!("{:.0}%", fraction * 100.0));
+            let bar = [slab[0] + 16.0, bar_y + bar_h - 16.0, play_w - 32.0, 5.0];
+            ui.rounded(bar[0], bar[1], bar[2], bar[3], 2.5, hex(0x0d3a16, 130));
+            ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(5.0), bar[3], 2.5, hex(0xeafcdd, 255));
+        } else {
+            let play_h = bar_h - 26.0;
+            let slab = [px0, bar_y, play_w, play_h];
+            let v_start = ui.batch_mut().vertices.len();
+            pixel_panel(ui, slab, hex(0x66cc5b, 255), hex(0x43a447, 255));
+            let label = if installed { "Play" } else if self.error.is_some() { "Retry" } else { "Download" };
+            let ink = hex(0x0d3a16, 255);
+            let two_lines = play_h >= 46.0;
+            let font = if two_lines { 17.0 } else { 15.0 };
+            let text_w = ui.measure(Face::Display, font, label);
+            let tri = font * 0.62;
+            let line_cy = if two_lines { bar_y + play_h * 0.5 - 7.0 } else { bar_y + play_h * 0.5 };
+            let start_x = px0 + (play_w - text_w - tri - 9.0) * 0.5;
+            draw_play_triangle(ui, start_x, line_cy, tri, ink);
+            ui.text(Face::Display, font, start_x + tri + 9.0,
+                text_vcenter(line_cy - 20.0, 40.0, font), ink, label);
+            if two_lines {
+                let secs = self.catalog.config.play_seconds;
+                let time = if secs == 0 { "0 h".to_owned() }
+                    else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
+                    else { format!("{} h", secs / 3600) };
+                draw_centered_text(ui, Face::LauncherMedium, 9.5,
+                    [px0, bar_y + play_h - 20.0, play_w, 12.0], hex(0x0d3a16, 200), &time);
+            }
+            press_scale(ui, v_start, slab, Action::Play);
+            self.targets.insert(0, (slab, Action::Play));
+
+            // Slim gold slab under Play, lobby-style: straight to the files.
+            let files = [px0, bar_y + play_h + 6.0, play_w, bar_h - play_h - 6.0];
+            pixel_panel(ui, files, hex(0xe9c53e, 255), hex(0xcda32a, 255));
+            draw_centered_text(ui, Face::LauncherMedium, 9.5, files, hex(0x4a3608, 255), "GAME FILES");
+            self.targets.push((files, Action::Page(Page::Installed)));
+        }
+
+        // Error line floating above the bar.
+        if !installing && let Some(error) = self.error.as_deref() {
+            let e = ui.fit_text(Face::LauncherRegular, 11.5, error, w - 2.0 * m - 40.0);
+            let ew = ui.measure(Face::LauncherRegular, 11.5, &e);
+            ui.text(Face::LauncherRegular, 11.5, ax + (w - ew) * 0.5, bar_y - 22.0,
+                theme::CRIMSON_BRIGHT(), &e);
+        }
+
+        // ---- Bottom-left: account chip ----
+        let acc_max = (gx - (ax + m) - 12.0).min(w * 0.3);
+        if acc_max >= 44.0 {
+            let acc_w = (ui.measure(Face::LauncherMedium, 12.0, account_status) + 48.0).min(acc_max);
+            let acc = [ax + m, ay + h - m - 40.0, acc_w, 40.0];
+            ui.rounded(acc[0], acc[1], acc[2], acc[3], 20.0, theme::GLASS());
+            ui.border(acc[0], acc[1], acc[2], acc[3], 20.0, theme::GLASS_BORDER());
+            draw_page_icon(ui, Page::Account, acc[0] + 20.0, acc[1] + 20.0, theme::MUTED());
+            if acc_w >= 72.0 {
+                let fit = ui.fit_text(Face::LauncherMedium, 12.0, account_status, acc_w - 48.0);
+                ui.text(Face::LauncherMedium, 12.0, acc[0] + 36.0,
+                    text_vcenter(acc[1], 40.0, 12.0), theme::TEXT(), &fit);
+            }
+            self.targets.push((acc, Action::Account));
+        }
+
+        // ---- Bottom-right: Help → the Volt Discord ----
+        let help = [ax + w - m - 96.0, ay + h - m - 40.0, 96.0, 40.0];
+        ui.rounded(help[0], help[1], help[2], help[3], 12.0, theme::GLASS());
+        ui.border(help[0], help[1], help[2], help[3], 12.0, theme::GLASS_BORDER());
+        draw_headset_icon(ui, help[0] + 22.0, help[1] + 20.0, theme::TEXT());
+        ui.text(Face::LauncherMedium, 12.5, help[0] + 38.0,
+            text_vcenter(help[1], 40.0, 12.5), theme::TEXT(), "Help");
+        self.targets.push((help, Action::Discord));
     }
 
     fn draw_home_tab(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str, installed: bool) {
@@ -4753,6 +4949,9 @@ impl Launcher {
                      self.cursor.1 as f32 / ui.density - offset[1]);
 
         let compact = w < 760.0;
+        // The lobby home draws full-bleed with its own corner controls, so
+        // the dock shell / compact header stay out of its way entirely.
+        let lobby = self.catalog.page == Page::Play && self.home_tab == HomeTab::Overview;
         let account_status = self
             .volt_accounts
             .active()
@@ -4788,7 +4987,9 @@ impl Launcher {
                 }),
                 preview_rect: &mut self.preview_rect,
             };
-            content_area = if compact {
+            content_area = if lobby {
+                [0.0, 0.0, w, h]
+            } else if compact {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
                 [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
@@ -4835,7 +5036,7 @@ impl Launcher {
             }
         }
 
-        if compact {
+        if compact && !lobby {
             let status = self.error.as_deref().unwrap_or(&self.catalog.status);
             if !status.is_empty() {
                 let sfit = ui.fit_text(Face::LauncherRegular, 12.0, status, (w - 196.0).max(40.0));
