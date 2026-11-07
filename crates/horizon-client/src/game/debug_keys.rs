@@ -573,7 +573,7 @@ impl Game<'_> {
         self.debug_feedback(Text::translate(key, &[]));
     }
     /// `LocalPlayer.isReducedDebugInfo`: the server's rule or the option.
-    fn reduced_debug_info(&self) -> bool {
+    pub(super) fn reduced_debug_info(&self) -> bool {
         self.settings.reduced_debug_info || self.ui.rules.bool("reduced_debug_info")
     }
     /// The default profile's `3d_crosshair` entry: on while the overlay is

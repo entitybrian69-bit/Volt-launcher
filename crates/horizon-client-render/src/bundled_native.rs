@@ -36,6 +36,17 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("hitbox_plus", "1.3.0"),
     ("invisible_frames", "0.1.1"),
     ("freelook", "0.3.1"),
+    ("voicechat", "1.0.0"),
+    ("worldedit", "1.2.1"),
+    ("horizonmatica", "0.1.1"),
+    ("visuality_horizon", "1.0.2"),
+    ("held_item_info", "0.1.0"),
+    ("carryblock", "0.1.2"),
+    ("chatheads", "0.1.0"),
+    ("fast_items", "0.1.0"),
+    ("customhud", "1.6.0"),
+    ("coords_hud", "2.0.0"),
+    ("biomecompass", "0.2.2"),
 ];
 
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {

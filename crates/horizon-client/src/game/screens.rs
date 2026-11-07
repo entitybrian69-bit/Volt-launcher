@@ -35,6 +35,9 @@ impl Screen {
             // WinScreen.extractBackground: the poem fills the screen with the End portal, the
             // credits alone blur. Game::menu_blur knows which one rolls.
             Self::Win => false,
+            // The debug overlay stays readable under the debug options
+            // screen, so no blur (game/debug_options.rs).
+            Self::DebugOptions => false,
         }
     }
 }
@@ -549,6 +552,7 @@ mod tests {
             Screen::CommandBlock,
             Screen::BlockEditor,
             Screen::Win,
+            Screen::DebugOptions,
         ] {
             assert!(!screen.blurs_background(true));
             assert!(!screen.blurs_background(false));
