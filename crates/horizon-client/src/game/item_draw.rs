@@ -412,6 +412,16 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
+        self.dropped_item_geometry_impl(camera, alpha, out);
+    }
+    /// `dropped_item_geometry`'s body, kept apart so the thin wrapper above
+    /// stays a plain injection site for the native mod weave (fast_items).
+    fn dropped_item_geometry_impl(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        out: &mut Vec<Vertex>,
+    ) {
         let (max_items, max_dist_sq) = self
             .settings
             .extras
