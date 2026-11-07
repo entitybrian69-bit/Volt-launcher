@@ -9786,10 +9786,18 @@ impl Game<'_> {
         // Entity shadows (EntityRenderer.extractShadow).
         self.mark_translucent_entity(out.len(), "minecraft:entity_shadow");
         let shadow_mode = self.settings.extras.fast_shadows;
-        let shadow_sprite = (self.settings.entity_shadows
-            && shadow_mode != horizon_client::volt_features::FastShadowMode::Off)
-            .then(|| self.gui.atlas.sprites.get("misc/shadow").copied())
-            .flatten();
+        // The item and orb shadow parameters, bound before this function's
+        // first closure so the native mod weave's common mixin compiler can
+        // modify the `item` local (fast_items' item-shadows injection).
+        let item = horizon_client::shadows::shadow_params("minecraft:item");
+        let orb = horizon_client::shadows::shadow_params("minecraft:experience_orb");
+        let shadow_sprite = if self.settings.entity_shadows
+            && shadow_mode != horizon_client::volt_features::FastShadowMode::Off
+        {
+            self.gui.atlas.sprites.get("misc/shadow").copied()
+        } else {
+            None
+        };
         if let Some(sprite) = shadow_sprite {
             let nearby_only =
                 shadow_mode == horizon_client::volt_features::FastShadowMode::Nearby16;
@@ -9813,13 +9821,11 @@ impl Game<'_> {
                     .filter(|(pos, _, _)| !nearby_only || (*pos - camera).length_squared() <= 256.0)
                     .collect();
             if !nearby_only {
-                let item = horizon_client::shadows::shadow_params("minecraft:item");
                 casters.extend(
                     self.dropped
                         .iter()
                         .map(|i| (lerp(i.previous, i.position), "minecraft:item", item.0)),
                 );
-                let orb = horizon_client::shadows::shadow_params("minecraft:experience_orb");
                 casters.extend(
                     self.orbs
                         .iter()

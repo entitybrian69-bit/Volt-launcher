@@ -412,61 +412,16 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
-        self.dropped_item_geometry_impl(camera, alpha, out);
-    }
-    /// `dropped_item_geometry`'s body, kept apart so the thin wrapper above
-    /// stays a plain injection site for the native mod weave (fast_items).
-    fn dropped_item_geometry_impl(
-        &self,
-        camera: glam::DVec3,
-        alpha: f64,
-        out: &mut Vec<Vertex>,
-    ) {
         let (max_items, max_dist_sq) = self
             .settings
             .extras
             .item_render_cap
             .limit_and_dist_sq()
             .unwrap_or((usize::MAX, 64.0 * 64.0));
-        let live_indices: Vec<usize> = if max_items < usize::MAX && self.dropped.len() > max_items {
-            let mut ordered: Vec<(usize, f64)> = Vec::with_capacity(self.dropped.len());
-            for (idx, item) in self.dropped.iter().enumerate() {
-                let (p, q) = (item.previous, item.position);
-                let at = [
-                    p.x + (q.x - p.x) * alpha,
-                    p.y + (q.y - p.y) * alpha,
-                    p.z + (q.z - p.z) * alpha,
-                ];
-                let d_sq = (glam::DVec3::from_array(at) - camera).length_squared();
-                if d_sq <= max_dist_sq {
-                    ordered.push((idx, d_sq));
-                }
-            }
-            ordered.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
-            ordered.truncate(max_items);
-            ordered.into_iter().map(|(idx, _)| idx).collect()
-        } else {
-            (0..self.dropped.len()).collect()
-        };
-        let live = live_indices.into_iter().map(|idx| {
-            let item = &self.dropped[idx];
-            let (p, q) = (item.previous, item.position);
-            let at = [
-                p.x + (q.x - p.x) * alpha,
-                p.y + (q.y - p.y) * alpha,
-                p.z + (q.z - p.z) * alpha,
-            ];
-            (item, at, alpha as f32)
-        });
-        // ItemPickupParticle: the render state extracted at partial tick 1.
-        let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
-            super::pickups::Taken::Item(item) => {
-                Some((&**item, super::pickups::position(p, alpha), 1.0))
-            }
-            _ => None,
-        });
         let mut rendered = 0usize;
-        for (item, at, partial) in live.chain(taken) {
+        for (item, at, partial) in
+            self.dropped_item_candidates(camera, alpha, max_items, max_dist_sq)
+        {
             if rendered >= max_items {
                 break;
             }
@@ -558,6 +513,57 @@ impl Game<'_> {
                 self.cull_entity_vertices(out, entity_start);
             }
         }
+    }
+    /// The dropped items and pickup particles to draw, with interpolated
+    /// positions and partial ticks (`ItemPickupParticle`: the render state
+    /// extracted at partial tick 1). Kept apart so `dropped_item_geometry`'s
+    /// body stays free of closures: the native mod weave's common mixin
+    /// compiler binds the `state` and `pose` locals there (fast_items).
+    fn dropped_item_candidates(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        max_items: usize,
+        max_dist_sq: f64,
+    ) -> Vec<(&horizon_client::entities::ItemEntity, [f64; 3], f32)> {
+        let live_indices: Vec<usize> = if max_items < usize::MAX && self.dropped.len() > max_items {
+            let mut ordered: Vec<(usize, f64)> = Vec::with_capacity(self.dropped.len());
+            for (idx, item) in self.dropped.iter().enumerate() {
+                let (p, q) = (item.previous, item.position);
+                let at = [
+                    p.x + (q.x - p.x) * alpha,
+                    p.y + (q.y - p.y) * alpha,
+                    p.z + (q.z - p.z) * alpha,
+                ];
+                let d_sq = (glam::DVec3::from_array(at) - camera).length_squared();
+                if d_sq <= max_dist_sq {
+                    ordered.push((idx, d_sq));
+                }
+            }
+            ordered.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            ordered.truncate(max_items);
+            ordered.into_iter().map(|(idx, _)| idx).collect()
+        } else {
+            (0..self.dropped.len()).collect()
+        };
+        let live = live_indices.into_iter().map(|idx| {
+            let item = &self.dropped[idx];
+            let (p, q) = (item.previous, item.position);
+            let at = [
+                p.x + (q.x - p.x) * alpha,
+                p.y + (q.y - p.y) * alpha,
+                p.z + (q.z - p.z) * alpha,
+            ];
+            (item, at, alpha as f32)
+        });
+        // ItemPickupParticle: the render state extracted at partial tick 1.
+        let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
+            super::pickups::Taken::Item(item) => {
+                Some((&**item, super::pickups::position(p, alpha), 1.0))
+            }
+            _ => None,
+        });
+        live.chain(taken).collect()
     }
 }
 

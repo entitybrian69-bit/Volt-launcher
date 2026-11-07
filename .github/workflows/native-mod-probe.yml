@@ -2,7 +2,7 @@
 # change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 
-# Probe pass: debug options port + bundle shims (e65c896 follow-up).
+# Probe pass: closure-free injection sites for fast_items' locals.
 on:
   workflow_dispatch:
   push:
