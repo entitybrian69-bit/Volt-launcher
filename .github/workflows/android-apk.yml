@@ -126,11 +126,27 @@ jobs:
           key: worldgen-test-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Climate and Biomes Unseen preset-table tests
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          rustup show active-toolchain
+          cargo --version
           cargo test -p horizon-client --lib --no-default-features -- \
             climate_entry_strips_keys_and_quantizes \
             biomes_unseen_hmod_biomes_reach_the_preset_tables \
-            --nocapture | tee worldgen-test.log
+            --nocapture 2>&1 | tee worldgen-test.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            # Logs are not downloadable from every network: surface the
+            # failure as annotations readable through the checks API.
+            python3 - <<'PY'
+          lines = open("worldgen-test.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::error title={title}::{msg or '(empty)'}")
+          emit("cargo-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
+          emit("log-tail", lines[-35:])
+          PY
+            exit "$status"
+          fi
       - name: Verify the 44 Biomes Unseen biomes reached the preset tables
         run: |
           set -euo pipefail
