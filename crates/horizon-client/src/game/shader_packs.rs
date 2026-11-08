@@ -212,6 +212,8 @@ impl Game<'_> {
                             if let Some((programs, notes)) =
                                 renderer.set_shader_pack(dimension, Some(post), &table)
                             {
+                                let skipped =
+                                    notes.iter().filter(|n| n.contains("skipped")).count();
                                 for note in notes {
                                     log::warn!("shader pack {name}: {note}");
                                 }
@@ -221,17 +223,47 @@ impl Game<'_> {
                                     programs.join(" "),
                                     started.elapsed().as_millis()
                                 );
+                                // The player sees why a pack looks incomplete
+                                // instead of a silently broken image.
+                                (skipped > 0).then(|| {
+                                    (
+                                        0xFFAA00,
+                                        format!(
+                                            "Shader pack {name}: {skipped} unsupported program(s) \
+                                             skipped; some effects may be missing"
+                                        ),
+                                    )
+                                })
+                            } else {
+                                None
                             }
                         }
                         Err(e) => {
                             self.pack_ids = None;
                             log::warn!("shader pack {name}: {e}");
                             renderer.set_shader_pack(dimension, None, &[]);
+                            // One line of the reason in chat, instead of a
+                            // pack that silently does nothing.
+                            let text = e.to_string();
+                            let mut text =
+                                text.split_whitespace().collect::<Vec<_>>().join(" ");
+                            if let Some((i, _)) = text.char_indices().nth(160) {
+                                text.truncate(i);
+                                text.push_str("...");
+                            }
+                            Some((
+                                0xFF5555,
+                                format!("Shader pack {name} could not be loaded: {text}"),
+                            ))
                         }
                     }
                 });
-                if let Err(panic) = loaded {
-                    self.shader_pack_failed(name, dimension, &panic);
+                match loaded {
+                    Err(panic) => self.shader_pack_failed(name, dimension, &panic),
+                    Ok(Some((color, message))) => {
+                        self.system_message(Text::colored(message, color));
+                    }
+                    Ok(None) => {}
                 }
             }
         }

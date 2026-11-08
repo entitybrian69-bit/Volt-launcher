@@ -572,13 +572,10 @@ impl Game<'_> {
     /// with `xRot` (`turn_rotation`).
     pub(super) fn turn_player(&mut self, xo: f64, yo: f64) {
         let pitch_o = self.player_model.as_ref().map(|m| m.previous_head_pitch);
+        let before = self.yaw;
         let rotation = turn_rotation(self.yaw, self.pitch, pitch_o, xo, yo);
         self.yaw = rotation.y_rot;
         self.pitch = rotation.x_rot;
-        if let Some(m) = self.player_model.as_mut() {
-            m.previous_head_pitch = rotation.x_rot_o;
-            m.head_pitch = rotation.x_rot;
-        }
         // Entity.turn ends in AbstractBoat.onPassengerTurned: clampRotation
         // keeps the view within 105 degrees of the boat at every turn, not
         // only at the tick, so it never swings past and back.
@@ -588,6 +585,18 @@ impl Game<'_> {
         {
             let delta = (self.yaw - b.yaw + 180.0).rem_euclid(360.0) - 180.0;
             self.yaw += delta.clamp(-105.0, 105.0) - delta;
+        }
+        if let Some(m) = self.player_model.as_mut() {
+            m.previous_head_pitch = rotation.x_rot_o;
+            m.head_pitch = rotation.x_rot;
+            // Entity.turn moves the old rotation with the new (`yRotO`
+            // follows `yRot`): the model's head tracks the view between
+            // ticks too, instead of easing in a tick late. Without this the
+            // head (and the body chasing it) visibly drags behind every
+            // camera swing in third person.
+            let moved = self.yaw - before;
+            m.head_yaw += moved;
+            m.previous_head_yaw += moved;
         }
     }
     /// `Entity.setOldRot` after a server sets the player's rotation

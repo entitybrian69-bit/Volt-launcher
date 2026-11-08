@@ -86,6 +86,15 @@ impl ShadowTargets {
         let size = shadow
             .resolution
             .clamp(1, device.limits().max_texture_dimension_2d);
+        // Packs ship desktop defaults (2048, often 4096): on a phone the
+        // shadow pass alone can blow the whole frame budget, so the map is
+        // capped on Android. 1024 keeps shadows usable at mobile view
+        // distances for a sixteenth of 4096's fill and memory.
+        let size = if cfg!(target_os = "android") {
+            size.min(1024)
+        } else {
+            size
+        };
         let copy = wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST;
         let depth = wgpu::TextureFormat::Depth32Float;
         let color = std::array::from_fn(|n| {
