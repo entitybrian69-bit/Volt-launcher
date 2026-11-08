@@ -271,3 +271,20 @@ Horizon's own mods are native. They live in
 The game keeps the parts that must be fast, such as drawing the minimap's map, and a native mod picks the options
 ([extras.md](extras.md)). Far View is not a mod any more: its distance and detail are Graphics > LOD Distance and Far
 Detail ([graphics.md](graphics.md)).
+
+### Mod biomes (worldgen-api)
+
+A content mod may register its own biomes with `data/<ns>/worldgen/biome/<name>.json` (the vanilla biome
+codec shape: `temperature`, `downfall`, `has_precipitation`, `effects`, `features`, `spawners`), its own
+features with `data/<ns>/worldgen/feature/` (26.3 name; `configured_feature/` still works) and
+`data/<ns>/worldgen/placed_feature/`. A biome file may also carry two keys vanilla data never has:
+`horizon:climate` (each of temperature/humidity/continentalness/erosion/depth/weirdness a `[min, max]`
+range or one number in -2..=2, plus `offset`; a missing field spans the whole range) and
+`horizon:dimension` (`minecraft:overworld` by default, or `minecraft:the_nether`; any other dimension is
+refused). Both keys are stripped before the biome joins the bundle, and the ranges are appended, quantized
+as vanilla's `quantizeCoord` quantizes its preset tables, to that dimension's multi-noise preset in
+`presets.json`. An added biome is placed only where its ranges are the closest match, as a datapack's
+appended entries are. A biome without `horizon:climate` registers but is placed by nothing. This is
+data-only, so it works on Android exactly as on PC, and API 0.2 mods without biome files are unchanged.
+Malformed climate data (out of range, `min > max`, unknown dimension) refuses the mod with the file named.
+Unit coverage: `climate_entry_strips_keys_and_quantizes` in `crates/horizon-client/src/mod_content_tests.rs`.

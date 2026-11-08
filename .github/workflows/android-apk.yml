@@ -106,6 +106,40 @@ jobs:
       - name: Validate Volt Shaders WGSL & Shader API
         run: cargo test -p horizon-shader-api
 
+  worldgen-test:
+    name: Worldgen mod tests (host)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: worldgen-test-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Climate and Biomes Unseen preset-table tests
+        run: |
+          set -euo pipefail
+          cargo test -p horizon-client --lib --no-default-features -- \
+            climate_entry_strips_keys_and_quantizes \
+            biomes_unseen_hmod_biomes_reach_the_preset_tables \
+            --nocapture | tee worldgen-test.log
+      - name: Verify the 44 Biomes Unseen biomes reached the preset tables
+        run: |
+          set -euo pipefail
+          grep -F "minecraft:overworld: 39 Biomes Unseen biome(s) registered in the multi-noise preset table" worldgen-test.log
+          grep -F "minecraft:the_nether: 5 Biomes Unseen biome(s) registered in the multi-noise preset table" worldgen-test.log
+          count=$(grep -c "  biomes_unseen:" worldgen-test.log)
+          echo "listed biome ids: $count"
+          test "$count" -eq 44
+
   prepare:
     name: Prepare engine tables
     needs: plan
@@ -1240,7 +1274,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: needs.plan.outputs.publish_release == 'true'
-    needs: [plan, build]
+    needs: [plan, build, worldgen-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

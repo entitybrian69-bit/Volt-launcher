@@ -1435,3 +1435,13 @@ license is `crates/horizon-theme/fonts/OFL-BricolageGrotesque.txt`.
 `crates/horizon-theme/src/glass.rs` is from the same Horizon Nightly snapshot,
 Copyright (c) 2026 Ludovic Marie and the Horizon contributors, under the MIT
 license in the repository's `LICENSE` file.
+
+## Test fixtures
+
+`crates/horizon-client/testdata/biomes_unseen.hmod` is the Biomes Unseen
+content mod v1.0.0 by the Biomes Unseen Contributors (MIT), built from
+[entitybrian69-bit/Rust-store-](https://github.com/entitybrian69-bit/Rust-store-)
+(branch `arena/c34de59d-rust-store`, `releases/biomes_unseen.hmod`), with the
+placement type `minecraft:surface_heightmap` corrected to vanilla's
+`minecraft:heightmap` in its 24 placed-feature files. Its textures are
+original procedural pixel art; no Biomes O' Plenty assets are included.

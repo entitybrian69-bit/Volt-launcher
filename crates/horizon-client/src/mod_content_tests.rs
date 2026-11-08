@@ -1463,3 +1463,118 @@ fn shapes_reject_unknown_or_missing_template_values() {
     }
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn climate_entry_strips_keys_and_quantizes() {
+    let text = r#"{"temperature":0.8,"downfall":0.4,"has_precipitation":true,"horizon:dimension":"minecraft:the_nether","horizon:climate":{"temperature":[0.5,1.5],"humidity":0.0,"offset":0.25}}"#;
+    let (entry, stripped) = ClimateEntry::take("ruby:cove", text).unwrap().unwrap();
+    assert_eq!(entry.preset, "minecraft:the_nether");
+    assert!(!stripped.contains("horizon:climate") && !stripped.contains("horizon:dimension"));
+    assert!(stripped.contains("\"temperature\":0.8"));
+    let q = serde_json::to_string(&entry.quantized()).unwrap();
+    assert!(q.contains("\"coordinates\":[[5000,15000],[0,0]"), "{q}");
+    assert!(q.contains("\"offset\":2500,\"biome\":\"ruby:cove\""), "{q}");
+    // No climate keys: registers only, placed by nothing.
+    assert!(ClimateEntry::take("ruby:x", r#"{"temperature":0.8}"#).unwrap().is_none());
+    // Out-of-range and inverted ranges are refused, not clamped silently.
+    assert!(ClimateEntry::take("ruby:x", r#"{"horizon:climate":{"temperature":[2.0,1.0]}}"#).is_err());
+    assert!(ClimateEntry::take("ruby:x", r#"{"horizon:climate":{"temperature":9.0}}"#).is_err());
+    assert!(ClimateEntry::take("ruby:x", r#"{"horizon:dimension":"minecraft:the_end","horizon:climate":{}}"#).is_err());
+}
+
+/// The real `biomes_unseen.hmod` (MIT, Biomes Unseen Contributors; the
+/// placement name `minecraft:surface_heightmap` fixed to vanilla's
+/// `minecraft:heightmap`): its 44 biome definitions load through the mod
+/// reader, every one carries valid `horizon:climate` data, the stripped
+/// text parses as the engine's biome codec does, every placement modifier
+/// of its placed features is one the engine decodes, and the appended
+/// preset tables parse back through the same `from_quantized_json` the
+/// world generator runs on `worldgen/presets.json`.
+#[test]
+fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
+    use horizon_mods::{Content, Package};
+    use horizon_world::worldgen::biome::MultiNoiseBiomeSource;
+    use horizon_world::worldgen::biome_temperature::BiomeTemperatureSettings;
+    use horizon_world::worldgen::placement::PlacementModifier;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    assert_eq!(package.manifest.id, "biomes_unseen");
+    let content = Content::read(&path, &package.manifest).unwrap();
+    let m = ContentMod {
+        id: package.manifest.id.clone(),
+        content,
+    };
+    let mut reader = m.content.reader().unwrap();
+    let mut overworld: Vec<ClimateEntry> = Vec::new();
+    let mut nether: Vec<ClimateEntry> = Vec::new();
+    let mut placements = 0;
+    let mut features = 0;
+    for file in &m.content.files {
+        let Some((bundle, id)) = worldgen_entry(file) else {
+            continue;
+        };
+        let text = String::from_utf8(reader.read(file).unwrap()).unwrap();
+        match bundle {
+            "worldgen/biomes.json" => {
+                let (entry, stripped) = ClimateEntry::take(&id, &text)
+                    .unwrap_or_else(|e| panic!("{file}: {e}"))
+                    .unwrap_or_else(|| panic!("{file}: no horizon:climate"));
+                // The engine's biome codec reads the stripped text.
+                BiomeTemperatureSettings::from_json(&stripped)
+                    .unwrap_or_else(|e| panic!("{file}: {e}"));
+                assert!(!stripped.contains("horizon:climate"), "{file}");
+                match entry.preset.as_str() {
+                    "minecraft:overworld" => overworld.push(entry),
+                    "minecraft:the_nether" => nether.push(entry),
+                    other => panic!("{file}: unexpected preset {other}"),
+                }
+            }
+            "worldgen/placed_features.json" => {
+                let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let Some(list) = doc["placement"].as_array() else {
+                    panic!("{file}: no placement list");
+                };
+                for p in list {
+                    // Every placement modifier is one the engine decodes.
+                    PlacementModifier::from_json(&p.to_string())
+                        .unwrap_or_else(|e| panic!("{file}: {p}: {e}"));
+                    placements += 1;
+                }
+            }
+            "worldgen/features.json" => features += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(overworld.len() + nether.len(), 44, "biome definitions");
+    assert_eq!(features, 25);
+    assert!(placements > 0, "placed features carry placements");
+    // The entries joined to a vanilla-shaped table, parsed back by the same
+    // code the world generator runs on `presets.json`.
+    let vanilla = r#"[{"coordinates":[[-10000,10000],[-5000,5000],[-10000,10000],[-10000,10000],[0,0],[-10000,10000]],"offset":0,"biome":"minecraft:plains"}]"#;
+    for (preset, entries) in [
+        ("minecraft:overworld", &overworld),
+        ("minecraft:the_nether", &nether),
+    ] {
+        let refs: Vec<&ClimateEntry> = entries.iter().collect();
+        let table = append_climates(vanilla, preset, &refs).unwrap();
+        let source = MultiNoiseBiomeSource::from_quantized_json(&table).unwrap();
+        let mut ids: Vec<&str> = source
+            .parameters()
+            .entries()
+            .iter()
+            .map(|(_, biome)| biome.as_str())
+            .filter(|biome| biome.starts_with("biomes_unseen:"))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), entries.len(), "{preset}");
+        println!(
+            "{preset}: {} Biomes Unseen biome(s) registered in the multi-noise preset table",
+            ids.len()
+        );
+        for id in &ids {
+            println!("  {id}");
+        }
+    }
+    assert_eq!((overworld.len(), nether.len()), (39, 5));
+}
