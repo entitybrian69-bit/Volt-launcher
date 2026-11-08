@@ -44,6 +44,7 @@ pub enum VoltAct {
     QolCamRoll,
     QolLetterbox,
     QolReplay,
+    QolReplayButton,
     QolCaveReverb,
     QolUnderwaterLpf,
     QolWallOcclusion,
@@ -174,6 +175,7 @@ impl VoltAct {
             Self::QolCamRoll => "Camera Dutch Tilt",
             Self::QolLetterbox => "Cinema Letterbox Bars",
             Self::QolReplay => "Replay Recording",
+            Self::QolReplayButton => "On-Screen Replay Button",
             Self::QolCaveReverb => "Cave Echo Reverb",
             Self::QolUnderwaterLpf => "Underwater Muffle LPF",
             Self::QolWallOcclusion => "Solid Wall Sound Muffle",
@@ -276,6 +278,7 @@ impl VoltAct {
             Self::QolCamRoll => format!("{}\u{00b0}", e.volt_qol.cam_roll_deg),
             Self::QolLetterbox => on_off(e.volt_qol.cam_letterbox).into(),
             Self::QolReplay => on_off(e.volt_qol.replay_buffer).into(),
+            Self::QolReplayButton => on_off(e.volt_qol.replay_button).into(),
             Self::QolCaveReverb => on_off(e.volt_qol.sound_cave_reverb).into(),
             Self::QolUnderwaterLpf => on_off(e.volt_qol.sound_underwater_lpf).into(),
             Self::QolWallOcclusion => on_off(e.volt_qol.sound_wall_occlusion).into(),
@@ -378,6 +381,7 @@ impl VoltAct {
             Self::QolCamRoll => "Applies a cinematic Dutch-angle camera roll tilt.",
             Self::QolLetterbox => "Adds 21:9 cinema letterbox bars to the top and bottom of the screen.",
             Self::QolReplay => "Records multiplayer and world sessions as Volt Replays. Watch them from the launcher's Replays page: timeline, speeds, pause, and a free camera that shows you in third person.",
+            Self::QolReplayButton => "Shows a floating Start / Pause / End recording button in the HUD. Drag it anywhere; hold it, then drag up-down for size and left-right for opacity. Applies when you next join a world or server.",
             Self::QolCaveReverb => "Adds subtle natural acoustic echo when deep inside enclosed stone caves.",
             Self::QolUnderwaterLpf => "Applies a warm low-pass muffle filter when the camera is submerged underwater.",
             Self::QolWallOcclusion => "Softens positional sounds originating behind solid walls.",
@@ -517,6 +521,7 @@ impl VoltAct {
             }
             Self::QolLetterbox => e.volt_qol.cam_letterbox = !e.volt_qol.cam_letterbox,
             Self::QolReplay => e.volt_qol.replay_buffer = !e.volt_qol.replay_buffer,
+            Self::QolReplayButton => e.volt_qol.replay_button = !e.volt_qol.replay_button,
             Self::QolCaveReverb => e.volt_qol.sound_cave_reverb = !e.volt_qol.sound_cave_reverb,
             Self::QolUnderwaterLpf => {
                 e.volt_qol.sound_underwater_lpf = !e.volt_qol.sound_underwater_lpf
@@ -703,6 +708,7 @@ pub const QOL_SECTIONS: &[(&str, &[VoltAct])] = &[
             VoltAct::QolCamRoll,
             VoltAct::QolLetterbox,
             VoltAct::QolReplay,
+            VoltAct::QolReplayButton,
         ],
     ),
 ];

@@ -146,6 +146,15 @@ pub struct VoltQolConfig {
     pub cam_roll_deg: i16,
     pub cam_letterbox: bool,
     pub replay_buffer: bool,
+    /// The draggable on-screen replay button (Start / Pause / End).
+    pub replay_button: bool,
+    /// The button's centre, in percent of the screen.
+    pub replay_btn_x_pct: u16,
+    pub replay_btn_y_pct: u16,
+    /// The button's edge in HUD units (hold the button and drag up/down).
+    pub replay_btn_size: u16,
+    /// The button's opacity in percent (hold and drag left/right).
+    pub replay_btn_opacity_pct: u16,
     // #15 Sound Physics Lite & Muffler
     pub sound_cave_reverb: bool,
     pub sound_underwater_lpf: bool,
@@ -188,6 +197,11 @@ impl Default for VoltQolConfig {
             cam_roll_deg: 0,
             cam_letterbox: false,
             replay_buffer: false,
+            replay_button: false,
+            replay_btn_x_pct: 7,
+            replay_btn_y_pct: 38,
+            replay_btn_size: 34,
+            replay_btn_opacity_pct: 85,
             sound_cave_reverb: false,
             sound_underwater_lpf: true,
             sound_wall_occlusion: false,

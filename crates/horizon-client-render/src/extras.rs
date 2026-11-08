@@ -769,6 +769,29 @@ impl Extras {
                 }
                 "voltQolLetterbox" => e.volt_qol.cam_letterbox = flag(e.volt_qol.cam_letterbox),
                 "voltQolReplay" => e.volt_qol.replay_buffer = flag(e.volt_qol.replay_buffer),
+                "voltQolReplayButton" => {
+                    e.volt_qol.replay_button = flag(e.volt_qol.replay_button)
+                }
+                "voltQolReplayBtnX" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.replay_btn_x_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolReplayBtnY" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.replay_btn_y_pct = v.clamp(0, 100);
+                    }
+                }
+                "voltQolReplayBtnSize" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.replay_btn_size = v.clamp(22, 72);
+                    }
+                }
+                "voltQolReplayBtnOpacity" => {
+                    if let Ok(v) = value.parse::<u16>() {
+                        e.volt_qol.replay_btn_opacity_pct = v.clamp(25, 100);
+                    }
+                }
                 "voltQolCaveReverb" => {
                     e.volt_qol.sound_cave_reverb = flag(e.volt_qol.sound_cave_reverb)
                 }
@@ -1275,6 +1298,26 @@ impl Extras {
         push("voltQolCamRoll", &self.volt_qol.cam_roll_deg.to_string());
         push("voltQolLetterbox", bool_text(self.volt_qol.cam_letterbox));
         push("voltQolReplay", bool_text(self.volt_qol.replay_buffer));
+        push(
+            "voltQolReplayButton",
+            bool_text(self.volt_qol.replay_button),
+        );
+        push(
+            "voltQolReplayBtnX",
+            &self.volt_qol.replay_btn_x_pct.to_string(),
+        );
+        push(
+            "voltQolReplayBtnY",
+            &self.volt_qol.replay_btn_y_pct.to_string(),
+        );
+        push(
+            "voltQolReplayBtnSize",
+            &self.volt_qol.replay_btn_size.to_string(),
+        );
+        push(
+            "voltQolReplayBtnOpacity",
+            &self.volt_qol.replay_btn_opacity_pct.to_string(),
+        );
         push(
             "voltQolCaveReverb",
             bool_text(self.volt_qol.sound_cave_reverb),

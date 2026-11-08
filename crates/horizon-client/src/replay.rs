@@ -309,7 +309,35 @@ struct Active {
     path: PathBuf,
     started: Instant,
     last_ms: u32,
+    /// Some while the clock is frozen: packets keep being written with the
+    /// frozen timestamp (so playback state stays whole) and the span plays
+    /// back as an instant cut.
+    paused_at: Option<Instant>,
+    /// Time spent frozen so far, subtracted from the wall clock.
+    paused_ms: u64,
+    /// The clock ever ran. A recording that never started (the on-screen
+    /// button armed the recorder but Start was never pressed) is deleted
+    /// on finish instead of saved as a 0:00 file.
+    armed: bool,
 }
+
+impl Active {
+    fn now_ms(&self) -> u32 {
+        let wall = match self.paused_at {
+            Some(p) => p.duration_since(self.started).as_millis(),
+            None => self.started.elapsed().as_millis(),
+        };
+        wall.saturating_sub(u128::from(self.paused_ms))
+            .min(u128::from(u32::MAX)) as u32
+    }
+}
+
+/// `Recorder::state`: no recording is open (never created, or ended).
+pub const REC_OFF: u8 = 0;
+/// `Recorder::state`: the clock runs and packets are stamped live.
+pub const REC_ON: u8 = 1;
+/// `Recorder::state`: the clock is frozen; the span becomes a cut.
+pub const REC_PAUSED: u8 = 2;
 
 /// Shared between the network thread (clientbound frames) and the game
 /// thread (the player's own movement packets); a write failure quietly
@@ -319,7 +347,10 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn create(dir: &Path, server: &str, name: &str, uuid: u128) -> Option<Arc<Recorder>> {
+    /// Opens the file and starts capturing. With `armed` false the clock
+    /// stays frozen at 0:00 until `resume` (the on-screen button's Start):
+    /// everything before plays back as the opening state of the recording.
+    pub fn create(dir: &Path, server: &str, name: &str, uuid: u128, armed: bool) -> Option<Arc<Recorder>> {
         std::fs::create_dir_all(dir).ok()?;
         let created = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -333,14 +364,51 @@ impl Recorder {
         let path = dir.join(format!("{label}-{created}.vrpl"));
         let mut file = File::create(&path).ok()?;
         write_header(&mut file, created, uuid, name, server).ok()?;
+        let now = Instant::now();
         Some(Arc::new(Recorder {
             inner: Mutex::new(Some(Active {
                 out: flate2::write::GzEncoder::new(file, flate2::Compression::fast()),
                 path,
-                started: Instant::now(),
+                started: now,
                 last_ms: 0,
+                paused_at: (!armed).then_some(now),
+                paused_ms: 0,
+                armed,
             })),
         }))
+    }
+    /// The recorder's current state (`REC_OFF` / `REC_ON` / `REC_PAUSED`).
+    pub fn state(&self) -> u8 {
+        match self.inner.lock().unwrap().as_ref() {
+            None => REC_OFF,
+            Some(a) if a.paused_at.is_some() => REC_PAUSED,
+            Some(_) => REC_ON,
+        }
+    }
+    /// Recorded time so far (the frozen spans excluded).
+    pub fn duration_ms(&self) -> u32 {
+        self.inner
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or(0, |a| a.now_ms())
+    }
+    /// Freezes the clock; packets keep flowing with the frozen stamp.
+    pub fn pause(&self) {
+        if let Some(a) = self.inner.lock().unwrap().as_mut()
+            && a.paused_at.is_none()
+        {
+            a.paused_at = Some(Instant::now());
+        }
+    }
+    /// Starts or resumes the clock.
+    pub fn resume(&self) {
+        if let Some(a) = self.inner.lock().unwrap().as_mut()
+            && let Some(p) = a.paused_at.take()
+        {
+            a.paused_ms += p.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            a.armed = true;
+        }
     }
     pub fn record(&self, phase: u8, id: i32, payload: &[u8]) {
         if id < 0 {
@@ -348,7 +416,7 @@ impl Recorder {
         }
         let mut guard = self.inner.lock().unwrap();
         let Some(active) = guard.as_mut() else { return };
-        let at = active.started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+        let at = active.now_ms();
         active.last_ms = at;
         let mut head = Vec::with_capacity(16);
         head.push(phase);
@@ -364,10 +432,17 @@ impl Recorder {
             *guard = None;
         }
     }
-    /// Close the stream and patch the duration into the header.
+    /// Close the stream and patch the duration into the header. A file
+    /// whose clock never ran (armed by the on-screen button, Start never
+    /// pressed) is deleted: there is nothing in it to watch.
     pub fn finish(&self) {
         let Some(active) = self.inner.lock().unwrap().take() else { return };
-        let (path, duration) = (active.path.clone(), active.last_ms);
+        let (path, duration) = (active.path.clone(), active.now_ms().max(active.last_ms));
+        if !active.armed {
+            drop(active.out);
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
         let closed = active.out.finish().map(|mut f| f.flush());
         if closed.is_ok()
             && let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(&path)
@@ -485,7 +560,8 @@ mod tests {
     fn round_trip_record_and_feed() {
         let dir = std::env::temp_dir().join(format!("volt-replay-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let recorder = Recorder::create(&dir, "play.example.org:25565", "Steve", 7).unwrap();
+        let recorder = Recorder::create(&dir, "play.example.org:25565", "Steve", 7, true).unwrap();
+        assert_eq!(recorder.state(), REC_ON);
         recorder.record(PHASE_CONFIG, 5, b"reg");
         recorder.record(PHASE_PLAY, 44, &[1, 2, 3, 4]);
         recorder.record(PHASE_SELF, 29, &[9; 300]);
@@ -503,6 +579,43 @@ mod tests {
         let (phase, _, id, payload) = feed.next().unwrap();
         assert_eq!((phase, id, payload.len()), (PHASE_SELF, 29, 300));
         assert!(feed.next().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn an_unstarted_manual_recording_leaves_no_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "volt-replay-idle-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        // The on-screen button armed the recorder but Start never ran:
+        // the clock stays at 0:00 and finish deletes the file.
+        let recorder = Recorder::create(&dir, "play.example.org", "Steve", 7, false).unwrap();
+        assert_eq!(recorder.state(), REC_PAUSED);
+        recorder.record(PHASE_CONFIG, 5, b"reg");
+        recorder.record(PHASE_PLAY, 44, &[1, 2, 3]);
+        assert_eq!(recorder.duration_ms(), 0, "the clock is frozen at zero");
+        recorder.finish();
+        assert_eq!(recorder.state(), REC_OFF);
+        assert!(list(&dir).is_empty(), "nothing to watch, nothing saved");
+        // Started, paused, ended: the file stays and keeps every packet.
+        let recorder = Recorder::create(&dir, "play.example.org", "Steve", 7, false).unwrap();
+        recorder.record(PHASE_CONFIG, 5, b"reg");
+        recorder.resume();
+        assert_eq!(recorder.state(), REC_ON);
+        recorder.record(PHASE_PLAY, 44, &[1, 2, 3]);
+        recorder.pause();
+        assert_eq!(recorder.state(), REC_PAUSED);
+        recorder.record(PHASE_PLAY, 45, &[4, 5]);
+        recorder.finish();
+        let listed = list(&dir);
+        assert_eq!(listed.len(), 1);
+        let mut feed = Feed::open(&listed[0].path).unwrap();
+        let mut count = 0;
+        while feed.next().is_some() {
+            count += 1;
+        }
+        assert_eq!(count, 3, "paused spans keep their packets as a cut");
         let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]

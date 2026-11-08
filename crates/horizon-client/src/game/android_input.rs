@@ -453,6 +453,7 @@ impl Game<'_> {
             return Ok(true);
         }
         if t.phase == TouchPhase::Cancelled {
+            self.extras.volt.replay_btn_touch = None;
             self.pad.touch_ui.cancel();
             self.android_release_touch_keys(true);
             return Ok(true);
@@ -468,6 +469,17 @@ impl Game<'_> {
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
         if matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
             let _ = self.try_click_volt_hud((p[0], p[1]), false);
+        }
+        // The floating replay button: its own gesture owns the touch from
+        // the press to the release (tap, drag, or hold-to-adjust).
+        if (!self.pad_in_menu() || t.phase != TouchPhase::Started)
+            && self.replay_button_touch(t.id, (p[0], p[1]), t.phase)
+        {
+            if t.phase == TouchPhase::Started {
+                self.pad.touch.clear();
+                self.pad.touch.ignore(t.id);
+            }
+            return Ok(true);
         }
         if !self.pad_in_menu()
             && t.phase == TouchPhase::Started

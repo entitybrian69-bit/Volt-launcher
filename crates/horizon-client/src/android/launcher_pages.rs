@@ -84,6 +84,7 @@ pub(super) enum Action {
     WatchReplay(usize),
     DeleteReplay(usize),
     ToggleVoltReplay,
+    ToggleReplayButton,
     PatchNotes,
     Page(Page),
     Play,
@@ -2625,7 +2626,7 @@ impl DrawCtx<'_> {
                     text_w,
                 );
                 ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
-                let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
+                let button = [cx + cw - 108.0, ry + 7.0, 98.0, 24.0];
                 if !self.catalog.busy() {
                     let first = self.targets.len();
                     styled_button(
@@ -2638,6 +2639,24 @@ impl DrawCtx<'_> {
                         true,
                     );
                     if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                        self.targets[first].0 = clipped;
+                    } else {
+                        self.targets.truncate(first);
+                    }
+                    // The on-screen Start / Pause / End button toggle.
+                    let btn2 = [cx + cw - 108.0, ry + 35.0, 98.0, 22.0];
+                    let btn_on = self.catalog.extras.volt_qol.replay_button;
+                    let first = self.targets.len();
+                    styled_button(
+                        ui,
+                        self.targets,
+                        btn2,
+                        if btn_on { "Button: On" } else { "Button: Off" },
+                        Action::ToggleReplayButton,
+                        if btn_on { BtnStyle::Primary } else { BtnStyle::Secondary },
+                        true,
+                    );
+                    if let Some(clipped) = super::gesture::clip_target_y(btn2, top, bottom) {
                         self.targets[first].0 = clipped;
                     } else {
                         self.targets.truncate(first);
@@ -5917,6 +5936,18 @@ impl Launcher {
                     "Volt Replay on: sessions are recorded. Watch them from Home > Replays.".into()
                 } else {
                     "Volt Replay off: sessions are no longer recorded.".into()
+                };
+            }
+            Some(Action::ToggleReplayButton) => {
+                let on = !self.catalog.extras.volt_qol.replay_button;
+                self.catalog.extras.volt_qol.replay_button = on;
+                let game_dir = self.catalog.config.game_home(&self.home);
+                let _ = std::fs::create_dir_all(&game_dir);
+                self.catalog.extras.save(&game_dir);
+                self.catalog.status = if on {
+                    "Replay button on: drag it anywhere in game; hold it to resize or fade it; tap for Start / Pause / End.".into()
+                } else {
+                    "Replay button off.".into()
                 };
             }
             Some(Action::DeleteReplay(index)) => {

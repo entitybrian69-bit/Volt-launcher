@@ -48,6 +48,26 @@ pub(super) struct VoltRuntime {
     pub toggle_sprint_latched: bool,
     pub last_input_at: f64,
     pub last_chat_line: Option<(String, u32)>,
+    /// The on-screen replay button's current touch gesture.
+    pub replay_btn_touch: Option<ReplayBtnTouch>,
+    /// The button's Start / Pause / End rows are open.
+    pub replay_btn_menu: bool,
+    /// A short caption under the button (saved, paused, adjust hints).
+    pub replay_btn_note: Option<(String, std::time::Instant)>,
+}
+
+/// One finger on the on-screen replay button: a quick tap opens the
+/// Start / Pause / End rows, an early move drags the button, and holding
+/// still first turns the drag into the size (up-down) and opacity
+/// (left-right) adjustment.
+pub(super) struct ReplayBtnTouch {
+    pub id: u64,
+    pub start: (f32, f32),
+    pub at: std::time::Instant,
+    /// 0 = undecided, 1 = dragging the position, 2 = hold: size/opacity.
+    pub mode: u8,
+    /// (x pct, y pct, size, opacity pct) when the finger went down.
+    pub base: (u16, u16, u16, u16),
 }
 
 pub(super) struct DamagePopup {
@@ -83,6 +103,9 @@ impl Default for VoltRuntime {
             toggle_sprint_latched: false,
             last_input_at: 0.0,
             last_chat_line: None,
+            replay_btn_touch: None,
+            replay_btn_menu: false,
+            replay_btn_note: None,
         }
     }
 }
@@ -886,6 +909,11 @@ impl Game<'_> {
             self.draw_replay_hud(batch);
             return;
         }
+        // The floating replay button (Start / Pause / End) rides over the
+        // live HUD; costs nothing while its setting is off.
+        if self.settings.extras.volt_qol.replay_button {
+            self.draw_replay_button(batch);
+        }
         let now = self.started.elapsed().as_secs_f64();
         let (w, h) = (batch.width, batch.height);
         let my_name = self.options.player_name();
@@ -1533,6 +1561,351 @@ impl Game<'_> {
         [(w - 58.0).max(4.0), (h * 0.52).floor(), 52.0, 18.0]
     }
 
+    /// The floating replay button's rectangle, from its saved centre
+    /// (percent of the screen) and edge length.
+    pub(super) fn replay_btn_rect(&self, w: f32, h: f32) -> [f32; 4] {
+        let q = &self.settings.extras.volt_qol;
+        let s = f32::from(q.replay_btn_size.clamp(22, 72));
+        let cx = w * f32::from(q.replay_btn_x_pct.min(100)) / 100.0;
+        let cy = h * f32::from(q.replay_btn_y_pct.min(100)) / 100.0;
+        [
+            (cx - s * 0.5).clamp(2.0, (w - s - 2.0).max(2.0)),
+            (cy - s * 0.5).clamp(2.0, (h - s - 2.0).max(2.0)),
+            s,
+            s,
+        ]
+    }
+
+    /// The Start / Pause / End rows beside the button, kept on screen.
+    pub(super) fn replay_btn_menu_rects(&self, w: f32, h: f32) -> [[f32; 4]; 3] {
+        let b = self.replay_btn_rect(w, h);
+        let (mw, mh, gap) = (62.0, 15.0, 3.0);
+        let x = if b[0] + b[2] + 6.0 + mw <= w - 2.0 {
+            b[0] + b[2] + 6.0
+        } else {
+            (b[0] - 6.0 - mw).max(2.0)
+        };
+        let total = mh * 3.0 + gap * 2.0;
+        let y0 = (b[1] + b[3] * 0.5 - total * 0.5).clamp(2.0, (h - total - 2.0).max(2.0));
+        [
+            [x, y0, mw, mh],
+            [x, y0 + mh + gap, mw, mh],
+            [x, y0 + 2.0 * (mh + gap), mw, mh],
+        ]
+    }
+
+    /// Draws the floating replay button, its state, its Start / Pause /
+    /// End rows and the fading caption under it.
+    fn draw_replay_button(&mut self, batch: &mut HudBatch) {
+        let Some(rec) = self.remote.as_ref().and_then(|r| r.recorder.clone()) else {
+            return;
+        };
+        // Holding still on the button turns the touch into the adjust
+        // gesture even when the finger never moves a pixel.
+        if let Some(t) = self.extras.volt.replay_btn_touch.as_mut()
+            && t.mode == 0
+            && t.at.elapsed().as_millis() >= 350
+        {
+            t.mode = 2;
+            self.extras.volt.replay_btn_note = Some((
+                "drag up/down: size \u{2022} left/right: fade".to_owned(),
+                std::time::Instant::now(),
+            ));
+        }
+        let (w, h) = (batch.width, batch.height);
+        let b = self.replay_btn_rect(w, h);
+        let q = &self.settings.extras.volt_qol;
+        let a = (f32::from(q.replay_btn_opacity_pct.clamp(25, 100)) * 2.55) as u8;
+        let state = rec.state();
+        let adjusting = self
+            .extras
+            .volt
+            .replay_btn_touch
+            .as_ref()
+            .is_some_and(|t| t.mode != 0);
+        let frame = if adjusting {
+            rgba(121, 229, 156, a)
+        } else {
+            rgba(235, 240, 250, a / 2)
+        };
+        batch.fill(&self.gui.atlas, b[0] - 1.0, b[1] - 1.0, b[2] + 2.0, b[3] + 2.0, frame);
+        batch.fill(&self.gui.atlas, b[0], b[1], b[2], b[3], rgba(10, 14, 22, a));
+        // The state glyph in the middle: a red dot while recording (it
+        // breathes), pause bars while frozen, a hollow dot while idle.
+        let (cx, cy) = (b[0] + b[2] * 0.5, b[1] + b[3] * 0.5);
+        let g = (b[2] * 0.22).clamp(4.0, 12.0);
+        match state {
+            horizon_client::replay::REC_ON => {
+                let pulse = (self.started.elapsed().as_secs_f32() * 2.0).sin() * 0.5 + 0.5;
+                let ga = (f32::from(a) * (0.6 + 0.4 * pulse)) as u8;
+                batch.fill(
+                    &self.gui.atlas,
+                    cx - g * 0.5,
+                    cy - g * 0.5,
+                    g,
+                    g,
+                    rgba(235, 80, 90, ga),
+                );
+            }
+            horizon_client::replay::REC_PAUSED => {
+                let bw = (g * 0.38).max(2.0);
+                batch.fill(&self.gui.atlas, cx - g * 0.5, cy - g * 0.5, bw, g, rgba(235, 240, 250, a));
+                batch.fill(&self.gui.atlas, cx + g * 0.5 - bw, cy - g * 0.5, bw, g, rgba(235, 240, 250, a));
+            }
+            _ => {
+                batch.fill(&self.gui.atlas, cx - g * 0.5, cy - g * 0.5, g, g, rgba(235, 80, 90, a / 2));
+                batch.fill(
+                    &self.gui.atlas,
+                    cx - g * 0.5 + 1.0,
+                    cy - g * 0.5 + 1.0,
+                    g - 2.0,
+                    g - 2.0,
+                    rgba(10, 14, 22, a),
+                );
+            }
+        }
+        // The running clock under the button while anything is captured.
+        if state != horizon_client::replay::REC_OFF && b[2] >= 30.0 {
+            let clock = horizon_client::replay::format_time(rec.duration_ms());
+            let tw = HudBatch::text_width(&self.gui.atlas, &clock);
+            batch.text(
+                &self.gui.atlas,
+                &clock,
+                cx - tw * 0.5,
+                b[1] + b[3] + 2.0,
+                rgba(235, 240, 250, a),
+                true,
+            );
+        }
+        // The caption: adjust hints, saved/paused notes.
+        let expired = self
+            .extras
+            .volt
+            .replay_btn_note
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed().as_secs_f32() >= 3.0);
+        if expired && !adjusting {
+            self.extras.volt.replay_btn_note = None;
+        }
+        if let Some((text, at)) = &self.extras.volt.replay_btn_note
+            && (at.elapsed().as_secs_f32() < 3.0 || adjusting)
+        {
+            let label = if adjusting {
+                format!(
+                    "{} \u{2022} {}px {}%",
+                    text, q.replay_btn_size, q.replay_btn_opacity_pct
+                )
+            } else {
+                text.clone()
+            };
+            let tw = HudBatch::text_width(&self.gui.atlas, &label);
+            batch.text(
+                &self.gui.atlas,
+                &label,
+                (cx - tw * 0.5).clamp(2.0, (w - tw - 2.0).max(2.0)),
+                (b[1] - 12.0).max(2.0),
+                rgba(255, 228, 160, 245),
+                true,
+            );
+        }
+        // The Start / Pause / End rows.
+        if self.extras.volt.replay_btn_menu {
+            let rows = self.replay_btn_menu_rects(w, h);
+            let labels = [
+                "START",
+                if state == horizon_client::replay::REC_PAUSED {
+                    "PAUSED"
+                } else {
+                    "PAUSE"
+                },
+                "END",
+            ];
+            for (i, (rect, label)) in rows.iter().zip(labels).enumerate() {
+                let active = (i == 0 && state == horizon_client::replay::REC_ON)
+                    || (i == 1 && state == horizon_client::replay::REC_PAUSED);
+                let fill = if active {
+                    rgba(42, 92, 62, 240)
+                } else if i == 2 {
+                    rgba(84, 30, 36, 240)
+                } else {
+                    rgba(28, 36, 52, 235)
+                };
+                batch.fill(&self.gui.atlas, rect[0], rect[1], rect[2], rect[3], fill);
+                let color = if active {
+                    rgba(121, 229, 156, 255)
+                } else if i == 2 {
+                    rgba(255, 150, 158, 255)
+                } else {
+                    rgba(235, 240, 250, 255)
+                };
+                let tw = HudBatch::text_width(&self.gui.atlas, label);
+                batch.text(
+                    &self.gui.atlas,
+                    label,
+                    rect[0] + ((rect[2] - tw) * 0.5).max(1.0),
+                    rect[1] + 4.0,
+                    color,
+                    true,
+                );
+            }
+        }
+    }
+
+    fn replay_btn_caption(&mut self, text: &str) {
+        self.extras.volt.replay_btn_note =
+            Some((text.to_owned(), std::time::Instant::now()));
+    }
+
+    /// A tapped Start / Pause / End row.
+    fn replay_btn_menu_act(&mut self, row: usize) {
+        let Some(rec) = self.remote.as_ref().and_then(|r| r.recorder.clone()) else {
+            return;
+        };
+        let state = rec.state();
+        match row {
+            0 => match state {
+                horizon_client::replay::REC_PAUSED => {
+                    rec.resume();
+                    self.replay_btn_caption("Recording");
+                }
+                horizon_client::replay::REC_ON => {
+                    self.replay_btn_caption("Already recording");
+                }
+                _ => self.replay_btn_caption("Saved \u{2022} rejoin to record again"),
+            },
+            1 => match state {
+                horizon_client::replay::REC_ON => {
+                    rec.pause();
+                    self.replay_btn_caption("Paused \u{2022} START resumes");
+                }
+                horizon_client::replay::REC_PAUSED => {
+                    self.replay_btn_caption("Already paused");
+                }
+                _ => self.replay_btn_caption("Nothing recording"),
+            },
+            _ => match state {
+                horizon_client::replay::REC_OFF => {
+                    self.replay_btn_caption("Nothing recording");
+                }
+                _ => {
+                    rec.finish();
+                    self.replay_btn_caption("Saved \u{2022} Home > Replays");
+                }
+            },
+        }
+        self.extras.volt.replay_btn_menu = false;
+    }
+
+    /// One finger on or owning the floating replay button. Consumes the
+    /// touch while the button, its rows, or a drag own it.
+    pub(super) fn replay_button_touch(
+        &mut self,
+        id: u64,
+        p: (f32, f32),
+        phase: winit::event::TouchPhase,
+    ) -> bool {
+        use winit::event::TouchPhase;
+        // A gesture in progress owns its touch id to the end; everything
+        // else rejects in a couple of comparisons, so an idle frame pays
+        // nothing for this hook.
+        let owns = self
+            .extras
+            .volt
+            .replay_btn_touch
+            .as_ref()
+            .is_some_and(|t| t.id == id);
+        if !owns
+            && (phase != TouchPhase::Started
+                || !self.settings.extras.volt_qol.replay_button
+                || self.title.is_some()
+                || self.ui.hide_gui
+                || self.screen != Screen::Playing
+                || self.replay_control().is_some()
+                || self.remote.as_ref().is_none_or(|r| r.recorder.is_none()))
+        {
+            return false;
+        }
+        let (w, h) = self.gui_size();
+        if owns {
+            match phase {
+                TouchPhase::Started => return false,
+                TouchPhase::Moved => {
+                    let t = self.extras.volt.replay_btn_touch.as_mut().unwrap();
+                    let dx = p.0 - t.start.0;
+                    let dy = p.1 - t.start.1;
+                    if t.mode == 0 && (dx.abs() >= 6.0 || dy.abs() >= 6.0) {
+                        t.mode = if t.at.elapsed().as_millis() >= 350 { 2 } else { 1 };
+                    }
+                    let (mode, base) = (t.mode, t.base);
+                    let q = &mut self.settings.extras.volt_qol;
+                    if mode == 1 {
+                        let nx = f32::from(base.0) + dx / w.max(1.0) * 100.0;
+                        let ny = f32::from(base.1) + dy / h.max(1.0) * 100.0;
+                        q.replay_btn_x_pct = nx.round().clamp(0.0, 100.0) as u16;
+                        q.replay_btn_y_pct = ny.round().clamp(0.0, 100.0) as u16;
+                    } else if mode == 2 {
+                        let size = f32::from(base.2) - dy * 0.5;
+                        let op = f32::from(base.3) + dx * 0.35;
+                        q.replay_btn_size = size.round().clamp(22.0, 72.0) as u16;
+                        q.replay_btn_opacity_pct = op.round().clamp(25.0, 100.0) as u16;
+                    }
+                    return true;
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled => {
+                    let t = self.extras.volt.replay_btn_touch.take().unwrap();
+                    if phase == TouchPhase::Ended
+                        && t.mode == 0
+                        && t.at.elapsed().as_millis() < 350
+                    {
+                        // A tap: the Start / Pause / End rows.
+                        self.extras.volt.replay_btn_menu = !self.extras.volt.replay_btn_menu;
+                        self.audio.play_button_click();
+                    } else if t.mode != 0 {
+                        // A finished drag or adjust: keep it.
+                        self.extras.volt.replay_btn_note = None;
+                        self.settings.save(&Self::options_path());
+                    }
+                    return true;
+                }
+            }
+        }
+        let hit = |r: &[f32; 4]| {
+            p.0 >= r[0] && p.0 <= r[0] + r[2] && p.1 >= r[1] && p.1 <= r[1] + r[3]
+        };
+        // The open rows first; a tap elsewhere just closes them.
+        if self.extras.volt.replay_btn_menu {
+            let rows = self.replay_btn_menu_rects(w, h);
+            for (i, rect) in rows.iter().enumerate() {
+                if hit(rect) {
+                    self.replay_btn_menu_act(i);
+                    self.audio.play_button_click();
+                    return true;
+                }
+            }
+            if !hit(&self.replay_btn_rect(w, h)) {
+                self.extras.volt.replay_btn_menu = false;
+                return false;
+            }
+        }
+        if hit(&self.replay_btn_rect(w, h)) {
+            let q = &self.settings.extras.volt_qol;
+            self.extras.volt.replay_btn_touch = Some(ReplayBtnTouch {
+                id,
+                start: p,
+                at: std::time::Instant::now(),
+                mode: 0,
+                base: (
+                    q.replay_btn_x_pct,
+                    q.replay_btn_y_pct,
+                    q.replay_btn_size,
+                    q.replay_btn_opacity_pct,
+                ),
+            });
+            return true;
+        }
+        false
+    }
+
     /// Replay Studio's editor panel: a full-width dock at the bottom.
     /// Returns (panel, feature row + its labels, transport row, timeline
     /// track). The feature labels shrink to codes on narrow screens.
@@ -1542,26 +1915,26 @@ impl Game<'_> {
         h: f32,
     ) -> (
         [f32; 4],
-        [[f32; 4]; 10],
-        [&'static str; 10],
+        [[f32; 4]; 11],
+        [&'static str; 11],
         [[f32; 4]; 8],
         [f32; 4],
     ) {
         let atlas = &self.gui.atlas;
         let panel = [0.0, h - 64.0, w, 64.0];
-        let full: [&'static str; 10] = [
-            "MARK", "<M", "M>", "+KF", "CLR", "PATH", "LAPSE", "MUSIC", "LOOP", "RENDER",
+        let full: [&'static str; 11] = [
+            "MARK", "<M", "M>", "+KF", "CLR", "PATH", "LAPSE", "MUSIC", "LOOP", "SHADER", "RENDER",
         ];
-        let compact: [&'static str; 10] =
-            ["MRK", "<M", "M>", "KF", "CLR", "PTH", "TLP", "MUS", "LP", "REC"];
-        let measure = |set: &[&'static str; 10]| -> ([f32; 10], f32) {
-            let mut ws = [0.0f32; 10];
+        let compact: [&'static str; 11] =
+            ["MRK", "<M", "M>", "KF", "CLR", "PTH", "TLP", "MUS", "LP", "SHD", "REC"];
+        let measure = |set: &[&'static str; 11]| -> ([f32; 11], f32) {
+            let mut ws = [0.0f32; 11];
             let mut total = 0.0;
             for (i, s) in set.iter().enumerate() {
                 ws[i] = HudBatch::text_width(atlas, s) + 10.0;
                 total += ws[i];
             }
-            (ws, total + 9.0 * 3.0)
+            (ws, total + 10.0 * 3.0)
         };
         let (mut ws, mut total) = measure(&full);
         let mut labels = full;
@@ -1569,7 +1942,7 @@ impl Game<'_> {
             (ws, total) = measure(&compact);
             labels = compact;
         }
-        let mut row_a = [[0.0f32; 4]; 10];
+        let mut row_a = [[0.0f32; 4]; 11];
         let mut x = ((w - total) * 0.5).max(4.0);
         for (i, rect) in row_a.iter_mut().enumerate() {
             *rect = [x, panel[1] + 4.0, ws[i], 15.0];
@@ -1593,7 +1966,7 @@ impl Game<'_> {
         let Some(ctl) = self.replay_control() else {
             return;
         };
-        let Some((markers, key_times, cam_path_on, music_on, loop_on, exporting, hud_age, note, stem)) =
+        let Some((markers, key_times, cam_path_on, music_on, loop_on, exporting, hud_age, note, stem, shader_menu)) =
             self.remote
                 .as_ref()
                 .and_then(|r| r.replay.as_ref())
@@ -1611,11 +1984,16 @@ impl Game<'_> {
                             .file_stem()
                             .map(|s| s.to_string_lossy().into_owned())
                             .unwrap_or_default(),
+                        rp.shader_menu,
                     )
                 })
         else {
             return;
         };
+        // SHD lights up whenever a shader runs over the playback (the
+        // studio's own pick, or the player's already-on shader).
+        let shader_on = self.settings.extras.volt_shaders.enabled
+            || !self.settings.horizon.shader_pack.is_empty();
         let (w, h) = (batch.width, batch.height);
         // While exporting, the whole studio hides itself so it is not
         // burned into the video; a tap near the panel brings it back.
@@ -1701,16 +2079,17 @@ impl Game<'_> {
                 6 => timelapse_on,
                 7 => music_on,
                 8 => loop_on,
+                9 => shader_on || shader_menu,
                 _ => false,
             };
             let fill = match i {
-                9 if exporting => rgba(118, 34, 42, 240),
+                10 if exporting => rgba(118, 34, 42, 240),
                 _ if on => rgba(42, 92, 62, 240),
                 _ => rgba(28, 36, 52, 235),
             };
             batch.fill(&self.gui.atlas, rect[0], rect[1], rect[2], rect[3], fill);
             let color = match i {
-                9 if exporting => rgba(255, 120, 130, 255),
+                10 if exporting => rgba(255, 120, 130, 255),
                 _ if on => rgba(121, 229, 156, 255),
                 _ => rgba(235, 240, 250, 255),
             };
@@ -1841,6 +2220,146 @@ impl Game<'_> {
                 true,
             );
         }
+        // SHADER: the picker above the dock — the built-in cinema look
+        // and every shader pack in this instance's shaderpacks folder.
+        // The pick colors the playback (and any RENDER export); the
+        // player's own shader settings come back untouched on exit.
+        if shader_menu {
+            let entries = self.replay_shader_entries();
+            let rows = Self::replay_shader_rows(w, h, entries.len());
+            let current = self.replay_effective_shader();
+            if let Some(first) = rows.first() {
+                let head = "SHADER \u{2014} colors playback & render";
+                batch.text(
+                    &self.gui.atlas,
+                    head,
+                    first[0],
+                    first[1] - 12.0,
+                    rgba(121, 229, 156, 235),
+                    true,
+                );
+            }
+            for (rect, (label, pick)) in rows.iter().zip(entries.iter()) {
+                let active = *pick == current;
+                let fill = if active {
+                    rgba(42, 92, 62, 240)
+                } else {
+                    rgba(10, 14, 22, 235)
+                };
+                batch.fill(&self.gui.atlas, rect[0], rect[1], rect[2], rect[3], fill);
+                let color = if active {
+                    rgba(121, 229, 156, 255)
+                } else {
+                    rgba(235, 240, 250, 255)
+                };
+                let label = if HudBatch::text_width(&self.gui.atlas, label) > rect[2] - 8.0 {
+                    let mut s = label.clone();
+                    while s.len() > 4
+                        && HudBatch::text_width(&self.gui.atlas, &format!("{s}..")) > rect[2] - 8.0
+                    {
+                        s.pop();
+                    }
+                    format!("{s}..")
+                } else {
+                    label.clone()
+                };
+                batch.text(
+                    &self.gui.atlas,
+                    &label,
+                    rect[0] + 4.0,
+                    rect[1] + 4.0,
+                    color,
+                    true,
+                );
+            }
+        }
+    }
+
+    /// What currently shades the frame: `__volt_shaders__`, a pack's file
+    /// name, or empty for the plain renderer.
+    fn replay_effective_shader(&self) -> String {
+        if self.settings.extras.volt_shaders.enabled {
+            super::native_shaders::VOLT_SHADERS_PICKED.to_owned()
+        } else {
+            self.settings.horizon.shader_pack.clone()
+        }
+    }
+
+    /// The picker's entries: (label, what to pick).
+    fn replay_shader_entries(&self) -> Vec<(String, String)> {
+        let mut entries = vec![
+            ("NO SHADER".to_owned(), String::new()),
+            (
+                "VOLT CINEMA \u{2022} BUILT IN".to_owned(),
+                super::native_shaders::VOLT_SHADERS_PICKED.to_owned(),
+            ),
+        ];
+        for pack in self.settings.shader_packs.iter().take(9) {
+            let title = if pack.title.is_empty() {
+                pack.file.clone()
+            } else {
+                pack.title.clone()
+            };
+            entries.push((title, pack.file.clone()));
+        }
+        entries
+    }
+
+    /// The picker's row rectangles, stacked upward from the dock.
+    fn replay_shader_rows(w: f32, h: f32, n: usize) -> Vec<[f32; 4]> {
+        let (rw, rh, gap) = (210.0_f32.min(w - 8.0), 14.0, 2.0);
+        let x = ((w - rw) * 0.5).max(4.0);
+        let total = n as f32 * (rh + gap);
+        let y0 = (h - 64.0 - 6.0 - total).max(16.0);
+        (0..n)
+            .map(|i| [x, y0 + i as f32 * (rh + gap), rw, rh])
+            .collect()
+    }
+
+    /// SHD tapped: open or close the picker; scan the shaderpacks folder
+    /// the first time so external packs show up.
+    fn replay_toggle_shader_menu(&mut self) {
+        if self.settings.shader_packs.is_empty() {
+            self.settings.shader_packs =
+                horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
+        }
+        if let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) {
+            rp.shader_menu = !rp.shader_menu;
+        }
+    }
+
+    /// A picker row tapped: shade the playback with the pick. The pick
+    /// lives only inside this viewing — the player's own shader settings
+    /// are remembered on the first pick and restored when the viewer
+    /// leaves, so normal play never pays for it.
+    fn replay_apply_shader(&mut self, pick: &str, label: &str) {
+        if self.remote.as_ref().and_then(|r| r.replay.as_ref()).is_none() {
+            return;
+        }
+        let saved = (
+            self.settings.horizon.shader_pack.clone(),
+            self.settings.extras.volt_shaders.enabled,
+        );
+        if pick == super::native_shaders::VOLT_SHADERS_PICKED {
+            self.settings.extras.volt_shaders.enabled = true;
+        } else {
+            self.settings.extras.volt_shaders.enabled = false;
+            self.settings.horizon.shader_pack = pick.to_owned();
+        }
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        if rp.shader_saved.is_none() {
+            rp.shader_saved = Some(saved);
+        }
+        rp.shader_pick = Some(pick.to_owned());
+        rp.shader_menu = false;
+        let note = if pick.is_empty() {
+            "Shader off: the plain frame.".to_owned()
+        } else {
+            format!("{label} shades the playback \u{2014} RENDER bakes it in.")
+        };
+        self.replay_note(note);
     }
 
     /// Taps on the replay playback bar.
@@ -1872,6 +2391,35 @@ impl Game<'_> {
             }
             rp.hud_touch = std::time::Instant::now();
         }
+        // The shader picker above the dock gets the tap first while it is
+        // open; a tap anywhere else closes it and falls through.
+        if self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .is_some_and(|rp| rp.shader_menu)
+        {
+            let entries = self.replay_shader_entries();
+            let rows = Self::replay_shader_rows(w, h, entries.len());
+            let picked = rows
+                .iter()
+                .position(hit)
+                .and_then(|i| entries.get(i).cloned());
+            if let Some((label, pick)) = picked {
+                self.replay_apply_shader(&pick, &label);
+                self.audio.play_button_click();
+                return true;
+            }
+            if let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) {
+                rp.shader_menu = false;
+            }
+            // SHD itself closes the picker; without this the fall-through
+            // would just reopen it.
+            if hit(&row_a[9]) {
+                self.audio.play_button_click();
+                return true;
+            }
+        }
         let t = ctl.time_ms.load(Relaxed);
         let d = ctl.duration_ms.load(Relaxed);
         let acted = if hit(&row_a[0]) {
@@ -1902,6 +2450,9 @@ impl Game<'_> {
             self.replay_toggle_loop();
             true
         } else if hit(&row_a[9]) {
+            self.replay_toggle_shader_menu();
+            true
+        } else if hit(&row_a[10]) {
             self.replay_toggle_export();
             true
         } else if hit(&row_t[0]) {

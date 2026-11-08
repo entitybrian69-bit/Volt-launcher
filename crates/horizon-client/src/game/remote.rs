@@ -297,6 +297,15 @@ pub(super) struct ReplayUi {
     /// When the playback bar was last touched; while exporting it hides
     /// itself a few seconds later so it is not burned into the video.
     pub(super) hud_touch: std::time::Instant,
+    /// SHADER: the picker list is open above the dock.
+    pub(super) shader_menu: bool,
+    /// The player's own shader settings (picked pack, Volt Shaders flag)
+    /// before the studio overrode them; restored when the viewer leaves,
+    /// so a studio pick never leaks into normal play.
+    pub(super) shader_saved: Option<(String, bool)>,
+    /// The studio's active shader pick, for the button and picker UI:
+    /// None = untouched, Some("") = forced clean, Some(name) = a pack.
+    pub(super) shader_pick: Option<String>,
 }
 
 impl ReplayUi {
@@ -323,6 +332,9 @@ impl ReplayUi {
             export: None,
             note: None,
             hud_touch: std::time::Instant::now(),
+            shader_menu: false,
+            shader_saved: None,
+            shader_pick: None,
         }
     }
 }
@@ -493,6 +505,9 @@ pub(super) struct Remote {
     synced: Vec<Option<ItemStack>>,
     /// Volt Replay: this session is a recorded one being watched.
     pub(super) replay: Option<ReplayUi>,
+    /// Volt Replay's live recorder, when this session is being captured;
+    /// the on-screen replay button drives its Start / Pause / End.
+    pub(super) recorder: Option<Arc<horizon_client::replay::Recorder>>,
     decode_errors: u32,
     clock: Option<i32>,
     /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
@@ -705,17 +720,24 @@ impl Game<'_> {
         let packs_address = (local.is_none() && replay.is_none()).then_some(address);
         self.server_packs_connect(packs_address, user);
         // Volt Replay: record the session when the setting is on; a replay
-        // being watched is never itself recorded.
-        let recorder = if replay.is_none() && self.settings.extras.volt_qol.replay_buffer {
+        // being watched is never itself recorded. With only the on-screen
+        // button enabled the recorder opens frozen at 0:00 — capture must
+        // begin at connect (the world state rides the packet stream), and
+        // the button's Start simply lets the clock run.
+        let auto_record = self.settings.extras.volt_qol.replay_buffer;
+        let replay_button = self.settings.extras.volt_qol.replay_button;
+        let recorder = if replay.is_none() && (auto_record || replay_button) {
             horizon_client::replay::Recorder::create(
                 std::path::Path::new("replays"),
                 address,
                 name,
                 uuid,
+                auto_record,
             )
         } else {
             None
         };
+        let recorder_handle = recorder.clone();
         let mut replay_control = None;
         let replay_path = replay.clone().unwrap_or_default();
         let session = if let Some(path) = replay {
@@ -910,6 +932,7 @@ impl Game<'_> {
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
             replay: replay_control.map(|control| ReplayUi::new(control, replay_path)),
+            recorder: recorder_handle,
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -943,6 +966,21 @@ impl Game<'_> {
         // MP4 exporter, which finalizes its file on drop) goes away.
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.video_sink = None;
+        }
+        // The floating replay button's menu and gesture die with the
+        // session they controlled.
+        self.extras.volt.replay_btn_menu = false;
+        self.extras.volt.replay_btn_touch = None;
+        // Replay Studio's shader pick was playback-only: hand the player's
+        // own shader settings back before the session goes away.
+        if let Some((pack, volt)) = self
+            .remote
+            .as_mut()
+            .and_then(|r| r.replay.as_mut())
+            .and_then(|rp| rp.shader_saved.take())
+        {
+            self.settings.horizon.shader_pack = pack;
+            self.settings.extras.volt_shaders.enabled = volt;
         }
         self.finish_perf();
         if reason.is_none() {
