@@ -45,7 +45,13 @@ pub(super) struct StartupMenu {
 
 impl StartupMenu {
     pub fn new(options: &Options, pack_error: Option<&str>) -> Result<Self> {
-        let pending = if let Some(address) = &options.server {
+        let pending = if let Some(path) = &options.replay {
+            // Volt Replay: --replay outranks --server; the launcher sends
+            // only one of them.
+            Some(PendingWorldEntry::Replay {
+                path: std::path::PathBuf::from(path),
+            })
+        } else if let Some(address) = &options.server {
             Some(PendingWorldEntry::Server {
                 address: address.clone(),
                 name: options.player_name(),

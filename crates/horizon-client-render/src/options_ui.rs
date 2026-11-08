@@ -1570,6 +1570,8 @@ pub enum Page {
     VoltShaders,
     VoltVisuals,
     VoltQol,
+    /// Volt Replay only: the session recorder's own small page.
+    VoltReplay,
     VoltChat,
     VoltMods,
     /// Image 1 split-pane frosted-glass Volt Settings hub (`volt_settings_ui`).
@@ -2415,6 +2417,7 @@ impl OptionsUi {
             Page::VoltShaders => "volt.shaders.title",
             Page::VoltVisuals => "volt.visuals.title",
             Page::VoltQol => "volt.qol.title",
+            Page::VoltReplay => "Volt Replay",
             Page::VoltChat => "volt.chat.title",
             Page::VoltMods => "volt.mods.title",
             Page::VoltGlass => "horizon.pages.settings",
@@ -2595,6 +2598,23 @@ impl OptionsUi {
                     self.volt_custom_sections(s, crate::options_volt_pages::QOL_SECTIONS),
                 );
                 rows
+            }
+            Page::VoltReplay => {
+                vec![
+                    Row::Header("Volt Replay \u{2014} Session Recorder"),
+                    Row::Buttons(
+                        self.volt_custom_button(
+                            s,
+                            crate::options_volt_pages::VoltAct::QolReplay,
+                        ),
+                        None,
+                    ),
+                    Row::Header("While on, every server and world session is saved"),
+                    Row::Header("to this instance's replays folder."),
+                    Row::Header("Watch them in the launcher: Home > Replays."),
+                    Row::Header("Playback: timeline, 0.25x-8x speed, pause, seeking,"),
+                    Row::Header("POV or a free camera that shows you in third person."),
+                ]
             }
             Page::VoltChat => {
                 let mut rows = vec![Row::Buttons(
@@ -3022,7 +3042,7 @@ impl OptionsUi {
                         0.0,
                         150.0,
                         tr("horizon.mods.settings"),
-                        Act::Push(Page::VoltQol),
+                        Act::Push(Page::VoltReplay),
                     )),
                 );
                 if s.mods.installed.is_empty() {

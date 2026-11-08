@@ -528,11 +528,16 @@ impl Game<'_> {
                 .last_input
                 .saturating_duration_since(self.started)
                 .as_millis() as i64;
+            let idle_ms = now_ms.saturating_sub(latest_input_ms);
             if !self.focused {
                 limit = limit.min(cap.min(15));
             } else if self.title.is_some() || self.screen != super::Screen::Playing {
-                limit = limit.min(cap);
-            } else if now_ms.saturating_sub(latest_input_ms) > 45_000 {
+                // Menus stay smooth while they are being used; the idle cap
+                // only applies after ten seconds without any input.
+                if idle_ms > 10_000 {
+                    limit = limit.min(cap);
+                }
+            } else if idle_ms > 45_000 {
                 limit = limit.min(cap);
             }
         }

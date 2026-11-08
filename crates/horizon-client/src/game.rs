@@ -17615,6 +17615,8 @@ enum PendingWorldEntry {
         /// A transfer's carried-over server cookies (`TransferState`).
         cookies: Option<horizon_client::net::Cookies>,
     },
+    /// Volt Replay: watch a recorded session file.
+    Replay { path: std::path::PathBuf },
 }
 
 struct WorldRestLoader {
@@ -17711,6 +17713,9 @@ impl Game<'_> {
                 cookies,
             }) => {
                 self.connect_server_with_cookies(&address, &name, cookies)?;
+            }
+            Some(PendingWorldEntry::Replay { path }) => {
+                self.connect_replay(path)?;
             }
             None => {}
         }

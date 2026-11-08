@@ -596,6 +596,12 @@ impl Game<'_> {
     /// Volt Replay: watch a recorded session. The world loads from the
     /// recorded packet stream instead of a connection.
     pub(super) fn connect_replay(&mut self, path: std::path::PathBuf) -> Result<()> {
+        // World resources must be ready first, exactly like a server join;
+        // at startup this waits for the loaders and resumes.
+        if self.defer_world_entry(super::PendingWorldEntry::Replay { path: path.clone() })? {
+            return Ok(());
+        }
+        self.join_world_rest()?;
         let name = self.options.player_name();
         if let Err(error) = self.join_server("replay", &name, None, None, Some(path)) {
             log::warn!("Horizon: could not open replay: {error}");
