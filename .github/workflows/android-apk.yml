@@ -126,7 +126,7 @@ jobs:
           key: worldgen-test-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Climate and Biomes Unseen preset-table tests
         run: |
-          set -uo pipefail
+          set -u +e -o pipefail
           rustup show active-toolchain
           cargo --version
           cargo test -p horizon-client --lib --no-default-features -- \
