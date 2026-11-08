@@ -909,7 +909,8 @@ fn pace_replay(
             *last = std::time::Instant::now();
             continue;
         }
-        let speed = f64::from(control.speed_pct.load(Relaxed).clamp(25, 800)) / 100.0;
+        // 10 = 0.1x slow motion; 1600..=6400 = the timelapse speeds.
+        let speed = f64::from(control.speed_pct.load(Relaxed).clamp(10, 6400)) / 100.0;
         let now = std::time::Instant::now();
         *virtual_ms += now.duration_since(*last).as_secs_f64() * 1000.0 * speed;
         *last = now;

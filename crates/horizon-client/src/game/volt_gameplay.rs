@@ -1507,13 +1507,14 @@ impl Game<'_> {
         (bar, buttons, track)
     }
 
-    /// The second row above the playback bar: marker, keyframe, camera
-    /// path and MP4 export controls (MRK, <M, M>, KF+, CLR, PTH, REC).
-    pub(super) fn replay_hud_row2(bar: &[f32; 4]) -> [[f32; 4]; 7] {
+    /// The second row above the playback bar: markers, keyframes, camera
+    /// path, timelapse, music, loop and MP4 export
+    /// (MRK, <M, M>, KF+, CLR, PTH, TLP, MUS, LP, REC).
+    pub(super) fn replay_hud_row2(bar: &[f32; 4]) -> [[f32; 4]; 10] {
         let (bw, bh) = (30.0, 15.0);
-        let total = 7.0 * bw + 6.0 * 4.0;
+        let total = 10.0 * bw + 9.0 * 4.0;
         let mut bx = bar[0] + (bar[2] - total) * 0.5;
-        let mut buttons = [[0.0f32; 4]; 7];
+        let mut buttons = [[0.0f32; 4]; 10];
         for rect in &mut buttons {
             *rect = [bx, bar[1] - 34.0, bw, bh];
             bx += bw + 4.0;
@@ -1527,20 +1528,22 @@ impl Game<'_> {
         let Some(ctl) = self.replay_control() else {
             return;
         };
-        let Some((markers, key_times, cam_path_on, exporting, hud_age, note)) = self
-            .remote
-            .as_ref()
-            .and_then(|r| r.replay.as_ref())
-            .map(|rp| {
-                (
-                    rp.markers.clone(),
-                    rp.cam_keys.iter().map(|k| k.ms).collect::<Vec<_>>(),
-                    rp.cam_path,
-                    rp.export.is_some(),
-                    rp.hud_touch.elapsed().as_secs_f32(),
-                    rp.note.clone(),
-                )
-            })
+        let Some((markers, key_times, cam_path_on, music_on, loop_on, exporting, hud_age, note)) =
+            self.remote
+                .as_ref()
+                .and_then(|r| r.replay.as_ref())
+                .map(|rp| {
+                    (
+                        rp.markers.clone(),
+                        rp.cam_keys.iter().map(|k| k.ms).collect::<Vec<_>>(),
+                        rp.cam_path,
+                        rp.music,
+                        rp.loop_play,
+                        rp.export.is_some(),
+                        rp.hud_touch.elapsed().as_secs_f32(),
+                        rp.note.clone(),
+                    )
+                })
         else {
             return;
         };
@@ -1593,11 +1596,15 @@ impl Game<'_> {
         let speed_label = format!(
             "x{}",
             match speed {
+                10 => "0.1",
                 25 => "0.25",
                 50 => "0.5",
                 200 => "2",
                 400 => "4",
                 800 => "8",
+                1600 => "16",
+                3200 => "32",
+                6400 => "64",
                 _ => "1",
             }
         );
@@ -1697,20 +1704,31 @@ impl Game<'_> {
                 rgba(121, 229, 156, 240),
             );
         }
-        // The second row: markers, camera keyframes, path and export.
+        // The second row: markers, camera keyframes, path, timelapse,
+        // music, loop and export.
+        let timelapse_on = speed >= 1600;
         let kf_label = format!("KF{}", key_times.len().min(99));
         let row2 = Self::replay_hud_row2(&bar);
-        let labels2: [&str; 7] = ["MRK", "<M", "M>", &kf_label, "CLR", "PTH", "REC"];
+        let labels2: [&str; 10] = [
+            "MRK", "<M", "M>", &kf_label, "CLR", "PTH", "TLP", "MUS", "LP", "REC",
+        ];
         for (i, (rect, label)) in row2.iter().zip(labels2).enumerate() {
+            let on = match i {
+                5 => cam_path_on,
+                6 => timelapse_on,
+                7 => music_on,
+                8 => loop_on,
+                _ => false,
+            };
             let fill = match i {
-                5 if cam_path_on => rgba(42, 92, 62, 240),
-                6 if exporting => rgba(118, 34, 42, 240),
+                9 if exporting => rgba(118, 34, 42, 240),
+                _ if on => rgba(42, 92, 62, 240),
                 _ => rgba(28, 36, 52, 235),
             };
             batch.fill(&self.gui.atlas, rect[0], rect[1], rect[2], rect[3], fill);
             let color = match i {
-                5 if cam_path_on => rgba(121, 229, 156, 255),
-                6 if exporting => rgba(255, 120, 130, 255),
+                9 if exporting => rgba(255, 120, 130, 255),
+                _ if on => rgba(121, 229, 156, 255),
                 _ => rgba(235, 240, 250, 255),
             };
             let tw = HudBatch::text_width(&self.gui.atlas, label);
@@ -1794,6 +1812,15 @@ impl Game<'_> {
             self.replay_toggle_path();
             true
         } else if hit(&row2[6]) {
+            self.replay_toggle_timelapse();
+            true
+        } else if hit(&row2[7]) {
+            self.replay_toggle_music();
+            true
+        } else if hit(&row2[8]) {
+            self.replay_toggle_loop();
+            true
+        } else if hit(&row2[9]) {
             self.replay_toggle_export();
             true
         } else if hit(&buttons[0]) {
@@ -1808,12 +1835,15 @@ impl Game<'_> {
             true
         } else if hit(&buttons[3]) {
             let next = match ctl.speed_pct.load(Relaxed) {
+                10 => 25,
                 25 => 50,
                 50 => 100,
                 100 => 200,
                 200 => 400,
                 400 => 800,
-                _ => 25,
+                800 => 10,
+                // Timelapse speeds (TLP) drop back to real time.
+                _ => 100,
             };
             ctl.speed_pct.store(next, Relaxed);
             true
@@ -1997,6 +2027,63 @@ impl Game<'_> {
         ));
     }
 
+    /// TLP: cycles the timelapse speeds (x16 -> x32 -> x64 -> off). With
+    /// PTH on at the same time, the camera flies its keyframe path while
+    /// time races: a cinematic timelapse. Shaders stay on throughout (and
+    /// are captured by REC, which stamps frames with the playback clock).
+    fn replay_toggle_timelapse(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        let next = match ctl.speed_pct.load(Relaxed) {
+            1600 => 3200,
+            3200 => 6400,
+            6400 => 100,
+            _ => 1600,
+        };
+        ctl.speed_pct.store(next, Relaxed);
+        self.replay_note(match next {
+            1600 => "Timelapse x16.".to_string(),
+            3200 => "Timelapse x32.".to_string(),
+            6400 => "Timelapse x64.".to_string(),
+            _ => "Timelapse off: real time.".to_string(),
+        });
+    }
+
+    /// MUS: continuous soundtrack while the replay plays, like a video's
+    /// background music.
+    fn replay_toggle_music(&mut self) {
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        rp.music = !rp.music;
+        rp.note = Some((
+            if rp.music {
+                "Music on: the soundtrack plays continuously.".to_string()
+            } else {
+                "Music off.".to_string()
+            },
+            std::time::Instant::now(),
+        ));
+    }
+
+    /// LP: playback starts over when it reaches the end.
+    fn replay_toggle_loop(&mut self) {
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        rp.loop_play = !rp.loop_play;
+        rp.note = Some((
+            if rp.loop_play {
+                "Loop on: the replay repeats.".to_string()
+            } else {
+                "Loop off.".to_string()
+            },
+            std::time::Instant::now(),
+        ));
+    }
+
     /// REC: starts or stops recording playback into an MP4 next to the
     /// replay (`replays/exports/`). The playback clock stamps the frames,
     /// so the video runs at the chosen speed regardless of render rate.
@@ -2099,7 +2186,8 @@ impl Game<'_> {
         }
     }
 
-    /// Ends an export when playback finishes or the viewer leaves.
+    /// Ends an export when playback finishes or the viewer leaves, and
+    /// restarts playback at the end while LP (loop) is on.
     pub(super) fn replay_export_tick(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
         let ended = self
@@ -2112,6 +2200,15 @@ impl Game<'_> {
             });
         if ended {
             self.replay_finish_export();
+        }
+        if let Some(rp) = self.remote.as_ref().and_then(|r| r.replay.as_ref())
+            && rp.loop_play
+            && rp.control.finished.load(Relaxed)
+            && !rp.control.exit.load(Relaxed)
+        {
+            // `request_seek` clears `finished`; the feeder restarts the
+            // stream from the top.
+            rp.control.request_seek(0);
         }
     }
 

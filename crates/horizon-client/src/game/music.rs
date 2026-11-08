@@ -11,6 +11,23 @@ impl Game<'_> {
     /// `Minecraft.tick` -> `MusicManager.tick`, once per client tick.
     pub(super) fn tick_music(&mut self) {
         let (music, volume) = self.situational_music();
+        // Volt Replay's MUS toggle: while on, the situation's soundtrack
+        // plays continuously (a new song as soon as the last one ends),
+        // like a video's background music.
+        let music = if self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .is_some_and(|rp| rp.music)
+        {
+            let sound = music
+                .as_ref()
+                .map(|m| m.sound.clone())
+                .unwrap_or_else(|| "minecraft:music.game".to_string());
+            Some(horizon_client::music::Music::new(&sound, 0, 0, false))
+        } else {
+            music
+        };
         // Options.musicFrequency's listener: MusicManager.setMinutesBetweenSongs.
         let frequency = MusicFrequency::parse(&self.settings.file.name("musicFrequency"));
         if frequency != self.music.frequency {

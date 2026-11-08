@@ -412,7 +412,7 @@ pub const NO_SEEK: u32 = u32::MAX;
 /// replay bar. Times are milliseconds into the recording.
 pub struct Control {
     pub paused: AtomicBool,
-    /// 25..=800, percent of real time.
+    /// 10..=6400, percent of real time (10 = slow motion, 1600+ = timelapse).
     pub speed_pct: AtomicU32,
     /// Where playback currently is; the feeder publishes it.
     pub time_ms: AtomicU32,

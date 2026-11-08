@@ -282,6 +282,10 @@ pub(super) struct ReplayUi {
     pub(super) cam_keys: Vec<horizon_client::replay::CamKey>,
     /// The free camera rides the keyframe path instead of the sticks.
     pub(super) cam_path: bool,
+    /// MUS: the soundtrack plays continuously while the replay runs.
+    pub(super) music: bool,
+    /// LP: playback starts over when it reaches the end.
+    pub(super) loop_play: bool,
     /// An MP4 export in progress.
     pub(super) export: Option<super::video_export::Exporter>,
     /// A short status line drawn above the playback bar.
@@ -303,6 +307,8 @@ impl ReplayUi {
             markers,
             cam_keys,
             cam_path: false,
+            music: false,
+            loop_play: false,
             export: None,
             note: None,
             hud_touch: std::time::Instant::now(),
