@@ -1756,14 +1756,15 @@ impl Game<'_> {
                 rgba(255, 196, 64, 240),
             );
         }
-        for k in &key_times {
-            let x = track[0] + track[2] * (*k as f32 / d as f32).clamp(0.0, 1.0);
+        // Camera keyframes ride the path's own clock, not the replay's:
+        // a mint bead per keyframe, queued left of the PATH button's row.
+        for (i, _) in key_times.iter().take(24).enumerate() {
             batch.fill(
                 &self.gui.atlas,
-                x - 2.5,
-                track[1] + track[3] * 0.5 - 2.5,
+                track[0] + i as f32 * 8.0,
+                track[1] - 5.0,
                 5.0,
-                5.0,
+                4.0,
                 rgba(121, 229, 156, 250),
             );
         }
@@ -1936,6 +1937,15 @@ impl Game<'_> {
         } else if hit(&row_t[6]) {
             let pov = ctl.pov.load(Relaxed);
             ctl.pov.store(!pov, Relaxed);
+            // Going back to the recorded view lands a running flight.
+            if !pov
+                && let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut())
+                && rp.cam_path
+            {
+                rp.cam_path = false;
+                rp.path_started = None;
+                rp.control.flying.store(false, Relaxed);
+            }
             true
         } else if hit(&row_t[7]) {
             ctl.exit.store(true, Relaxed);
@@ -2023,48 +2033,52 @@ impl Game<'_> {
         }
     }
 
-    /// KF+: saves the free camera's position, angles and the playhead as a
-    /// keyframe (within half a second of an old one, it replaces it).
+    /// Seconds of flight between two camera keyframes.
+    const REPLAY_KEY_GAP_MS: u32 = 5_000;
+
+    /// +KF: saves the free camera's position and angles as the next stop
+    /// on the camera path. The path has its own timeline (a keyframe
+    /// every 5 seconds of flight), so keyframes can be framed calmly
+    /// while the replay is paused — they never collide or get replaced.
     fn replay_add_keyframe(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
         let Some(ctl) = self.replay_control() else {
             return;
         };
         if ctl.pov.load(Relaxed) {
-            self.replay_note("Keyframes are placed in CAM view.".to_string());
+            self.replay_note("Keyframes are placed in FREE view.".to_string());
             return;
         }
-        let t = ctl.time_ms.load(Relaxed);
         let Some(player) = self.player.as_ref() else {
             return;
         };
-        let key = horizon_client::replay::CamKey {
-            ms: t,
-            pos: [player.position.x, player.position.y, player.position.z],
-            yaw: self.yaw,
-            pitch: self.pitch,
-        };
+        let (pos, yaw, pitch) = (
+            [player.position.x, player.position.y, player.position.z],
+            self.yaw,
+            self.pitch,
+        );
         let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
             return;
         };
-        let note = match rp.cam_keys.iter().position(|k| k.ms.abs_diff(t) < 500) {
-            Some(i) => {
-                rp.cam_keys[i] = key;
-                format!(
-                    "Keyframe {} updated at {}.",
-                    i + 1,
-                    horizon_client::replay::format_time(t)
-                )
-            }
-            None => {
-                rp.cam_keys.push(key);
-                rp.cam_keys.sort_by_key(|k| k.ms);
-                format!(
-                    "Keyframe {} at {} (2+ make a path).",
-                    rp.cam_keys.len(),
-                    horizon_client::replay::format_time(t)
-                )
-            }
+        let ms = rp
+            .cam_keys
+            .last()
+            .map(|k| k.ms + Self::REPLAY_KEY_GAP_MS)
+            .unwrap_or(0);
+        rp.cam_keys.push(horizon_client::replay::CamKey {
+            ms,
+            pos,
+            yaw,
+            pitch,
+        });
+        let n = rp.cam_keys.len();
+        let note = if n < 2 {
+            format!("Keyframe {n} saved (2+ make a path).")
+        } else {
+            format!(
+                "Keyframe {n} saved \u{2014} {} flight.",
+                horizon_client::replay::format_time(ms)
+            )
         };
         horizon_client::replay::save_sidecar(&rp.path, &rp.markers, &rp.cam_keys);
         rp.note = Some((note, std::time::Instant::now()));
@@ -2081,12 +2095,18 @@ impl Game<'_> {
         }
         rp.cam_keys.clear();
         rp.cam_path = false;
+        rp.path_started = None;
+        rp.control
+            .flying
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         horizon_client::replay::save_sidecar(&rp.path, &rp.markers, &rp.cam_keys);
         rp.note = Some(("Camera path cleared.".to_string(), std::time::Instant::now()));
     }
 
-    /// PTH: the free camera rides the keyframe path; the timeline drives it
-    /// (seek to scrub, change speed for a timelapse, pause to hold).
+    /// PATH: flies the camera through the keyframes, start to finish, on
+    /// the path's own clock - the world underneath can be paused, slowed
+    /// or timelapsed and the flight stays smooth. A second tap stops the
+    /// flight.
     fn replay_toggle_path(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
         let Some(ctl) = self.replay_control() else {
@@ -2097,31 +2117,40 @@ impl Game<'_> {
         };
         if rp.cam_path {
             rp.cam_path = false;
+            rp.path_started = None;
+            rp.control.flying.store(false, Relaxed);
             rp.note = Some((
-                "Camera path off: free flight.".to_string(),
+                "Camera path stopped: free flight.".to_string(),
                 std::time::Instant::now(),
             ));
             return;
         }
         if rp.cam_keys.len() < 2 {
             rp.note = Some((
-                "Place at least 2 keyframes (KF) first.".to_string(),
+                "Place at least 2 keyframes (+KF) first.".to_string(),
                 std::time::Instant::now(),
             ));
             return;
         }
         ctl.pov.store(false, Relaxed);
         rp.cam_path = true;
+        rp.path_started = Some(std::time::Instant::now());
+        rp.control.flying.store(true, Relaxed);
+        let end = rp.cam_keys.last().map(|k| k.ms).unwrap_or(0);
         rp.note = Some((
-            "Camera path on: the camera follows your keyframes.".to_string(),
+            format!(
+                "Flying the camera path: {} keyframes, {}.",
+                rp.cam_keys.len(),
+                horizon_client::replay::format_time(end)
+            ),
             std::time::Instant::now(),
         ));
     }
 
-    /// TLP: cycles the timelapse speeds (x16 -> x32 -> x64 -> off). With
-    /// PTH on at the same time, the camera flies its keyframe path while
-    /// time races: a cinematic timelapse. Shaders stay on throughout (and
-    /// are captured by REC, which stamps frames with the playback clock).
+    /// LAPSE: cycles the timelapse speeds (x16 -> x32 -> x64 -> off).
+    /// With PATH on at the same time, the camera flies its keyframe
+    /// spline in real time while the world races underneath: a cinematic
+    /// timelapse. Shaders stay on throughout and RENDER captures it all.
     fn replay_toggle_timelapse(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
         let Some(ctl) = self.replay_control() else {
@@ -2227,18 +2256,26 @@ impl Game<'_> {
         let control = ctl.clone();
         let mut last_t: Option<u32> = None;
         let mut pts_us: i64 = 0;
+        let mut last_wall = std::time::Instant::now();
         let sink = move |size: [u32; 2], bgra: bool, pixels: Vec<[u8; 4]>| {
-            if control.paused.load(Relaxed) {
+            let flying = control.flying.load(Relaxed);
+            let t = control.time_ms.load(Relaxed);
+            // A camera-path flight records on its own wall clock, so a
+            // pan over a paused (or seeking) world still lands on video.
+            if !flying && (control.paused.load(Relaxed) || last_t.is_some_and(|prev| t <= prev)) {
+                last_wall = std::time::Instant::now();
                 return;
             }
-            let t = control.time_ms.load(Relaxed);
-            if let Some(prev) = last_t {
-                if t <= prev {
-                    return;
-                }
+            if let Some(prev) = last_t
+                && t > prev
+                && !flying
+            {
                 let speed = control.speed_pct.load(Relaxed).clamp(1, 10_000) as i64;
                 pts_us += i64::from(t - prev) * 1000 * 100 / speed;
+            } else if last_t.is_some() {
+                pts_us += last_wall.elapsed().as_micros().min(200_000) as i64;
             }
+            last_wall = std::time::Instant::now();
             last_t = Some(t);
             let _ = sender.try_send(super::video_export::Frame {
                 size,

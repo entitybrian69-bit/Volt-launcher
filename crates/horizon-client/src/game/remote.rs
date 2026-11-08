@@ -282,6 +282,10 @@ pub(super) struct ReplayUi {
     pub(super) cam_keys: Vec<horizon_client::replay::CamKey>,
     /// The free camera rides the keyframe path instead of the sticks.
     pub(super) cam_path: bool,
+    /// When the running camera-path flight took off: the path rides its
+    /// own wall clock (one keyframe every few seconds), independent of
+    /// the replay clock, so pause and speed cannot strand it.
+    pub(super) path_started: Option<std::time::Instant>,
     /// MUS: the soundtrack plays continuously while the replay runs.
     pub(super) music: bool,
     /// LP: playback starts over when it reaches the end.
@@ -297,7 +301,13 @@ pub(super) struct ReplayUi {
 
 impl ReplayUi {
     fn new(control: Arc<horizon_client::replay::Control>, path: std::path::PathBuf) -> Self {
-        let (markers, cam_keys) = horizon_client::replay::load_sidecar(&path);
+        let (markers, mut cam_keys) = horizon_client::replay::load_sidecar(&path);
+        // The camera path rides its own clock: keyframes sit a fixed few
+        // seconds of flight apart. Older sidecars stored replay-clock
+        // stamps; re-spacing them keeps those paths flyable.
+        for (i, k) in cam_keys.iter_mut().enumerate() {
+            k.ms = i as u32 * 5_000;
+        }
         Self {
             control,
             poses: Default::default(),
@@ -307,6 +317,7 @@ impl ReplayUi {
             markers,
             cam_keys,
             cam_path: false,
+            path_started: None,
             music: false,
             loop_play: false,
             export: None,
@@ -5135,10 +5146,29 @@ impl Game<'_> {
             }
         };
         // Camera path playback: the free camera glides through the user's
-        // keyframes, parameterized by the replay clock (so pause, speed and
-        // seeking steer the flight too — speed up for a timelapse).
+        // keyframes on the flight's own wall clock (the replay clock only
+        // drives the world, so pause or timelapse underneath and the
+        // camera still flies smoothly).
         let path_cam = if !pov && rp.cam_path {
-            horizon_client::replay::sample_cam_path(&rp.cam_keys, t)
+            let elapsed = rp
+                .path_started
+                .map(|s| s.elapsed().as_millis().min(u128::from(u32::MAX)) as u32)
+                .unwrap_or(0);
+            let end = rp.cam_keys.last().map(|k| k.ms).unwrap_or(0);
+            if elapsed >= end {
+                // The flight is over: park at the last keyframe and hand
+                // the camera back to free flight.
+                rp.cam_path = false;
+                rp.path_started = None;
+                control.flying.store(false, Relaxed);
+                rp.note = Some((
+                    "Camera path finished.".to_string(),
+                    std::time::Instant::now(),
+                ));
+                horizon_client::replay::sample_cam_path(&rp.cam_keys, end)
+            } else {
+                horizon_client::replay::sample_cam_path(&rp.cam_keys, elapsed)
+            }
         } else {
             None
         };

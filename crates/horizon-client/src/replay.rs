@@ -253,10 +253,12 @@ fn catmull(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
         + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t)
 }
 
-/// Where the camera path puts the camera at `t` ms of the recording:
-/// a Catmull-Rom spline through the keyframes' positions (ends clamped)
-/// with shortest-arc interpolated angles. Before the first keyframe the
-/// camera waits there; after the last it stays there.
+/// Where the camera path puts the camera at `t` ms along the flight:
+/// a Catmull-Rom spline through the keyframes' positions AND angles
+/// (ends clamped, yaw unwrapped along the shortest arc), so the camera
+/// glides through keyframes instead of stopping or kinking at them.
+/// Before the first keyframe the camera waits there; after the last it
+/// stays there.
 pub fn sample_cam_path(keys: &[CamKey], t: u32) -> Option<([f64; 3], f32, f32)> {
     let (first, last) = (keys.first()?, keys.last()?);
     if t <= first.ms || keys.len() == 1 {
@@ -268,19 +270,28 @@ pub fn sample_cam_path(keys: &[CamKey], t: u32) -> Option<([f64; 3], f32, f32)> 
     let i = keys.iter().position(|k| k.ms > t)?.max(1) - 1;
     let (a, b) = (keys[i], keys[i + 1]);
     let f = f64::from(t - a.ms) / f64::from((b.ms - a.ms).max(1));
-    let p0 = keys[i.saturating_sub(1)].pos;
-    let p3 = keys[(i + 2).min(keys.len() - 1)].pos;
+    let k0 = keys[i.saturating_sub(1)];
+    let k3 = keys[(i + 2).min(keys.len() - 1)];
     let pos = [
-        catmull(p0[0], a.pos[0], b.pos[0], p3[0], f),
-        catmull(p0[1], a.pos[1], b.pos[1], p3[1], f),
-        catmull(p0[2], a.pos[2], b.pos[2], p3[2], f),
+        catmull(k0.pos[0], a.pos[0], b.pos[0], k3.pos[0], f),
+        catmull(k0.pos[1], a.pos[1], b.pos[1], k3.pos[1], f),
+        catmull(k0.pos[2], a.pos[2], b.pos[2], k3.pos[2], f),
     ];
-    let fa = f as f32;
-    Some((
-        pos,
-        angle_lerp(a.yaw, b.yaw, fa),
-        a.pitch + (b.pitch - a.pitch) * fa,
-    ))
+    // Unwrap the neighbours' yaws around `a` so the spline never takes
+    // the long way around the circle.
+    let y1 = f64::from(a.yaw);
+    let y0 = y1 + f64::from(angle_lerp(a.yaw, k0.yaw, 1.0) - a.yaw);
+    let y2 = y1 + f64::from(angle_lerp(a.yaw, b.yaw, 1.0) - a.yaw);
+    let y3 = y2 + f64::from(angle_lerp(b.yaw, k3.yaw, 1.0) - b.yaw);
+    let yaw = catmull(y0, y1, y2, y3, f) as f32;
+    let pitch = catmull(
+        f64::from(k0.pitch),
+        f64::from(a.pitch),
+        f64::from(b.pitch),
+        f64::from(k3.pitch),
+        f,
+    ) as f32;
+    Some((pos, yaw, pitch.clamp(-90.0, 90.0)))
 }
 
 /// `12:34` / `1:02:34` for the lists and the playback bar.
@@ -414,6 +425,9 @@ pub struct Control {
     pub paused: AtomicBool,
     /// 10..=6400, percent of real time (10 = slow motion, 1600+ = timelapse).
     pub speed_pct: AtomicU32,
+    /// A camera-path flight is running (it rides its own wall clock, so
+    /// the MP4 capture keeps recording even while the replay is paused).
+    pub flying: AtomicBool,
     /// Where playback currently is; the feeder publishes it.
     pub time_ms: AtomicU32,
     pub duration_ms: AtomicU32,
@@ -441,6 +455,7 @@ impl Control {
             // Replay Studio opens in the free spectator camera, with the
             // recorded player in view; POV is one tap away.
             pov: AtomicBool::new(false),
+            flying: AtomicBool::new(false),
         })
     }
     pub fn request_seek(&self, ms: u32) {
