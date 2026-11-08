@@ -155,6 +155,14 @@ jobs:
           count=$(grep -c "  biomes_unseen:" worldgen-test.log)
           echo "listed biome ids: $count"
           test "$count" -eq 44
+          # Publish the proof lines as an annotation readable through the
+          # checks API (job logs are not downloadable from every network).
+          python3 - <<'PY'
+          lines = [l for l in open("worldgen-test.log", encoding="utf-8", errors="replace").read().splitlines()
+                   if "registered in the multi-noise preset table" in l or l.startswith("  biomes_unseen:")]
+          msg = "%0A".join(l.replace("%", "%25") for l in lines)[:3800]
+          print(f"::notice title=biomes-unseen-proof::{msg}")
+          PY
 
   prepare:
     name: Prepare engine tables
