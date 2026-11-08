@@ -748,6 +748,15 @@ pub struct Renderer {
     /// tightly packed rows of 4-byte pixels, red and blue swapped when
     /// `bgra` is true.
     pub video_sink: Option<Box<dyn FnMut([u32; 2], bool, Vec<[u8; 4]>) + Send>>,
+    /// Export readbacks in flight: asynchronously mapped copies, oldest
+    /// first, so the render thread never waits on the GPU for a video
+    /// frame (the old synchronous readback froze gameplay while
+    /// recording). 0 = mapping, 1 = ready, 2 = failed.
+    video_pending: VecDeque<(wgpu::Buffer, Arc<std::sync::atomic::AtomicU8>, [u32; 2], bool)>,
+    /// Export buffers ready for reuse: no per-frame allocations.
+    video_free: Vec<wgpu::Buffer>,
+    /// When the export last grabbed a frame, for the ~30 fps cap.
+    video_last_capture: Option<Instant>,
     /// Brightness option (lightmap gamma), 0..1.
     pub gamma: f32,
     /// Optional full-light lightmap (Horizon Extras).
@@ -3446,6 +3455,9 @@ impl Renderer {
             screenshot: None,
             screenshot_result: None,
             video_sink: None,
+            video_pending: VecDeque::new(),
+            video_free: Vec::new(),
+            video_last_capture: None,
             gamma: 0.5,
             improved_transparency: false,
             oit: None,
@@ -7214,17 +7226,56 @@ impl Renderer {
                 .and_then(|request| self.take_readback(request, &mut encoder, &target_texture))
         });
         // Volt Replay's MP4 export grabs the finished frame, GUI included,
-        // the same way a full screenshot does.
-        let video_frame = (self.video_sink.is_some()
-            && self.config.format.block_copy_size(None) == Some(4))
-        .then(|| {
-            copy_frame(
-                &self.device,
-                &mut encoder,
-                &target_texture,
-                [self.config.width, self.config.height],
-            )
-        });
+        // the same way a full screenshot does — but asynchronously: the
+        // copy is encoded now, mapped after submit and read back once the
+        // GPU reports it done, a frame or two later. The render thread
+        // never blocks on the GPU and buffers are pooled, so recording no
+        // longer drags the game down. Capture is capped near 30 fps (the
+        // export's frame rate).
+        let mut video_frame: Option<wgpu::Buffer> = None;
+        if self.video_sink.is_some()
+            && self.config.format.block_copy_size(None) == Some(4)
+            && self.video_pending.len() < 3
+            && self
+                .video_last_capture
+                .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(31))
+        {
+            self.video_last_capture = Some(Instant::now());
+            let size = [self.config.width, self.config.height];
+            let required = u64::from(padded_row(size[0])) * u64::from(size[1]);
+            let buffer = match self.video_free.pop() {
+                Some(b) if b.size() == required => b,
+                stale => {
+                    if stale.is_some() {
+                        // The frame size changed: the old pool is useless.
+                        self.video_free.clear();
+                    }
+                    self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Horizon video frame"),
+                        size: required,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    })
+                }
+            };
+            encoder.copy_texture_to_buffer(
+                target_texture.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded_row(size[0])),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+            );
+            video_frame = Some(buffer);
+        }
         self.uploads.finish(&encoder);
         if has_section_copies {
             self.section_copy_bytes = 0;
@@ -7314,13 +7365,64 @@ impl Renderer {
                 self.config.format.remove_srgb_suffix(),
                 wgpu::TextureFormat::Bgra8Unorm
             );
-            match self.read_frame(&buffer) {
-                Ok(pixels) => {
-                    if let Some(sink) = &mut self.video_sink {
-                        sink([self.config.width, self.config.height], bgra, pixels);
+            let flag = Arc::new(std::sync::atomic::AtomicU8::new(0));
+            let done = flag.clone();
+            buffer.map_async(wgpu::MapMode::Read, .., move |r| {
+                done.store(
+                    if r.is_ok() { 1 } else { 2 },
+                    std::sync::atomic::Ordering::Release,
+                );
+            });
+            self.video_pending.push_back((
+                buffer,
+                flag,
+                [self.config.width, self.config.height],
+                bgra,
+            ));
+        }
+        if self.video_sink.is_none() {
+            // The export ended: let go of the in-flight and pooled buffers.
+            if !self.video_pending.is_empty() || !self.video_free.is_empty() {
+                self.video_pending.clear();
+                self.video_free.clear();
+                self.video_last_capture = None;
+            }
+        } else if !self.video_pending.is_empty() {
+            // Nudge the map callbacks along without waiting, then hand
+            // every finished frame (oldest first) to the export.
+            let _ = self.device.poll(wgpu::PollType::Poll);
+            while let Some((buffer, flag, size, bgra)) = self.video_pending.pop_front() {
+                match flag.load(std::sync::atomic::Ordering::Acquire) {
+                    0 => {
+                        self.video_pending.push_front((buffer, flag, size, bgra));
+                        break;
+                    }
+                    1 => {
+                        let (width, height, row) = (
+                            size[0] as usize,
+                            size[1] as usize,
+                            padded_row(size[0]) as usize,
+                        );
+                        let mut pixels = Vec::with_capacity(width * height);
+                        if let Ok(data) = buffer.get_mapped_range(..) {
+                            for y in 0..height {
+                                pixels.extend_from_slice(
+                                    data[y * row..y * row + width * 4].as_chunks::<4>().0,
+                                );
+                            }
+                        }
+                        buffer.unmap();
+                        if pixels.len() == width * height
+                            && let Some(sink) = &mut self.video_sink
+                        {
+                            sink(size, bgra, pixels);
+                        }
+                        self.video_free.push(buffer);
+                    }
+                    _ => {
+                        log::warn!("Horizon renderer: a video export frame failed to map");
                     }
                 }
-                Err(e) => log::warn!("Horizon renderer: video export frame: {e}"),
             }
         }
         let present = Instant::now();
