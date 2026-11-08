@@ -1796,3 +1796,18 @@ fn biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries() {
         bearing.len()
     );
 }
+
+/// The Android importer's archive check (`content_files::validate`,
+/// `android/documents.rs` runs it on every picked file) accepts the
+/// shipped Biomes Unseen content mod: manifest at the ZIP root plus
+/// content, no `mod.wasm` required for a content-only `.hmod`.
+#[test]
+fn biomes_unseen_hmod_passes_android_import_validation() {
+    use crate::content_files::{Kind, validate};
+    use std::path::Path;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let native_shader = validate(&path, Kind::Mods, "biomes_unseen.hmod", || false)
+        .unwrap_or_else(|e| panic!("rejected: {e}"));
+    assert!(!native_shader);
+    println!("android import validation: biomes_unseen.hmod accepted as a Mods package");
+}

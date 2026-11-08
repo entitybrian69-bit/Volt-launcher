@@ -133,6 +133,8 @@ jobs:
             climate_entry_strips_keys_and_quantizes \
             biomes_unseen_hmod_biomes_reach_the_preset_tables \
             biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries \
+            biomes_unseen_hmod_passes_android_import_validation \
+            content_files \
             --nocapture 2>&1 | tee worldgen-test.log
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -158,6 +160,7 @@ jobs:
           test "$count" -eq 44
           grep -F "assets: 176 blockstates, 609 models, 193 item definitions, 217 textures, 206 lang keys verified" worldgen-test.log
           grep -F "creative inventory: 193 Biomes Unseen item(s) join the category and search tabs" worldgen-test.log
+          grep -F "android import validation: biomes_unseen.hmod accepted as a Mods package" worldgen-test.log
           # Publish the proof lines as an annotation readable through the
           # checks API (job logs are not downloadable from every network).
           python3 - <<'PY'
