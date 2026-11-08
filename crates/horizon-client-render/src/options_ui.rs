@@ -1627,6 +1627,8 @@ enum Act {
     /// The installed mod's own settings page (capability `ui`), shown as a
     /// screen: `Event::ModSettings` has the game open it.
     ModSettings(usize),
+    /// Play `s.replays[.0]` right here, without leaving the game.
+    WatchReplay(usize),
     /// A native mod's key (mod, key) waits for a key; a button of its page.
     NativeKey(usize, usize),
     NativeButton(usize, usize),
@@ -1731,6 +1733,12 @@ pub enum Event {
     CopyAgentDetails,
     /// Teleport to or copy coordinates of `s.volt_waypoints.entries[i]`.
     WaypointAction(usize),
+    /// The Volt Replay page opened: list the instance's `replays/` folder
+    /// into `s.replays` (the game reads the files; this crate cannot).
+    ListReplays,
+    /// Watch `s.replays[.0]` without leaving the game: the game closes the
+    /// current session if needed and starts replay playback.
+    WatchReplay(usize),
     #[cfg(target_os = "android")]
     TouchControls,
 }
@@ -2600,7 +2608,7 @@ impl OptionsUi {
                 rows
             }
             Page::VoltReplay => {
-                vec![
+                let mut rows = vec![
                     Row::Header("Volt Replay \u{2014} Session Recorder"),
                     Row::Buttons(
                         self.volt_custom_button(
@@ -2611,10 +2619,27 @@ impl OptionsUi {
                     ),
                     Row::Header("While on, every server and world session is saved"),
                     Row::Header("to this instance's replays folder."),
-                    Row::Header("Watch them in the launcher: Home > Replays."),
-                    Row::Header("Playback: timeline, 0.25x-8x speed, pause, seeking,"),
+                    Row::Header("Playback: timeline with seeking, pause, 0.25x-8x speed,"),
                     Row::Header("POV or a free camera that shows you in third person."),
-                ]
+                    Row::Header("Watch a replay \u{2014} it plays right here, in the game:"),
+                ];
+                if s.replays.is_empty() {
+                    rows.push(Row::Note("No replays recorded yet.".to_string()));
+                }
+                for (i, r) in s.replays.iter().enumerate() {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            Text::literal(format!("Watch: {}", r.title)),
+                            Act::WatchReplay(i),
+                        ),
+                        None,
+                    ));
+                    rows.push(Row::Note(r.line.clone()));
+                }
+                rows
             }
             Page::VoltChat => {
                 let mut rows = vec![Row::Buttons(
@@ -4756,6 +4781,9 @@ impl OptionsUi {
                             if p == Page::ShaderPacks {
                                 events.push(Event::ListShaderPacks);
                             }
+                            if p == Page::VoltReplay {
+                                events.push(Event::ListReplays);
+                            }
                             self.push(p)
                         }
                         Act::Done => events.extend(self.back(s)),
@@ -4834,6 +4862,10 @@ impl OptionsUi {
                             } else {
                                 events.push(Event::ModSettings(i));
                             }
+                        }
+                        Act::WatchReplay(i) => {
+                            events.push(Event::ButtonClick);
+                            events.push(Event::WatchReplay(i));
                         }
                         Act::NativeKey(i, k) => {
                             self.selected_key = Some(NATIVE_KEY);

@@ -558,6 +558,21 @@ impl Loading {
                     #[cfg(target_os = "android")]
                     self.menu.click_sound(self.settings.volumes);
                 }
+                Event::ListReplays => {
+                    self.settings.replays = Game::scan_replay_list();
+                }
+                Event::WatchReplay(i) => {
+                    if let Some(entry) = self.settings.replays.get(i) {
+                        // The game is not running yet: queue the replay like
+                        // `--replay`; the handoff plays it once loaded.
+                        self.menu.pending = Some(PendingWorldEntry::Replay {
+                            path: entry.path.clone(),
+                        });
+                        self.menu.options_open = false;
+                        self.menu.dragging = false;
+                        self.save_menu_settings();
+                    }
+                }
                 Event::CopyAgentDetails | Event::WaypointAction(_) | Event::Volume(..) => {}
             }
         }

@@ -90,6 +90,18 @@ pub fn source_volume(i: usize) -> f32 {
     }
 }
 
+/// One saved replay on the Volt Replay page: the game fills these
+/// (it can read the replay files; this crate cannot).
+#[derive(Clone, Debug)]
+pub struct ReplayListEntry {
+    /// The server address or world the session was recorded on.
+    pub title: String,
+    /// Duration, player name and recording date, as one grey line.
+    pub line: String,
+    /// The `.vrpl` file to play.
+    pub path: std::path::PathBuf,
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     /// Degrees, 30..=110 (options.txt stores (fov - 70) / 40).
@@ -204,6 +216,10 @@ pub struct Settings {
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
     /// `horizon.shader_pack`.
     pub shader_packs: Vec<crate::shader_pack_list::Entry>,
+    /// The replays in this instance's `replays/` folder, listed when the
+    /// Volt Replay page opens (`Event::ListReplays`); `Act::WatchReplay`
+    /// plays one without leaving the game.
+    pub replays: Vec<ReplayListEntry>,
     /// The picked `shaders/` pack's options while its Shader Options page is open.
     pub shader_options: Option<crate::shader_options::ShaderOptions>,
     /// Saved Volt Waypoints (`volt-waypoints.json`).
@@ -293,6 +309,7 @@ impl Default for Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            replays: Vec::new(),
             shader_options: None,
             volt_waypoints: Default::default(),
         }
@@ -491,6 +508,7 @@ impl Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            replays: Vec::new(),
             shader_options: None,
             volt_waypoints: Default::default(),
             auto_jump: f.bool("autoJump"),

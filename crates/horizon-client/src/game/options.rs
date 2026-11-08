@@ -88,6 +88,31 @@ impl Game<'_> {
     pub(super) fn shader_packs_dir() -> std::path::PathBuf {
         Self::options_path().with_file_name(horizon_client::shader_pack_list::DIR)
     }
+    /// This instance's saved replays, newest first, for the Volt Replay
+    /// page's in-game watch list (the recorder writes next to the
+    /// options file too: the working directory is the game home).
+    pub(super) fn scan_replay_list() -> Vec<horizon_client::settings::ReplayListEntry> {
+        horizon_client::replay::list(&Self::options_path().with_file_name("replays"))
+            .into_iter()
+            .map(|m| horizon_client::settings::ReplayListEntry {
+                title: if m.server.is_empty() {
+                    m.file_name.clone()
+                } else {
+                    m.server.clone()
+                },
+                line: if m.name.is_empty() {
+                    horizon_client::replay::format_time(m.duration_ms)
+                } else {
+                    format!(
+                        "{} - {}",
+                        horizon_client::replay::format_time(m.duration_ms),
+                        m.name
+                    )
+                },
+                path: m.path,
+            })
+            .collect()
+    }
     pub(super) fn gui_size(&self) -> (f32, f32) {
         let size = self
             .renderer
@@ -303,6 +328,31 @@ impl Game<'_> {
                 }
                 Event::WaypointAction(idx) => {
                     self.execute_waypoint_action(idx);
+                }
+                Event::ListReplays => {
+                    self.settings.replays = Self::scan_replay_list();
+                }
+                Event::WatchReplay(i) => {
+                    if let Some(entry) = self.settings.replays.get(i) {
+                        let path = entry.path.clone();
+                        // Leave whatever is open first; the pending entry
+                        // starts playback once the session has closed (a
+                        // local world's save finishes before `pending_entry`
+                        // is looked at again).
+                        if self.remote.is_some() {
+                            self.leave_server(None)?;
+                        } else if self.title.is_none() {
+                            self.close_world()?;
+                        }
+                        self.pending_entry = Some(super::PendingWorldEntry::Replay { path });
+                        // Close the options like `Event::Close`, back to
+                        // the title screen under the loading overlay.
+                        self.settings.save(&Self::options_path());
+                        self.options_to_game = false;
+                        self.options_to_world_options = false;
+                        self.screen = Screen::Playing;
+                        self.dragging = false;
+                    }
                 }
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
