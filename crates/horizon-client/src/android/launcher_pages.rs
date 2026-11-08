@@ -1357,12 +1357,13 @@ impl DrawCtx<'_> {
         ui.text(Face::LauncherRegular, 10.5, ax + m + 42.0, ay + m + 22.0, theme::MUTED(),
             "Minecraft 26.3 · Native Rust");
 
-        // ---- Quiet icon squares, top-right ----
+        // ---- Quiet icon squares, top-right (Millida order: profile,
+        // avatar, gift, settings) ----
         let sq = if compact { 38.0 } else { 42.0 };
         let squares: [(Page, Action); 4] = [
-            (Page::Installed, Action::Page(Page::Installed)),
-            (Page::VoltSettings, Action::Page(Page::VoltSettings)),
+            (Page::Account, Action::Profile),
             (Page::Account, Action::Page(Page::Account)),
+            (Page::Packs, Action::Page(Page::Packs)),
             (Page::Settings, Action::Page(Page::Settings)),
         ];
         for (i, (page, action)) in squares.iter().enumerate() {
@@ -1409,43 +1410,58 @@ impl DrawCtx<'_> {
             .active()
             .map(|a| a.name.clone())
             .unwrap_or_else(|| self.catalog.config.name.clone());
-        let cards: [(&str, String, Page, u32, u32, Action); 3] = [
-            ("MODS", "33 built in".to_owned(), Page::Mods,
-                hex(0xd8455f, 255), hex(0xa32a44, 255), Action::Page(Page::Mods)),
-            ("MY SKIN", skin_sub, Page::Account,
-                hex(0x3f7bea, 255), hex(0x2a54c0, 255), Action::Page(Page::Account)),
-            ("SHADERS", "Volt Visuals".to_owned(), Page::Shaders,
-                hex(0x58b956, 255), hex(0x398f3f, 255), Action::Page(Page::Shaders)),
+        // Millida's left stack: Shop (dark-red glass, red "!" badge),
+        // My skin (navy glass) and Play with friends (dark-green glass),
+        // all 10px-corner translucent cards. Shop opens the mod catalog;
+        // friends opens the multiplayer tab.
+        let cards: [(&str, String, u8, u32, Action); 3] = [
+            ("Shop", "Bonus waiting".to_owned(), 0, 0x8b0000, Action::Page(Page::Mods)),
+            ("My skin", skin_sub, 1, 0x004080, Action::Page(Page::Account)),
+            ("Play with friends", String::new(), 2, 0x006400,
+                Action::HomeTab(HomeTab::Multiplayer)),
         ];
-        for (i, (title, sub, page, top, bottom, action)) in cards.iter().enumerate() {
+        for (i, (title, sub, kind, rgb, action)) in cards.iter().enumerate() {
             let rect = [ax + m, cards_top + i as f32 * (card_h + gap), card_w, card_h];
             if rect[1] + rect[3] > bar_y - 6.0 {
                 break;
             }
             let v_start = ui.batch_mut().vertices.len();
-            pixel_panel(ui, rect, *top, *bottom);
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, hex(*rgb, 77));
+            ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, hex(*rgb, 210));
             let cy = rect[1] + card_h * 0.5;
-            draw_page_icon(ui, *page, rect[0] + 26.0, cy, hex(0xffffff, 235));
-            if card_h >= 56.0 {
-                ui.text(Face::Display, 15.0, rect[0] + 46.0, cy - 17.0, hex(0xffffff, 255), title);
-                let sub = ui.fit_text(Face::LauncherRegular, 10.5, sub, card_w - 60.0);
-                ui.text(Face::LauncherRegular, 10.5, rect[0] + 46.0, cy + 2.0, hex(0xffffff, 190), &sub);
+            match *kind {
+                0 => draw_page_icon(ui, Page::Mods, rect[0] + 24.0, cy, hex(0xffffff, 235)),
+                1 => draw_page_icon(ui, Page::Account, rect[0] + 24.0, cy, hex(0xffffff, 235)),
+                _ => draw_tile_icon(ui, 1, rect[0] + 24.0, cy, hex(0xffffff, 235)),
+            }
+            if !sub.is_empty() && card_h >= 56.0 {
+                ui.text(Face::Display, 15.0, rect[0] + 44.0, cy - 17.0, hex(0xffffff, 255), title);
+                let sub = ui.fit_text(Face::LauncherRegular, 10.5, sub, card_w - 58.0);
+                ui.text(Face::LauncherRegular, 10.5, rect[0] + 44.0, cy + 2.0,
+                    hex(0xffd98a, 240), &sub);
             } else {
-                ui.text(Face::Display, 14.5, rect[0] + 46.0,
-                    text_vcenter(rect[1], card_h, 14.5), hex(0xffffff, 255), title);
+                let fit = ui.fit_text(Face::Display, 14.0, title, card_w - 56.0);
+                ui.text(Face::Display, 14.0, rect[0] + 44.0,
+                    text_vcenter(rect[1], card_h, 14.0), hex(0xffffff, 255), &fit);
             }
             press_scale(ui, v_start, rect, *action);
             self.targets.push((rect, *action));
+            if *kind == 0 {
+                // The red exclamation badge pinned to the Shop card.
+                let b = [rect[0] - 5.0, rect[1] - 5.0, 20.0, 20.0];
+                ui.rounded(b[0], b[1], b[2], b[3], 5.0, hex(0xe53935, 255));
+                draw_centered_text(ui, Face::Display, 13.0, b, hex(0xffffff, 255), "!");
+            }
         }
 
         // ---- Right rail: the quieter destinations as small chips ----
         let chips: [(&str, u8, Action); 7] = [
             ("Worlds", 0, Action::HomeTab(HomeTab::Worlds)),
-            ("Servers", 1, Action::HomeTab(HomeTab::Multiplayer)),
             ("Replays", 2, Action::HomeTab(HomeTab::Replays)),
             ("Shots", 2, Action::HomeTab(HomeTab::Screenshots)),
             ("Logs", 3, Action::HomeTab(HomeTab::Console)),
-            ("Packs", 5, Action::Page(Page::Packs)),
+            ("Shaders", 6, Action::Page(Page::Shaders)),
+            ("Volt", 7, Action::Page(Page::VoltSettings)),
             ("Boost", 4, Action::OpenVoltBoost),
         ];
         let chip_w = 96.0;
@@ -1459,10 +1475,11 @@ impl DrawCtx<'_> {
             let rect = [chip_x, chip_y, chip_w, chip_h];
             ui.rounded(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS());
             ui.border(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS_BORDER());
-            if glyph == 5 {
-                draw_page_icon(ui, Page::Packs, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
-            } else {
-                draw_tile_icon(ui, glyph, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
+            match glyph {
+                5 => draw_page_icon(ui, Page::Packs, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED()),
+                6 => draw_page_icon(ui, Page::Shaders, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED()),
+                7 => draw_page_icon(ui, Page::VoltSettings, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED()),
+                _ => draw_tile_icon(ui, glyph, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED()),
             }
             ui.text(Face::LauncherMedium, 11.5, rect[0] + 29.0,
                 text_vcenter(rect[1], chip_h, 11.5), theme::TEXT(), label);
@@ -1470,29 +1487,35 @@ impl DrawCtx<'_> {
             chip_y += chip_h + 6.0;
         }
 
-        // ---- Bottom centre: profile selector + the big green Play ----
-        let play_w = if compact { 150.0 } else { 188.0 };
-        let sel_w = (w * 0.30).clamp(if compact { 200.0 } else { 240.0 }, 360.0);
-        let group_w = sel_w + 12.0 + play_w;
+        // ---- Bottom centre, the Millida bar: a deep-blue "START HERE"
+        // modpack card (70%) beside the green Play stacked on the yellow
+        // Open chest (30%). Hardcoded Millida palette: #1A3A5A card,
+        // #3A8DFF stroke, #4CAF50 Play, #FFC107 chest. ----
+        let group_w = (w * 0.62).clamp(if compact { 330.0 } else { 430.0 }, 660.0);
         let gx = ax + ((w - group_w) * 0.5).max(m);
+        let sel_w = group_w * 0.70 - 6.0;
+        let play_w = group_w * 0.30 - 6.0;
 
-        // Blue profile selector slab.
+        // Deep blue modpack card with the bright blue stroke.
         let sel = [gx, bar_y, sel_w, bar_h];
         let v_start = ui.batch_mut().vertices.len();
-        pixel_panel(ui, sel, hex(0x3b63d6, 255), hex(0x2947ab, 255));
+        ui.rounded(sel[0], sel[1], sel[2], sel[3], 10.0, hex(0x1a3a5a, 250));
+        ui.border(sel[0], sel[1], sel[2], sel[3], 10.0, hex(0x3a8dff, 255));
+        ui.border(sel[0] + 1.0, sel[1] + 1.0, sel[2] - 2.0, sel[3] - 2.0, 9.0, hex(0x3a8dff, 150));
         let logo_sq = bar_h - 24.0;
-        ui.rounded(sel[0] + 10.0, bar_y + 12.0, logo_sq, logo_sq, 8.0, hex(0x1b2d66, 220));
+        ui.rounded(sel[0] + 10.0, bar_y + 12.0, logo_sq, logo_sq, 8.0, hex(0x10263f, 240));
         ui.volt_logo(sel[0] + 10.0 + logo_sq * 0.5 - 14.0, bar_y + 12.0 + logo_sq * 0.5 - 14.0, 28.0, 28.0);
         let tx = sel[0] + logo_sq + 20.0;
-        ui.text(Face::LauncherMedium, 9.5, tx, bar_y + 9.0, hex(0xaec2ff, 255), "SELECTED PROFILE");
+        ui.text(Face::LauncherMedium, 9.5, tx, bar_y + 9.0, hex(0x9fc8ff, 255), "START HERE");
         let profile = self.catalog.config.profile;
-        let pname = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
+        let pname = if profile == 0 { "Modpack 26.3".to_owned() }
+            else { format!("Profile {profile} · 26.3") };
         let pname = ui.fit_text(Face::Display, 16.0, &pname, sel_w - logo_sq - 36.0);
         ui.text(Face::Display, 16.0, tx, bar_y + 21.0, hex(0xffffff, 255), &pname);
-        let played = if self.catalog.config.last_played == 0 { "Horizon · 26.3 · Native".to_owned() }
+        let played = if self.catalog.config.last_played == 0 { "Horizon · 26.3".to_owned() }
             else { played_summary(&self.catalog.config) };
         let played = ui.fit_text(Face::LauncherRegular, 10.0, &played, sel_w - logo_sq - 36.0);
-        ui.text(Face::LauncherRegular, 10.0, tx, bar_y + bar_h - 20.0, hex(0xc7d4ff, 230), &played);
+        ui.text(Face::LauncherRegular, 10.0, tx, bar_y + bar_h - 20.0, hex(0xbfd9ff, 235), &played);
         press_scale(ui, v_start, sel, Action::Profile);
         self.targets.push((sel, Action::Profile));
 
@@ -1514,13 +1537,15 @@ impl DrawCtx<'_> {
             ui.rounded(bar[0], bar[1], bar[2], bar[3], 2.5, hex(0x0d3a16, 130));
             ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(5.0), bar[3], 2.5, hex(0xeafcdd, 255));
         } else {
-            let play_h = bar_h - 26.0;
+            // The vibrant green Play, Millida's #4CAF50.
+            let play_h = (bar_h * 0.62).max(40.0);
             let slab = [px0, bar_y, play_w, play_h];
             let v_start = ui.batch_mut().vertices.len();
-            pixel_panel(ui, slab, hex(0x66cc5b, 255), hex(0x43a447, 255));
+            ui.rounded(slab[0], slab[1], slab[2], slab[3], 10.0, hex(0x4caf50, 255));
+            ui.border(slab[0], slab[1], slab[2], slab[3], 10.0, hex(0x7fdc84, 160));
             let label = if installed { "Play" } else if self.error.is_some() { "Retry" } else { "Download" };
             let ink = hex(0x0d3a16, 255);
-            let two_lines = play_h >= 46.0;
+            let two_lines = play_h >= 44.0;
             let font = if two_lines { 17.0 } else { 15.0 };
             let text_w = ui.measure(Face::Display, font, label);
             let tri = font * 0.62;
@@ -1540,10 +1565,13 @@ impl DrawCtx<'_> {
             press_scale(ui, v_start, slab, Action::Play);
             self.targets.insert(0, (slab, Action::Play));
 
-            // Slim gold slab under Play, lobby-style: straight to the files.
-            let files = [px0, bar_y + play_h + 6.0, play_w, bar_h - play_h - 6.0];
-            pixel_panel(ui, files, hex(0xe9c53e, 255), hex(0xcda32a, 255));
-            draw_centered_text(ui, Face::LauncherMedium, 9.5, files, hex(0x4a3608, 255), "GAME FILES");
+            // The yellow Open chest under Play, Millida's #FFC107: the
+            // installed game files live behind it.
+            let files = [px0, bar_y + play_h + 6.0, play_w, (bar_h - play_h - 6.0).max(16.0)];
+            let v_chest = ui.batch_mut().vertices.len();
+            ui.rounded(files[0], files[1], files[2], files[3], 8.0, hex(0xffc107, 255));
+            draw_centered_text(ui, Face::LauncherMedium, 10.0, files, hex(0x5a4300, 255), "Open chest");
+            press_scale(ui, v_chest, files, Action::Page(Page::Installed));
             self.targets.push((files, Action::Page(Page::Installed)));
         }
 
