@@ -3004,10 +3004,32 @@ impl OptionsUi {
             }
             Page::Font => pairs(&[Opt::ForceUnicode, Opt::JapaneseGlyphs]),
             Page::Mods => {
+                // Volt Replay leads the list: Volt's built-in session
+                // recorder, toggled like any other mod. Its Settings button
+                // opens Volt QoL, where the toggle also lives.
+                let replay_label = Text::literal("Volt Replay 1.0.0: ".to_owned())
+                    .append(on_off(s.extras.volt_qol.replay_buffer));
+                let replay = Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        replay_label,
+                        Act::VoltCustom(crate::options_volt_pages::VoltAct::QolReplay),
+                    ),
+                    Some(button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        tr("horizon.mods.settings"),
+                        Act::Push(Page::VoltQol),
+                    )),
+                );
                 if s.mods.installed.is_empty() {
-                    return vec![Row::Header("horizon.mods.empty")];
+                    return vec![replay, Row::Header("horizon.mods.empty")];
                 }
-                s.mods
+                std::iter::once(replay)
+                    .chain(s.mods
                     .installed
                     .iter()
                     .enumerate()
@@ -3041,7 +3063,7 @@ impl OptionsUi {
                             let widget = button(0.0, 0.0, 310.0, label, Act::ToggleMod(i));
                             Row::Buttons(if dead { inactive(widget) } else { widget }, None)
                         }
-                    })
+                    }))
                     .collect()
             }
             Page::NativeMod(i) => self.native_rows(s, i),

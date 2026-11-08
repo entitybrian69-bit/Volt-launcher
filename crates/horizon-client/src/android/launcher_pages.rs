@@ -83,6 +83,7 @@ pub(super) enum Action {
     SaveServer,
     WatchReplay(usize),
     DeleteReplay(usize),
+    ToggleVoltReplay,
     PatchNotes,
     Page(Page),
     Play,
@@ -2564,12 +2565,62 @@ impl DrawCtx<'_> {
         let step = 70.0;
         let bundled = horizon_client::bundled_native::BUNDLED;
         let woven = horizon_client::bundled_native::WOVEN;
-        let total = (bundled.len() + woven.len()) as f32 * step;
+        let total = (1 + bundled.len() + woven.len()) as f32 * step;
         let max_scroll = (total - view_h).max(0.0);
         self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
         *self.list_view = Some([top, bottom, max_scroll]);
+        // Volt Replay leads the list: Volt's own session recorder, built
+        // into the engine rather than woven from the registry.
+        {
+            let ry = top - self.catalog.scroll;
+            if ry + row_h >= top && ry <= bottom {
+                let start = ui.batch_mut().vertices.len();
+                ui.rounded(cx, ry, cw, row_h, 10.0, theme::CARD());
+                ui.border(cx, ry, cw, row_h, 10.0, theme::BORDER());
+                let icon = [cx + 8.0, ry + 11.0, 42.0, 42.0];
+                ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_GLOW_SOFT());
+                ui.border(icon[0], icon[1], icon[2], icon[3], 8.0, theme::BORDER());
+                draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), "V");
+                let enabled = self.catalog.extras.volt_qol.replay_buffer;
+                let tx = cx + 58.0;
+                let text_w = (cw - 178.0).max(32.0);
+                let title = ui.fit_text(Face::LauncherMedium, 14.0, "Volt Replay 1.0.0", text_w);
+                ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
+                let state = if enabled { "Recording on" } else { "Recording off" };
+                let line = format!("Volt mod · Built into this APK · {state}");
+                let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
+                ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
+                let blurb = ui.fit_text(
+                    Face::LauncherRegular,
+                    11.0,
+                    "Records your sessions. Watch them from Home > Replays: timeline, speeds, free camera.",
+                    text_w,
+                );
+                ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
+                let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
+                if !self.catalog.busy() {
+                    let first = self.targets.len();
+                    styled_button(
+                        ui,
+                        self.targets,
+                        button,
+                        if enabled { "Turn off" } else { "Turn on" },
+                        Action::ToggleVoltReplay,
+                        if enabled { BtnStyle::Secondary } else { BtnStyle::Primary },
+                        true,
+                    );
+                    if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                        self.targets[first].0 = clipped;
+                    } else {
+                        self.targets.truncate(first);
+                    }
+                }
+                let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
+                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+            }
+        }
         for (i, &(id, version, _)) in bundled.iter().enumerate() {
-            let ry = top + i as f32 * step - self.catalog.scroll;
+            let ry = top + (1 + i) as f32 * step - self.catalog.scroll;
             if ry + row_h < top || ry > bottom {
                 continue;
             }
@@ -2624,7 +2675,7 @@ impl DrawCtx<'_> {
             ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
         }
         for (i, &(id, version)) in woven.iter().enumerate() {
-            let ry = top + (bundled.len() + i) as f32 * step - self.catalog.scroll;
+            let ry = top + (1 + bundled.len() + i) as f32 * step - self.catalog.scroll;
             if ry + row_h < top || ry > bottom {
                 continue;
             }
@@ -5827,6 +5878,18 @@ impl Launcher {
                 } else {
                     self.catalog.status = "Replay list changed; please choose again.".into();
                 }
+            }
+            Some(Action::ToggleVoltReplay) => {
+                let on = !self.catalog.extras.volt_qol.replay_buffer;
+                self.catalog.extras.volt_qol.replay_buffer = on;
+                let game_dir = self.catalog.config.game_home(&self.home);
+                let _ = std::fs::create_dir_all(&game_dir);
+                self.catalog.extras.save(&game_dir);
+                self.catalog.status = if on {
+                    "Volt Replay on: sessions are recorded. Watch them from Home > Replays.".into()
+                } else {
+                    "Volt Replay off: sessions are no longer recorded.".into()
+                };
             }
             Some(Action::DeleteReplay(index)) => {
                 if let Some(replay) = self.catalog.replays.get(index) {
