@@ -637,6 +637,11 @@ impl Game<'_> {
 
         // A. #3 Mob-Spawn Light-0 3D Floor Crosses
         if qol.spawn_light_overlay {
+            // Sky-lit ground only spawns hostiles after dusk: by day the
+            // amber "night-only" marks covered every grass block and read
+            // as a broken texture, so they only show while the sun is down.
+            let tod = self.world.day_time.rem_euclid(24000);
+            let night = (13000..23000).contains(&tod);
             let px = p.position.x.floor() as i32;
             let py = p.position.y.floor() as i32;
             let pz = p.position.z.floor() as i32;
@@ -662,8 +667,10 @@ impl Game<'_> {
                         if block_l == 0 {
                             let col = if sky_l == 0 {
                                 0xE0FF_2A3C // Always hostile-spawnable (Red)
+                            } else if night {
+                                0xD0FF_CC22 // Spawnable now: the sun is down (Amber)
                             } else {
-                                0xD0FF_CC22 // Night-only spawnable (Amber)
+                                continue; // Daylight keeps the surface clean.
                             };
                             let y = f64::from(wy) + 0.03;
                             lines.push(Line {

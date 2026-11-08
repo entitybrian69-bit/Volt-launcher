@@ -1556,12 +1556,30 @@ impl Game<'_> {
                     yaw,
                     pitch,
                 } => {
+                    let mut body = false;
                     if let Some(r) = self.remote.as_mut()
                         && let Some(rp) = r.replay.as_mut()
                     {
                         rp.poses.push_back((at, position, yaw, pitch));
                         if rp.poses.len() > 400 {
                             rp.poses.pop_front();
+                        }
+                        body = rp.body;
+                    }
+                    // The free camera's body walks like any remote player:
+                    // each recorded pose feeds the same stepped interpolation
+                    // that live MoveEntityPosRot and RotateHead packets drive,
+                    // so the motion stays tick-smooth and the legs swing.
+                    if body {
+                        self.move_entity(
+                            REPLAY_BODY_ID,
+                            Some(Path::Linear(position)),
+                            Some((yaw, pitch)),
+                            true,
+                            false,
+                        );
+                        if let Some(r) = self.remote.as_mut() {
+                            r.head_lerps.insert(REPLAY_BODY_ID, (yaw, 3));
                         }
                     }
                 }
@@ -1602,6 +1620,22 @@ impl Game<'_> {
                     }
                 }
                 Event::Reconfiguring => {
+                    // Volt Replay: a seek restarts the stream and rebuilds the
+                    // world. Back to the recorded view first, or the replayed
+                    // login teleport is dropped by the free-camera guard and
+                    // the player never spawns ("Loading terrain..." forever).
+                    // The body and pose buffer are stale too: the world they
+                    // belonged to is going away.
+                    if let Some(r) = self.remote.as_mut()
+                        && let Some(rp) = r.replay.as_mut()
+                    {
+                        rp.control
+                            .pov
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        rp.was_pov = true;
+                        rp.body = false;
+                        rp.poses.clear();
+                    }
                     // handleConfigurationStart: the held-back chat shows, then
                     // clearClientLevel opens ServerReconfigScreen over no level.
                     self.flush_chat_queue();
@@ -1675,6 +1709,16 @@ impl Game<'_> {
                     if let Some((address, name, cookies)) = transfer {
                         self.leave_server(None)?;
                         self.connect_server_with_cookies(&address, &name, Some(cookies))?;
+                        return Ok(());
+                    }
+                    // Volt Replay: the X button or the file's end is not a
+                    // lost connection. Straight back to the title screen —
+                    // no disconnect screen, no auto-reconnect offer.
+                    if self.remote.as_ref().is_some_and(|r| r.replay.is_some()) {
+                        self.leave_server(None)?;
+                        if let Some(title) = self.title.as_mut() {
+                            title.mode = horizon_client::title::Mode::Main;
+                        }
                         return Ok(());
                     }
                     let retry = self.reconnect_after(&reason, from_server);
@@ -5093,22 +5137,11 @@ impl Game<'_> {
                 {
                     rp.body = true;
                 }
-            } else if let Some(m) = self
-                .mobs
-                .iter_mut()
-                .find(|m| m.id == REPLAY_BODY_ID as u32)
-            {
-                m.previous = m.position;
-                m.position = Vec3::new(p[0], p[1], p[2]);
-                m.previous_yaw = m.yaw;
-                m.yaw = yaw;
-                m.previous_body_yaw = m.body_yaw;
-                m.body_yaw = yaw;
-                m.previous_head_yaw = m.head_yaw;
-                m.head_yaw = yaw;
-                m.previous_head_pitch = m.head_pitch;
-                m.head_pitch = pitch;
             }
+            // From here the recorded poses move the body through
+            // `move_entity` (Event::ReplayPose), exactly like a live
+            // player's movement packets: per-frame position writes here
+            // fought the tick interpolation and froze the walk animation.
         }
     }
     /// Playback control when a replay is being watched.
