@@ -1666,9 +1666,9 @@ impl Game<'_> {
                     if let Some(r) = self.remote.as_mut()
                         && let Some(rp) = r.replay.as_mut()
                     {
-                        rp.control
-                            .pov
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        // The chosen camera survives the stream restart;
+                        // was_pov = true re-runs the free-camera switch
+                        // (spectator mode, body, framing) after the rejoin.
                         rp.was_pov = true;
                         rp.body = false;
                         rp.poses.clear();
@@ -5085,6 +5085,12 @@ impl Game<'_> {
     /// the playback clock.
     pub(super) fn replay_frame(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
+        // Before the login teleport makes the player there is nothing to
+        // drive, and the POV <-> free flip must not be consumed yet (the
+        // spectator switch would be overwritten by the login's mode).
+        if self.player.is_none() {
+            return;
+        }
         let Some(r) = self.remote.as_mut() else { return };
         let Some(rp) = r.replay.as_mut() else { return };
         let control = rp.control.clone();
@@ -5192,6 +5198,26 @@ impl Game<'_> {
                 {
                     rp.body = true;
                 }
+                // Director's view: step the camera back along the recorded
+                // sight line so the body is in frame from the first moment
+                // instead of the camera sitting inside the model.
+                let yr = f64::from(yaw.to_radians());
+                let pr = f64::from(pitch.to_radians());
+                if let Some(player) = self.player.as_mut() {
+                    player.position = Vec3::new(
+                        p[0] + yr.sin() * pr.cos() * 4.0,
+                        p[1] + pr.sin() * 4.0 + 1.6,
+                        p[2] - yr.cos() * pr.cos() * 4.0,
+                    );
+                    player.velocity = Vec3::ZERO;
+                }
+                // Aim down at the body's eyes from up there.
+                let dy = 4.0 * pr.sin() + 1.6;
+                let horiz = (4.0 * pr.cos()).abs().max(0.001);
+                self.yaw = yaw;
+                self.pitch = ((dy / (horiz * horiz + dy * dy).sqrt()).asin().to_degrees()
+                    as f32)
+                    .clamp(-89.0, 89.0);
             }
             // From here the recorded poses move the body through
             // `move_entity` (Event::ReplayPose), exactly like a live
@@ -5207,10 +5233,12 @@ impl Game<'_> {
     fn remote_teleport(&mut self, p: &play::PlayerPosition) -> Result<()> {
         use play::relative as rel;
         // Volt Replay's free camera: the recorded view's teleports must not
-        // yank the detached camera around.
+        // yank the detached camera around. The first teleport still lands:
+        // it is the one that makes the player.
         if let Some(r) = self.remote.as_ref()
             && let Some(rp) = r.replay.as_ref()
             && !rp.control.pov.load(std::sync::atomic::Ordering::Relaxed)
+            && self.player.is_some()
         {
             return Ok(());
         }

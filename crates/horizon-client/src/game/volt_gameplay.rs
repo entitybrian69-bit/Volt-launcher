@@ -629,6 +629,45 @@ impl Game<'_> {
         if self.title.is_some() || self.ui.hide_gui {
             return;
         }
+        // Replay Studio: the keyframe camera path hangs in the world as a
+        // red spline with mint keyframe cubes, visible from the free
+        // camera (hidden in POV and while the camera flies the path).
+        if let Some(rp) = self.remote.as_ref().and_then(|r| r.replay.as_ref()) {
+            use std::sync::atomic::Ordering::Relaxed;
+            if !rp.control.pov.load(Relaxed) && !rp.cam_path && rp.cam_keys.len() >= 2 {
+                let (first, last) = (rp.cam_keys[0].ms, rp.cam_keys[rp.cam_keys.len() - 1].ms);
+                let steps = (rp.cam_keys.len() * 16).clamp(24, 160) as u32;
+                let mut prev: Option<[f64; 3]> = None;
+                for i in 0..=steps {
+                    let t = first + ((u64::from(last - first) * u64::from(i)
+                        / u64::from(steps)) as u32);
+                    if let Some((pos, _, _)) =
+                        horizon_client::replay::sample_cam_path(&rp.cam_keys, t)
+                    {
+                        if let Some(a) = prev {
+                            lines.push(Line {
+                                start: a,
+                                end: pos,
+                                color: 0xFFE8_445A,
+                                width: 2.4,
+                            });
+                        }
+                        prev = Some(pos);
+                    }
+                }
+                for k in &rp.cam_keys {
+                    box_wireframe(
+                        lines,
+                        [k.pos[0] - 0.18, k.pos[1] - 0.18, k.pos[2] - 0.18],
+                        [k.pos[0] + 0.18, k.pos[1] + 0.18, k.pos[2] + 0.18],
+                        0xFF79_E59C,
+                        2.0,
+                    );
+                }
+            }
+            // The rest of the gizmos are gameplay aids; a replay shows none.
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -841,7 +880,12 @@ impl Game<'_> {
         if self.title.is_some() || self.ui.hide_gui {
             return;
         }
-        self.draw_replay_hud(batch);
+        // Replay Studio: while a replay is watched, the editor panel is
+        // the whole interface; gameplay HUDs stay out of the footage.
+        if self.replay_control().is_some() {
+            self.draw_replay_hud(batch);
+            return;
+        }
         let now = self.started.elapsed().as_secs_f64();
         let (w, h) = (batch.width, batch.height);
         let my_name = self.options.player_name();
@@ -1489,46 +1533,67 @@ impl Game<'_> {
         [(w - 58.0).max(4.0), (h * 0.52).floor(), 52.0, 18.0]
     }
 
-    /// Volt Replay's playback bar: (bar, six buttons, timeline track).
-    /// Buttons: back 10s, play/pause, forward 10s, speed, POV/free camera,
-    /// leave.
-    pub(super) fn replay_hud_rects(w: f32, h: f32) -> ([f32; 4], [[f32; 4]; 6], [f32; 4]) {
-        let bar_w = (w * 0.72).clamp(220.0, 430.0);
-        let bar = [((w - bar_w) * 0.5).floor(), h - 46.0, bar_w, 42.0];
-        let (bw, bh) = (30.0, 15.0);
-        let total = 6.0 * bw + 5.0 * 4.0;
-        let mut bx = bar[0] + (bar_w - total) * 0.5;
-        let mut buttons = [[0.0f32; 4]; 6];
-        for rect in &mut buttons {
-            *rect = [bx, bar[1] + 4.0, bw, bh];
-            bx += bw + 4.0;
+    /// Replay Studio's editor panel: a full-width dock at the bottom.
+    /// Returns (panel, feature row + its labels, transport row, timeline
+    /// track). The feature labels shrink to codes on narrow screens.
+    fn replay_studio_rects(
+        &self,
+        w: f32,
+        h: f32,
+    ) -> (
+        [f32; 4],
+        [[f32; 4]; 10],
+        [&'static str; 10],
+        [[f32; 4]; 8],
+        [f32; 4],
+    ) {
+        let atlas = &self.gui.atlas;
+        let panel = [0.0, h - 64.0, w, 64.0];
+        let full: [&'static str; 10] = [
+            "MARK", "<M", "M>", "+KF", "CLR", "PATH", "LAPSE", "MUSIC", "LOOP", "RENDER",
+        ];
+        let compact: [&'static str; 10] =
+            ["MRK", "<M", "M>", "KF", "CLR", "PTH", "TLP", "MUS", "LP", "REC"];
+        let measure = |set: &[&'static str; 10]| -> ([f32; 10], f32) {
+            let mut ws = [0.0f32; 10];
+            let mut total = 0.0;
+            for (i, s) in set.iter().enumerate() {
+                ws[i] = HudBatch::text_width(atlas, s) + 10.0;
+                total += ws[i];
+            }
+            (ws, total + 9.0 * 3.0)
+        };
+        let (mut ws, mut total) = measure(&full);
+        let mut labels = full;
+        if total > w - 8.0 {
+            (ws, total) = measure(&compact);
+            labels = compact;
         }
-        let track = [bar[0] + 10.0, bar[1] + 27.0, bar_w - 20.0, 9.0];
-        (bar, buttons, track)
+        let mut row_a = [[0.0f32; 4]; 10];
+        let mut x = ((w - total) * 0.5).max(4.0);
+        for (i, rect) in row_a.iter_mut().enumerate() {
+            *rect = [x, panel[1] + 4.0, ws[i], 15.0];
+            x += ws[i] + 3.0;
+        }
+        let track = [10.0, panel[1] + 24.0, w - 20.0, 10.0];
+        let tws: [f32; 8] = [24.0, 30.0, 46.0, 30.0, 24.0, 36.0, 42.0, 36.0];
+        let ttotal: f32 = tws.iter().sum::<f32>() + 7.0 * 4.0;
+        let mut row_t = [[0.0f32; 4]; 8];
+        let mut x = ((w - ttotal) * 0.5).max(4.0);
+        for (i, rect) in row_t.iter_mut().enumerate() {
+            *rect = [x, panel[1] + 40.0, tws[i], 18.0];
+            x += tws[i] + 4.0;
+        }
+        (panel, row_a, labels, row_t, track)
     }
 
-    /// The second row above the playback bar: markers, keyframes, camera
-    /// path, timelapse, music, loop and MP4 export
-    /// (MRK, <M, M>, KF+, CLR, PTH, TLP, MUS, LP, REC).
-    pub(super) fn replay_hud_row2(bar: &[f32; 4]) -> [[f32; 4]; 10] {
-        let (bw, bh) = (30.0, 15.0);
-        let total = 10.0 * bw + 9.0 * 4.0;
-        let mut bx = bar[0] + (bar[2] - total) * 0.5;
-        let mut buttons = [[0.0f32; 4]; 10];
-        for rect in &mut buttons {
-            *rect = [bx, bar[1] - 34.0, bw, bh];
-            bx += bw + 4.0;
-        }
-        buttons
-    }
-
-    /// The playback bar while a replay is being watched.
-    fn draw_replay_hud(&mut self, batch: &mut HudBatch) {
+    /// Replay Studio's editor panel while a replay is being watched.
+    pub(super) fn draw_replay_hud(&mut self, batch: &mut HudBatch) {
         use std::sync::atomic::Ordering::Relaxed;
         let Some(ctl) = self.replay_control() else {
             return;
         };
-        let Some((markers, key_times, cam_path_on, music_on, loop_on, exporting, hud_age, note)) =
+        let Some((markers, key_times, cam_path_on, music_on, loop_on, exporting, hud_age, note, stem)) =
             self.remote
                 .as_ref()
                 .and_then(|r| r.replay.as_ref())
@@ -1542,15 +1607,18 @@ impl Game<'_> {
                         rp.export.is_some(),
                         rp.hud_touch.elapsed().as_secs_f32(),
                         rp.note.clone(),
+                        rp.path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
                     )
                 })
         else {
             return;
         };
         let (w, h) = (batch.width, batch.height);
-        let (bar, buttons, track) = Self::replay_hud_rects(w, h);
-        // While exporting, the bar hides itself so it is not burned into
-        // the video; a tap near it brings it back for a few seconds.
+        // While exporting, the whole studio hides itself so it is not
+        // burned into the video; a tap near the panel brings it back.
         if exporting && hud_age > 3.0 {
             let tag = "REC";
             let tag_w = HudBatch::text_width(&self.gui.atlas, tag);
@@ -1572,147 +1640,62 @@ impl Game<'_> {
             );
             return;
         }
+        let (panel, row_a, labels_a, row_t, track) = self.replay_studio_rects(w, h);
         let t = ctl.time_ms.load(Relaxed);
         let d = ctl.duration_ms.load(Relaxed).max(1);
         let paused = ctl.paused.load(Relaxed);
         let pov = ctl.pov.load(Relaxed);
         let speed = ctl.speed_pct.load(Relaxed);
+        let timelapse_on = speed >= 1600;
+        // The dock: dark glass with a mint hairline on top.
         batch.fill(
             &self.gui.atlas,
-            bar[0],
-            bar[1],
-            bar[2],
-            bar[3],
-            rgba(10, 14, 22, 205),
+            panel[0],
+            panel[1],
+            panel[2],
+            panel[3],
+            rgba(10, 14, 22, 215),
         );
         batch.fill(
             &self.gui.atlas,
-            bar[0],
-            bar[1],
-            bar[2],
+            panel[0],
+            panel[1],
+            panel[2],
             1.0,
             rgba(121, 229, 156, 235),
         );
-        let speed_label = format!(
-            "x{}",
-            match speed {
-                10 => "0.1",
-                25 => "0.25",
-                50 => "0.5",
-                200 => "2",
-                400 => "4",
-                800 => "8",
-                1600 => "16",
-                3200 => "32",
-                6400 => "64",
-                _ => "1",
-            }
-        );
-        let labels: [&str; 6] = [
-            "<<",
-            if paused { "|>" } else { "||" },
-            ">>",
-            &speed_label,
-            if pov { "POV" } else { "CAM" },
-            "X",
-        ];
-        for (rect, label) in buttons.iter().zip(labels) {
-            batch.fill(
-                &self.gui.atlas,
-                rect[0],
-                rect[1],
-                rect[2],
-                rect[3],
-                rgba(28, 36, 52, 235),
-            );
-            let tw = HudBatch::text_width(&self.gui.atlas, label);
-            batch.text(
-                &self.gui.atlas,
-                label,
-                rect[0] + ((rect[2] - tw) * 0.5).max(1.0),
-                rect[1] + 4.0,
-                rgba(235, 240, 250, 255),
-                true,
-            );
-        }
-        batch.fill(
-            &self.gui.atlas,
-            track[0],
-            track[1],
-            track[2],
-            track[3],
-            rgba(30, 38, 54, 225),
-        );
-        let frac = (t as f32 / d as f32).clamp(0.0, 1.0);
-        if frac > 0.0 {
-            batch.fill(
-                &self.gui.atlas,
-                track[0],
-                track[1],
-                track[2] * frac,
-                track[3],
-                rgba(121, 229, 156, 240),
-            );
-        }
-        let time = format!(
-            "{} / {}",
-            horizon_client::replay::format_time(t),
-            horizon_client::replay::format_time(d),
-        );
+        // The header line above the dock: the studio tag and the clock.
+        let title = format!("\u{2022} REPLAY STUDIO \u{2014} {stem}");
         batch.text(
             &self.gui.atlas,
-            &time,
-            bar[0] + 2.0,
-            bar[1] - 11.0,
-            rgba(235, 240, 250, 235),
-            true,
-        );
-        let tag = if ctl.finished.load(Relaxed) {
-            "REPLAY \u{2022} END"
-        } else {
-            "REPLAY"
-        };
-        let tag_w = HudBatch::text_width(&self.gui.atlas, tag);
-        batch.text(
-            &self.gui.atlas,
-            tag,
-            bar[0] + bar[2] - tag_w - 2.0,
-            bar[1] - 11.0,
+            &title,
+            6.0,
+            panel[1] - 12.0,
             rgba(121, 229, 156, 235),
             true,
         );
-        // Markers (amber) and camera keyframes (green) as ticks on the track.
-        for m in &markers {
-            let x = track[0] + track[2] * (*m as f32 / d as f32).clamp(0.0, 1.0);
-            batch.fill(
-                &self.gui.atlas,
-                x - 1.0,
-                track[1] - 2.0,
-                2.0,
-                track[3] + 2.0,
-                rgba(255, 196, 64, 240),
-            );
-        }
-        for k in &key_times {
-            let x = track[0] + track[2] * (*k as f32 / d as f32).clamp(0.0, 1.0);
-            batch.fill(
-                &self.gui.atlas,
-                x - 1.0,
-                track[1] + track[3] - 3.0,
-                2.0,
-                5.0,
-                rgba(121, 229, 156, 240),
-            );
-        }
-        // The second row: markers, camera keyframes, path, timelapse,
-        // music, loop and export.
-        let timelapse_on = speed >= 1600;
-        let kf_label = format!("KF{}", key_times.len().min(99));
-        let row2 = Self::replay_hud_row2(&bar);
-        let labels2: [&str; 10] = [
-            "MRK", "<M", "M>", &kf_label, "CLR", "PTH", "TLP", "MUS", "LP", "REC",
-        ];
-        for (i, (rect, label)) in row2.iter().zip(labels2).enumerate() {
+        let clock = format!(
+            "{} / {}{}",
+            horizon_client::replay::format_time(t),
+            horizon_client::replay::format_time(d),
+            if ctl.finished.load(Relaxed) {
+                " \u{2022} END"
+            } else {
+                ""
+            },
+        );
+        let cw = HudBatch::text_width(&self.gui.atlas, &clock);
+        batch.text(
+            &self.gui.atlas,
+            &clock,
+            w - cw - 6.0,
+            panel[1] - 12.0,
+            rgba(235, 240, 250, 235),
+            true,
+        );
+        // The feature row: markers, keyframes, path, timelapse, music,
+        // loop and render.
+        for (i, (rect, label)) in row_a.iter().zip(labels_a).enumerate() {
             let on = match i {
                 5 => cam_path_on,
                 6 => timelapse_on,
@@ -1741,6 +1724,108 @@ impl Game<'_> {
                 true,
             );
         }
+        // The timeline: progress, playhead, markers (amber) and camera
+        // keyframes (mint).
+        batch.fill(
+            &self.gui.atlas,
+            track[0],
+            track[1],
+            track[2],
+            track[3],
+            rgba(30, 38, 54, 225),
+        );
+        let frac = (t as f32 / d as f32).clamp(0.0, 1.0);
+        if frac > 0.0 {
+            batch.fill(
+                &self.gui.atlas,
+                track[0],
+                track[1],
+                track[2] * frac,
+                track[3],
+                rgba(60, 118, 86, 235),
+            );
+        }
+        for m in &markers {
+            let x = track[0] + track[2] * (*m as f32 / d as f32).clamp(0.0, 1.0);
+            batch.fill(
+                &self.gui.atlas,
+                x - 1.0,
+                track[1] - 2.0,
+                2.0,
+                track[3] + 4.0,
+                rgba(255, 196, 64, 240),
+            );
+        }
+        for k in &key_times {
+            let x = track[0] + track[2] * (*k as f32 / d as f32).clamp(0.0, 1.0);
+            batch.fill(
+                &self.gui.atlas,
+                x - 2.5,
+                track[1] + track[3] * 0.5 - 2.5,
+                5.0,
+                5.0,
+                rgba(121, 229, 156, 250),
+            );
+        }
+        // The playhead on top of everything.
+        let px = track[0] + track[2] * frac;
+        batch.fill(
+            &self.gui.atlas,
+            px - 1.0,
+            track[1] - 3.0,
+            2.0,
+            track[3] + 6.0,
+            rgba(245, 248, 255, 250),
+        );
+        // The transport row: jump to start/end, skip, play, speed, the
+        // camera and the exit.
+        let speed_label = format!(
+            "x{}",
+            match speed {
+                10 => "0.1",
+                25 => "0.25",
+                50 => "0.5",
+                200 => "2",
+                400 => "4",
+                800 => "8",
+                1600 => "16",
+                3200 => "32",
+                6400 => "64",
+                _ => "1",
+            }
+        );
+        let labels_t: [&str; 8] = [
+            "|<",
+            "<<",
+            if paused { "|>" } else { "||" },
+            ">>",
+            ">|",
+            &speed_label,
+            if pov { "POV" } else { "FREE" },
+            "EXIT",
+        ];
+        for (i, (rect, label)) in row_t.iter().zip(labels_t).enumerate() {
+            let fill = match i {
+                2 => rgba(42, 92, 62, 240),
+                7 => rgba(84, 30, 36, 240),
+                _ => rgba(28, 36, 52, 235),
+            };
+            batch.fill(&self.gui.atlas, rect[0], rect[1], rect[2], rect[3], fill);
+            let color = match i {
+                2 => rgba(121, 229, 156, 255),
+                7 => rgba(255, 150, 158, 255),
+                _ => rgba(235, 240, 250, 255),
+            };
+            let tw = HudBatch::text_width(&self.gui.atlas, label);
+            batch.text(
+                &self.gui.atlas,
+                label,
+                rect[0] + ((rect[2] - tw) * 0.5).max(1.0),
+                rect[1] + 5.0,
+                color,
+                true,
+            );
+        }
         // Status notes (marker added, keyframe saved, export outcome).
         if let Some((text, at)) = &note
             && at.elapsed().as_secs_f32() < 5.0
@@ -1749,8 +1834,8 @@ impl Game<'_> {
             batch.text(
                 &self.gui.atlas,
                 text,
-                bar[0] + ((bar[2] - tw) * 0.5).max(0.0),
-                bar[1] - 46.0,
+                ((w - tw) * 0.5).max(0.0),
+                panel[1] - 26.0,
                 rgba(255, 228, 160, 245),
                 true,
             );
@@ -1770,19 +1855,15 @@ impl Game<'_> {
             return false;
         }
         let (w, h) = self.gui_size();
-        let (bar, buttons, track) = Self::replay_hud_rects(w, h);
+        let (panel, row_a, _labels_a, row_t, track) = self.replay_studio_rects(w, h);
         let hit = |r: &[f32; 4]| {
             cursor.0 >= r[0] && cursor.0 <= r[0] + r[2] && cursor.1 >= r[1] && cursor.1 <= r[1] + r[3]
         };
-        // While exporting, the hidden bar comes back with one tap near it
-        // (and that tap does nothing else).
+        // While exporting, the hidden studio comes back with one tap near
+        // the dock (and that tap does nothing else).
         if let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) {
             if rp.export.is_some() && rp.hud_touch.elapsed().as_secs_f32() > 3.0 {
-                let near = cursor.0 >= bar[0]
-                    && cursor.0 <= bar[0] + bar[2]
-                    && cursor.1 >= bar[1] - 40.0
-                    && cursor.1 <= bar[1] + bar[3];
-                if near {
+                if cursor.1 >= panel[1] - 16.0 {
                     rp.hud_touch = std::time::Instant::now();
                     return true;
                 }
@@ -1790,50 +1871,55 @@ impl Game<'_> {
             }
             rp.hud_touch = std::time::Instant::now();
         }
-        let row2 = Self::replay_hud_row2(&bar);
         let t = ctl.time_ms.load(Relaxed);
         let d = ctl.duration_ms.load(Relaxed);
-        let acted = if hit(&row2[0]) {
+        let acted = if hit(&row_a[0]) {
             self.replay_toggle_marker();
             true
-        } else if hit(&row2[1]) {
+        } else if hit(&row_a[1]) {
             self.replay_jump_marker(false);
             true
-        } else if hit(&row2[2]) {
+        } else if hit(&row_a[2]) {
             self.replay_jump_marker(true);
             true
-        } else if hit(&row2[3]) {
+        } else if hit(&row_a[3]) {
             self.replay_add_keyframe();
             true
-        } else if hit(&row2[4]) {
+        } else if hit(&row_a[4]) {
             self.replay_clear_keyframes();
             true
-        } else if hit(&row2[5]) {
+        } else if hit(&row_a[5]) {
             self.replay_toggle_path();
             true
-        } else if hit(&row2[6]) {
+        } else if hit(&row_a[6]) {
             self.replay_toggle_timelapse();
             true
-        } else if hit(&row2[7]) {
+        } else if hit(&row_a[7]) {
             self.replay_toggle_music();
             true
-        } else if hit(&row2[8]) {
+        } else if hit(&row_a[8]) {
             self.replay_toggle_loop();
             true
-        } else if hit(&row2[9]) {
+        } else if hit(&row_a[9]) {
             self.replay_toggle_export();
             true
-        } else if hit(&buttons[0]) {
+        } else if hit(&row_t[0]) {
+            ctl.request_seek(0);
+            true
+        } else if hit(&row_t[1]) {
             ctl.request_seek(t.saturating_sub(10_000));
             true
-        } else if hit(&buttons[1]) {
+        } else if hit(&row_t[2]) {
             let paused = ctl.paused.load(Relaxed);
             ctl.paused.store(!paused, Relaxed);
             true
-        } else if hit(&buttons[2]) {
+        } else if hit(&row_t[3]) {
             ctl.request_seek(t.saturating_add(10_000).min(d));
             true
-        } else if hit(&buttons[3]) {
+        } else if hit(&row_t[4]) {
+            ctl.request_seek(d);
+            true
+        } else if hit(&row_t[5]) {
             let next = match ctl.speed_pct.load(Relaxed) {
                 10 => 25,
                 25 => 50,
@@ -1842,24 +1928,29 @@ impl Game<'_> {
                 200 => 400,
                 400 => 800,
                 800 => 10,
-                // Timelapse speeds (TLP) drop back to real time.
+                // Timelapse speeds (LAPSE) drop back to real time.
                 _ => 100,
             };
             ctl.speed_pct.store(next, Relaxed);
             true
-        } else if hit(&buttons[4]) {
+        } else if hit(&row_t[6]) {
             let pov = ctl.pov.load(Relaxed);
             ctl.pov.store(!pov, Relaxed);
             true
-        } else if hit(&buttons[5]) {
+        } else if hit(&row_t[7]) {
             ctl.exit.store(true, Relaxed);
             true
-        } else if hit(&track) {
+        } else if hit(&track)
+            || (cursor.0 >= track[0]
+                && cursor.0 <= track[0] + track[2]
+                && cursor.1 >= track[1] - 4.0
+                && cursor.1 <= track[1] + track[3] + 4.0)
+        {
             let frac = ((cursor.0 - track[0]) / track[2]).clamp(0.0, 1.0);
             ctl.request_seek((frac * d as f32) as u32);
             true
         } else {
-            hit(&bar)
+            hit(&panel)
         };
         if acted {
             self.audio.play_button_click();

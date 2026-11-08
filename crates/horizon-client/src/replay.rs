@@ -438,7 +438,9 @@ impl Control {
             seek_ms: AtomicU32::new(NO_SEEK),
             finished: AtomicBool::new(false),
             exit: AtomicBool::new(false),
-            pov: AtomicBool::new(true),
+            // Replay Studio opens in the free spectator camera, with the
+            // recorded player in view; POV is one tap away.
+            pov: AtomicBool::new(false),
         })
     }
     pub fn request_seek(&self, ms: u32) {

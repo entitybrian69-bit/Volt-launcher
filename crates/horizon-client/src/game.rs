@@ -7533,7 +7533,9 @@ impl Game<'_> {
         // the sleep overlay, debug screen and open screens still draw.
         let spectator = self.spectator();
         let (wi, hi) = (w as i32, h as i32);
-        let show_hud = !self.ui.hide_gui;
+        // Replay Studio hides the gameplay HUD entirely (crosshair, hotbar,
+        // bars): a replay is footage, not play.
+        let show_hud = !self.ui.hide_gui && self.replay_control().is_none();
         // max(Hud.leftHeight, Hud.rightHeight) after the bars: the item name and
         // the action bar sit above it.
         let mut bar_height = 39;
@@ -7606,6 +7608,15 @@ impl Game<'_> {
             });
             horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_extras(b));
             self.draw_mod_shapes(&mut batch);
+        }
+        // Replay Studio: the editor panel is the replay's whole interface,
+        // so it draws although the gameplay HUD above stayed hidden.
+        if !show_hud
+            && !self.ui.hide_gui
+            && self.title.is_none()
+            && self.replay_control().is_some()
+        {
+            horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_replay_hud(b));
         }
         if show_hud {
             // Hud.nextContextualInfoState: the jump bar, the experience bar or
@@ -12567,9 +12578,11 @@ impl Game<'_> {
     /// both hands in view space, converted to camera-relative world space.
     fn hand_geometry(&mut self, alpha: f64) -> Vec<Vertex> {
         let mut out = Vec::new();
-        // GameRenderer.renderItemInHand: F1 hides the hand with the HUD.
+        // GameRenderer.renderItemInHand: F1 hides the hand with the HUD;
+        // Replay Studio hides it too (the recording is watched, not played).
         if self.spectator()
             || self.ui.hide_gui
+            || self.replay_control().is_some()
             || self.sleeping.is_some()
             || !self.camera_type.first_person()
             || self
