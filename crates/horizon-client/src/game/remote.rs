@@ -660,7 +660,9 @@ impl Game<'_> {
             |a| (a.name.clone(), a.uuid),
         );
         let uuid = user.1;
-        self.server_packs_connect(local.is_none().then_some(address), user);
+        // Replays behave like a local world: no server pack prompts.
+        let packs_address = (local.is_none() && replay.is_none()).then_some(address);
+        self.server_packs_connect(packs_address, user);
         // Volt Replay: record the session when the setting is on; a replay
         // being watched is never itself recorded.
         let recorder = if replay.is_none() && self.settings.extras.volt_qol.replay_buffer {

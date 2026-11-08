@@ -537,7 +537,9 @@ impl Game<'_> {
                 if idle_ms > 10_000 {
                     limit = limit.min(cap);
                 }
-            } else if idle_ms > 45_000 {
+            } else if idle_ms > 45_000 && self.replay_control().is_none() {
+                // AFK drop, except while a replay plays: watching is
+                // hands-off by nature.
                 limit = limit.min(cap);
             }
         }
@@ -561,7 +563,9 @@ impl Game<'_> {
                 .as_millis() as i64;
             if !self.focused {
                 limit = limit.min(cap);
-            } else if now_ms.saturating_sub(latest_input_ms) > 35_000 {
+            } else if now_ms.saturating_sub(latest_input_ms) > 35_000
+                && self.replay_control().is_none()
+            {
                 limit = limit.min(cap.max(15));
             }
         }

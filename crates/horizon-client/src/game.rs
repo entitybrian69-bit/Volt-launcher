@@ -19475,6 +19475,7 @@ impl Loading {
         // StartupMenu owns world selection until it can hand it to Game.
         options.world = None;
         options.server = None;
+        options.replay = None;
         let gui = self.gui.take().ok_or("missing menu bundle")?;
         let window = self.window.clone().ok_or("window closed")?;
         let renderer_at = Instant::now();
