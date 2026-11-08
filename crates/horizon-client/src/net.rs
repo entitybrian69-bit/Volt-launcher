@@ -1374,6 +1374,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                None,
             ));
         });
         let ended = result
@@ -1421,6 +1422,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &root,
+                None,
             )
         });
         let mut server = Connection::local(server);
@@ -1489,6 +1491,7 @@ mod tests {
                 counters: Arc::new(Mutex::new(None)),
                 cookies: Cookies::default(),
                 debug: false,
+                recorder: None,
             };
             let started = std::time::Instant::now();
             if explicit_disconnect {
@@ -1537,6 +1540,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                None,
             )
         });
         let mut server = Connection::local(server);
@@ -1588,6 +1592,7 @@ mod tests {
             counters: Arc::new(Mutex::new(None)),
             cookies: Cookies::default(),
             debug: false,
+            recorder: None,
         };
         let (thread_writer, thread_configuring) =
             (session.writer.clone(), session.configuring.clone());
@@ -1600,6 +1605,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                None,
             )
         });
         let mut server = Connection::local(server);
@@ -1647,6 +1653,7 @@ mod tests {
                 &send,
                 &thread_cookies,
                 Path::new("."),
+                None,
             )
         });
         let mut server = Connection::local(server);
