@@ -1507,14 +1507,68 @@ impl Game<'_> {
         (bar, buttons, track)
     }
 
+    /// The second row above the playback bar: marker, keyframe, camera
+    /// path and MP4 export controls (MRK, <M, M>, KF+, CLR, PTH, REC).
+    pub(super) fn replay_hud_row2(bar: &[f32; 4]) -> [[f32; 4]; 7] {
+        let (bw, bh) = (30.0, 15.0);
+        let total = 7.0 * bw + 6.0 * 4.0;
+        let mut bx = bar[0] + (bar[2] - total) * 0.5;
+        let mut buttons = [[0.0f32; 4]; 7];
+        for rect in &mut buttons {
+            *rect = [bx, bar[1] - 34.0, bw, bh];
+            bx += bw + 4.0;
+        }
+        buttons
+    }
+
     /// The playback bar while a replay is being watched.
     fn draw_replay_hud(&mut self, batch: &mut HudBatch) {
         use std::sync::atomic::Ordering::Relaxed;
         let Some(ctl) = self.replay_control() else {
             return;
         };
+        let Some((markers, key_times, cam_path_on, exporting, hud_age, note)) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .map(|rp| {
+                (
+                    rp.markers.clone(),
+                    rp.cam_keys.iter().map(|k| k.ms).collect::<Vec<_>>(),
+                    rp.cam_path,
+                    rp.export.is_some(),
+                    rp.hud_touch.elapsed().as_secs_f32(),
+                    rp.note.clone(),
+                )
+            })
+        else {
+            return;
+        };
         let (w, h) = (batch.width, batch.height);
         let (bar, buttons, track) = Self::replay_hud_rects(w, h);
+        // While exporting, the bar hides itself so it is not burned into
+        // the video; a tap near it brings it back for a few seconds.
+        if exporting && hud_age > 3.0 {
+            let tag = "REC";
+            let tag_w = HudBatch::text_width(&self.gui.atlas, tag);
+            batch.fill(
+                &self.gui.atlas,
+                w - tag_w - 16.0,
+                8.0,
+                6.0,
+                6.0,
+                rgba(235, 80, 90, 235),
+            );
+            batch.text(
+                &self.gui.atlas,
+                tag,
+                w - tag_w - 6.0,
+                6.0,
+                rgba(235, 80, 90, 235),
+                true,
+            );
+            return;
+        }
         let t = ctl.time_ms.load(Relaxed);
         let d = ctl.duration_ms.load(Relaxed).max(1);
         let paused = ctl.paused.load(Relaxed);
@@ -1620,6 +1674,69 @@ impl Game<'_> {
             rgba(121, 229, 156, 235),
             true,
         );
+        // Markers (amber) and camera keyframes (green) as ticks on the track.
+        for m in &markers {
+            let x = track[0] + track[2] * (*m as f32 / d as f32).clamp(0.0, 1.0);
+            batch.fill(
+                &self.gui.atlas,
+                x - 1.0,
+                track[1] - 2.0,
+                2.0,
+                track[3] + 2.0,
+                rgba(255, 196, 64, 240),
+            );
+        }
+        for k in &key_times {
+            let x = track[0] + track[2] * (*k as f32 / d as f32).clamp(0.0, 1.0);
+            batch.fill(
+                &self.gui.atlas,
+                x - 1.0,
+                track[1] + track[3] - 3.0,
+                2.0,
+                5.0,
+                rgba(121, 229, 156, 240),
+            );
+        }
+        // The second row: markers, camera keyframes, path and export.
+        let kf_label = format!("KF{}", key_times.len().min(99));
+        let row2 = Self::replay_hud_row2(&bar);
+        let labels2: [&str; 7] = ["MRK", "<M", "M>", &kf_label, "CLR", "PTH", "REC"];
+        for (i, (rect, label)) in row2.iter().zip(labels2).enumerate() {
+            let fill = match i {
+                5 if cam_path_on => rgba(42, 92, 62, 240),
+                6 if exporting => rgba(118, 34, 42, 240),
+                _ => rgba(28, 36, 52, 235),
+            };
+            batch.fill(&self.gui.atlas, rect[0], rect[1], rect[2], rect[3], fill);
+            let color = match i {
+                5 if cam_path_on => rgba(121, 229, 156, 255),
+                6 if exporting => rgba(255, 120, 130, 255),
+                _ => rgba(235, 240, 250, 255),
+            };
+            let tw = HudBatch::text_width(&self.gui.atlas, label);
+            batch.text(
+                &self.gui.atlas,
+                label,
+                rect[0] + ((rect[2] - tw) * 0.5).max(1.0),
+                rect[1] + 4.0,
+                color,
+                true,
+            );
+        }
+        // Status notes (marker added, keyframe saved, export outcome).
+        if let Some((text, at)) = &note
+            && at.elapsed().as_secs_f32() < 5.0
+        {
+            let tw = HudBatch::text_width(&self.gui.atlas, text);
+            batch.text(
+                &self.gui.atlas,
+                text,
+                bar[0] + ((bar[2] - tw) * 0.5).max(0.0),
+                bar[1] - 46.0,
+                rgba(255, 228, 160, 245),
+                true,
+            );
+        }
     }
 
     /// Taps on the replay playback bar.
@@ -1639,9 +1756,47 @@ impl Game<'_> {
         let hit = |r: &[f32; 4]| {
             cursor.0 >= r[0] && cursor.0 <= r[0] + r[2] && cursor.1 >= r[1] && cursor.1 <= r[1] + r[3]
         };
+        // While exporting, the hidden bar comes back with one tap near it
+        // (and that tap does nothing else).
+        if let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) {
+            if rp.export.is_some() && rp.hud_touch.elapsed().as_secs_f32() > 3.0 {
+                let near = cursor.0 >= bar[0]
+                    && cursor.0 <= bar[0] + bar[2]
+                    && cursor.1 >= bar[1] - 40.0
+                    && cursor.1 <= bar[1] + bar[3];
+                if near {
+                    rp.hud_touch = std::time::Instant::now();
+                    return true;
+                }
+                return false;
+            }
+            rp.hud_touch = std::time::Instant::now();
+        }
+        let row2 = Self::replay_hud_row2(&bar);
         let t = ctl.time_ms.load(Relaxed);
         let d = ctl.duration_ms.load(Relaxed);
-        let acted = if hit(&buttons[0]) {
+        let acted = if hit(&row2[0]) {
+            self.replay_toggle_marker();
+            true
+        } else if hit(&row2[1]) {
+            self.replay_jump_marker(false);
+            true
+        } else if hit(&row2[2]) {
+            self.replay_jump_marker(true);
+            true
+        } else if hit(&row2[3]) {
+            self.replay_add_keyframe();
+            true
+        } else if hit(&row2[4]) {
+            self.replay_clear_keyframes();
+            true
+        } else if hit(&row2[5]) {
+            self.replay_toggle_path();
+            true
+        } else if hit(&row2[6]) {
+            self.replay_toggle_export();
+            true
+        } else if hit(&buttons[0]) {
             ctl.request_seek(t.saturating_sub(10_000));
             true
         } else if hit(&buttons[1]) {
@@ -1680,6 +1835,284 @@ impl Game<'_> {
             self.audio.play_button_click();
         }
         acted
+    }
+
+    /// Puts a status line above the playback bar for a few seconds.
+    fn replay_note(&mut self, text: String) {
+        if let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) {
+            rp.note = Some((text, std::time::Instant::now()));
+        }
+    }
+
+    /// MRK: drops a marker at the playhead, or removes the one within a
+    /// second of it. Markers persist in the replay's sidecar.
+    fn replay_toggle_marker(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        let t = ctl.time_ms.load(Relaxed);
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        let note = if let Some(i) = rp.markers.iter().position(|m| m.abs_diff(t) < 1000) {
+            rp.markers.remove(i);
+            "Marker removed.".to_string()
+        } else {
+            rp.markers.push(t);
+            rp.markers.sort_unstable();
+            format!(
+                "Marker at {}.",
+                horizon_client::replay::format_time(t)
+            )
+        };
+        horizon_client::replay::save_sidecar(&rp.path, &rp.markers, &rp.cam_keys);
+        rp.note = Some((note, std::time::Instant::now()));
+    }
+
+    /// `<M` / `M>`: seek to the previous or next marker.
+    fn replay_jump_marker(&mut self, forward: bool) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        let t = ctl.time_ms.load(Relaxed);
+        let target = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .and_then(|rp| {
+                if forward {
+                    rp.markers.iter().find(|&&m| m > t.saturating_add(500)).copied()
+                } else {
+                    rp.markers
+                        .iter()
+                        .rev()
+                        .find(|&&m| m.saturating_add(500) < t)
+                        .copied()
+                }
+            });
+        match target {
+            Some(m) => ctl.request_seek(m),
+            None => self.replay_note(if forward {
+                "No marker ahead.".to_string()
+            } else {
+                "No marker behind.".to_string()
+            }),
+        }
+    }
+
+    /// KF+: saves the free camera's position, angles and the playhead as a
+    /// keyframe (within half a second of an old one, it replaces it).
+    fn replay_add_keyframe(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        if ctl.pov.load(Relaxed) {
+            self.replay_note("Keyframes are placed in CAM view.".to_string());
+            return;
+        }
+        let t = ctl.time_ms.load(Relaxed);
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
+        let key = horizon_client::replay::CamKey {
+            ms: t,
+            pos: [player.position.x, player.position.y, player.position.z],
+            yaw: self.yaw,
+            pitch: self.pitch,
+        };
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        let note = match rp.cam_keys.iter().position(|k| k.ms.abs_diff(t) < 500) {
+            Some(i) => {
+                rp.cam_keys[i] = key;
+                format!(
+                    "Keyframe {} updated at {}.",
+                    i + 1,
+                    horizon_client::replay::format_time(t)
+                )
+            }
+            None => {
+                rp.cam_keys.push(key);
+                rp.cam_keys.sort_by_key(|k| k.ms);
+                format!(
+                    "Keyframe {} at {} (2+ make a path).",
+                    rp.cam_keys.len(),
+                    horizon_client::replay::format_time(t)
+                )
+            }
+        };
+        horizon_client::replay::save_sidecar(&rp.path, &rp.markers, &rp.cam_keys);
+        rp.note = Some((note, std::time::Instant::now()));
+    }
+
+    /// CLR: forgets the camera path.
+    fn replay_clear_keyframes(&mut self) {
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        if rp.cam_keys.is_empty() {
+            rp.note = Some(("No keyframes to clear.".to_string(), std::time::Instant::now()));
+            return;
+        }
+        rp.cam_keys.clear();
+        rp.cam_path = false;
+        horizon_client::replay::save_sidecar(&rp.path, &rp.markers, &rp.cam_keys);
+        rp.note = Some(("Camera path cleared.".to_string(), std::time::Instant::now()));
+    }
+
+    /// PTH: the free camera rides the keyframe path; the timeline drives it
+    /// (seek to scrub, change speed for a timelapse, pause to hold).
+    fn replay_toggle_path(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) else {
+            return;
+        };
+        if rp.cam_path {
+            rp.cam_path = false;
+            rp.note = Some((
+                "Camera path off: free flight.".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+        if rp.cam_keys.len() < 2 {
+            rp.note = Some((
+                "Place at least 2 keyframes (KF) first.".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+        ctl.pov.store(false, Relaxed);
+        rp.cam_path = true;
+        rp.note = Some((
+            "Camera path on: the camera follows your keyframes.".to_string(),
+            std::time::Instant::now(),
+        ));
+    }
+
+    /// REC: starts or stops recording playback into an MP4 next to the
+    /// replay (`replays/exports/`). The playback clock stamps the frames,
+    /// so the video runs at the chosen speed regardless of render rate.
+    fn replay_toggle_export(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        // A tap while recording stops and finalizes.
+        let stopping = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .is_some_and(|rp| rp.export.is_some());
+        if stopping {
+            self.replay_finish_export();
+            return;
+        }
+        let Some(ctl) = self.replay_control() else {
+            return;
+        };
+        let Some(out) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .map(|rp| {
+                let stem = rp
+                    .path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "replay".to_string());
+                let dir = rp
+                    .path
+                    .parent()
+                    .map(|p| p.join("exports"))
+                    .unwrap_or_else(|| std::path::PathBuf::from("exports"));
+                let t = ctl.time_ms.load(Relaxed);
+                dir.join(format!(
+                    "{stem}-{}.mp4",
+                    horizon_client::replay::format_time(t).replace(':', ".")
+                ))
+            })
+        else {
+            return;
+        };
+        let exporter = super::video_export::Exporter::start(out);
+        let Some(sender) = exporter.sender() else {
+            self.replay_note("Export could not start.".to_string());
+            return;
+        };
+        // The capture closure runs inside the renderer, right after each
+        // frame is read back: it stamps frames with the playback clock.
+        let control = ctl.clone();
+        let mut last_t: Option<u32> = None;
+        let mut pts_us: i64 = 0;
+        let sink = move |size: [u32; 2], bgra: bool, pixels: Vec<[u8; 4]>| {
+            if control.paused.load(Relaxed) {
+                return;
+            }
+            let t = control.time_ms.load(Relaxed);
+            if let Some(prev) = last_t {
+                if t <= prev {
+                    return;
+                }
+                let speed = control.speed_pct.load(Relaxed).clamp(1, 10_000) as i64;
+                pts_us += i64::from(t - prev) * 1000 * 100 / speed;
+            }
+            last_t = Some(t);
+            let _ = sender.try_send(super::video_export::Frame {
+                size,
+                bgra,
+                pts_us,
+                pixels,
+            });
+        };
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.video_sink = Some(Box::new(sink));
+        } else {
+            self.replay_note("Export needs the renderer.".to_string());
+            return;
+        }
+        if let Some(rp) = self.remote.as_mut().and_then(|r| r.replay.as_mut()) {
+            rp.export = Some(exporter);
+            rp.hud_touch = std::time::Instant::now();
+        }
+        self.replay_note("Recording MP4... tap REC to stop.".to_string());
+    }
+
+    /// Uninstalls the capture and finalizes the MP4; the outcome goes to
+    /// the note line.
+    fn replay_finish_export(&mut self) {
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.video_sink = None;
+        }
+        let note = self
+            .remote
+            .as_mut()
+            .and_then(|r| r.replay.as_mut())
+            .and_then(|rp| rp.export.take())
+            .map(|mut e| e.finish());
+        if let Some(note) = note {
+            self.replay_note(note);
+        }
+    }
+
+    /// Ends an export when playback finishes or the viewer leaves.
+    pub(super) fn replay_export_tick(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let ended = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.replay.as_ref())
+            .is_some_and(|rp| {
+                rp.export.is_some()
+                    && (rp.control.finished.load(Relaxed) || rp.control.exit.load(Relaxed))
+            });
+        if ended {
+            self.replay_finish_export();
+        }
     }
 
     /// Handles touch/mouse press on the HUD Push-to-Talk `[MIC]` button.

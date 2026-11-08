@@ -2621,6 +2621,10 @@ impl OptionsUi {
                     Row::Header("to this instance's replays folder."),
                     Row::Header("Playback: timeline with seeking, pause, 0.25x-8x speed,"),
                     Row::Header("POV or a free camera that shows you in third person."),
+                    Row::Header("On the bar's second row: MRK timeline markers,"),
+                    Row::Header("KF+ camera keyframes, PTH flies their spline path"),
+                    Row::Header("(speed up for a timelapse), REC exports an MP4"),
+                    Row::Header("to replays/exports \u{2014} all on-device."),
                     Row::Header("Watch a replay \u{2014} it plays right here, in the game:"),
                 ];
                 if s.replays.is_empty() {

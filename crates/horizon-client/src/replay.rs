@@ -156,6 +156,133 @@ pub fn list(dir: &Path) -> Vec<Meta> {
     out
 }
 
+/// A free-camera keyframe: where the camera stands at `ms` of the
+/// recording. The path between keyframes is a Catmull-Rom spline, so the
+/// camera glides through them instead of turning corners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CamKey {
+    pub ms: u32,
+    pub pos: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// `foo.vrpl` -> `foo.vmeta`: the sidecar that keeps the replay's timeline
+/// markers and camera keyframes between sessions.
+pub fn sidecar_path(replay: &Path) -> PathBuf {
+    replay.with_extension("vmeta")
+}
+
+/// Reads the sidecar: `m <ms>` marker lines and
+/// `k <ms> <x> <y> <z> <yaw> <pitch>` keyframe lines, sorted.
+pub fn load_sidecar(replay: &Path) -> (Vec<u32>, Vec<CamKey>) {
+    let mut markers = Vec::new();
+    let mut keys: Vec<CamKey> = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(sidecar_path(replay)) {
+        for line in text.lines() {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            match fields.as_slice() {
+                ["m", ms] => {
+                    if let Ok(ms) = ms.parse() {
+                        markers.push(ms);
+                    }
+                }
+                ["k", ms, x, y, z, yaw, pitch] => {
+                    if let (Ok(ms), Ok(x), Ok(y), Ok(z), Ok(yaw), Ok(pitch)) = (
+                        ms.parse(),
+                        x.parse(),
+                        y.parse(),
+                        z.parse(),
+                        yaw.parse(),
+                        pitch.parse(),
+                    ) {
+                        keys.push(CamKey {
+                            ms,
+                            pos: [x, y, z],
+                            yaw,
+                            pitch,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    markers.sort_unstable();
+    markers.dedup();
+    keys.sort_by_key(|k| k.ms);
+    (markers, keys)
+}
+
+/// Writes the sidecar; removes it when there is nothing left to keep.
+pub fn save_sidecar(replay: &Path, markers: &[u32], keys: &[CamKey]) {
+    let path = sidecar_path(replay);
+    if markers.is_empty() && keys.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    let mut text = String::new();
+    for m in markers {
+        text.push_str(&format!("m {m}\n"));
+    }
+    for k in keys {
+        text.push_str(&format!(
+            "k {} {} {} {} {} {}\n",
+            k.ms, k.pos[0], k.pos[1], k.pos[2], k.yaw, k.pitch
+        ));
+    }
+    let _ = std::fs::write(path, text);
+}
+
+/// The shortest way around from angle `a` to `b`, `f` of the way there.
+pub fn angle_lerp(a: f32, b: f32, f: f32) -> f32 {
+    let mut d = (b - a) % 360.0;
+    if d > 180.0 {
+        d -= 360.0;
+    }
+    if d < -180.0 {
+        d += 360.0;
+    }
+    a + d * f
+}
+
+fn catmull(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
+    0.5 * (2.0 * p1
+        + (p2 - p0) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
+        + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t)
+}
+
+/// Where the camera path puts the camera at `t` ms of the recording:
+/// a Catmull-Rom spline through the keyframes' positions (ends clamped)
+/// with shortest-arc interpolated angles. Before the first keyframe the
+/// camera waits there; after the last it stays there.
+pub fn sample_cam_path(keys: &[CamKey], t: u32) -> Option<([f64; 3], f32, f32)> {
+    let (first, last) = (keys.first()?, keys.last()?);
+    if t <= first.ms || keys.len() == 1 {
+        return Some((first.pos, first.yaw, first.pitch));
+    }
+    if t >= last.ms {
+        return Some((last.pos, last.yaw, last.pitch));
+    }
+    let i = keys.iter().position(|k| k.ms > t)?.max(1) - 1;
+    let (a, b) = (keys[i], keys[i + 1]);
+    let f = f64::from(t - a.ms) / f64::from((b.ms - a.ms).max(1));
+    let p0 = keys[i.saturating_sub(1)].pos;
+    let p3 = keys[(i + 2).min(keys.len() - 1)].pos;
+    let pos = [
+        catmull(p0[0], a.pos[0], b.pos[0], p3[0], f),
+        catmull(p0[1], a.pos[1], b.pos[1], p3[1], f),
+        catmull(p0[2], a.pos[2], b.pos[2], p3[2], f),
+    ];
+    let fa = f as f32;
+    Some((
+        pos,
+        angle_lerp(a.yaw, b.yaw, fa),
+        a.pitch + (b.pitch - a.pitch) * fa,
+    ))
+}
+
 /// `12:34` / `1:02:34` for the lists and the playback bar.
 pub fn format_time(ms: u32) -> String {
     let s = ms / 1000;

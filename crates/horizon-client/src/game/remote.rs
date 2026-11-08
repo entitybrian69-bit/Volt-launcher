@@ -273,15 +273,39 @@ pub(super) struct ReplayUi {
     pub(super) body: bool,
     /// The mode `replay_frame` last saw, to notice POV <-> free camera flips.
     pub(super) was_pov: bool,
+    /// The `.vrpl` being watched; markers and camera keyframes persist in
+    /// its `.vmeta` sidecar.
+    pub(super) path: std::path::PathBuf,
+    /// Timeline markers (ms), sorted.
+    pub(super) markers: Vec<u32>,
+    /// Free-camera keyframes, sorted by time.
+    pub(super) cam_keys: Vec<horizon_client::replay::CamKey>,
+    /// The free camera rides the keyframe path instead of the sticks.
+    pub(super) cam_path: bool,
+    /// An MP4 export in progress.
+    pub(super) export: Option<super::video_export::Exporter>,
+    /// A short status line drawn above the playback bar.
+    pub(super) note: Option<(String, std::time::Instant)>,
+    /// When the playback bar was last touched; while exporting it hides
+    /// itself a few seconds later so it is not burned into the video.
+    pub(super) hud_touch: std::time::Instant,
 }
 
 impl ReplayUi {
-    fn new(control: Arc<horizon_client::replay::Control>) -> Self {
+    fn new(control: Arc<horizon_client::replay::Control>, path: std::path::PathBuf) -> Self {
+        let (markers, cam_keys) = horizon_client::replay::load_sidecar(&path);
         Self {
             control,
             poses: Default::default(),
             body: false,
             was_pov: true,
+            path,
+            markers,
+            cam_keys,
+            cam_path: false,
+            export: None,
+            note: None,
+            hud_touch: std::time::Instant::now(),
         }
     }
 }
@@ -676,6 +700,7 @@ impl Game<'_> {
             None
         };
         let mut replay_control = None;
+        let replay_path = replay.clone().unwrap_or_default();
         let session = if let Some(path) = replay {
             let (session, control) =
                 Session::replay(&path).ok_or("This file is not a Volt replay.")?;
@@ -867,7 +892,7 @@ impl Game<'_> {
             show_death_screen: true,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
-            replay: replay_control.map(ReplayUi::new),
+            replay: replay_control.map(|control| ReplayUi::new(control, replay_path)),
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -896,6 +921,11 @@ impl Game<'_> {
     pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
         if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
             return self.begin_closing_save(false);
+        }
+        // Volt Replay: stop capturing before the session (and with it the
+        // MP4 exporter, which finalizes its file on drop) goes away.
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.video_sink = None;
         }
         self.finish_perf();
         if reason.is_none() {
@@ -1434,6 +1464,7 @@ impl Game<'_> {
     /// back what follows it.
     pub(super) fn poll_remote(&mut self) -> Result<()> {
         self.replay_frame();
+        self.replay_export_tick();
         let Some(r) = self.remote.as_mut() else {
             return Ok(());
         };
@@ -5091,6 +5122,14 @@ impl Game<'_> {
                 None => poses.back().map(|&(_, p, yaw, pitch)| (p, yaw, pitch)),
             }
         };
+        // Camera path playback: the free camera glides through the user's
+        // keyframes, parameterized by the replay clock (so pause, speed and
+        // seeking steer the flight too — speed up for a timelapse).
+        let path_cam = if !pov && rp.cam_path {
+            horizon_client::replay::sample_cam_path(&rp.cam_keys, t)
+        } else {
+            None
+        };
         let body = rp.body;
         let profile = (r.profile, r.profile_name.clone());
         let recorded_mode = r.game_mode;
@@ -5122,6 +5161,16 @@ impl Game<'_> {
             if switched {
                 // Free camera: spectator flight, through walls, unseen.
                 self.set_mode_id(3);
+            }
+            // The keyframe path drives the camera even while the pose
+            // buffer is still refilling (right after a seek).
+            if let Some((p, yaw, pitch)) = path_cam {
+                if let Some(player) = self.player.as_mut() {
+                    player.position = Vec3::new(p[0], p[1], p[2]);
+                    player.velocity = Vec3::ZERO;
+                }
+                self.yaw = yaw;
+                self.pitch = pitch;
             }
             let Some((p, yaw, pitch)) = pose else { return };
             if !body {

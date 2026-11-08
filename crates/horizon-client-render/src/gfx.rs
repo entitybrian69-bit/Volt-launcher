@@ -743,6 +743,11 @@ pub struct Renderer {
     pub screenshot: Option<ScreenshotRequest>,
     /// Outcome of the last screenshot: frame size, or the error.
     pub screenshot_result: Option<std::result::Result<[u32; 2], String>>,
+    /// Volt Replay's MP4 export: while set, every frame is read back after
+    /// the GUI has drawn and handed over as `(size, bgra, pixels)` —
+    /// tightly packed rows of 4-byte pixels, red and blue swapped when
+    /// `bgra` is true.
+    pub video_sink: Option<Box<dyn FnMut([u32; 2], bool, Vec<[u8; 4]>) + Send>>,
     /// Brightness option (lightmap gamma), 0..1.
     pub gamma: f32,
     /// Optional full-light lightmap (Horizon Extras).
@@ -3440,6 +3445,7 @@ impl Renderer {
             started: Instant::now(),
             screenshot: None,
             screenshot_result: None,
+            video_sink: None,
             gamma: 0.5,
             improved_transparency: false,
             oit: None,
@@ -7207,6 +7213,18 @@ impl Renderer {
                 .take()
                 .and_then(|request| self.take_readback(request, &mut encoder, &target_texture))
         });
+        // Volt Replay's MP4 export grabs the finished frame, GUI included,
+        // the same way a full screenshot does.
+        let video_frame = (self.video_sink.is_some()
+            && self.config.format.block_copy_size(None) == Some(4))
+        .then(|| {
+            copy_frame(
+                &self.device,
+                &mut encoder,
+                &target_texture,
+                [self.config.width, self.config.height],
+            )
+        });
         self.uploads.finish(&encoder);
         if has_section_copies {
             self.section_copy_bytes = 0;
@@ -7290,6 +7308,20 @@ impl Renderer {
                 self.write_screenshot(&request, &buffer)
                     .map_err(|e| e.to_string()),
             );
+        }
+        if let Some(buffer) = video_frame {
+            let bgra = matches!(
+                self.config.format.remove_srgb_suffix(),
+                wgpu::TextureFormat::Bgra8Unorm
+            );
+            match self.read_frame(&buffer) {
+                Ok(pixels) => {
+                    if let Some(sink) = &mut self.video_sink {
+                        sink([self.config.width, self.config.height], bgra, pixels);
+                    }
+                }
+                Err(e) => log::warn!("Horizon renderer: video export frame: {e}"),
+            }
         }
         let present = Instant::now();
         if let Some(surface_frame) = surface_frame {

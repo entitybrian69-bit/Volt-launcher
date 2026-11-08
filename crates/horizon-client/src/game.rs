@@ -296,6 +296,7 @@ mod tutorial;
 mod tweaks;
 mod ui_control;
 mod vault;
+mod video_export;
 mod villagers;
 mod wandering_trader;
 mod win;
