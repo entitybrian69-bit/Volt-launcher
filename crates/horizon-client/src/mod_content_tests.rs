@@ -1510,6 +1510,11 @@ fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
     let mut placements = 0;
     let mut features = 0;
     for file in &m.content.files {
+        // Tag files (data/<ns>/tags/...) take build()'s tag path, exactly
+        // as its is_tag check routes them.
+        if file.starts_with("data/") && file.contains("/tags/") {
+            continue;
+        }
         let Some((bundle, id)) = worldgen_entry(file) else {
             continue;
         };
