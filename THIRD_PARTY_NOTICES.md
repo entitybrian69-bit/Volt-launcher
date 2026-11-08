@@ -1443,9 +1443,15 @@ content mod v1.0.0 by the Biomes Unseen Contributors (MIT), built from
 [entitybrian69-bit/Rust-store-](https://github.com/entitybrian69-bit/Rust-store-)
 (branch `arena/c34de59d-rust-store`, `releases/biomes_unseen.hmod`), with the
 placement type `minecraft:surface_heightmap` corrected to vanilla's
-`minecraft:heightmap` in its 24 placed-feature files, and the unsupported
-`data/biomes_unseen/horizon/creative_tab/biomes_unseen_tab.json` removed
-(this engine's `data/<ns>/horizon/` validation accepts `block/`, `item/`
-and `mob_effect/` declarations only; the blocks and items themselves are
-unaffected). Its textures are original procedural pixel art; no
-Biomes O' Plenty assets are included.
+`minecraft:heightmap` in its 24 placed-feature files, and its block and
+item declarations normalized to this engine's schema (validation itself
+is unchanged): the unsupported
+`data/biomes_unseen/horizon/creative_tab/biomes_unseen_tab.json` was
+removed (`data/<ns>/horizon/` accepts `block/`, `item/` and `mob_effect/`
+only), `properties.resistance` was renamed to the engine's
+`explosion_resistance` in all 176 block files, generator-only `wood_type`
+/ `wall_block` keys were dropped from the 24 sign blocks, and
+`minecraft:max_stack_size` / `minecraft:rarity` component patches were
+moved to the engine's dedicated `max_stack_size` / `rarity` fields in 29
+item files. No gameplay values were altered. Its textures are original
+procedural pixel art; no Biomes O' Plenty assets are included.
