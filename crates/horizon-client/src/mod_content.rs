@@ -1152,6 +1152,131 @@ fn append_climates(text: &str, preset: &str, entries: &[&ClimateEntry]) -> Resul
     Ok(serde_json::to_string(&table)?)
 }
 
+/// The client's creative inventory export (`crate::creative::Creative::load`
+/// reads it from the root): [`build`] adds every mod item so the creative
+/// screens offer them.
+const CREATIVE: &str = "creative-inventory.json";
+
+/// The item id leading a `creative-inventory.json` stack string
+/// (`minecraft:oak_planks`, possibly followed by SNBT components).
+fn stack_item(snbt: &str) -> &str {
+    let end = snbt
+        .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "_.:/-".contains(c)))
+        .unwrap_or(snbt.len());
+    &snbt[..end]
+}
+
+/// Mod items join the creative inventory export: each appears in every
+/// CATEGORY tab holding its vanilla template item, right after it, and in
+/// the SEARCH tab (after the template, or appended when the template is
+/// not listed) under its id-derived name. `entries` are `(mod item id,
+/// vanilla template item id)` in registry order. The per-item arrays a
+/// SEARCH tab carries (`lines`, `tags`) and every tab's
+/// `permissions_only` indices stay aligned with the items.
+fn append_creative(doc: &mut J, entries: &[(String, String)]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let Some(J::Arr(tabs)) = doc.get_mut("tabs") else {
+        return vec![format!("{CREATIVE}: no tabs; mod items not added")];
+    };
+    let mut in_category: BTreeSet<usize> = BTreeSet::new();
+    let mut in_search: BTreeSet<usize> = BTreeSet::new();
+    for tab in tabs.iter_mut() {
+        let kind = match tab.get("type") {
+            Some(J::Str(s)) => s.clone(),
+            _ => continue,
+        };
+        if kind != "CATEGORY" && kind != "SEARCH" {
+            continue;
+        }
+        let search = kind == "SEARCH";
+        let Some(J::Arr(items)) = tab.get("items") else {
+            continue;
+        };
+        let old: Vec<String> = items
+            .iter()
+            .map(|v| match v {
+                J::Str(s) => stack_item(s).to_owned(),
+                _ => String::new(),
+            })
+            .collect();
+        // The new item list: Ok(old index) kept, Err(entry index) inserted.
+        let mut slots: Vec<std::result::Result<usize, usize>> = Vec::new();
+        for (i, id) in old.iter().enumerate() {
+            slots.push(Ok(i));
+            // Only the template's first listing takes the mod items.
+            if id.is_empty() || old[..i].contains(id) {
+                continue;
+            }
+            for (k, (_, from)) in entries.iter().enumerate() {
+                if from == id {
+                    slots.push(Err(k));
+                    (if search { &mut in_search } else { &mut in_category }).insert(k);
+                }
+            }
+        }
+        if search {
+            for (k, (to, _)) in entries.iter().enumerate() {
+                if in_search.insert(k) {
+                    slots.push(Err(k));
+                    warnings.push(format!(
+                        "{CREATIVE}: {to}: its template is not in the search tab; appended at its end"
+                    ));
+                }
+            }
+        }
+        if slots.len() == old.len() {
+            continue;
+        }
+        // Rebuild the arrays that align with the items.
+        let name = |k: usize| {
+            let (to, _) = &entries[k];
+            to.split(':').next_back().unwrap_or(to).replace('_', " ")
+        };
+        for key in ["items", "lines", "tags"] {
+            let Some(J::Arr(a)) = tab.get_mut(key) else {
+                continue;
+            };
+            if key != "items" && a.len() != old.len() {
+                continue;
+            }
+            let mut rebuilt = Vec::with_capacity(slots.len());
+            for slot in &slots {
+                rebuilt.push(match (key, slot) {
+                    (_, Ok(i)) => a[*i].clone(),
+                    ("items", Err(k)) => J::Str(entries[*k].0.clone()),
+                    ("lines", Err(k)) => J::Arr(vec![J::Str(name(*k))]),
+                    (_, Err(_)) => J::Arr(Vec::new()),
+                });
+            }
+            *a = rebuilt;
+        }
+        // The operator-only indices move with the items they point at.
+        let position: BTreeMap<usize, usize> = slots
+            .iter()
+            .enumerate()
+            .filter_map(|(new, slot)| slot.ok().map(|old| (old, new)))
+            .collect();
+        if let Some(J::Arr(only)) = tab.get_mut("permissions_only") {
+            for v in only.iter_mut() {
+                if let J::Num(n) = v
+                    && let Some(old_index) = n.as_u64()
+                    && let Some(new_index) = position.get(&(old_index as usize))
+                {
+                    *n = (*new_index as u64).into();
+                }
+            }
+        }
+    }
+    for (k, (to, from)) in entries.iter().enumerate() {
+        if !in_category.contains(&k) {
+            warnings.push(format!(
+                "{CREATIVE}: {to}: template {from} is in no category tab; search only"
+            ));
+        }
+    }
+    warnings
+}
+
 /// A mod file that adds to a worldgen bundle: (bundle, id).
 fn worldgen_entry(file: &str) -> Option<(&'static str, String)> {
     let (ns, rest) = file.strip_prefix("data/")?.split_once("/worldgen/")?;
@@ -1693,6 +1818,25 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             doc.set(preset, J::Str(table));
         }
         overlay.write(PRESETS, &serde_json::to_vec(&doc)?)?;
+    }
+    // Mod items join the creative screens: each next to its vanilla
+    // template item (`crate::creative::Creative::load` reads the export
+    // from the root).
+    if !plan.items.is_empty() {
+        if base.join(CREATIVE).exists() {
+            let mut doc = read_json(&base.join(CREATIVE))?;
+            let entries: Vec<(String, String)> = plan
+                .items
+                .iter()
+                .map(|i| (i.rename.to.clone(), i.rename.from.clone()))
+                .collect();
+            warnings.extend(append_creative(&mut doc, &entries));
+            overlay.write(CREATIVE, &serde_json::to_vec(&doc)?)?;
+        } else {
+            warnings.push(format!(
+                "{CREATIVE} is not in the base: mod items stay out of the creative screens"
+            ));
+        }
     }
     // The commands suggest ids from `command-registries.json`: add the
     // structures, pools, sets and features the mods bring.

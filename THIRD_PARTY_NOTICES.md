@@ -1439,19 +1439,15 @@ license in the repository's `LICENSE` file.
 ## Test fixtures
 
 `crates/horizon-client/testdata/biomes_unseen.hmod` is the Biomes Unseen
-content mod v1.0.0 by the Biomes Unseen Contributors (MIT), built from
+content mod v1.0.0 by the Biomes Unseen Contributors (MIT). It is built,
+byte-for-byte reproducibly, by `scripts/generate_biomes_unseen.py` — a port
+of the generator from
 [entitybrian69-bit/Rust-store-](https://github.com/entitybrian69-bit/Rust-store-)
-(branch `arena/c34de59d-rust-store`, `releases/biomes_unseen.hmod`), with the
-placement type `minecraft:surface_heightmap` corrected to vanilla's
-`minecraft:heightmap` in its 24 placed-feature files, and its block and
-item declarations normalized to this engine's schema (validation itself
-is unchanged): the unsupported
-`data/biomes_unseen/horizon/creative_tab/biomes_unseen_tab.json` was
-removed (`data/<ns>/horizon/` accepts `block/`, `item/` and `mob_effect/`
-only), `properties.resistance` was renamed to the engine's
-`explosion_resistance` in all 176 block files, generator-only `wood_type`
-/ `wall_block` keys were dropped from the 24 sign blocks, and
-`minecraft:max_stack_size` / `minecraft:rarity` component patches were
-moved to the engine's dedicated `max_stack_size` / `rarity` fields in 29
-item files. No gameplay values were altered. Its textures are original
-procedural pixel art; no Biomes O' Plenty assets are included.
+(branch `arena/c34de59d-rust-store`, `scripts/generate_biomes_unseen.py`)
+with every fix this repository's CI required baked in (engine schema field
+names, no unsupported `creative_tab` declaration, vanilla
+`minecraft:heightmap` placements, and `assets/<ns>/items/` client item
+definitions; the script's header documents each change). No gameplay values
+were altered relative to the upstream release. Its textures are original
+procedural pixel art; no Biomes O' Plenty assets are included. The same
+file ships as the `biomes_unseen.hmod` asset on GitHub releases.

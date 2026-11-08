@@ -1583,3 +1583,216 @@ fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
     }
     assert_eq!((overworld.len(), nether.len()), (39, 5));
 }
+
+/// Every Biomes Unseen block and item ships complete client assets — a
+/// blockstate whose models exist, model chains that resolve to real
+/// textures, an `items/<name>.json` client item definition and an English
+/// name — and `append_creative` places every item in the creative
+/// category and search tabs next to its vanilla template.
+#[test]
+fn biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries() {
+    use horizon_assets::item_model::ClientItem;
+    use horizon_mods::{Content, Package};
+    use serde_json::Value;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::Path;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    let content = Content::read(&path, &package.manifest).unwrap();
+    let files: BTreeSet<&str> = content.files.iter().map(String::as_str).collect();
+    let mut reader = content.reader().unwrap();
+    let mut read = |file: &str| -> Value {
+        serde_json::from_slice(&reader.read(file).unwrap())
+            .unwrap_or_else(|e| panic!("{file}: {e}"))
+    };
+    // The declarations: block path -> (template, has an item), item path -> template.
+    let mut blocks: BTreeMap<String, (String, bool)> = BTreeMap::new();
+    let mut items: BTreeMap<String, String> = BTreeMap::new();
+    for file in &content.files {
+        if let Some(p) = file
+            .strip_prefix("data/biomes_unseen/horizon/block/")
+            .and_then(|p| p.strip_suffix(".json"))
+        {
+            let d = read(file);
+            let template = d["template"].as_str().unwrap().to_owned();
+            let item = d["item"].as_bool().unwrap_or(true);
+            blocks.insert(p.to_owned(), (template, item));
+        } else if let Some(p) = file
+            .strip_prefix("data/biomes_unseen/horizon/item/")
+            .and_then(|p| p.strip_suffix(".json"))
+        {
+            items.insert(p.to_owned(), read(file)["template"].as_str().unwrap().to_owned());
+        }
+    }
+    assert_eq!((blocks.len(), items.len()), (176, 29));
+    // Every model of the mod: parents and declared textures must exist.
+    let mut models: BTreeMap<String, Value> = BTreeMap::new();
+    let mut textures = 0;
+    for file in &content.files {
+        if let Some(p) = file
+            .strip_prefix("assets/biomes_unseen/models/")
+            .and_then(|p| p.strip_suffix(".json"))
+        {
+            models.insert(format!("biomes_unseen:{p}"), read(file));
+        } else if file.starts_with("assets/biomes_unseen/textures/") && file.ends_with(".png") {
+            textures += 1;
+        }
+    }
+    for (id, model) in &models {
+        if let Some(parent) = model["parent"].as_str()
+            && let Some(p) = parent.strip_prefix("biomes_unseen:")
+        {
+            assert!(models.contains_key(parent), "{id}: parent {p} missing");
+        }
+        for (slot, value) in model["textures"].as_object().into_iter().flatten() {
+            let t = value.as_str().unwrap_or_default();
+            if let Some(p) = t.strip_prefix("biomes_unseen:") {
+                assert!(
+                    files.contains(format!("assets/biomes_unseen/textures/{p}.png").as_str()),
+                    "{id}: texture {slot} = {t} missing"
+                );
+            }
+        }
+    }
+    // A model's chain inside the mod must reach at least one real texture
+    // (a chain ending at a vanilla parent still needs its own textures:
+    // `minecraft:block/cube_all` and the like draw the `textures` slots).
+    let textured = |mut id: String| -> bool {
+        for _ in 0..10 {
+            let Some(model) = models.get(&id) else {
+                return false; // A vanilla model carries no mod texture.
+            };
+            if model["textures"]
+                .as_object()
+                .is_some_and(|t| t.values().any(|v| {
+                    v.as_str().is_some_and(|s| !s.starts_with('#'))
+                }))
+            {
+                return true;
+            }
+            match model["parent"].as_str() {
+                Some(p) if p.starts_with("biomes_unseen:") => id = p.to_owned(),
+                _ => return false,
+            }
+        }
+        false
+    };
+    // Blockstates: every block has one and its models exist and are textured.
+    let blockstate_models = |d: &Value| -> Vec<String> {
+        let mut out = Vec::new();
+        let entries = |v: &Value, out: &mut Vec<String>| {
+            for e in v.as_array().cloned().unwrap_or_else(|| vec![v.clone()]) {
+                if let Some(m) = e["model"].as_str() {
+                    out.push(m.to_owned());
+                }
+            }
+        };
+        for v in d["variants"].as_object().into_iter().flatten().map(|(_, v)| v) {
+            entries(v, &mut out);
+        }
+        for p in d["multipart"].as_array().into_iter().flatten() {
+            entries(&p["apply"], &mut out);
+        }
+        out
+    };
+    let lang = read("assets/biomes_unseen/lang/en_us.json");
+    for (block, _) in &blocks {
+        let file = format!("assets/biomes_unseen/blockstates/{block}.json");
+        assert!(files.contains(file.as_str()), "{block}: no blockstate");
+        let refs = blockstate_models(&read(&file));
+        assert!(!refs.is_empty(), "{block}: blockstate names no model");
+        for m in refs {
+            assert!(models.contains_key(&m), "{block}: model {m} missing");
+            assert!(textured(m.clone()), "{block}: model {m} resolves to no texture");
+        }
+        assert!(
+            lang[format!("block.biomes_unseen.{block}")].is_string(),
+            "{block}: no lang key"
+        );
+    }
+    // Item definitions: every item-bearing id has `items/<name>.json` the
+    // engine's own decoder accepts, naming a model that exists and is
+    // textured; and its English name.
+    let mut bearing: Vec<(String, String)> = Vec::new(); // (id, template item)
+    for (b, (template, item)) in &blocks {
+        if *item {
+            bearing.push((format!("biomes_unseen:{b}"), template.clone()));
+        }
+    }
+    for (i, template) in &items {
+        bearing.push((format!("biomes_unseen:{i}"), template.clone()));
+        assert!(
+            lang[format!("item.biomes_unseen.{i}")].is_string(),
+            "{i}: no lang key"
+        );
+    }
+    bearing.sort_by(|a, b| a.0.cmp(&b.0)); // `Plan` sorts items by id.
+    let mut definitions = 0;
+    for (id, _) in &bearing {
+        let name = id.strip_prefix("biomes_unseen:").unwrap();
+        let file = format!("assets/biomes_unseen/items/{name}.json");
+        assert!(files.contains(file.as_str()), "{id}: no item definition");
+        let d = read(&file);
+        ClientItem::from_json(&d.to_string()).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let model = d["model"]["model"].as_str().unwrap().to_owned();
+        assert!(models.contains_key(&model), "{id}: definition model {model} missing");
+        assert!(textured(model.clone()), "{id}: definition model {model} untextured");
+        definitions += 1;
+    }
+    println!(
+        "assets: {} blockstates, {} models, {definitions} item definitions, {textures} textures, {} lang keys verified",
+        blocks.len(),
+        models.len(),
+        lang.as_object().map_or(0, serde_json::Map::len)
+    );
+    // The creative export: templates listed once per tab (plus a duplicate
+    // to prove only the first listing takes insertions), an operator-only
+    // index and the search tab's aligned arrays.
+    let templates: BTreeSet<&str> = bearing.iter().map(|(_, t)| t.as_str()).collect();
+    let mut tab_items: Vec<String> = templates.iter().map(|t| (*t).to_owned()).collect();
+    tab_items.push("minecraft:command_block".into()); // Operator-only.
+    let operator_index = tab_items.len() - 1;
+    tab_items.push("minecraft:oak_planks".into()); // The duplicate listing.
+    let search_lines: Vec<Value> = tab_items.iter().map(|_| serde_json::json!([])).collect();
+    let doc = serde_json::json!({ "tabs": [
+        { "type": "CATEGORY", "id": "minecraft:building_blocks", "items": tab_items,
+          "permissions_only": [operator_index] },
+        { "type": "INVENTORY", "id": "minecraft:inventory", "items": [] },
+        { "type": "SEARCH", "id": "minecraft:search", "items": tab_items,
+          "lines": search_lines, "tags": search_lines,
+          "permissions_only": [operator_index] },
+    ]});
+    let mut doc: J = serde_json::from_str(&doc.to_string()).unwrap();
+    let warnings = append_creative(&mut doc, &bearing);
+    assert_eq!(warnings, Vec::<String>::new());
+    for (t, want_arrays) in [(0usize, false), (2, true)] {
+        let Some(J::Arr(tabs)) = doc.get_mut("tabs") else { panic!("no tabs") };
+        let tab = &tabs[t];
+        let Some(J::Arr(stacks)) = tab.get("items") else { panic!("no items") };
+        let ids: Vec<&str> = stacks
+            .iter()
+            .map(|v| match v { J::Str(s) => s.as_str(), _ => "" })
+            .collect();
+        for (id, _) in &bearing {
+            assert_eq!(
+                ids.iter().filter(|s| *s == id).count(),
+                1,
+                "tab {t}: {id} must appear exactly once"
+            );
+        }
+        if want_arrays {
+            for key in ["lines", "tags"] {
+                let Some(J::Arr(a)) = tab.get(key) else { panic!("no {key}") };
+                assert_eq!(a.len(), ids.len(), "{key} aligned");
+            }
+        }
+        let Some(J::Arr(only)) = tab.get("permissions_only") else { panic!() };
+        let J::Num(n) = &only[0] else { panic!() };
+        let moved = n.as_u64().unwrap() as usize;
+        assert_eq!(ids[moved], "minecraft:command_block", "tab {t}: operator index follows its item");
+    }
+    println!(
+        "creative inventory: {} Biomes Unseen item(s) join the category and search tabs",
+        bearing.len()
+    );
+}

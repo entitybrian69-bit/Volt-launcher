@@ -132,6 +132,7 @@ jobs:
           cargo test -p horizon-client --lib --no-default-features -- \
             climate_entry_strips_keys_and_quantizes \
             biomes_unseen_hmod_biomes_reach_the_preset_tables \
+            biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries \
             --nocapture 2>&1 | tee worldgen-test.log
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -155,6 +156,8 @@ jobs:
           count=$(grep -c "  biomes_unseen:" worldgen-test.log)
           echo "listed biome ids: $count"
           test "$count" -eq 44
+          grep -F "assets: 176 blockstates, 609 models, 193 item definitions, 217 textures, 206 lang keys verified" worldgen-test.log
+          grep -F "creative inventory: 193 Biomes Unseen item(s) join the category and search tabs" worldgen-test.log
           # Publish the proof lines as an annotation readable through the
           # checks API (job logs are not downloadable from every network).
           python3 - <<'PY'
@@ -1344,7 +1347,18 @@ jobs:
 
           gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
           version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
-          sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in apks)
+
+          # The Biomes Unseen content mod ships beside the APKs: the same
+          # .hmod the worldgen-test job verifies (docs/biomes_unseen/).
+          hmod = Path("crates/horizon-client/testdata/biomes_unseen.hmod")
+          with zipfile.ZipFile(hmod, "r") as zf:
+              if zf.testzip() is not None:
+                  raise SystemExit("biomes_unseen.hmod failed CRC check")
+          target = collect / "biomes_unseen.hmod"
+          target.write_bytes(hmod.read_bytes())
+
+          summed = apks + [target]
+          sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in summed)
           (collect / "SHA256SUMS.txt").write_text(sums, encoding="utf-8")
 
           is_tag = os.environ["IS_TAG"].lower() == "true"
@@ -1375,11 +1389,18 @@ jobs:
           ShulkerBoxTooltip, Language Reload, FastQuit, BetterF3, Better Ping Display,
           Controlling, Mouse Tweaks, No Fog, FerriteCore, Dynamic FPS, BadOptimizations,
           Screenshot to Clipboard, Chat Heads, and Better Clouds; see THIRD_PARTY_NOTICES.md.
+
+          **Biomes Unseen** (`biomes_unseen.hmod`, attached): 44 data-driven biomes
+          (39 Overworld, 5 Nether), 176 blocks and 29 items. The APK does not bundle
+          it. Install on Android: copy the asset link above, open Volt Launcher >
+          Mods, paste the HTTPS URL and tap Import .hmod; then enable Biomes Unseen
+          in Installed (or the game's Options > Mods) and create a new world.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
+              .local/android/release-collect/biomes_unseen.hmod \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
@@ -1392,6 +1413,7 @@ jobs:
             fi
             gh release create "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
+              .local/android/release-collect/biomes_unseen.hmod \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \

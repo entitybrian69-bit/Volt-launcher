@@ -288,3 +288,21 @@ appended entries are. A biome without `horizon:climate` registers but is placed 
 data-only, so it works on Android exactly as on PC, and API 0.2 mods without biome files are unchanged.
 Malformed climate data (out of range, `min > max`, unknown dimension) refuses the mod with the file named.
 Unit coverage: `climate_entry_strips_keys_and_quantizes` in `crates/horizon-client/src/mod_content_tests.rs`.
+
+### Mod items in the creative inventory
+
+The content build also patches `creative-inventory.json`: every mod item (a declared item, or a block's
+item) joins each creative category tab that lists its vanilla template item, right after the template's
+first listing, and the search tab under its id-derived name — the search tab's aligned `lines`/`tags`
+arrays and each tab's `permissions_only` indices are kept consistent (`append_creative` in
+`crates/horizon-client/src/mod_content.rs`). Items also need an `assets/<ns>/items/<name>.json` client
+item definition to render (`item_render.rs` loads definitions, not bare `models/item/` files).
+
+### Biomes Unseen (`biomes_unseen.hmod`)
+
+The showcase content mod for the worldgen API: 44 biomes (39 Overworld, 5 Nether), 176 blocks, 29 items,
+built reproducibly by `scripts/generate_biomes_unseen.py` (which also packages the `.hmod`). It ships as
+a release asset, not inside the APK. Android install: Volt Launcher > Mods > paste the release asset's
+HTTPS URL > Import .hmod (or drop the file into the launcher's "Mods" folder), enable it, start a new
+world. Format decision and evidence: `docs/biomes_unseen/FORMAT-DECISION.md`. CI proof: the
+`Worldgen mod tests (host)` job (biome registration, asset completeness, creative placement).
