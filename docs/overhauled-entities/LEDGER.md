@@ -14,14 +14,43 @@ sessions.
 | 2026-11-09 | [OOB] Light Overlay stale-overlay fix v2 (read-level force, commit 5c18dad) — IMPLEMENTED-UNVERIFIED, awaiting owner device run. Not part of this mission; tracked in BUILTIN-PARITY.md. | agent |
 | 2026-11-09 | PHASE 0 ACCEPTED (pending version-source citation + OOB tagging, both resolved below). Gate decisions: **Q1** scope = sections A–E; F splits into F-NOW (holstered weapons, sword stance, wolf moon-howl — rows added below, per-row decision at Phase 1, no implementation before Phase 1 sign-off) and F-BACKLOG (death-animation system, Witch/Strider reworks, placeable items/props/plushies, Vibrant Visuals, seasonal/Pale Garden — deferred). **Q2** defaults screenshot incoming; UNKNOWN defaults tied to BLOCKED rows marked DEFERRED-WITH-PARENT. **Q3** first person = extend Punchy; single FP owner, no parallel layer. **Q4** Moving Vegetation approved as NAMED SUBSTITUTION for the grass-sway row (D2). **Q5** A14 faces DEFER — no shader-hacked eyes (C2); B8 items/armour DEFER — needs separate scoping pass; C11 Wither SUBSTITUTE motion-only, label IMPLEMENTED-PARTIAL; C13 babies DEFER; E12 Morphs DEFER (model replacement + server grief vector). | owner |
 
+| 2026-11-09 | PHASE 1 conditional acceptance processed. **Blocker resolved as (a)**: deliverable = compiled-in native row, not a distributable hmod — **accepted deviation from the original ask, reason: hmod format is data-only** (and `.hnmod` is source-form; see Packaging, citations added). Confirmations: hot-apply logged as NAMED DEVIATION (superset, approved); Volt-extra toggles (players/mobs/intensity) KEPT as labeled Volt extras (named deviation); item-QoL rides T3 (approved, no T4). F-NOW: FN1 holstered weapons DEFERRED (un-sized; reopen as scoped candidate only after v1 ships), FN2 sword stance APPROVED → T1, FN3 wolf moon-howl APPROVED → T2. One-pass audit of the official 1.5 source completed (corrections + new rows below). | owner |
+
+## Named deviations (approved, per C2)
+
+| # | Deviation | Approved |
+|---|---|---|
+| ND1 | Deliverable is a compiled-in native mod row, not a distributable hmod. Reason: hmod format is data-only; `.hnmod` is Rust source (not a loadable binary). | 2026-11-09 |
+| ND2 | Hot-apply is instant (statics read per frame) — superset of the reference's apply-on-menu-close. | 2026-11-09 |
+| ND3 | Volt-only extra toggles kept (`players`, `mobs`, `intensity`), clearly labeled as Volt extras — additions beyond the 1:1 mirrored set. | 2026-11-09 |
+| ND4 | D2 grass sway satisfied by Volt Shaders Moving Vegetation (named substitution, Q4). | 2026-11-09 |
+
 ## Packaging note (for Phase 1, logged early per §8)
 
-Animations require native code. Android never executes downloaded native
-code (standing Volt directive), so a literal downloadable `.hmod` cannot
-carry animation logic. The delivery vehicle is the existing compiled-in
-native mod row "Overhauled Entities" (same UX as an hmod row in Options >
-Mods). Data-only parts (authored textures/variants) can ship as `.hmod`
-content. Formal decision at Phase 1 gate.
+Animations require native code, and nothing downloadable can carry it on
+this engine — cited (blocker resolution, option (a)):
+
+1. **Spec:** `docs/HNMOD-DECISION.md` — "Android never executes
+   downloaded native code. Ever." with the per-platform can/cannot table
+   and the security rationale. This is Volt's recorded design decision.
+2. **Format fact:** a `.hnmod` is Rust *source* compiled against a pinned
+   engine revision (upstream: playhorizon.dev/mods, "compiled-in"); it is
+   not a binary — there is nothing to `dlopen`, sideloaded or not. The
+   engine contains no runtime native loader (grep `dlopen|libloading`
+   across `crates/`: zero hits).
+3. **Data-only `.hmod`:** `crates/horizon-mods/src/manifest.rs:33`
+   (`#[serde(deny_unknown_fields)]` Manifest) — id/name/version/api/
+   capabilities/namespaces + content files; no code-carrying field, and
+   `content.rs` validation accepts asset/data kinds only.
+4. **ABI drift:** the fork pins NATIVE_HOOKS_API 40 vs upstream 80 — even
+   a hypothetical binary hnmod would not link
+   (`tools/native_mods/compat.py` `check_hooks`).
+
+So: the owner's (b) hypothesis (dlopen from app-private storage is
+technically possible on sideloaded Android) is true of Android but moot
+here — the mod format ships source, the engine has no loader, and the
+spec forbids adding one. Deviation ND1 logged. Data-only parts (authored
+variant textures) can still ship as `.hmod` content.
 
 ## Version mapping (RESOLVED, cited — anchors the table)
 
@@ -140,9 +169,9 @@ from A&S parity, which needs the richer motion + the rubric pass).
 
 | # | Feature | Version | Verdict | Status |
 |---|---|---|---|---|
-| FN1 | Holstered weapons (hotbar carried on back/belt) | 1.13 | EQUIVALENT-WORK (render hotbar items attached to body/belt parts; needs a small item-on-body render hook) | NOT-STARTED |
-| FN2 | Sword combat stance | 1.13 | NATIVE (held-sword pose layer) | NOT-STARTED |
-| FN3 | Wolf full-moon howl | 1.13 | NATIVE (moon phase + night time are client-visible; howl pose is a keyframe clip; howl *sound* = authored-asset question, flagged) | NOT-STARTED |
+| FN1 | Holstered weapons (hotbar carried on back/belt) | 1.13 | EQUIVALENT-WORK | **DEFERRED (owner, 2026-11-09: un-sized; reopen as scoped candidate after v1 ships)** |
+| FN2 | Sword combat stance | 1.13 | NATIVE (held-sword pose layer) | APPROVED → T1 |
+| FN3 | Wolf full-moon howl | 1.13 | NATIVE (pose clip + moon/time gate; howl *sound* = authored-asset question, flagged) | APPROVED → T2 |
 
 ### F-BACKLOG (deferred by owner, 2026-11-09; logged, not dropped)
 
@@ -154,10 +183,63 @@ from A&S parity, which needs the richer motion + the rubric pass).
 | Placeable items, props (weapon rack, tanning rack, nets, hoops), plushies | 1.11–1.12 |
 | Vibrant Visuals integration | 1.8 |
 
+## Official-1.5 source audit (one pass, 2026-11-09; both chunks of the guide read)
+
+Source: <https://guides.orevillestudios.com/1-5-23fd70150598817e90c9f038f425f025>
+
+**Corrections to existing rows (no renumbering):**
+
+- **C11 Wither**: official scope is *effects*, not geometry — spawn
+  animation with visible skulls, phase-1 glowing eyes, phase-2 blue aura +
+  particles + crack texture, pixel-accurate texture, 3rd-person throwing
+  animation. Motion + particle + emissive parts are implementable under
+  the approved motion-only substitute; texture parts group with the
+  deferred asset pipeline. Target label stays IMPLEMENTED-PARTIAL.
+- **A5 water entry**: official triggers — leap into water = dive; crouch
+  at dive start = Cannon Ball; crouch midway (body flat) = Belly Flop;
+  bubble particles on impact. Rubric updated to these exact triggers.
+- **C4 Wolf**: interact on tamed wolf = 50% lay down; 4 laying idles
+  (look around, ear wiggles, curious, ear scratch); dozes off with zZz
+  particles, wake on interact; 3 standing idles (ear scratch, play bow,
+  2 happy-hop variants). Own-player interactions are client-visible;
+  other players' interactions = Class B note.
+- **C5 Cat**: interact = 50% LOAF MODE, 3 loaf idles, doze with zZz,
+  wake on interact. Same Class B note.
+- **C10 Happy Ghast**: + Ghastling; 3 idles; wiggly tentacles. Facial
+  parts ride A14 (deferred). Harness/balloon designs = asset content.
+- **E1 subpack semantics** (official): since 1.5, Full Experience = 64x,
+  Custom (texture-pack compatible) = 16x, Vanilla = 32x.
+
+**New rows (added, not renumbered):**
+
+| # | Feature | Verdict | Status |
+|---|---|---|---|
+| D6 | XP orb particle trail | NATIVE (particles) | NOT-STARTED (T3) |
+| D7 | On-fire screen overlay (player burning) | EQUIVALENT-WORK (HUD overlay quad) | NOT-STARTED (T3) |
+| D8 | Explosion particle revamp (scale-accurate) | NATIVE (particles) | NOT-STARTED (T3) |
+| C16 | Rare natural variants + 1.5 nametag set (Baby Enderman 0.5% / Brian zombie 0.05% / Pink Dolphin 1% / Dapper Iron Golem / Oiia Oiia Cat / balloon + Saddleless tags / Husk Mummy-Dusty 3%) | EQUIVALENT-WORK — rides the C14 authored-texture pipeline | NOT-STARTED |
+| X1 | 1.5 texture/asset content aggregate: 60 double-slab designs, 3D mushroom/dripstone model assignments, stone-brick variants, Disc 5 glows, smithing-rune emissives, held-item models (Dried Ghast etc.), kelp/glyph/panorama touch-ups, multi-lead locators | DEFERRED-WITH-PARENT (B8/E1 texture overhaul) | deferred |
+
 ## Gate Q&A — all answered 2026-11-09 (see session log). Open follow-ups:
 
 - Q2 defaults screenshot: PENDING (owner, this session) → fills the E-table TBDs.
 - X-cross retest on v0.9.9-build.11b1353: PENDING (owner) → VERIFIED or triage before Phase 1 code.
+
+## Hook scoping (required before T1 starts; estimates, verified at build)
+
+| Hook | Tier | Files touched | Rough LOC (impl + test) | Risk |
+|---|---|---|---|---|
+| H1 swing-variety counter | T1 | `mobs.rs` (AnimState +1 field, increment at attack_anim start — single site), `mobs/anim.rs` (State +1 field in `state()`), `overhauled.rs` (consume) | 25 + 15 | LOW |
+| H2 edge probe | T1 | `game/volt_builtins.rs` (frame: 4 neighbor `game.world.block` + facts queries under feet — same API light_overlay glue uses), `overhauled.rs` (static + `Motion.on_edge`, pure classify fn) | 35 + 25 | LOW-MED (own player only) |
+| H3 water-entry event | T1 | `game/volt_builtins.rs` (prev-frame in-water/fall/crouch tracker → queue clip), `mobs/overhauled_clips.rs` (trigger API) | 30 + 15 | LOW-MED (player fluid flag verified at build; fallback = block-at-eye fluid check, same API) |
+| H4 moon-phase/time read | T2 | `game/volt_builtins.rs` (world time/day → static), `overhauled.rs` (gate) | 10 + 10 | LOW |
+| H5 glow-squid emissive pulse | T2 | `mobs/render.rs` (emissive intensity scaled by etf phase for GlowSquid) | 15 + 10 (+20 if its emissive layer is absent — verified at build) | LOW |
+| H6 clips module (not an engine hook) | T1 | `mobs/overhauled_clips.rs` NEW (sampler reuse, tables, zero-ends + budget tests) | ~300 | LOW (pattern exists in player_gestures) |
+| H7 local-state feed (sprint/sneak/airborne/fall/sit-timer for A12) | T1 | `game/volt_builtins.rs` | 40 + 10 | LOW |
+| H8 pet-interact trigger (C4/C5 lay/loaf) | T2 | game interact-entity path (site located at T2 start) → `overhauled.rs` per-mob state map (etf-seeded chance) | 40 + 15 | MED (locating the use-entity client path; other players' interactions = Class B) |
+| H9 on-fire HUD overlay | T3 | `extras_hud.rs` (overlay quad while burning) | 30 + 10 | LOW-MED |
+| H10 particle batch (XP trail, explosion, rain splash, boat wakes, ambient motes, mining sparks) | T3 | `overhauled_fx.rs` NEW + hook sites in `animate_tick.rs` / game frame (subtle_effects pattern) | ~120 + 30 | LOW (API proven) |
+| (dropped) FN1 item-on-body render | — | deferred with FN1 | — | — |
 
 ## Known-good / known-bad devices (Class D)
 
