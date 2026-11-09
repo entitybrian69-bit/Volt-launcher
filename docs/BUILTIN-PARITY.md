@@ -162,6 +162,7 @@ The woven `light_overlay` registry mod persists its `active` flag across
 sessions, and its only toggle is the F7 key — which touch devices do not
 have. A once-enabled overlay therefore came back on every launch as
 "random X crosses on the blocks". Volt keeps the mod but makes the overlay
-session-only: `volt_builtins_frame` scrubs a persisted `active=true` once
-per launch, before the mod first reads its settings. The in-session toggle
-still works unchanged.
+session-only, enforced at the read level: `native_hooks::native_setting`
+returns "false" for `light_overlay`/`active` until the first in-session
+write of that key, so no frame-order race can resurrect a stale flag. The
+in-session toggle still works unchanged.

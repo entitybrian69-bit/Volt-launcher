@@ -19,10 +19,6 @@ static MOB_FX_CLOCK: Mutex<Duration> = Mutex::new(Duration::ZERO);
 /// Whether the gesture layer currently borrows the third-person front
 /// camera (set while a clip plays from first person, cleared on restore).
 static GESTURE_CAMERA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Whether the one-per-launch Light Overlay persistence scrub has run.
-static LIGHT_OVERLAY_SCRUBBED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
 const ON: &str = "ON";
 const OFF: &str = "OFF";
 fn label(name: &str, on: bool) -> String {
@@ -257,19 +253,10 @@ impl Game<'_> {
         gestures::set_suspended(!self.native_on(gestures::ID));
         subtle::set_suspended(!self.native_on(subtle::ID));
         overhauled::set_suspended(!self.native_on(overhauled::ID));
-        // Light Overlay (woven registry mod) persists its in-game overlay
-        // across sessions, so a once-toggled overlay came back forever as
-        // "random X crosses on every block" on touch devices with no F7 to
-        // turn it off. Volt makes it session-only: each launch starts with
-        // the overlay off; the mod's own toggle still works for the session.
-        if !LIGHT_OVERLAY_SCRUBBED.swap(true, std::sync::atomic::Ordering::Relaxed)
-            && matches!(
-                self.native_setting("light_overlay", "active").as_deref(),
-                Some("true") | Some("1")
-            )
-        {
-            self.native_set_setting("light_overlay", "active", "false");
-        }
+        // (Light Overlay's stale persisted `active` flag is handled at the
+        // source: `native_hooks::native_setting` forces reads of it to
+        // "false" until the first in-session write, so the overlay is
+        // session-only with no frame-order race.)
         // A gesture queued from the settings page ("Play now") starts on
         // the first frame the player is back in the world, so the clip is
         // not already over behind the paused menu.

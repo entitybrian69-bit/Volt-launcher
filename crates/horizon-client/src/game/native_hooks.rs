@@ -181,6 +181,12 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+/// Whether `light_overlay`'s `active` setting was written this session;
+/// until then reads of it are forced to "false" (session-only overlay —
+/// touch devices have no F7 to clear a stale persisted flag).
+static LIGHT_OVERLAY_ACTIVE_WRITTEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
 /// furnace sets its `lit`. Horizon sends every write to players, so
@@ -1952,11 +1958,27 @@ impl Game<'_> {
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        // Light Overlay's persisted `active` flag is forced off until the
+        // first in-session write: its only toggles are F7 (absent on touch
+        // devices) and its settings page, so a stale persisted overlay came
+        // back on every launch as unremovable X crosses over the blocks.
+        // Reads are intercepted here, before the mod's first settings load,
+        // so no frame-order race can resurrect the stale flag; once the
+        // player toggles it this session, reads pass through unchanged.
+        if mod_id == "light_overlay"
+            && key == "active"
+            && !LIGHT_OVERLAY_ACTIVE_WRITTEN.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Some("false".to_owned());
+        }
         let path = self.native_data_dir(mod_id).join(key);
         fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
     }
     /// Keeps a mod's setting `key`.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {
+        if mod_id == "light_overlay" && key == "active" {
+            LIGHT_OVERLAY_ACTIVE_WRITTEN.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         let dir = self.native_data_dir(mod_id);
         let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
     }
