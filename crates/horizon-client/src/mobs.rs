@@ -57,6 +57,7 @@ pub mod monster_brain;
 pub mod nautilus;
 pub mod nea;
 pub mod overhauled;
+pub mod overhauled_clips;
 pub mod player_gestures;
 pub mod nav;
 pub mod nether;

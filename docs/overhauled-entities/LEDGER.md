@@ -14,6 +14,7 @@ sessions.
 | 2026-11-09 | [OOB] Light Overlay stale-overlay fix v2 (read-level force, commit 5c18dad) — IMPLEMENTED-UNVERIFIED, awaiting owner device run. Not part of this mission; tracked in BUILTIN-PARITY.md. | agent |
 | 2026-11-09 | PHASE 0 ACCEPTED (pending version-source citation + OOB tagging, both resolved below). Gate decisions: **Q1** scope = sections A–E; F splits into F-NOW (holstered weapons, sword stance, wolf moon-howl — rows added below, per-row decision at Phase 1, no implementation before Phase 1 sign-off) and F-BACKLOG (death-animation system, Witch/Strider reworks, placeable items/props/plushies, Vibrant Visuals, seasonal/Pale Garden — deferred). **Q2** defaults screenshot incoming; UNKNOWN defaults tied to BLOCKED rows marked DEFERRED-WITH-PARENT. **Q3** first person = extend Punchy; single FP owner, no parallel layer. **Q4** Moving Vegetation approved as NAMED SUBSTITUTION for the grass-sway row (D2). **Q5** A14 faces DEFER — no shader-hacked eyes (C2); B8 items/armour DEFER — needs separate scoping pass; C11 Wither SUBSTITUTE motion-only, label IMPLEMENTED-PARTIAL; C13 babies DEFER; E12 Morphs DEFER (model replacement + server grief vector). | owner |
 
+| 2026-11-09 | **OWNER OVERRIDE**: "Do all the phase and work in one go. No stopping before the completion of every single task. Provide me apk." Logged as blanket sign-off: Phase 1 signed, T1+T2+T3 built in one pass, no per-tier gates, deliverable = release APK. Immutable constraints (C1–C6) unchanged. Results in "One-go build" section below. | owner |
 | 2026-11-09 | PHASE 1 conditional acceptance processed. **Blocker resolved as (a)**: deliverable = compiled-in native row, not a distributable hmod — **accepted deviation from the original ask, reason: hmod format is data-only** (and `.hnmod` is source-form; see Packaging, citations added). Confirmations: hot-apply logged as NAMED DEVIATION (superset, approved); Volt-extra toggles (players/mobs/intensity) KEPT as labeled Volt extras (named deviation); item-QoL rides T3 (approved, no T4). F-NOW: FN1 holstered weapons DEFERRED (un-sized; reopen as scoped candidate only after v1 ships), FN2 sword stance APPROVED → T1, FN3 wolf moon-howl APPROVED → T2. One-pass audit of the official 1.5 source completed (corrections + new rows below). | owner |
 
 ## Named deviations (approved, per C2)
@@ -240,6 +241,70 @@ Source: <https://guides.orevillestudios.com/1-5-23fd70150598817e90c9f038f425f025
 | H9 on-fire HUD overlay | T3 | `extras_hud.rs` (overlay quad while burning) | 30 + 10 | LOW-MED |
 | H10 particle batch (XP trail, explosion, rain splash, boat wakes, ambient motes, mining sparks) | T3 | `overhauled_fx.rs` NEW + hook sites in `animate_tick.rs` / game frame (subtle_effects pattern) | ~120 + 30 | LOW (API proven) |
 | (dropped) FN1 item-on-body render | — | deferred with FN1 | — | — |
+
+## One-go build (2026-11-09, owner override) — per-row outcomes
+
+Code: `mobs/overhauled_clips.rs` (NEW: keyframe clip engine + per-entity
+trigger state, 9 unit tests), `mobs/overhauled.rs` v1.1.0 (swim stroke,
+sprint lean, tool stances, swing variation, ledge balance, wolf/cat/
+equine/wither/happy-ghast idle families, creeper fuse tremble, clip
+integration), `game/volt_builtins.rs` (env feed, own-player triggers,
+tick-rate particle pass, "Better rain particles" toggle). All statuses
+below are IMPLEMENTED-UNVERIFIED until the owner's on-device pass
+(Phase 3 checklist) upgrades them to VERIFIED; CI unit tests are the
+only evidence attached at ship time.
+
+| Row | Outcome | Mechanism |
+|---|---|---|
+| A1/A7 | IMPLEMENTED-UNVERIFIED | baseline gait/idle kept; follow-through + personality layers |
+| A2 | IMPLEMENTED-UNVERIFIED | sprint body lean (speed-gated) |
+| A3 | IMPLEMENTED-PARTIAL | vanilla crouch pose + gait layers persist while sneaking; no dedicated sneak cycle |
+| A4 | IMPLEMENTED-UNVERIFIED | alternating front-crawl stroke + flutter kick overlay in water |
+| A5 | IMPLEMENTED-UNVERIFIED | water-entry edge on `fluids.in_water` + tracked fall: dive / cannonball (crouch early) / belly flop (crouch at entry); bubble burst on impact. Remote players: crouch via synced pose — mid-air crouch may not sync on all servers (noted limitation) |
+| A6 | IMPLEMENTED (baseline) | gesture spring landing kept |
+| A8 | IMPLEMENTED-UNVERIFIED | stretch / look-around / arm-cross on a deterministic per-entity idle schedule |
+| A9 | IMPLEMENTED-UNVERIFIED | own-player ledge probe (block-below + 2 open sides) → balance windmill |
+| A10 | IMPLEMENTED-PARTIAL | NEA eat/drink pose layer only; item shrink NOT SHIPPED (item-render pipeline) |
+| A11 | IMPLEMENTED-PARTIAL | tilt pose via NEA; liquid depletion NOT SHIPPED (geometry states) |
+| A12 | IMPLEMENTED-UNVERIFIED | flip = crouch mid-air; sit = sneak 5 s + look down (held until sneak release); roll = landing a sprint fall ≥3 blocks. **Named limitation (C2): no root-motion hook — flip/roll are tuck-pose clips, not full 360° body rotations** |
+| A13 | NOT SHIPPED | death-anim system rides F-BACKLOG (1.13 content) |
+| B1 | IMPLEMENTED-UNVERIFIED | swing counter (rising-edge, no engine hook needed) cycles 3 lateral paths |
+| B2/B5 | IMPLEMENTED-UNVERIFIED | axe chop drives body+shoulder; pick/shovel drive body; keyed off synced main-hand item |
+| B3 | IMPLEMENTED-UNVERIFIED | drawn bow/crossbow fine tremble (vanilla staged draw kept) |
+| B4 | IMPLEMENTED-UNVERIFIED | shield brace hunch while blocking |
+| B6 | IMPLEMENTED-PARTIAL | sparks fly from the mined face while breaking; NOT scaled by tool material (flat rate) |
+| B7 | NOT SHIPPED | fishing rod cycle — no cheap client fishing-state path found this pass |
+| C1 | IMPLEMENTED-PARTIAL | families covered: humanoid(+5 undead/arbalist kinds), villager, enderman, quadruped group, horse, wolf, cat, fox, creeper, spider, chicken, wither, happy ghast, ambient fallback for the rest |
+| C2/C3/C8 | IMPLEMENTED (baseline kept) | graze/tail, peck/ruffle, tiptoe + NEW fuse tremble (C8) |
+| C4 | IMPLEMENTED-PARTIAL | play bow + happy hops + ear flicks as idle windows; full-moon howl clip (FN3). Interact-to-lay trigger NOT SHIPPED (H8 pending) |
+| C5 | IMPLEMENTED-PARTIAL | loaf (legs folded, tail curled, doze nod) as idle window; interact trigger NOT SHIPPED (H8) |
+| C6 | IMPLEMENTED-PARTIAL | tail swish, head toss, idle stomp; mane flow needs model parts not present |
+| C7 | IMPLEMENTED-UNVERIFIED | drawn-bow tremble applies to skeletons (synced main hand + using) |
+| C10 | IMPLEMENTED-PARTIAL | slow body sway; tentacle parts not separately articulated in the model |
+| C11 | IMPLEMENTED-PARTIAL (as approved) | three heads drift/scan, ribcage pulse, tail sway; effects/texture parts stay deferred |
+| C12 | IMPLEMENTED-PARTIAL | glow twinkle particles near glow squids; render-path emissive pulse NOT SHIPPED (C5 risk on shared render path) |
+| C14/C15/C16 | NOT SHIPPED | authored-texture variant pipeline — asset work, unchanged verdict |
+| D1 | IMPLEMENTED-UNVERIFIED | sparse air motes near the player (air-block checked) |
+| D3/E10 | IMPLEMENTED-UNVERIFIED | rain impact splashes on open-sky surfaces, "Better rain particles" toggle (default ON — assumption until the defaults screenshot lands). Limitation: global weather flag, not biome-filtered |
+| D5 | IMPLEMENTED-UNVERIFIED | stern wake + hull bubbles while under way, oar splashes while paddling, idle hull foam |
+| D6 | IMPLEMENTED-UNVERIFIED | twinkle trail on XP orbs (teal Glow particle — colour differs from the reference's green; named approximation) |
+| D7 | NOT SHIPPED | on-fire HUD overlay (H9) — HUD hook not landed this pass |
+| D8 | NOT SHIPPED | explosion revamp — explosion event hook not scoped-safe this pass |
+| E5/E6/E7 | NOT SHIPPED | glint/totem render-pipeline work |
+| E9 | NOT SHIPPED | no confirmed UI-sound API on the client path |
+| E11/E14 | DEFERRED-WITH-PARENT | unchanged |
+| FN2 | IMPLEMENTED-UNVERIFIED | sword ready stance while a sword is held |
+| FN3 | IMPLEMENTED-UNVERIFIED | howl clip on full-moon nights (day_time: night window + day-0 moon phase); howl *sound* not shipped (authored asset) |
+| H1–H7, H10 | LANDED | as scoped (H1 needed no engine hook; H10 lives in volt_builtins, not a separate fx file) |
+| H5, H8, H9 | NOT LANDED | listed above against their rows |
+
+**Honest remaining list (not silently dropped):** A13 death anims,
+B7 fishing, B6 material scaling, H8 interact triggers (cat loaf / wolf
+lay on interact), D7 fire overlay, D8 explosions, E5/E6/E7 glint+totem,
+E9 swap sounds, A10/A11 item-render parts, C14/C15/C16/X1 asset
+pipeline, render-path glow pulse (C12 full), A14/B8/C13/E12 owner-
+deferred rows, FN1, F-BACKLOG. E-toggle defaults stay provisional until
+the owner's defaults screenshot arrives.
 
 ## Known-good / known-bad devices (Class D)
 

@@ -139,7 +139,8 @@ internal engine layers with no row or settings anywhere, by design.
 | Per-entity personality (EMF/ETF layer) | DONE | Stable SplitMix64 phase/amplitude/tempo per entity id, so herds never sync (`etf::entity_random` avalanche-tested). |
 | Keyframe-exact Fresh Animations clips | UNSUPPORTED | The upstream packs' CEM keyframes are ARR data; shipping them would violate the licensing directive. The procedural recreation targets the same visible behaviours. |
 | ETF texture features (blinking, random skins, emissives) | UNSUPPORTED / already-vanilla | Need third-party texture assets (none ship by policy); emissive eyes are already vanilla-parity in `mobs/render.rs`. |
-| Settings | DONE | Master toggle, player/mob switches, Subtle/Balanced/Dramatic intensity; all persisted per profile. |
+| Settings | DONE | Master toggle, player/mob switches, Better rain particles, Subtle/Balanced/Dramatic intensity; all persisted per profile. |
+| Actions & Stuff behavioral-parity layer (v1.1.0) | DONE (code) / device verification pending | Keyframed clips (`mobs/overhauled_clips.rs`): idle emotes (stretch / look around / arm cross), flip (crouch mid-air), roll (sprint-fall landing), sit (sneak 5 s + look down), water entries (dive / cannonball / belly flop) with bubble bursts, full-moon wolf howl. Procedural: swim stroke + flutter kick, sprint lean, sword stance, drawn-bow tremble, shield brace, per-tool swing variation with a 3-path swing counter, ledge balancing, wolf play-bow/hops, cat loaf, horse swish/toss/stomp, wither head drift, happy-ghast sway, creeper fuse tremble. Environment pass (`volt_builtins`): rain impact splashes, ambient motes, boat wakes + oar splashes, XP-orb trails, mining sparks, glow-squid twinkles. Full per-row ledger: `docs/overhauled-entities/LEDGER.md`. |
 
 ---
 
@@ -147,7 +148,7 @@ internal engine layers with no row or settings anywhere, by design.
 
 Each logic module has unit tests compiled into `horizon-client --lib` and
 run by the CI worldgen-test job filter: `nea::tests`,
-`player_gestures::tests`, `subtle_effects::tests`, `overhauled::tests`,
+`player_gestures::tests`, `subtle_effects::tests`, `overhauled::tests`, `overhauled_clips::tests`,
 `emf::tests`, `etf::tests` — pose
 math, gating flags, keyframe sampling, spring/landing behaviour, additive
 rotation budgets, randomizer stability and settings

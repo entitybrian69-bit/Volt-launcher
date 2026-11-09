@@ -1454,13 +1454,17 @@ feature with its DONE/ADAPTED/UNSUPPORTED status.
   Subtle Effects for Minecraft (All Rights Reserved). No code or assets
   from the original are used; all particles are vanilla sprites.
 - **Overhauled Entities** (`crates/horizon-client/src/mobs/overhauled.rs`,
-  with the internal engine layers `mobs/emf.rs` and `mobs/etf.rs`) — a
-  clean-room procedural recreation inspired by the visible behaviour of
-  FreshLX's Fresh Animations and Fresh Moves resource packs for Minecraft
-  (All Rights Reserved) and by the documented behaviour of Traben's
-  Entity Model Features (EMF) and Entity Texture Features (ETF) mods.
-  No CEM keyframe data, code or assets from any of those projects are
-  used; all animation is original additive math over Volt's own models.
+  `mobs/overhauled_clips.rs`, with the internal engine layers
+  `mobs/emf.rs` and `mobs/etf.rs`) — a clean-room recreation in
+  behavioral parity with Oreville Studios' Actions & Stuff resource pack
+  for Minecraft Bedrock (All Rights Reserved), and inspired by the
+  visible behaviour of FreshLX's Fresh Animations and Fresh Moves
+  resource packs for Minecraft (All Rights Reserved) and by the
+  documented behaviour of Traben's Entity Model Features (EMF) and
+  Entity Texture Features (ETF) mods. No pack files, keyframe data,
+  code, textures, sounds or other assets from any of those projects are
+  used; all animation is original additive math and original keyframe
+  tables over Volt's own models, and all particles are vanilla sprites.
 - **Punchy (vendored native mod)** — the earlier clean-room `punchy.rs`
   built-in was removed in favour of the real Punchy Rust port, vendored at
   `tools/native_mods/vendored/punchy/` and woven into Android builds as

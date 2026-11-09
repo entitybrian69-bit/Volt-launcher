@@ -3,38 +3,54 @@
 //! vanilla pose after `anim::setup`. Walking gains weight and follow-
 //! through (eased double-frequency gait harmonics), bodies roll and
 //! counter-roll into steps, idle entities breathe, glance around and
-//! fidget, zombies reach and sway, creepers tiptoe and lean, spiders wave
-//! their legs, chickens peck as they strut, wolves and cats wag and curl
-//! their tails. Every entity gets a stable personality (phase, amplitude,
-//! tempo) so herds never move in lockstep. Purely visual: movement,
-//! timing and hitboxes never change, so it works on any server.
+//! fidget, zombies reach and sway, creepers tiptoe, lean and tremble as
+//! they swell, spiders wave their legs, chickens peck as they strut,
+//! wolves and cats wag and curl their tails. On top of the procedural
+//! layer ride the keyframed clips (`overhauled_clips`): idle emotes, the
+//! mid-air flip, the sprint-fall roll, the sneak sit, the three water
+//! entries and the full-moon wolf howl. Players swim with a real stroke,
+//! lean into sprints, settle into a sword stance, tremble holding a drawn
+//! bow, brace behind shields and windmill for balance on ledges; horses
+//! swish and stomp, cats loaf, wolves play-bow and hop, withers drift
+//! their three heads, happy ghasts sway. Every entity gets a stable
+//! personality (phase, amplitude, tempo) so herds never move in lockstep.
+//! Purely visual: movement, timing and hitboxes never change, so it works
+//! on any server.
 //!
-//! In the spirit of FreshLX's Fresh Animations and Fresh Moves packs
-//! (reimplemented from their documented behaviour as native procedural
-//! animation; no upstream assets or code are used — those packs are
-//! all-rights-reserved CEM data). Powered by the hidden `emf`/`etf`
-//! engine layers. Credits in THIRD_PARTY_NOTICES.md.
+//! Behavioral parity with Actions & Stuff (Oreville Studios, Bedrock) and
+//! in the spirit of FreshLX's Fresh Animations — reimplemented from their
+//! documented behaviour as native procedural animation; no upstream assets
+//! or code are used. Powered by the hidden `emf`/`etf` engine layers.
+//! Credits in THIRD_PARTY_NOTICES.md.
 use super::anim::{Anim, Poses, State};
-use super::{Mob, emf};
+use super::{Mob, emf, overhauled_clips as clips};
 use horizon_core::geometry::trig::Mth;
 use std::f32::consts::PI;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const ID: &str = "overhauled_entities";
 pub const NAME: &str = "Overhauled Entities";
-pub const VERSION: &str = "1.0.0";
+pub const VERSION: &str = "1.1.0";
 pub const DESCRIPTION: &str = "Animation overhaul for every entity, the player included: \
-weighted walks with follow-through, breathing and idle glances, zombie reaches, creeper \
-tiptoes, spider leg waves, chicken pecks, tail wags. Per-entity personality so herds \
-never sync. Purely visual, works on any server.";
+weighted walks, swim strokes, sword stances, ledge balancing, dives, flips, rolls, sits, \
+idle emotes, wolf howls under a full moon, cat loafs, horse stomps, wither head drift. \
+Plus rain splashes, boat wakes, XP-orb trails and mining sparks. Purely visual, works on \
+any server.";
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static PLAYERS: AtomicBool = AtomicBool::new(true);
 static MOBS: AtomicBool = AtomicBool::new(true);
+static RAIN: AtomicBool = AtomicBool::new(true);
 /// 0 = Subtle, 1 = Balanced, 2 = Dramatic.
 static INTENSITY: AtomicUsize = AtomicUsize::new(1);
 /// Set while the mod's row in Options > Mods is switched off entirely.
 static SUSPENDED: AtomicBool = AtomicBool::new(false);
+/// Fed once a frame by the game bridge: whether it is a full-moon night
+/// (wolves howl), whether the own player stands on a ledge, and whether
+/// the own player holds crouch (the synced pose covers everyone else).
+static NIGHT_MOON: AtomicBool = AtomicBool::new(false);
+static OWN_EDGE: AtomicBool = AtomicBool::new(false);
+static OWN_CROUCH: AtomicBool = AtomicBool::new(false);
 
 pub const INTENSITY_NAMES: [&str; 3] = ["Subtle", "Balanced", "Dramatic"];
 const INTENSITY_SCALE: [f32; 3] = [0.6, 1.0, 1.45];
@@ -42,12 +58,22 @@ const INTENSITY_SCALE: [f32; 3] = [0.6, 1.0, 1.45];
 pub fn set_suspended(off: bool) {
     SUSPENDED.store(off, Ordering::Relaxed);
 }
+pub fn set_env(night_moon: bool) {
+    NIGHT_MOON.store(night_moon, Ordering::Relaxed);
+}
+pub fn set_own_edge(edge: bool) {
+    OWN_EDGE.store(edge, Ordering::Relaxed);
+}
+pub fn set_own_crouch(crouch: bool) {
+    OWN_CROUCH.store(crouch, Ordering::Relaxed);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Flags {
     pub enabled: bool,
     pub players: bool,
     pub mobs: bool,
+    pub rain: bool,
     pub intensity: usize,
 }
 pub fn flags() -> Flags {
@@ -55,6 +81,7 @@ pub fn flags() -> Flags {
         enabled: ENABLED.load(Ordering::Relaxed),
         players: PLAYERS.load(Ordering::Relaxed),
         mobs: MOBS.load(Ordering::Relaxed),
+        rain: RAIN.load(Ordering::Relaxed),
         intensity: INTENSITY.load(Ordering::Relaxed).min(2),
     }
 }
@@ -62,10 +89,50 @@ pub fn set_flags(f: Flags) {
     ENABLED.store(f.enabled, Ordering::Relaxed);
     PLAYERS.store(f.players, Ordering::Relaxed);
     MOBS.store(f.mobs, Ordering::Relaxed);
+    RAIN.store(f.rain, Ordering::Relaxed);
     INTENSITY.store(f.intensity.min(2), Ordering::Relaxed);
 }
-fn active() -> bool {
+pub fn active() -> bool {
     ENABLED.load(Ordering::Relaxed) && !SUSPENDED.load(Ordering::Relaxed)
+}
+
+/// What the entity holds, read from the synced main-hand item id: the
+/// stance, swing style and tremble layers key off it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Tool {
+    #[default]
+    None,
+    Sword,
+    Axe,
+    Pickaxe,
+    Shovel,
+    Hoe,
+    Bow,
+    Crossbow,
+    Trident,
+}
+pub fn tool_of(item: Option<&str>) -> Tool {
+    let Some(id) = item else { return Tool::None };
+    let n = id.rsplit(':').next().unwrap_or(id);
+    if n.ends_with("_sword") {
+        Tool::Sword
+    } else if n.ends_with("_axe") {
+        Tool::Axe
+    } else if n.ends_with("_pickaxe") {
+        Tool::Pickaxe
+    } else if n.ends_with("_shovel") {
+        Tool::Shovel
+    } else if n.ends_with("_hoe") {
+        Tool::Hoe
+    } else if n == "crossbow" {
+        Tool::Crossbow
+    } else if n == "bow" {
+        Tool::Bow
+    } else if n == "trident" {
+        Tool::Trident
+    } else {
+        Tool::None
+    }
 }
 
 /// What the motion routines read, extracted so each is a pure function of
@@ -84,6 +151,22 @@ pub struct Motion {
     pub phase: f32,
     /// 1 when standing still, fading to 0 once walking.
     pub idle: f32,
+    /// The vanilla attack-swing progress, 0..1 (0 = not swinging).
+    pub swing: f32,
+    /// How many swings this entity has thrown (for attack variation).
+    pub swing_index: u32,
+    /// Bobbing in water: the swim-stroke overlay gates on it.
+    pub in_water: bool,
+    /// Using an item right now (a drawn bow trembles).
+    pub using: bool,
+    /// Holding a shield up: the brace stance.
+    pub blocking: bool,
+    /// The own player standing over a ledge: the balance windmill.
+    pub on_edge: bool,
+    /// A swelling creeper's tension, 0..1: the fuse tremble.
+    pub tense: f32,
+    /// What the main hand holds.
+    pub tool: Tool,
 }
 
 /// The post-pass over the finished vanilla pose, for every mob kind.
@@ -97,13 +180,59 @@ pub fn apply(m: &Mob, s: &State, p: &mut Poses) {
         return;
     }
     let per = emf::personality(m.id);
+    let family = match m.kind.anim {
+        Anim::Humanoid { .. }
+        | Anim::Zombie
+        | Anim::Drowned
+        | Anim::ZombieVillager
+        | Anim::ZombifiedPiglin
+        | Anim::Skeleton
+        | Anim::Witch
+        | Anim::Illager
+        | Anim::Piglin => clips::Family::Humanoid,
+        Anim::Wolf => clips::Family::Wolf,
+        Anim::Feline => clips::Family::Cat,
+        _ => clips::Family::Other,
+    };
+    // The own player's crouch comes from the keyboard; everyone else's
+    // from the synced entity pose (5 = crouching in the vanilla order).
+    let crouching = if m.own {
+        OWN_CROUCH.load(Ordering::Relaxed)
+    } else {
+        m.extra.synced_pose == 5
+    };
+    let mut k = INTENSITY_SCALE[f.intensity] * per.amp;
+    if m.extra.fall_flying {
+        // Elytra flight keeps its vanilla pose: damp everything additive.
+        k *= 0.25;
+    }
+    let idle = (1.0 - s.speed * 3.0).clamp(0.0, 1.0);
+    let sig = clips::tick(&clips::Obs {
+        id: m.id,
+        now: s.age / 20.0,
+        swing: s.swing,
+        in_water: m.fluids.in_water,
+        fall: m.fall_distance as f32,
+        crouching,
+        idle: idle > 0.6,
+        family,
+        howl_ok: NIGHT_MOON.load(Ordering::Relaxed),
+    });
     let mo = Motion {
-        t: s.age / 20.0 * per.tempo,
+        t: s.age / 20.0 * per.tempo * if s.baby { 1.15 } else { 1.0 },
         pos: s.pos,
         speed: s.speed.min(1.0),
-        k: INTENSITY_SCALE[f.intensity] * per.amp,
+        k,
         phase: per.phase,
-        idle: (1.0 - s.speed * 3.0).clamp(0.0, 1.0),
+        idle,
+        swing: s.swing,
+        swing_index: sig.swing_index,
+        in_water: m.fluids.in_water,
+        using: m.extra.using_item > 0,
+        blocking: m.extra.blocking,
+        on_edge: m.own && OWN_EDGE.load(Ordering::Relaxed),
+        tense: (m.swell as f32 / 30.0).clamp(0.0, 1.0),
+        tool: tool_of(m.extra.main_hand.as_deref()),
     };
     match m.kind.anim {
         Anim::Humanoid { zombie_arms } => humanoid(p, &mo, zombie_arms),
@@ -119,16 +248,41 @@ pub fn apply(m: &Mob, s: &State, p: &mut Poses) {
         | Anim::Panda
         | Anim::Goat
         | Anim::Hoglin
-        | Anim::Horse
         | Anim::Llama => quadruped(p, &mo),
-        Anim::Wolf | Anim::Feline | Anim::Fox => {
+        Anim::Horse => {
+            quadruped(p, &mo);
+            equine(p, &mo);
+        }
+        Anim::Wolf => {
+            quadruped(p, &mo);
+            tail_wag(p, &mo);
+            wolf(p, &mo);
+        }
+        Anim::Feline => {
+            quadruped(p, &mo);
+            tail_wag(p, &mo);
+            cat(p, &mo);
+        }
+        Anim::Fox => {
             quadruped(p, &mo);
             tail_wag(p, &mo);
         }
         Anim::Creeper => creeper(p, &mo),
         Anim::Spider => spider(p, &mo),
         Anim::Chicken => chicken(p, &mo),
+        Anim::Wither => wither(p, &mo),
+        Anim::HappyGhast => happy_ghast_sway(p, &mo),
         _ => ambient(p, &mo),
+    }
+    // The keyframed clips ride on top of everything: idle emotes fade
+    // with the idle factor (so walking out of one never pops), triggered
+    // clips (dives, flips, rolls, sits, howls) play at full strength.
+    if let Some((c, t, emote)) = sig.clip {
+        let fade = if emote { mo.idle } else { 1.0 };
+        let scale = (0.85 + 0.15 * mo.k.min(2.0)) * fade;
+        if scale > 0.01 {
+            clips::apply_clip(p, c, t, scale);
+        }
     }
 }
 
@@ -147,6 +301,8 @@ pub fn humanoid(p: &mut Poses, mo: &Motion, zombie: bool) {
     emf::add(p, "body", 5, emf::capped(0.05 * k * roll, 0.12));
     emf::add(p, "head", 5, emf::capped(-0.035 * k * roll, 0.1));
     emf::add(p, "body", 4, emf::capped(0.06 * k * roll, 0.14));
+    // The sprint lean: shoulders pitch into a fast run.
+    emf::add(p, "body", 3, 0.10 * k * ((mo.speed - 0.65).max(0.0) / 0.35));
     // Idle life: breathing arms, a slow head wander, a tiny weight shift.
     let idle = mo.idle * k;
     emf::add(p, "right_arm", 5, 0.025 * idle * emf::osc(mo.t, 0.21, mo.phase));
@@ -163,6 +319,86 @@ pub fn humanoid(p: &mut Poses, mo: &Motion, zombie: bool) {
         emf::add(p, "right_arm", 4, 0.06 * k * emf::drift(mo.t, 0.21, mo.phase + 1.2));
         emf::add(p, "left_arm", 4, -0.06 * k * emf::drift(mo.t, 0.21, mo.phase + 4.0));
     }
+    swim_stroke(p, mo);
+    stance(p, mo);
+    attack_variation(p, mo);
+    edge_balance(p, mo);
+}
+
+/// The swim overlay: a real alternating front-crawl stroke and a flutter
+/// kick, over the vanilla water pose, whenever a humanoid moves in water.
+pub fn swim_stroke(p: &mut Poses, mo: &Motion) {
+    if !mo.in_water || mo.speed < 0.03 {
+        return;
+    }
+    let k = mo.k;
+    let sw = mo.speed;
+    let st = mo.t * 2.1 * PI * 2.0 + mo.phase;
+    emf::add(p, "right_arm", 3, -0.55 * k * sw * (st.msin() * 0.5 + 0.5));
+    emf::add(p, "left_arm", 3, -0.55 * k * sw * ((st + PI).msin() * 0.5 + 0.5));
+    emf::add(p, "right_arm", 5, 0.3 * k * sw * (st + 0.8).msin());
+    emf::add(p, "left_arm", 5, -0.3 * k * sw * (st + 0.8 + PI).msin());
+    let kick = (mo.t * 5.0 * PI * 2.0 + mo.phase).msin() * 0.35 * k * sw;
+    emf::add(p, "right_leg", 3, kick);
+    emf::add(p, "left_leg", 3, -kick);
+    emf::add(p, "body", 5, 0.08 * k * sw * (st * 0.5).msin());
+}
+
+/// Held-item stances: the sword ready pose, the drawn-bow tremble and the
+/// shield brace.
+pub fn stance(p: &mut Poses, mo: &Motion) {
+    let k = mo.k;
+    if mo.tool == Tool::Sword && mo.swing <= 0.0 {
+        // The ready stance: the sword arm rides a little raised and in.
+        emf::add(p, "right_arm", 3, -0.2 * k);
+        emf::add(p, "right_arm", 5, -0.05 * k);
+        emf::add(p, "body", 4, -0.06 * k);
+    }
+    if matches!(mo.tool, Tool::Bow | Tool::Crossbow) && mo.using {
+        // Holding a draw is work: a fine, fast tremble in both arms.
+        let tr = 0.02 * k * (mo.t * 37.0).msin() + 0.012 * k * (mo.t * 53.0 + 1.3).msin();
+        emf::add(p, "right_arm", 3, tr);
+        emf::add(p, "left_arm", 3, -tr);
+        emf::add(p, "head", 5, 0.4 * tr);
+    }
+    if mo.blocking {
+        // Braced behind the shield: hunched shoulders, chin down.
+        emf::add(p, "body", 3, 0.09 * k);
+        emf::add(p, "head", 3, 0.12 * k);
+    }
+}
+
+/// Attack variation: each swing picks a different lateral path, axes chop
+/// with more shoulder, picks and shovels drive with the body.
+pub fn attack_variation(p: &mut Poses, mo: &Motion) {
+    if mo.swing <= 0.0 || mo.swing >= 1.0 {
+        return;
+    }
+    let k = mo.k;
+    let env = (mo.swing * PI).msin();
+    let path = [-0.16f32, 0.0, 0.16][(mo.swing_index % 3) as usize];
+    emf::add(p, "right_arm", 4, path * k * env);
+    match mo.tool {
+        Tool::Axe => {
+            emf::add(p, "body", 3, 0.12 * k * env);
+            emf::add(p, "right_arm", 5, 0.1 * k * env);
+        }
+        Tool::Pickaxe | Tool::Shovel => emf::add(p, "body", 3, 0.08 * k * env),
+        _ => {}
+    }
+}
+
+/// Ledge balancing (own player): arms windmill out, the torso wobbles.
+pub fn edge_balance(p: &mut Poses, mo: &Motion) {
+    if !mo.on_edge || mo.idle < 0.3 {
+        return;
+    }
+    let k = mo.k * mo.idle;
+    let w = emf::drift(mo.t, 0.9, mo.phase);
+    emf::add(p, "right_arm", 5, (0.9 + 0.25 * w) * k);
+    emf::add(p, "left_arm", 5, (-0.9 + 0.25 * w) * k);
+    emf::add(p, "body", 5, 0.06 * k * w);
+    emf::add(p, "head", 5, -0.04 * k * w);
 }
 
 /// Weighted quadruped gait: leg follow-through, a trotting body bob, an
@@ -190,16 +426,74 @@ pub fn quadruped(p: &mut Poses, mo: &Motion) {
 }
 
 /// A wagging tail for wolves, cats and foxes: eager while moving, a lazy
-/// curl-sway at rest.
+/// curl-sway at rest. (The wolf model names its articulated tail
+/// `real_tail`, the cat its segments `tail1`/`tail2`: all written,
+/// unknown parts are a no-op.)
 pub fn tail_wag(p: &mut Poses, mo: &Motion) {
     let k = mo.k;
     let eager = 0.25 + 0.75 * mo.speed;
-    emf::add(p, "tail", 4, emf::capped(0.28 * k * eager * emf::osc(mo.t, 1.9, mo.phase), 0.45));
-    emf::add(p, "tail", 3, 0.06 * k * mo.idle * emf::osc(mo.t, 0.23, mo.phase + 0.8));
+    let wag = emf::capped(0.28 * k * eager * emf::osc(mo.t, 1.9, mo.phase), 0.45);
+    let curl = 0.06 * k * mo.idle * emf::osc(mo.t, 0.23, mo.phase + 0.8);
+    for tail in ["tail", "real_tail", "tail1", "tail2"] {
+        emf::add(p, tail, 4, wag);
+        emf::add(p, tail, 3, curl);
+    }
+}
+
+/// Wolf idle windows: the play bow, two happy hops and ear flicks.
+pub fn wolf(p: &mut Poses, mo: &Motion) {
+    let idle = mo.idle * mo.k;
+    // The play bow: chest down, front legs stretched, tail up.
+    let bow = ((emf::osc(mo.t, 0.031, mo.phase + 4.2) - 0.75).max(0.0) / 0.25) * idle;
+    emf::add(p, "upper_body", 3, 0.45 * bow);
+    emf::add(p, "right_front_leg", 3, -0.7 * bow);
+    emf::add(p, "left_front_leg", 3, -0.7 * bow);
+    emf::add(p, "real_head", 3, -0.25 * bow);
+    emf::add(p, "head", 3, -0.25 * bow);
+    emf::add(p, "real_tail", 3, -0.5 * bow);
+    emf::add(p, "tail", 3, -0.5 * bow);
+    // Happy hops: a short double-bounce window.
+    let gate = ((emf::osc(mo.t, 0.027, mo.phase + 1.1) - 0.85).max(0.0) / 0.15) * idle;
+    let hop = gate * (mo.t * 7.0 * PI * 2.0).msin().max(0.0);
+    emf::add(p, "right_front_leg", 3, -0.8 * hop);
+    emf::add(p, "left_front_leg", 3, -0.8 * hop);
+    emf::add(p, "upper_body", 3, -0.25 * hop);
+    // Ear flicks (a no-op on models without ear parts).
+    let flick = ((emf::osc(mo.t, 0.11, mo.phase + 2.7) - 0.9).max(0.0) / 0.1) * idle;
+    emf::add(p, "left_ear", 5, -0.5 * flick * (mo.t * 15.0).msin());
+    emf::add(p, "right_ear", 5, 0.5 * flick * (mo.t * 15.0 + 1.0).msin());
+}
+
+/// Cat idle windows: the loaf (legs folded under, tail curled around)
+/// and a dozing head nod inside it.
+pub fn cat(p: &mut Poses, mo: &Motion) {
+    let idle = mo.idle * mo.k;
+    let loaf = (((emf::osc(mo.t, 0.016, mo.phase + 3.3) - 0.62).max(0.0) / 0.38).min(1.0)) * idle;
+    for leg in ["right_front_leg", "left_front_leg", "right_hind_leg", "left_hind_leg"] {
+        emf::add(p, leg, 3, 1.25 * loaf);
+    }
+    emf::add(p, "body", 3, 0.1 * loaf);
+    emf::add(p, "head", 3, 0.22 * loaf * (0.6 + 0.4 * emf::osc(mo.t, 0.11, mo.phase)));
+    emf::add(p, "tail1", 4, 0.8 * loaf);
+    emf::add(p, "tail2", 4, 0.9 * loaf);
+}
+
+/// Horse-family idle extras: the tail swish, a head toss and a front-hoof
+/// stomp. (The articulated head group is `head_parts` on equine models.)
+pub fn equine(p: &mut Poses, mo: &Motion) {
+    let k = mo.k;
+    let idle = mo.idle * k;
+    emf::add(p, "tail", 4, 0.35 * k * emf::drift(mo.t, 0.6, mo.phase));
+    let toss = ((emf::osc(mo.t, 0.05, mo.phase + 0.9) - 0.86).max(0.0) / 0.14) * idle;
+    emf::add(p, "head_parts", 3, -0.3 * toss);
+    emf::add(p, "head_parts", 5, 0.15 * toss * (mo.t * 9.0).msin());
+    let stomp = ((emf::osc(mo.t, 0.041, mo.phase + 2.2) - 0.88).max(0.0) / 0.12) * idle;
+    emf::add(p, "right_front_leg", 3, -0.55 * stomp * (mo.t * 6.0 * PI).msin().max(0.0));
 }
 
 /// The creeper tiptoe: a nervous forward lean that grows with speed, legs
-/// stepping lighter, the head tilting as it stalks.
+/// stepping lighter, the head tilting as it stalks — and a fuse tremble
+/// that builds as it swells.
 pub fn creeper(p: &mut Poses, mo: &Motion) {
     let k = mo.k;
     let lean = mo.speed * (0.8 + 0.2 * (mo.pos * 1.3324).msin());
@@ -215,6 +509,11 @@ pub fn creeper(p: &mut Poses, mo: &Motion) {
     }
     emf::add(p, "head", 5, 0.05 * k * emf::drift(mo.t, 0.11, mo.phase));
     emf::add(p, "head", 3, 0.04 * k * mo.idle * emf::drift(mo.t, 0.08, mo.phase + 2.0));
+    if mo.tense > 0.0 {
+        let tr = mo.tense * k;
+        emf::add(p, "body", 5, 0.05 * tr * (mo.t * 31.0).msin());
+        emf::add(p, "head", 5, 0.04 * tr * (mo.t * 43.0).msin());
+    }
 }
 
 /// Spider idle leg waves: each leg lifts and circles in turn while the
@@ -275,6 +574,26 @@ pub fn enderman(p: &mut Poses, mo: &Motion) {
     emf::add(p, "left_leg", 3, emf::capped(0.08 * k * bounce, 0.25));
 }
 
+/// The wither: its three heads drift and scan independently, the ribcage
+/// pulses with the hover, the tail sways.
+pub fn wither(p: &mut Poses, mo: &Motion) {
+    let k = mo.k;
+    emf::add(p, "left_head", 4, 0.35 * k * emf::drift(mo.t, 0.09, mo.phase + 1.0));
+    emf::add(p, "left_head", 3, 0.18 * k * emf::drift(mo.t, 0.07, mo.phase + 2.0));
+    emf::add(p, "right_head", 4, 0.35 * k * emf::drift(mo.t, 0.08, mo.phase + 4.1));
+    emf::add(p, "right_head", 3, 0.18 * k * emf::drift(mo.t, 0.06, mo.phase + 5.2));
+    emf::add(p, "center_head", 3, 0.06 * k * emf::drift(mo.t, 0.05, mo.phase));
+    emf::add(p, "ribcage", 3, 0.05 * k * emf::osc(mo.t, 0.22, mo.phase));
+    emf::add(p, "tail", 3, 0.25 * k * emf::drift(mo.t, 0.13, mo.phase + 0.7));
+}
+
+/// The happy ghast: a slow, floaty whole-body sway as it drifts.
+pub fn happy_ghast_sway(p: &mut Poses, mo: &Motion) {
+    let k = mo.k;
+    emf::add(p, "body", 3, 0.07 * k * emf::drift(mo.t, 0.07, mo.phase));
+    emf::add(p, "body", 5, 0.09 * k * emf::drift(mo.t, 0.055, mo.phase + 2.0));
+}
+
 /// Everything else alive gets the ambient layer: breathing and a wandering
 /// gaze on whatever parts the model actually has.
 pub fn ambient(p: &mut Poses, mo: &Motion) {
@@ -330,6 +649,14 @@ mod tests {
             k: 1.0,
             phase: 0.7,
             idle: (1.0 - speed * 3.0).clamp(0.0, 1.0),
+            swing: 0.0,
+            swing_index: 0,
+            in_water: false,
+            using: false,
+            blocking: false,
+            on_edge: false,
+            tense: 0.0,
+            tool: Tool::None,
         }
     }
 
@@ -372,6 +699,108 @@ mod tests {
     }
 
     #[test]
+    fn swimmers_stroke_and_kick() {
+        let mut dry = humanoid_poses();
+        humanoid(&mut dry, &motion(3.0, 1.5, 0.8), false);
+        let mut wet = humanoid_poses();
+        let mut mo = motion(3.0, 1.5, 0.8);
+        mo.in_water = true;
+        humanoid(&mut wet, &mo, false);
+        let arms = |p: &mut Poses| p.get("right_arm")[3].abs() + p.get("left_arm")[3].abs();
+        assert_ne!(arms(&mut dry), arms(&mut wet), "water adds the stroke");
+        // The stroke alternates: both arms never share the same x rotation.
+        assert_ne!(wet.get("right_arm")[3], wet.get("left_arm")[3]);
+        // And it stays within a sane budget everywhere.
+        for ti in 0..40 {
+            let mut p = humanoid_poses();
+            let mut mo = motion(ti as f32 * 0.21, 2.0, 1.0);
+            mo.in_water = true;
+            humanoid(&mut p, &mo, false);
+            for n in ["head", "body", "right_arm", "left_arm", "right_leg", "left_leg"] {
+                for a in 3..6 {
+                    assert!(p.get(n)[a].abs() < 1.2, "{n}[{a}] swim budget");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stances_follow_the_held_tool() {
+        let mut sword = humanoid_poses();
+        let mut mo = motion(2.0, 0.0, 0.0);
+        mo.tool = Tool::Sword;
+        humanoid(&mut sword, &mo, false);
+        let mut bare = humanoid_poses();
+        humanoid(&mut bare, &motion(2.0, 0.0, 0.0), false);
+        assert!(
+            sword.get("right_arm")[3] < bare.get("right_arm")[3],
+            "the sword arm rides raised"
+        );
+        // A drawn bow trembles; an undrawn one does not.
+        let mut drawn = humanoid_poses();
+        let mut mo = motion(2.0, 0.0, 0.0);
+        mo.tool = Tool::Bow;
+        mo.using = true;
+        humanoid(&mut drawn, &mo, false);
+        let mut held = humanoid_poses();
+        mo.using = false;
+        humanoid(&mut held, &mo, false);
+        assert_ne!(drawn.get("right_arm")[3], held.get("right_arm")[3]);
+        // Blocking hunches the body.
+        let mut block = humanoid_poses();
+        let mut mo = motion(2.0, 0.0, 0.0);
+        mo.blocking = true;
+        humanoid(&mut block, &mo, false);
+        assert!(block.get("body")[3] > bare.get("body")[3]);
+    }
+
+    #[test]
+    fn swings_vary_by_index_and_tool() {
+        let swing_at = |index: u32, tool: Tool| {
+            let mut p = humanoid_poses();
+            let mut mo = motion(2.0, 0.0, 0.0);
+            mo.swing = 0.5;
+            mo.swing_index = index;
+            mo.tool = tool;
+            humanoid(&mut p, &mo, false);
+            (p.get("right_arm")[4], p.get("body")[3])
+        };
+        let (a, _) = swing_at(0, Tool::None);
+        let (b, _) = swing_at(1, Tool::None);
+        let (c, _) = swing_at(2, Tool::None);
+        assert!(a != c && a != b, "three swing paths cycle: {a} {b} {c}");
+        let (_, bare_body) = swing_at(1, Tool::None);
+        let (_, axe_body) = swing_at(1, Tool::Axe);
+        assert!(axe_body > bare_body, "the axe chop drives the body");
+    }
+
+    #[test]
+    fn ledge_balancing_windmills_the_arms() {
+        let mut p = humanoid_poses();
+        let mut mo = motion(2.0, 0.0, 0.0);
+        mo.on_edge = true;
+        humanoid(&mut p, &mo, false);
+        assert!(p.get("right_arm")[5] > 0.5, "arms out");
+        assert!(p.get("left_arm")[5] < -0.5, "both of them");
+        // Off the ledge, nothing of the sort.
+        let mut q = humanoid_poses();
+        humanoid(&mut q, &motion(2.0, 0.0, 0.0), false);
+        assert!(q.get("right_arm")[5].abs() < 0.1);
+    }
+
+    #[test]
+    fn tool_of_classifies_the_held_item() {
+        assert_eq!(tool_of(Some("minecraft:diamond_sword")), Tool::Sword);
+        assert_eq!(tool_of(Some("minecraft:golden_axe")), Tool::Axe);
+        assert_eq!(tool_of(Some("minecraft:iron_pickaxe")), Tool::Pickaxe);
+        assert_eq!(tool_of(Some("minecraft:bow")), Tool::Bow);
+        assert_eq!(tool_of(Some("minecraft:crossbow")), Tool::Crossbow);
+        assert_eq!(tool_of(Some("minecraft:trident")), Tool::Trident);
+        assert_eq!(tool_of(Some("minecraft:cobblestone")), Tool::None);
+        assert_eq!(tool_of(None), Tool::None);
+    }
+
+    #[test]
     fn every_channel_stays_within_the_additive_budget() {
         // Sweep phases and speeds: no single routine may bend any part
         // more than half a radian, so vanilla poses stay recognisable.
@@ -399,6 +828,18 @@ mod tests {
                         assert!(q.get(n)[a].abs() < 0.75, "{n}[{a}] quadruped budget");
                     }
                 }
+                // The idle-window families stay within their own budgets.
+                for (i, routine) in
+                    [wolf as fn(&mut Poses, &Motion), cat, equine].iter().enumerate()
+                {
+                    let mut w = quad_poses();
+                    routine(&mut w, &motion(t, pos, speed));
+                    for n in ["head", "body", "tail", "right_front_leg", "left_front_leg"] {
+                        for a in 3..6 {
+                            assert!(w.get(n)[a].abs() < 1.6, "{i}:{n}[{a}] idle-window budget");
+                        }
+                    }
+                }
             }
         }
     }
@@ -419,18 +860,51 @@ mod tests {
     }
 
     #[test]
+    fn idle_windows_eventually_open_for_each_family() {
+        let wolf_bowed = (0..2400).any(|i| {
+            let mut q = quad_poses();
+            wolf(&mut q, &motion(i as f32 * 0.25, 0.0, 0.0));
+            q.get("right_front_leg")[3].abs() > 0.1
+        });
+        assert!(wolf_bowed, "a wolf play-bows or hops within ten minutes");
+        let cat_loafed = (0..2400).any(|i| {
+            let mut q = quad_poses();
+            cat(&mut q, &motion(i as f32 * 0.25, 0.0, 0.0));
+            q.get("right_front_leg")[3] > 0.4
+        });
+        assert!(cat_loafed, "a cat loafs within ten minutes");
+        let horse_moved = (0..2400).any(|i| {
+            let mut q = quad_poses();
+            equine(&mut q, &motion(i as f32 * 0.25, 0.0, 0.0));
+            q.get("right_front_leg")[3].abs() > 0.1 || q.get("tail")[4].abs() > 0.1
+        });
+        assert!(horse_moved, "a horse swishes or stomps within ten minutes");
+    }
+
+    #[test]
+    fn creepers_tremble_as_they_swell() {
+        let mut calm = quad_poses();
+        creeper(&mut calm, &motion(3.0, 0.0, 0.0));
+        let mut fused = quad_poses();
+        let mut mo = motion(3.0, 0.0, 0.0);
+        mo.tense = 1.0;
+        creeper(&mut fused, &mo);
+        assert_ne!(calm.get("body")[5], fused.get("body")[5], "the fuse trembles");
+    }
+
+    #[test]
     fn per_entity_personality_desynchronises_the_herd() {
         let a = emf::personality(10);
         let b = emf::personality(11);
         let mut pa = quad_poses();
         let mut pb = quad_poses();
-        let mo = |per: emf::Personality| Motion {
-            t: 6.0 * per.tempo,
-            pos: 0.0,
-            speed: 0.0,
-            k: per.amp,
-            phase: per.phase,
-            idle: 1.0,
+        let mo = |per: emf::Personality| {
+            let mut m = motion(0.0, 0.0, 0.0);
+            m.t = 6.0 * per.tempo;
+            m.k = per.amp;
+            m.phase = per.phase;
+            m.idle = 1.0;
+            m
         };
         quadruped(&mut pa, &mo(a));
         quadruped(&mut pb, &mo(b));
@@ -444,14 +918,31 @@ mod tests {
     #[test]
     fn flags_round_trip_and_gate() {
         let before = flags();
-        set_flags(Flags { enabled: true, players: false, mobs: true, intensity: 2 });
-        assert_eq!(flags(), Flags { enabled: true, players: false, mobs: true, intensity: 2 });
-        set_flags(Flags { enabled: true, players: true, mobs: true, intensity: 9 });
+        set_flags(Flags { enabled: true, players: false, mobs: true, rain: false, intensity: 2 });
+        assert_eq!(
+            flags(),
+            Flags { enabled: true, players: false, mobs: true, rain: false, intensity: 2 }
+        );
+        set_flags(Flags { enabled: true, players: true, mobs: true, rain: true, intensity: 9 });
         assert_eq!(flags().intensity, 2, "intensity clamps to the names table");
         set_suspended(true);
         assert!(!active(), "the row toggle suspends everything");
         set_suspended(false);
         assert!(active());
         set_flags(before);
+    }
+
+    #[test]
+    fn frame_feeds_round_trip() {
+        set_env(true);
+        assert!(NIGHT_MOON.load(Ordering::Relaxed));
+        set_env(false);
+        assert!(!NIGHT_MOON.load(Ordering::Relaxed));
+        set_own_edge(true);
+        assert!(OWN_EDGE.load(Ordering::Relaxed));
+        set_own_edge(false);
+        set_own_crouch(true);
+        assert!(OWN_CROUCH.load(Ordering::Relaxed));
+        set_own_crouch(false);
     }
 }
