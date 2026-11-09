@@ -65,9 +65,9 @@ or sounds are unsupported by policy).
 
 | Upstream feature | Status | Notes |
 |---|---|---|
-| Torch/candle flame sparks | DONE | `flame_spark` beside every vanilla torch/candle flame spawn (incl. soul/copper torches via the same arm). |
-| Campfire embers | DONE | `campfire_sparks` over lit campfires, beyond vanilla's lava pops. |
-| Glowstone dust | DONE | Gold `dust` particles drifting off sampled glowstone faces. |
+| Torch/candle flame sparks | DONE | `flame_spark` beside every vanilla torch/candle flame spawn (incl. soul/copper torches via the same arm): a 3-spark ember fan at 90% odds, so the rare animate-tick visits read as a clear burst (runtime-proven in CI: `subtle_effects_burst_in_the_live_animate_tick`). |
+| Campfire embers | DONE | `campfire_sparks` over lit campfires: a 3-ember column plus a frequent arcing lava spark, beyond vanilla's pops. |
+| Glowstone dust | DONE | Three gold `dust` motes per sampled tick drifting off glowstone faces (60% odds), a visible shimmer. |
 | Redstone-block dust | DONE | Red `dust` from `minecraft:redstone_block`. (Upstream also covers ores; ours is exact-block only to keep the animate-tick lookup cheap — ADAPTED in scope.) |
 | Burning-entity sparks | DONE | Embers + smoke within the mob's bounding size, mobs within 32 blocks, tick rate. |
 | Slime trails | DONE | `item_slime` blobs under moving grounded slimes. |
@@ -112,7 +112,7 @@ gesture set so the library is usable out of the box.
 | Keyframed per-part channels | DONE | `(time, radians)` keys per part axis. |
 | Interpolation/easing | ADAPTED | Smoothstep easing between keys (playerAnimator also offers molang expressions — out of scope). |
 | Layering over vanilla pose with clean entry/exit | DONE | Additive channels; every clip starts and ends at zero, so there is no snap (tested). |
-| Third-person playback | DONE | On the local player's body. |
+| Third-person playback | DONE | On the local player's body; while a clip plays from first person the camera auto-borrows the front third-person view and restores it after (`volt_builtins_frame` + `still_playing`), so gestures are always visible. |
 | First-person playback | UNSUPPORTED | Our first-person hands are matrix-posed, not keyframe-rigged; Punchy covers first-person motion. |
 | Playback on other players | UNSUPPORTED | Would need a network channel; no protocol changes by directive. |
 | API for other mods | DONE | `play_keyframes(index, now)` is public to the other built-ins. |

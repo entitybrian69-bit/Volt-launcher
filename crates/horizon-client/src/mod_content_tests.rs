@@ -1903,6 +1903,160 @@ fn biomes_unseen_full_root_runtime() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
+/// Subtle Effects AT RUNTIME, over the REAL prepared root and the REAL
+/// render path: the exact `animate_tick` call `game/render_tick.rs` makes
+/// every render tick, with the real `AnimateTables`, block registry,
+/// collision cache and a world holding torches, glowstone and lit
+/// campfires. The same scene is ticked once with the built-in off and once
+/// on: the off run spawns NO small-flame sparks and NO glowing dust (so
+/// the counted particles are attributable to the mod alone), the on run
+/// spawns hundreds - the bursts a player actually sees near a torch.
+#[test]
+#[ignore = "full prepared root: the CI worldgen job runs it"]
+fn subtle_effects_burst_in_the_live_animate_tick() {
+    use crate::animate_tick::{AnimateContext, AnimateTables, animate_tick};
+    use crate::biome::Biomes;
+    use crate::chunk::Chunk;
+    use crate::particles::{ParticleEngine, ParticleType};
+    use crate::subtle_effects::{self, Flags};
+    use crate::world::World;
+    use horizon_world::block_collision::BlockCollisionRegistry;
+    use horizon_world::collision::CachedCollisionRegistry;
+    use horizon_world::registry::BlockStateId;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+    let _guard = subtle_effects::FLAGS_LOCK.lock().unwrap();
+    let Some(base) = prepared() else {
+        panic!("no prepared root: run tools/android_prepare.py first");
+    };
+    let assets = Assets::load(&base).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&base, registry).unwrap();
+    let (named, _) = nbt::read_named(
+        &fs::read(base.join("cached-collision.nbt")).unwrap(),
+        Limits::tables(),
+    )
+    .unwrap();
+    let cached = CachedCollisionRegistry::from_nbt(&named.tag, registry).unwrap();
+    let collision = BlockCollisionRegistry::new(Arc::new(cached)).unwrap();
+    let biomes = Biomes::load(&base).unwrap();
+    let tables = AnimateTables::load(&base, registry, &biomes).unwrap();
+
+    // A dense display layer at y 70 in chunk (0, 0): a row of lit
+    // campfires, then alternating torches and glowstone. Neighbour chunks
+    // are resident air, like a loaded world around the player.
+    let torch = registry.default_state("minecraft:torch").unwrap();
+    let glowstone = registry.default_state("minecraft:glowstone").unwrap();
+    let lit = "true";
+    let campfire = (0..registry.len() as u32)
+        .map(BlockStateId)
+        .find(|id| {
+            registry.state(*id).is_some_and(|s| {
+                s.name == "minecraft:campfire"
+                    && s.properties.get("lit").is_some_and(|v| v == lit)
+                    && s.properties.get("waterlogged").is_none_or(|v| v == "false")
+            })
+        })
+        .expect("a lit, dry campfire state exists");
+    assert!(tables.is_lit_campfire(campfire.0), "the chosen campfire state ticks particles");
+    let air = registry.default_state("minecraft:air").unwrap();
+    let mut world = World::new(air, 1);
+    for cx in -2..=2 {
+        for cz in -2..=2 {
+            world
+                .chunks
+                .insert((cx, cz), Arc::new(Chunk::empty(cx, cz)));
+        }
+    }
+    let (mut torches, mut stones, mut fires) = (0, 0, 0);
+    for x in 0..16 {
+        for z in 0..16 {
+            let state = if z == 0 {
+                fires += 1;
+                campfire
+            } else if (x + z) % 2 == 0 {
+                torches += 1;
+                torch
+            } else {
+                stones += 1;
+                glowstone
+            };
+            world.set(x, 70, z, state).unwrap();
+        }
+    }
+    assert!(torches > 100 && stones > 90 && fires == 16);
+
+    // The same context render_tick.rs builds, with a clear sky.
+    let raining_at = |_: [i32; 3]| -> bool { false };
+    let height_no_leaves = |_: [i32; 3]| -> i32 { 0 };
+    let model_offset = |_: BlockStateId, _: i32, _: i32| -> Option<[f64; 3]> { None };
+    let gateway_particles = |_: BlockStateId, _: [i32; 3]| -> usize { 0 };
+    let ctx = AnimateContext {
+        world: &world,
+        facts: &facts,
+        collision: &collision,
+        biomes: &biomes,
+        registry,
+        raining_at: &raining_at,
+        height_no_leaves: &height_no_leaves,
+        firefly_bush_sounds: false,
+        creaking_active: false,
+        sky_darken: 0,
+        marker: None,
+        model_offset: &model_offset,
+        gateway_particles: &gateway_particles,
+        thundering: false,
+        ultrawarm: false,
+    };
+    let before = subtle_effects::flags();
+    let run = |enabled: bool| {
+        subtle_effects::set_flags(Flags {
+            enabled,
+            sparks: true,
+            dust: true,
+            burning: true,
+            slimes: true,
+            density: 1,
+        });
+        subtle_effects::set_suspended(false);
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.seed_randoms(7, 7, 7);
+        engine.requested = Some(Vec::new());
+        // 30 render ticks with the player standing on the display floor.
+        for _ in 0..30 {
+            animate_tick(&tables, &mut engine, &ctx, [8, 70, 8]);
+        }
+        let got = engine.requested.take().unwrap();
+        let count =
+            |ty: ParticleType| got.iter().filter(|(o, _, _)| o.ty == ty).count();
+        (
+            count(ParticleType::SmallFlame),
+            count(ParticleType::Dust),
+            count(ParticleType::Flame),
+        )
+    };
+    let (off_small, off_dust, off_flame) = run(false);
+    let (on_small, on_dust, on_flame) = run(true);
+    subtle_effects::set_flags(before);
+    // Off: vanilla alone - torches make Flame and Smoke, never SmallFlame;
+    // glowstone makes nothing. So every counted spark/dust mote is ours.
+    assert_eq!(off_small, 0, "vanilla spawns no small-flame sparks here");
+    assert_eq!(off_dust, 0, "vanilla spawns no glowing dust");
+    assert!(off_flame > 100, "the torches do burn in vanilla: {off_flame}");
+    // On: the bursts are unmissable - hundreds of sparks and motes in a
+    // 1.5-second window - and the campfires add ember flames over vanilla.
+    assert!(on_small > 300, "torch spark bursts at runtime: {on_small}");
+    assert!(on_dust > 150, "glowstone dust shimmer at runtime: {on_dust}");
+    assert!(
+        on_flame > off_flame + 50,
+        "campfire embers add flames: {on_flame} vs {off_flame}"
+    );
+    println!(
+        "live animate_tick: subtle effects off {off_small}/{off_dust}/{off_flame} on {on_small}/{on_dust}/{on_flame} (small flame/dust/flame over 30 render ticks)"
+    );
+    println!("live animate_tick: Subtle Effects spawns visible bursts on the real render path");
+}
+
 /// The ANDROID-SHAPED root: the public APK ships no `worldgen/presets.json`
 /// (tools/android_build.py's `generated_engine_file` allowlist), only the
 /// `worldgen/biome_parameters/*.json` reports - the exact shape that made

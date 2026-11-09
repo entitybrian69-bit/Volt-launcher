@@ -15,6 +15,9 @@ use std::time::Duration;
 
 /// Accumulates frame time so mob-attached particles run at tick rate.
 static MOB_FX_CLOCK: Mutex<Duration> = Mutex::new(Duration::ZERO);
+/// Whether the gesture layer currently borrows the third-person front
+/// camera (set while a clip plays from first person, cleared on restore).
+static GESTURE_CAMERA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const ON: &str = "ON";
 const OFF: &str = "OFF";
@@ -217,6 +220,28 @@ impl Game<'_> {
             && let Some(m) = self.player_model.as_ref()
         {
             gestures::start_pending(m.age as f32 / 20.0);
+        }
+        // A gesture is invisible from inside the player's own head: while
+        // one plays from first person, borrow the front third-person
+        // camera (as emote mods do), and give it back when the clip ends.
+        // A manual perspective change while borrowed is respected: the
+        // restore only touches the camera if it is still the front view.
+        {
+            use super::perspective::CameraType;
+            let now = self.player_model.as_ref().map(|m| m.age as f32 / 20.0);
+            let active = now.is_some_and(gestures::still_playing);
+            let borrowed = GESTURE_CAMERA.load(std::sync::atomic::Ordering::Relaxed);
+            if active && !borrowed && self.camera_type.first_person() {
+                GESTURE_CAMERA.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.camera_type = CameraType::ThirdPersonFront;
+                self.check_entity_post_effect(false);
+            } else if !active && borrowed {
+                GESTURE_CAMERA.store(false, std::sync::atomic::Ordering::Relaxed);
+                if self.camera_type == CameraType::ThirdPersonFront {
+                    self.camera_type = CameraType::FirstPerson;
+                    self.check_entity_post_effect(true);
+                }
+            }
         }
         // Not Enough Animations: the local climbing and boat state (other
         // players' mobs carry theirs on the Mob).

@@ -143,6 +143,24 @@ pub fn play_keyframes(index: usize, now: f32) {
 pub fn playing() -> bool {
     PLAYING.lock().unwrap().is_some()
 }
+/// Whether the clip is still inside its run at age-second `now`, clearing
+/// it once it has ended (or the clock went backwards: a new world). Unlike
+/// `apply`, this does not need the body to be rendered, so the per-frame
+/// camera logic can rely on it even from first person.
+pub fn still_playing(now: f32) -> bool {
+    let mut playing = PLAYING.lock().unwrap();
+    let Some((index, started)) = *playing else {
+        return false;
+    };
+    let seconds = GESTURES.get(index).map_or(0.0, |g| g.seconds);
+    let t = now - started;
+    if (0.0..=seconds).contains(&t) {
+        true
+    } else {
+        *playing = None;
+        false
+    }
+}
 
 /// Smoothstep-eased sample of `keys` at `t`, 0 outside the span.
 fn sample(keys: &[(f32, f32)], t: f32) -> f32 {
@@ -289,5 +307,17 @@ mod tests {
         set_enabled(false);
         assert!(!pending(), "disabling clears the queue");
         set_enabled(true);
+        // The clock-based check the camera borrow runs on: true inside the
+        // clip, expired after it (clearing the state without a render), and
+        // a clock that jumped backwards (a new world) also clears it.
+        play_selected(10.0);
+        let seconds = GESTURES[selected()].seconds;
+        assert!(still_playing(10.0), "clip active at its start");
+        assert!(still_playing(10.0 + seconds * 0.5), "active mid-clip");
+        assert!(!still_playing(10.0 + seconds + 0.1), "expired by clock");
+        assert!(!playing(), "expiry cleared the clip without a render");
+        play_selected(10.0);
+        assert!(!still_playing(2.0), "a clock from a new world clears it");
+        assert!(!playing());
     }
 }

@@ -263,6 +263,7 @@ jobs:
           cargo test -p horizon-client --lib --no-default-features -- \
             biomes_unseen_full_root_runtime \
             biomes_unseen_android_shaped_root_places_biomes \
+            subtle_effects_burst_in_the_live_animate_tick \
             --ignored --nocapture 2>&1 | tee runtime-proof.log
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -286,6 +287,8 @@ jobs:
           grep -F "full root runtime: resource_root, registry, /give ids, GeneratorData and creative all verified over the real prepared root" runtime-proof.log
           grep -F "android-shaped root minecraft:overworld: 39 Biomes Unseen biome(s) placed without a base presets.json" runtime-proof.log
           grep -F "android-shaped root minecraft:nether: 5 Biomes Unseen biome(s) placed without a base presets.json" runtime-proof.log
+          grep -F "live animate_tick: Subtle Effects spawns visible bursts on the real render path" runtime-proof.log
+          grep -E "live animate_tick: subtle effects off 0/0/[0-9]+ on [0-9]+/[0-9]+/[0-9]+" runtime-proof.log
 
       - name: Build the client and horizon-ctl for the live run
         run: |

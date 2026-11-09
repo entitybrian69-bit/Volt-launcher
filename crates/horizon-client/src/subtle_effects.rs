@@ -78,17 +78,26 @@ fn roll(r: &mut LegacyRandom, base: f32) -> bool {
 /// `animate_tick` right where vanilla spawns the flame particle.
 pub fn flame_spark(engine: &mut ParticleEngine, p: [f64; 3]) {
     let f = flags();
-    if !active() || !f.sparks || !roll(engine.random(), 0.55) {
+    if !active() || !f.sparks || !roll(engine.random(), 0.9) {
         return;
     }
-    let r = engine.random();
-    let v = [
-        f64::from(r.next_float() - 0.5) * 0.025,
-        0.035 + f64::from(r.next_float()) * 0.045,
-        f64::from(r.next_float() - 0.5) * 0.025,
-    ];
-    let at = [p[0], p[1] + 0.05, p[2]];
-    engine.add(&ParticleOptions::simple(T::SmallFlame), at, v);
+    // Random display ticks reach a given torch only a few times a minute,
+    // so each pass spawns a small fan of sparks: one pass reads as an
+    // unmistakable burst of embers, not a lone extra flame particle.
+    for _ in 0..3 {
+        let r = engine.random();
+        let v = [
+            f64::from(r.next_float() - 0.5) * 0.03,
+            0.035 + f64::from(r.next_float()) * 0.05,
+            f64::from(r.next_float() - 0.5) * 0.03,
+        ];
+        let at = [
+            p[0] + f64::from(r.next_float() - 0.5) * 0.1,
+            p[1] + 0.05,
+            p[2] + f64::from(r.next_float() - 0.5) * 0.1,
+        ];
+        engine.add(&ParticleOptions::simple(T::SmallFlame), at, v);
+    }
 }
 
 /// Extra embers over a lit campfire, beyond vanilla's occasional lava pop.
@@ -98,8 +107,8 @@ pub fn campfire_sparks(engine: &mut ParticleEngine, p: [f64; 3]) {
         return;
     }
     // A short column of full-size embers, clearly taller than vanilla's
-    // occasional pop, plus a rare arcing lava spark.
-    for _ in 0..2 {
+    // occasional pop, plus a frequent arcing lava spark.
+    for _ in 0..3 {
         let r = engine.random();
         let at = [
             p[0] + f64::from(r.next_float() - 0.5) * 0.5,
@@ -113,7 +122,7 @@ pub fn campfire_sparks(engine: &mut ParticleEngine, p: [f64; 3]) {
         ];
         engine.add(&ParticleOptions::simple(T::Flame), at, v);
     }
-    if engine.random().next_float() < 0.15 {
+    if engine.random().next_float() < 0.25 {
         let at = [p[0], p[1] + 0.4, p[2]];
         engine.add(&ParticleOptions::simple(T::Lava), at, [0.0; 3]);
     }
@@ -122,8 +131,8 @@ pub fn campfire_sparks(engine: &mut ParticleEngine, p: [f64; 3]) {
 /// The glowing dust a block sheds, if any: colour, size and base odds.
 pub fn block_dust(name: &str) -> Option<([f32; 3], f32, f32)> {
     match name {
-        "minecraft:glowstone" => Some(([0.98, 0.83, 0.42], 0.9, 0.25)),
-        "minecraft:redstone_block" => Some(([0.86, 0.09, 0.04], 0.9, 0.25)),
+        "minecraft:glowstone" => Some(([0.98, 0.83, 0.42], 0.9, 0.6)),
+        "minecraft:redstone_block" => Some(([0.86, 0.09, 0.04], 0.9, 0.6)),
         _ => None,
     }
 }
@@ -139,21 +148,25 @@ pub fn ambient_dust(engine: &mut ParticleEngine, name: &str, pos: [i32; 3]) {
     if !roll(engine.random(), base) {
         return;
     }
-    let r = engine.random();
-    // A random point on a random face, drifting slowly down.
-    let (u, v) = (f64::from(r.next_float()), f64::from(r.next_float()));
-    let face = next(r, 6);
-    let (fx, fy, fz) = (f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
-    let o = 1.05;
-    let p = match face {
-        0 => [fx + u, fy - 0.05, fz + v],
-        1 => [fx + u, fy + o, fz + v],
-        2 => [fx + u, fy + v, fz - 0.05],
-        3 => [fx + u, fy + v, fz + o],
-        4 => [fx - 0.05, fy + u, fz + v],
-        _ => [fx + o, fy + u, fz + v],
-    };
-    engine.add(&ParticleOptions::dust(rgb, scale), p, [0.0, -0.01, 0.0]);
+    // Three motes per sampled tick: random display ticks visit a block
+    // rarely, so a pass must read as a clear shimmer, not one grain.
+    for _ in 0..3 {
+        let r = engine.random();
+        // A random point on a random face, drifting slowly down.
+        let (u, v) = (f64::from(r.next_float()), f64::from(r.next_float()));
+        let face = next(r, 6);
+        let (fx, fy, fz) = (f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]));
+        let o = 1.05;
+        let p = match face {
+            0 => [fx + u, fy - 0.05, fz + v],
+            1 => [fx + u, fy + o, fz + v],
+            2 => [fx + u, fy + v, fz - 0.05],
+            3 => [fx + u, fy + v, fz + o],
+            4 => [fx - 0.05, fy + u, fz + v],
+            _ => [fx + o, fy + u, fz + v],
+        };
+        engine.add(&ParticleOptions::dust(rgb, scale), p, [0.0, -0.01, 0.0]);
+    }
 }
 fn next(r: &mut LegacyRandom, bound: i32) -> i32 {
     r.next_int_bound(bound).unwrap_or(0)
@@ -204,16 +217,18 @@ pub fn is_slime(kind: &str) -> bool {
     kind == "minecraft:slime"
 }
 
+/// Tests that touch the global flags (here and in other modules, like the
+/// full-root animate-tick proof) take this lock so they cannot observe
+/// each other's intermediate states.
+#[cfg(test)]
+pub(crate) static FLAGS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
-    use std::sync::Mutex;
-
-    /// Tests that touch the global flags take this lock so they cannot
-    /// observe each other's intermediate states.
-    static FLAGS_LOCK: Mutex<()> = Mutex::new(());
+    use super::FLAGS_LOCK;
 
     #[test]
     fn every_effect_spawns_clearly_visible_particles() {
@@ -242,14 +257,14 @@ mod tests {
         }
         let got = engine.requested.take().unwrap();
         let count = |ty: T| got.iter().filter(|(o, _, _)| o.ty == ty).count();
-        // Torch/candle sparks: at ~55% odds, 100 calls make dozens.
+        // Torch/candle sparks: a 3-spark fan at 90% odds, 100 calls make hundreds.
         let small = count(T::SmallFlame);
-        assert!(small > 25, "torch sparks spawn often: {small}");
-        // Campfire embers are full-size flames, two per pass.
+        assert!(small > 150, "torch sparks burst: {small}");
+        // Campfire embers are full-size flames, three per pass.
         let embers = count(T::Flame);
-        assert!(embers > 60, "campfire + burning embers: {embers}");
+        assert!(embers > 150, "campfire + burning embers: {embers}");
         assert!(count(T::Lava) > 0, "the rare arcing lava spark happens");
-        assert!(count(T::Dust) > 10, "glowing dust is frequent");
+        assert!(count(T::Dust) > 80, "glowing dust shimmers");
         assert!(count(T::Smoke) > 25, "burning mobs smoke");
         assert!(count(T::ItemSlime) > 25, "slime trails leave blobs");
         // Sparks genuinely rise: every flame's velocity points up, hard.
