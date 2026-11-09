@@ -294,6 +294,9 @@ pub struct Catalog {
     pub results_born: std::time::Instant,
     pub status: String,
     pub offset: usize,
+    /// The next finished search APPENDS to `results` (the grid's
+    /// continuous scroll fetched another page) instead of replacing them.
+    pub append_next: bool,
     pub scroll: f32,
     /// Ids of `bundled_native::BUNDLED` mods the profile turned off in-game.
     pub bundled_disabled: std::collections::BTreeSet<String>,
@@ -361,6 +364,7 @@ impl Catalog {
             results_born: std::time::Instant::now(),
             status: String::new(),
             offset: 0,
+            append_next: false,
             scroll: 0.0,
             bundled_disabled: std::collections::BTreeSet::new(),
             native_sources: std::collections::HashSet::new(),
@@ -623,10 +627,31 @@ impl Catalog {
         self.start_search();
     }
     pub fn search(&mut self, home: &Path) {
+        self.append_next = false;
+        self.request_search(home, true);
+    }
+    /// Whether the continuous grid may fetch another page: the last fetch
+    /// filled its page (so more may exist) and nothing is in flight.
+    pub fn can_append(&self) -> bool {
+        self.page.is_catalog()
+            && !self.append_next
+            && self.search_worker.is_none()
+            && !self.results.is_empty()
+            && self.results.len() >= self.offset + 12
+    }
+    /// Fetch the next page and append it to the grid in place.
+    pub fn append_next_page(&mut self, home: &Path) {
+        if !self.can_append() {
+            return;
+        }
+        self.offset = self.results.len();
+        self.append_next = true;
         self.request_search(home, true);
     }
     pub fn browse(&mut self, home: &Path) {
         self.searches.cancel_interest();
+        // Page navigation starts a fresh grid, never an append.
+        self.append_next = false;
         if self.page.is_catalog() {
             self.request_search(home, false);
         }
@@ -635,7 +660,9 @@ impl Catalog {
         if !self.page.is_catalog() {
             return;
         }
-        self.scroll = 0.0;
+        if !self.append_next {
+            self.scroll = 0.0;
+        }
         let origin = match self.page {
             Page::Packs => self.config.pack_source,
             Page::Shaders => self.config.shader_source,
@@ -645,6 +672,8 @@ impl Catalog {
         let key = (self.page, origin, self.query.trim().to_owned(), self.offset);
         if let Some(items) = self.searches.request(key, refresh) {
             self.show_results(items, home);
+        } else if self.append_next {
+            self.status = "Loading more results...".into();
         } else {
             self.results.clear();
             self.status = "Searching... You can switch tabs while results load.".into();
@@ -673,8 +702,21 @@ impl Catalog {
                 active_origin.label()
             )
         };
-        self.results = items;
-        self.results_born = std::time::Instant::now();
+        if std::mem::take(&mut self.append_next) {
+            // The continuous grid grows in place: append the new page,
+            // dropping anything the sources already returned earlier.
+            let have: std::collections::HashSet<(browser::SourceId, String)> = self
+                .results
+                .iter()
+                .map(|p| (p.source, p.page.clone()))
+                .collect();
+            self.results
+                .extend(items.into_iter().filter(|p| !have.contains(&(p.source, p.page.clone()))));
+            self.status = format!("{} results loaded", self.results.len());
+        } else {
+            self.results = items;
+            self.results_born = std::time::Instant::now();
+        }
         self.queue_result_icons(home);
     }
     pub fn project_icon(&self, project: &Project) -> Option<&ProjectIcon> {

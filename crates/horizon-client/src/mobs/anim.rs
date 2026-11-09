@@ -663,8 +663,10 @@ pub fn setup(
     w_anims: &HashMap<String, super::keyframes::Animation>,
 ) {
     setup_vanilla(m, s, p, w_anims);
-    // Built-in animation mods post-process the finished humanoid pose
-    // (Options > Mods): Not Enough Animations, then the gesture layer.
+    // Built-in animation mods post-process the finished pose (Options >
+    // Mods): the Overhauled Entities layer for every mob, then Not Enough
+    // Animations and the gesture layer for humanoids.
+    super::overhauled::apply(m, s, p);
     if matches!(m.kind.anim, Anim::Humanoid { .. }) {
         super::nea::apply(m, s, p);
         super::player_gestures::apply(m, s, p);

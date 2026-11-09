@@ -103,8 +103,6 @@ pub(super) enum Action {
     ToggleLocal(usize),
     DeleteLocal(usize),
     ConfirmDeleteLocal,
-    Next,
-    Previous,
     Profile,
     Logs,
     RecordPerformance,
@@ -690,40 +688,6 @@ fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     ui.rounded(0.0, 0.0, w, h, 0.0, if dark { hex(0x090b12, 128) } else { hex(0xffffff, 56) });
 }
 
-/// "You've played for 12 hours! Last played 2 hours ago", from persisted
-/// launch records; honest fallbacks when the game was never started.
-fn played_summary(config: &crate::catalog::Config) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Count an in-progress session so the number grows while you play today.
-    let mut seconds = config.play_seconds;
-    if config.session_mark > 0 && now > config.session_mark {
-        seconds = seconds.saturating_add((now - config.session_mark).min(12 * 3600));
-    }
-    let played = if seconds == 0 {
-        "Not played yet".to_owned()
-    } else if seconds < 3600 {
-        format!("You've played for {} minutes!", (seconds / 60).max(1))
-    } else {
-        format!("You've played for {} hours!", seconds / 3600)
-    };
-    if config.last_played == 0 {
-        return played;
-    }
-    let ago = now.saturating_sub(config.last_played);
-    let last = if ago < 120 {
-        "just now".to_owned()
-    } else if ago < 3600 {
-        format!("{} minutes ago", ago / 60)
-    } else if ago < 48 * 3600 {
-        format!("{} hours ago", ago / 3600)
-    } else {
-        format!("{} days ago", ago / 86_400)
-    };
-    format!("{played} Last played {last}.")
-}
 
 /// The big fully-rounded Play control with a triangle icon and press
 /// feedback; its target is inserted at the front so it always wins the tap.
@@ -1021,11 +985,12 @@ impl DrawCtx<'_> {
     fn draw_shell(&mut self, ui: &mut Ui, w: f32, h: f32, account_status: &str) {
         let bar_h = 62.0;
         let by = h - bar_h - 12.0;
-        // Account chip, clamped so it can never run under the centred dock.
-        let dock_item = if w >= 900.0 { 102.0 } else { 88.0 };
-        let dock_left = (w - (dock_item * 4.0 + 20.0)) * 0.5;
+        // Account chip, clamped so it can never run under the centred dock
+        // (six items now: Packs and Shaders download pages joined it).
+        let dock_item = if w >= 1100.0 { 96.0 } else { 82.0 };
+        let dock_left = (w - (dock_item * 6.0 + 20.0)) * 0.5;
         let chip_w = 200.0_f32.min(w * 0.26).min(dock_left - 26.0).max(120.0);
-        let chip = [14.0, by, chip_w, bar_h];
+        let chip = [6.0, by, chip_w, bar_h];
         ui.rounded(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS());
         ui.border(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS_BORDER());
         ui.rounded(chip[0] + 8.0, chip[1] + 8.0, bar_h - 16.0, bar_h - 16.0,
@@ -1043,16 +1008,18 @@ impl DrawCtx<'_> {
         let badge = ui.fit_text(Face::LauncherRegular, 11.5, &badge, chip_w - bar_h - 16.0);
         ui.text(Face::LauncherRegular, 11.5, text_x, chip[1] + 33.0, theme::CRIMSON_BRIGHT(), &badge);
         self.targets.push((chip, Action::Page(Page::Account)));
-        // Centred dock.
+        // Centred dock, now with direct Packs and Shaders download pages.
         let item_w = dock_item;
-        let dock_w = item_w * 4.0 + 20.0;
+        let dock_w = item_w * 6.0 + 20.0;
         let dock = [(w - dock_w) * 0.5, by, dock_w, bar_h];
         ui.rounded(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS());
         ui.border(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS_BORDER());
-        let items: [(&str, Page, Action); 4] = [
+        let items: [(&str, Page, Action); 6] = [
             ("Home", Page::Play, Action::Page(Page::Play)),
             ("Instances", Page::Installed, Action::Profile),
             ("Browse", Page::Mods, Action::Page(Page::Mods)),
+            ("Packs", Page::Packs, Action::Page(Page::Packs)),
+            ("Shaders", Page::Shaders, Action::Page(Page::Shaders)),
             ("Settings", Page::Settings, Action::Page(Page::Settings)),
         ];
         for (i, (label, icon, action)) in items.iter().enumerate() {
@@ -1060,8 +1027,9 @@ impl DrawCtx<'_> {
             let active = match i {
                 0 => self.catalog.page == Page::Play,
                 1 => false,
-                2 => matches!(self.catalog.page,
-                    Page::Mods | Page::Packs | Page::Shaders | Page::Installed),
+                2 => matches!(self.catalog.page, Page::Mods | Page::Installed),
+                3 => self.catalog.page == Page::Packs,
+                4 => self.catalog.page == Page::Shaders,
                 _ => matches!(self.catalog.page, Page::Settings | Page::VoltSettings),
             };
             if active {
@@ -1076,12 +1044,12 @@ impl DrawCtx<'_> {
         }
         // Round Discord and Files buttons.
         let fab = bar_h - 6.0;
-        let discord = [w - 14.0 - fab * 2.0 - 10.0, by + 3.0, fab, fab];
+        let discord = [w - 6.0 - fab * 2.0 - 10.0, by + 3.0, fab, fab];
         let discord_bg = horizon_client::ui_theme::color::hex(0x5865f2, 255);
         ui.rounded(discord[0], discord[1], discord[2], discord[3], fab * 0.5, discord_bg);
         draw_discord_icon(ui, discord[0] + fab * 0.5, discord[1] + fab * 0.5, theme::TEXT(), discord_bg);
         self.targets.push((discord, Action::Discord));
-        let files = [w - 14.0 - fab, by + 3.0, fab, fab];
+        let files = [w - 6.0 - fab, by + 3.0, fab, fab];
         ui.rounded(files[0], files[1], files[2], files[3], fab * 0.5, theme::GLASS());
         ui.border(files[0], files[1], files[2], files[3], fab * 0.5, theme::GLASS_BORDER());
         let (fx, fy) = (files[0] + fab * 0.5, files[1] + fab * 0.5);
@@ -1249,13 +1217,14 @@ impl DrawCtx<'_> {
     }
 
     fn draw_compact_header(&mut self, ui: &mut Ui, w: f32, account_status: &str) {
-        ui.rounded(12.0, 10.0, 168.0, 34.0, 9.0, theme::CARD());
-        ui.border(12.0, 10.0, 168.0, 34.0, 9.0, theme::BORDER_CRIMSON());
-        ui.volt_logo(18.0, 14.0, 26.0, 26.0);
+        // Brand flush left, account chip flush right.
+        ui.rounded(6.0, 10.0, 168.0, 34.0, 9.0, theme::CARD());
+        ui.border(6.0, 10.0, 168.0, 34.0, 9.0, theme::BORDER_CRIMSON());
+        ui.volt_logo(12.0, 14.0, 26.0, 26.0);
         ui.text(
             Face::LauncherMedium,
             12.5,
-            50.0,
+            44.0,
             text_vcenter(10.0, 34.0, 12.5),
             theme::TEXT(),
             "VOLT LAUNCHER",
@@ -1263,17 +1232,17 @@ impl DrawCtx<'_> {
         draw_account_chip(
             ui,
             self.targets,
-            [188.0, 10.0, (w - 200.0).max(110.0), 34.0],
+            [182.0, 10.0, (w - 188.0).max(110.0), 34.0],
             account_status,
             self.login.signed_in,
         );
 
         // Segmented pill dock with a smoothly gliding selection.
-        ui.rounded(12.0, 52.0, w - 24.0, 40.0, 10.0, theme::RAIL());
-        ui.border(12.0, 52.0, w - 24.0, 40.0, 10.0, theme::BORDER());
-        let tab_w = (w - 32.0) / Page::ALL.len() as f32;
+        ui.rounded(6.0, 52.0, w - 12.0, 40.0, 10.0, theme::RAIL());
+        ui.border(6.0, 52.0, w - 12.0, 40.0, 10.0, theme::BORDER());
+        let tab_w = (w - 20.0) / Page::ALL.len() as f32;
         ui.rounded(
-            16.0 + self.sidebar_anim * tab_w + 1.0,
+            10.0 + self.sidebar_anim * tab_w + 1.0,
             56.0,
             tab_w - 2.0,
             32.0,
@@ -1281,7 +1250,7 @@ impl DrawCtx<'_> {
             theme::CRIMSON(),
         );
         for (i, &page) in Page::ALL.iter().enumerate() {
-            let tx = 16.0 + i as f32 * tab_w;
+            let tx = 10.0 + i as f32 * tab_w;
             let prox = (1.0 - (self.sidebar_anim - i as f32).abs()).clamp(0.0, 1.0);
             let label = match page {
                 Page::Installed => "Files",
@@ -1342,11 +1311,11 @@ impl DrawCtx<'_> {
         self.draw_lobby_home(ui, area, account_status);
     }
 
-    /// The lobby home, as in the chosen reference: the player's 3D character
-    /// takes centre stage over the live world, flanked by chunky pixel-art
-    /// destination slabs on the left, quiet icon squares top-right, and a
-    /// bottom bar with the profile selector, a big green Play (with playtime)
-    /// and a Help button. The dock shell is intentionally absent here.
+    /// The lobby home: the player's 3D character takes centre stage over
+    /// the live world, chunky pixel-art destination slabs flush against the
+    /// left edge, the icon squares and their connected chip rail flush
+    /// against the right edge, and one big centred red Play slab (with
+    /// playtime). The dock shell is intentionally absent here.
     fn draw_lobby_home(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
         use horizon_client::official_install::InstallStage;
         use horizon_client::ui_theme::color::hex;
@@ -1357,10 +1326,10 @@ impl DrawCtx<'_> {
         let compact = w < 760.0;
         let m = if compact { 10.0 } else { 16.0 };
 
-        // ---- Brand, top-left ----
-        ui.volt_logo(ax + m + 2.0, ay + m, 32.0, 32.0);
-        ui.text(Face::Display, 19.0, ax + m + 42.0, ay + m + 1.0, theme::TEXT(), "VOLT");
-        ui.text(Face::LauncherRegular, 10.5, ax + m + 42.0, ay + m + 22.0, theme::MUTED(),
+        // ---- Brand, flush to the top-left corner ----
+        ui.volt_logo(ax + 2.0, ay + m, 32.0, 32.0);
+        ui.text(Face::Display, 19.0, ax + 42.0, ay + m + 1.0, theme::TEXT(), "VOLT");
+        ui.text(Face::LauncherRegular, 10.5, ax + 42.0, ay + m + 22.0, theme::MUTED(),
             "Minecraft 26.3 · Native Rust");
 
         // ---- Quiet icon squares, top-right ----
@@ -1372,7 +1341,8 @@ impl DrawCtx<'_> {
             (Page::Settings, Action::Page(Page::Settings)),
         ];
         for (i, (page, action)) in squares.iter().enumerate() {
-            let rect = [ax + w - m - (squares.len() - i) as f32 * (sq + 8.0) + 8.0, ay + m, sq, sq];
+            // Flush to the screen's right edge, where the rail below joins.
+            let rect = [ax + w - (squares.len() - i) as f32 * (sq + 8.0) + 8.0, ay + m, sq, sq];
             ui.rounded(rect[0], rect[1], rect[2], rect[3], 10.0, theme::GLASS());
             ui.border(rect[0], rect[1], rect[2], rect[3], 10.0, theme::GLASS_BORDER());
             draw_page_icon(ui, *page, rect[0] + sq * 0.5, rect[1] + sq * 0.5, theme::TEXT());
@@ -1416,7 +1386,7 @@ impl DrawCtx<'_> {
             .map(|a| a.name.clone())
             .unwrap_or_else(|| self.catalog.config.name.clone());
         let cards: [(&str, String, Page, u32, u32, Action); 3] = [
-            ("MODS", "33 built in".to_owned(), Page::Mods,
+            ("MODS", "Built into Volt".to_owned(), Page::Mods,
                 hex(0xd8455f, 255), hex(0xa32a44, 255), Action::Page(Page::Mods)),
             ("MY SKIN", skin_sub, Page::Account,
                 hex(0x3f7bea, 255), hex(0x2a54c0, 255), Action::Page(Page::Account)),
@@ -1424,7 +1394,8 @@ impl DrawCtx<'_> {
                 hex(0x58b956, 255), hex(0x398f3f, 255), Action::Page(Page::Shaders)),
         ];
         for (i, (title, sub, page, top, bottom, action)) in cards.iter().enumerate() {
-            let rect = [ax + m, cards_top + i as f32 * (card_h + gap), card_w, card_h];
+            // Flush to the screen's left edge.
+            let rect = [ax, cards_top + i as f32 * (card_h + gap), card_w, card_h];
             if rect[1] + rect[3] > bar_y - 6.0 {
                 break;
             }
@@ -1444,7 +1415,9 @@ impl DrawCtx<'_> {
             self.targets.push((rect, *action));
         }
 
-        // ---- Right rail: the quieter destinations as small chips ----
+        // ---- Right rail: the quieter destinations as small chips, on a
+        // glass rail that runs flush to the screen edge and joins the
+        // top icon row with no gap, so the two bars read as one piece.
         let chips: [(&str, u8, Action); 7] = [
             ("Worlds", 0, Action::HomeTab(HomeTab::Worlds)),
             ("Servers", 1, Action::HomeTab(HomeTab::Multiplayer)),
@@ -1456,12 +1429,24 @@ impl DrawCtx<'_> {
         ];
         let chip_w = 96.0;
         let chip_h = 27.0;
-        let mut chip_y = ay + m + sq + 12.0;
-        let chip_x = ax + w - m - chip_w;
-        for (label, glyph, action) in chips {
-            if chip_y + chip_h > bar_y - 6.0 {
-                break;
-            }
+        let rail_w = chip_w + 14.0;
+        let rail_x = ax + w - rail_w;
+        let chip_x = rail_x + 7.0;
+        let mut chip_y = ay + m + sq + 8.0;
+        let shown = chips
+            .iter()
+            .enumerate()
+            .take_while(|(i, _)| chip_y + (*i as f32) * (chip_h + 6.0) + chip_h <= bar_y - 6.0)
+            .count();
+        if shown > 0 {
+            // The rail starts at the top icon row's baseline, so the
+            // vertical bar connects straight into the horizontal one.
+            let rail_top = ay + m + sq;
+            let rail_h = (shown as f32) * (chip_h + 6.0) + 10.0;
+            ui.rounded(rail_x, rail_top, rail_w, rail_h, 14.0, theme::GLASS());
+            ui.border(rail_x, rail_top, rail_w, rail_h, 14.0, theme::GLASS_BORDER());
+        }
+        for (label, glyph, action) in chips.into_iter().take(shown) {
             let rect = [chip_x, chip_y, chip_w, chip_h];
             ui.rounded(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS());
             ui.border(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS_BORDER());
@@ -1476,81 +1461,49 @@ impl DrawCtx<'_> {
             chip_y += chip_h + 6.0;
         }
 
-        // ---- Bottom centre: profile selector + the big green Play ----
-        let play_w = if compact { 150.0 } else { 188.0 };
-        let sel_w = (w * 0.30).clamp(if compact { 200.0 } else { 240.0 }, 360.0);
-        let group_w = sel_w + 12.0 + play_w;
-        let gx = ax + ((w - group_w) * 0.5).max(m);
-
-        // Blue profile selector slab.
-        let sel = [gx, bar_y, sel_w, bar_h];
-        let v_start = ui.batch_mut().vertices.len();
-        pixel_panel(ui, sel, hex(0x3b63d6, 255), hex(0x2947ab, 255));
-        let logo_sq = bar_h - 24.0;
-        ui.rounded(sel[0] + 10.0, bar_y + 12.0, logo_sq, logo_sq, 8.0, hex(0x1b2d66, 220));
-        ui.volt_logo(sel[0] + 10.0 + logo_sq * 0.5 - 14.0, bar_y + 12.0 + logo_sq * 0.5 - 14.0, 28.0, 28.0);
-        let tx = sel[0] + logo_sq + 20.0;
-        ui.text(Face::LauncherMedium, 9.5, tx, bar_y + 9.0, hex(0xaec2ff, 255), "SELECTED PROFILE");
-        let profile = self.catalog.config.profile;
-        let pname = if profile == 0 { "Volt".to_owned() } else { format!("Profile {profile}") };
-        let pname = ui.fit_text(Face::Display, 16.0, &pname, sel_w - logo_sq - 36.0);
-        ui.text(Face::Display, 16.0, tx, bar_y + 21.0, hex(0xffffff, 255), &pname);
-        let played = if self.catalog.config.last_played == 0 { "Horizon · 26.3 · Native".to_owned() }
-            else { played_summary(&self.catalog.config) };
-        let played = ui.fit_text(Face::LauncherRegular, 10.0, &played, sel_w - logo_sq - 36.0);
-        ui.text(Face::LauncherRegular, 10.0, tx, bar_y + bar_h - 20.0, hex(0xc7d4ff, 230), &played);
-        press_scale(ui, v_start, sel, Action::Profile);
-        self.targets.push((sel, Action::Profile));
-
-        // Green Play slab (or the install-progress slab while downloading).
-        let px0 = gx + sel_w + 12.0;
+        // ---- Bottom centre: ONE big red Play slab, perfectly centred
+        // (the profile selector and Game Files slabs are gone by request;
+        // profiles stay reachable from Instances and the files page from
+        // the top-right squares).
+        let play_w = if compact { 210.0 } else { 260.0 };
+        let px0 = ax + (w - play_w) * 0.5;
         if installing {
             let slab = [px0, bar_y, play_w, bar_h];
-            pixel_panel(ui, slab, hex(0x62c759, 255), hex(0x3f9e42, 255));
+            pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
             let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
             let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
             let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32)
                 .clamp(0.0, 1.0);
             draw_centered_text(ui, Face::LauncherMedium, 10.0,
-                [slab[0], bar_y + 8.0, play_w, 12.0], hex(0x0d3a16, 220), "INSTALLING");
+                [slab[0], bar_y + 8.0, play_w, 12.0], hex(0x3d0812, 220), "INSTALLING");
             draw_centered_text(ui, Face::Display, 19.0,
-                [slab[0], bar_y + 20.0, play_w, 24.0], hex(0x0d3a16, 255),
+                [slab[0], bar_y + 20.0, play_w, 24.0], hex(0x3d0812, 255),
                 &format!("{:.0}%", fraction * 100.0));
             let bar = [slab[0] + 16.0, bar_y + bar_h - 16.0, play_w - 32.0, 5.0];
-            ui.rounded(bar[0], bar[1], bar[2], bar[3], 2.5, hex(0x0d3a16, 130));
-            ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(5.0), bar[3], 2.5, hex(0xeafcdd, 255));
+            ui.rounded(bar[0], bar[1], bar[2], bar[3], 2.5, hex(0x3d0812, 130));
+            ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(5.0), bar[3], 2.5, hex(0xffe3e9, 255));
         } else {
-            let play_h = bar_h - 26.0;
-            let slab = [px0, bar_y, play_w, play_h];
+            let slab = [px0, bar_y, play_w, bar_h];
             let v_start = ui.batch_mut().vertices.len();
-            pixel_panel(ui, slab, hex(0x66cc5b, 255), hex(0x43a447, 255));
+            pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
             let label = if installed { "Play" } else if self.error.is_some() { "Retry" } else { "Download" };
-            let ink = hex(0x0d3a16, 255);
-            let two_lines = play_h >= 46.0;
-            let font = if two_lines { 17.0 } else { 15.0 };
+            let ink = hex(0xffffff, 255);
+            let font = 20.0;
             let text_w = ui.measure(Face::Display, font, label);
             let tri = font * 0.62;
-            let line_cy = if two_lines { bar_y + play_h * 0.5 - 7.0 } else { bar_y + play_h * 0.5 };
+            let line_cy = bar_y + bar_h * 0.5 - 7.0;
             let start_x = px0 + (play_w - text_w - tri - 9.0) * 0.5;
             draw_play_triangle(ui, start_x, line_cy, tri, ink);
             ui.text(Face::Display, font, start_x + tri + 9.0,
                 text_vcenter(line_cy - 20.0, 40.0, font), ink, label);
-            if two_lines {
-                let secs = self.catalog.config.play_seconds;
-                let time = if secs == 0 { "0 h".to_owned() }
-                    else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
-                    else { format!("{} h", secs / 3600) };
-                draw_centered_text(ui, Face::LauncherMedium, 9.5,
-                    [px0, bar_y + play_h - 20.0, play_w, 12.0], hex(0x0d3a16, 200), &time);
-            }
+            let secs = self.catalog.config.play_seconds;
+            let time = if secs == 0 { "0 h".to_owned() }
+                else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
+                else { format!("{} h", secs / 3600) };
+            draw_centered_text(ui, Face::LauncherMedium, 9.5,
+                [px0, bar_y + bar_h - 20.0, play_w, 12.0], hex(0xffd2da, 220), &time);
             press_scale(ui, v_start, slab, Action::Play);
             self.targets.insert(0, (slab, Action::Play));
-
-            // Slim gold slab under Play, lobby-style: straight to the files.
-            let files = [px0, bar_y + play_h + 6.0, play_w, bar_h - play_h - 6.0];
-            pixel_panel(ui, files, hex(0xe9c53e, 255), hex(0xcda32a, 255));
-            draw_centered_text(ui, Face::LauncherMedium, 9.5, files, hex(0x4a3608, 255), "GAME FILES");
-            self.targets.push((files, Action::Page(Page::Installed)));
         }
 
         // Error line floating above the bar.
@@ -1562,10 +1515,11 @@ impl DrawCtx<'_> {
         }
 
         // ---- Bottom-left: account chip ----
-        let acc_max = (gx - (ax + m) - 12.0).min(w * 0.3);
+        let acc_max = (px0 - ax - 12.0).min(w * 0.3);
         if acc_max >= 44.0 {
             let acc_w = (ui.measure(Face::LauncherMedium, 12.0, account_status) + 48.0).min(acc_max);
-            let acc = [ax + m, ay + h - m - 40.0, acc_w, 40.0];
+            // Flush to the screen's left edge.
+            let acc = [ax, ay + h - m - 40.0, acc_w, 40.0];
             ui.rounded(acc[0], acc[1], acc[2], acc[3], 20.0, theme::GLASS());
             ui.border(acc[0], acc[1], acc[2], acc[3], 20.0, theme::GLASS_BORDER());
             draw_page_icon(ui, Page::Account, acc[0] + 20.0, acc[1] + 20.0, theme::MUTED());
@@ -1578,7 +1532,7 @@ impl DrawCtx<'_> {
         }
 
         // ---- Bottom-right: Help → the Volt Discord ----
-        let help = [ax + w - m - 96.0, ay + h - m - 40.0, 96.0, 40.0];
+        let help = [ax + w - 96.0, ay + h - m - 40.0, 96.0, 40.0];
         ui.rounded(help[0], help[1], help[2], help[3], 12.0, theme::GLASS());
         ui.border(help[0], help[1], help[2], help[3], 12.0, theme::GLASS_BORDER());
         draw_headset_icon(ui, help[0] + 22.0, help[1] + 20.0, theme::TEXT());
@@ -2135,6 +2089,16 @@ impl DrawCtx<'_> {
             self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
             *self.list_view = Some([top, bottom, max_scroll]);
 
+            // One connected, continuously scrolling grid: when the scroll
+            // nears the bottom and the last fetch was a full page, the next
+            // page is appended in place (no Next-button page flip needed).
+            // (When a full page fits the view outright, this also fires
+            // immediately, so tall screens fill up without any scrolling.)
+            if self.catalog.scroll >= max_scroll - row_step && self.catalog.can_append() {
+                self.catalog.append_next_page(self.home);
+            }
+
+            let grid_v_start = ui.batch_mut().vertices.len();
             let results_age = self.catalog.results_born.elapsed().as_secs_f32();
             for (i, p) in self.catalog.results.iter().enumerate() {
                 let row = i / cols;
@@ -2164,7 +2128,10 @@ impl DrawCtx<'_> {
                 if can_install {
                     self.list_targets.push((btn_rect, Action::Install(i)));
                 }
-                if y + 8.0 < top || y + card_h - 8.0 > bottom {
+                // Draw every card that touches the view; the clip below
+                // trims the straddling ones, so scrolling never pops a
+                // whole row in or out at the view edges.
+                if y + card_h < top || y > bottom {
                     continue;
                 }
 
@@ -2495,55 +2462,47 @@ impl DrawCtx<'_> {
                     );
                 }
             }
+            // Trim the straddling cards to the list view, so partially
+            // scrolled rows render cut instead of vanishing wholesale.
+            let bounds = [
+                ui.to_batch(cx),
+                ui.to_batch(top),
+                ui.to_batch(cx + cw),
+                ui.to_batch(bottom),
+            ];
+            ui.batch_mut().clip_since(grid_v_start, bounds[0], bounds[1], bounds[2], bounds[3]);
         }
 
-        // Bottom Pagination & Status Bar (matching 02-mods.png)
+        // Bottom status bar. The grid scrolls continuously and appends the
+        // next page by itself, so the Previous/Next page flip buttons are
+        // gone and the whole bar carries the status text.
         let fy = cy + ch - footer_h;
         ui.rounded(cx, fy, cw, footer_h, 11.0, theme::CARD());
         ui.border(cx, fy, cw, footer_h, 11.0, theme::BORDER());
-        styled_button(
-            ui,
-            self.targets,
-            [cx + 6.0, fy + 5.0, 108.0, 34.0],
-            "<- Previous",
-            Action::Previous,
-            BtnStyle::Secondary,
-            true,
-        );
-        styled_button(
-            ui,
-            self.targets,
-            [cx + cw - 114.0, fy + 5.0, 108.0, 34.0],
-            "Next ->",
-            Action::Next,
-            BtnStyle::Primary,
-            true,
-        );
-        if !compact {
-            let status_text = self
-                .error
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    if !self.catalog.status.is_empty() {
-                        &self.catalog.status
-                    } else {
-                        hint
-                    }
-                });
-            draw_centered_text(
-                ui,
-                Face::LauncherRegular,
-                13.0,
-                [cx + 124.0, fy, (cw - 248.0).max(40.0), footer_h],
-                if self.error.is_some() {
-                    theme::CRIMSON_BRIGHT()
+        let status_text = self
+            .error
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                if !self.catalog.status.is_empty() {
+                    &self.catalog.status
                 } else {
-                    theme::MUTED()
-                },
-                status_text,
-            );
-        }
+                    hint
+                }
+            });
+        let fitted = ui.fit_text(Face::LauncherRegular, 13.0, status_text, (cw - 16.0).max(40.0));
+        draw_centered_text(
+            ui,
+            Face::LauncherRegular,
+            13.0,
+            [cx + 8.0, fy, (cw - 16.0).max(40.0), footer_h],
+            if self.error.is_some() {
+                theme::CRIMSON_BRIGHT()
+            } else {
+                theme::MUTED()
+            },
+            &fitted,
+        );
     }
 
     /// Official Horizon registry mods compiled into this APK: install or
@@ -5129,10 +5088,10 @@ impl Launcher {
                 [0.0, 0.0, w, h]
             } else if compact {
                 ctx.draw_compact_header(&mut ui, w, &account_status);
-                [12.0, 102.0, (w - 24.0).max(120.0), (h - 148.0).max(120.0)]
+                [6.0, 102.0, (w - 12.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
                 ctx.draw_shell(&mut ui, w, h, &account_status);
-                [16.0, 14.0, (w - 32.0).max(240.0), (h - 102.0).max(120.0)]
+                [6.0, 14.0, (w - 12.0).max(240.0), (h - 102.0).max(120.0)]
             };
 
             page_v_start = ui.batch_mut().vertices.len();
@@ -6004,14 +5963,6 @@ impl Launcher {
                 crate::platform::show(initial);
             }
             Some(Action::Install(i)) => self.catalog.install(&self.home, i),
-            Some(Action::Next) => {
-                self.catalog.offset += 12;
-                self.catalog.search(&self.home);
-            }
-            Some(Action::Previous) => {
-                self.catalog.offset = self.catalog.offset.saturating_sub(12);
-                self.catalog.search(&self.home);
-            }
             Some(Action::Profile) => self.open_chooser(chooser::Kind::Profile),
             Some(Action::Renderer) => self.open_chooser(chooser::Kind::Renderer),
             Some(Action::RenderScale) => self.open_chooser(chooser::Kind::RenderScale),

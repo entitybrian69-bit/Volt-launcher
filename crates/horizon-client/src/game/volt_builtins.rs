@@ -1,6 +1,7 @@
 //! The bridge for Volt's in-client built-in mods — Not Enough Animations
-//! (`mobs::nea`), Player Animations (`mobs::player_gestures`) and Subtle
-//! Effects (`subtle_effects`) — into the native-mod surface: rows and
+//! (`mobs::nea`), Player Animations (`mobs::player_gestures`), Subtle
+//! Effects (`subtle_effects`) and Overhauled Entities
+//! (`mobs::overhauled`) — into the native-mod surface: rows and
 //! settings pages in Options > Mods, keybinds, per-key persistence through
 //! `native_setting`, and the per-frame feed of local player state. The
 //! logic lives in the library modules; this file only translates. Both
@@ -8,7 +9,7 @@
 //! built-in: the real Punchy native-mod port is woven into Android builds
 //! from `tools/native_mods/vendored/punchy`.)
 use super::{Game, native_hooks::NativeMod};
-use horizon_client::mobs::{nea, player_gestures as gestures};
+use horizon_client::mobs::{nea, overhauled, player_gestures as gestures};
 use horizon_client::subtle_effects as subtle;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -18,6 +19,9 @@ static MOB_FX_CLOCK: Mutex<Duration> = Mutex::new(Duration::ZERO);
 /// Whether the gesture layer currently borrows the third-person front
 /// camera (set while a clip plays from first person, cleared on restore).
 static GESTURE_CAMERA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the one-per-launch Light Overlay persistence scrub has run.
+static LIGHT_OVERLAY_SCRUBBED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 const ON: &str = "ON";
 const OFF: &str = "OFF";
@@ -61,6 +65,12 @@ impl Game<'_> {
             density: self.stored_usize(subtle::ID, "density", 1),
         });
         gestures::set_enabled(self.stored_bool(gestures::ID, "enabled", true));
+        overhauled::set_flags(overhauled::Flags {
+            enabled: self.stored_bool(overhauled::ID, "enabled", true),
+            players: self.stored_bool(overhauled::ID, "players", true),
+            mobs: self.stored_bool(overhauled::ID, "mobs", true),
+            intensity: self.stored_usize(overhauled::ID, "intensity", 1),
+        });
     }
 
     /// Options > Mods rows, after the woven and bundled mods' rows.
@@ -79,6 +89,13 @@ impl Game<'_> {
             "key.keyboard.unknown".into(),
         ]]));
         mods.push(row(subtle::ID, subtle::NAME, subtle::VERSION, subtle::DESCRIPTION, vec![]));
+        mods.push(row(
+            overhauled::ID,
+            overhauled::NAME,
+            overhauled::VERSION,
+            overhauled::DESCRIPTION,
+            vec![],
+        ));
         mods.push(row(
             gestures::ID,
             gestures::NAME,
@@ -111,6 +128,16 @@ impl Game<'_> {
                 buttons.push(label("Burning mob embers", f.burning));
                 buttons.push(label("Slime trails", f.slimes));
                 buttons.push(format!("Density: {}", subtle::DENSITY_NAMES[f.density]));
+            }
+            _ if id == overhauled::ID => {
+                let f = overhauled::flags();
+                buttons.push(label("Overhauled Entities", f.enabled));
+                buttons.push(label("Player animations", f.players));
+                buttons.push(label("Mob animations", f.mobs));
+                buttons.push(format!(
+                    "Intensity: {}",
+                    overhauled::INTENSITY_NAMES[f.intensity]
+                ));
             }
             _ if id == gestures::ID => {
                 buttons.push(label("Gestures", gestures::enabled()));
@@ -156,6 +183,23 @@ impl Game<'_> {
                 self.store_bool(subtle::ID, keys[button], v);
             } else {
                 self.native_set_setting(subtle::ID, "density", &f.density.to_string());
+            }
+        } else if id == overhauled::ID {
+            let mut f = overhauled::flags();
+            match button {
+                0 => { f.enabled = !f.enabled; }
+                1 => { f.players = !f.players; }
+                2 => { f.mobs = !f.mobs; }
+                3 => { f.intensity = (f.intensity + 1) % 3; }
+                _ => return,
+            }
+            overhauled::set_flags(f);
+            if button < 3 {
+                let keys = ["enabled", "players", "mobs"];
+                let v = [f.enabled, f.players, f.mobs][button];
+                self.store_bool(overhauled::ID, keys[button], v);
+            } else {
+                self.native_set_setting(overhauled::ID, "intensity", &f.intensity.to_string());
             }
         } else if id == gestures::ID {
             match button {
@@ -212,6 +256,20 @@ impl Game<'_> {
         nea::set_suspended(!self.native_on(nea::ID));
         gestures::set_suspended(!self.native_on(gestures::ID));
         subtle::set_suspended(!self.native_on(subtle::ID));
+        overhauled::set_suspended(!self.native_on(overhauled::ID));
+        // Light Overlay (woven registry mod) persists its in-game overlay
+        // across sessions, so a once-toggled overlay came back forever as
+        // "random X crosses on every block" on touch devices with no F7 to
+        // turn it off. Volt makes it session-only: each launch starts with
+        // the overlay off; the mod's own toggle still works for the session.
+        if !LIGHT_OVERLAY_SCRUBBED.swap(true, std::sync::atomic::Ordering::Relaxed)
+            && matches!(
+                self.native_setting("light_overlay", "active").as_deref(),
+                Some("true") | Some("1")
+            )
+        {
+            self.native_set_setting("light_overlay", "active", "false");
+        }
         // A gesture queued from the settings page ("Play now") starts on
         // the first frame the player is back in the world, so the clip is
         // not already over behind the paused menu.

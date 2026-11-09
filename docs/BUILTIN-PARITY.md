@@ -118,13 +118,50 @@ gesture set so the library is usable out of the box.
 | API for other mods | DONE | `play_keyframes(index, now)` is public to the other built-ins. |
 | Built-in gestures + keybind | DONE | Wave, Point, Salute, Nod, Shake head, Clap; gesture key + selection in settings. (This part is ours; upstream ships no gestures.) |
 
+## 6. Overhauled Entities → `mobs/overhauled.rs` (+ `mobs/emf.rs`, `mobs/etf.rs`)
+
+**Upstream identity:** inspired by FreshLX's Fresh Animations / Fresh
+Moves resource packs (All Rights Reserved CEM keyframe data) and powered
+in upstream Minecraft by Traben's Entity Model Features (EMF) and Entity
+Texture Features (ETF). **Implementation:** fully clean-room native
+procedural animation — no upstream CEM data, assets or code. One visible
+mod row ("Overhauled Entities", default ON); the EMF/ETF counterparts are
+internal engine layers with no row or settings anywhere, by design.
+
+| Area | Status | Notes |
+|---|---|---|
+| Full-body walk overhaul (player + humanoids) | DONE | Eased double-frequency gait follow-through on arms/legs, body roll + sway, head counter-roll; additive over the vanilla pose, hitboxes untouched. |
+| Idle life (all entities) | DONE | Breathing arms, layered-noise head wander, weight shifts; `ambient` fallback covers every living model via part-name no-op writes. |
+| Zombie family reaches | DONE | Drifting raised-arm reach for Zombie/Drowned/Zombie Villager/Zombified Piglin and `Humanoid { zombie_arms }`. |
+| Quadruped gait + grazing + tail flicks | DONE | Cows, pigs, sheep, bears, pandas, goats, hoglins, horses, llamas; gated slow graze dip while idle. |
+| Tail wags (wolf/cat/fox) | DONE | Eager wag scaling with speed, lazy curl at rest. |
+| Creeper tiptoe, spider leg waves, chicken pecks, villager nods, enderman sway | DONE | Per-family routines matched to each model's part names. |
+| Per-entity personality (EMF/ETF layer) | DONE | Stable SplitMix64 phase/amplitude/tempo per entity id, so herds never sync (`etf::entity_random` avalanche-tested). |
+| Keyframe-exact Fresh Animations clips | UNSUPPORTED | The upstream packs' CEM keyframes are ARR data; shipping them would violate the licensing directive. The procedural recreation targets the same visible behaviours. |
+| ETF texture features (blinking, random skins, emissives) | UNSUPPORTED / already-vanilla | Need third-party texture assets (none ship by policy); emissive eyes are already vanilla-parity in `mobs/render.rs`. |
+| Settings | DONE | Master toggle, player/mob switches, Subtle/Balanced/Dramatic intensity; all persisted per profile. |
+
 ---
 
 ## Test coverage
 
 Each logic module has unit tests compiled into `horizon-client --lib` and
 run by the CI worldgen-test job filter: `nea::tests`,
-`player_gestures::tests`, `subtle_effects::tests` — pose
-math, gating flags, keyframe sampling, spring/landing behaviour, settings
+`player_gestures::tests`, `subtle_effects::tests`, `overhauled::tests`,
+`emf::tests`, `etf::tests` — pose
+math, gating flags, keyframe sampling, spring/landing behaviour, additive
+rotation budgets, randomizer stability and settings
 round-trips. The woven ABP mod is verified by the weave job's expected-set
 check.
+
+---
+
+## Woven-mod behaviour note: Light Overlay
+
+The woven `light_overlay` registry mod persists its `active` flag across
+sessions, and its only toggle is the F7 key — which touch devices do not
+have. A once-enabled overlay therefore came back on every launch as
+"random X crosses on the blocks". Volt keeps the mod but makes the overlay
+session-only: `volt_builtins_frame` scrubs a persisted `active=true` once
+per launch, before the mod first reads its settings. The in-session toggle
+still works unchanged.
