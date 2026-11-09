@@ -299,7 +299,7 @@ jobs:
         run: |
           set -u +e -o pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends mesa-vulkan-drivers xvfb
+          sudo apt-get install -y -qq --no-install-recommends mesa-vulkan-drivers xvfb libxkbcommon-x11-0 libxkbcommon0
           xvfb-run -a python3 tools/biomes_e2e.py --bin-dir target/fast 2>&1 | tee biomes-e2e.log
           status=$?
           python3 - <<'PY'
