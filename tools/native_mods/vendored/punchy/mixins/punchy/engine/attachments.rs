@@ -226,41 +226,7 @@ pub fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resources::{GEOMETRY, member, parse_bones};
-    #[test]
-    fn actual_source_rest_arm_pivots_and_item_alignment_are_finite() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../MODS/newmods/punchy-3.1b-fabric-26.3.jar");
-        let bones = parse_bones(&member(&root, GEOMETRY).unwrap()).unwrap();
-        let skeleton = Skeleton::new(&bones).unwrap();
-        let r = standard_pose(
-            &skeleton,
-            false,
-            None,
-            1.,
-            &Transform::default(),
-            &Transform::default(),
-            1.,
-            1.,
-            false,
-        );
-        let l = standard_pose(
-            &skeleton,
-            true,
-            None,
-            1.,
-            &Transform::default(),
-            &Transform::default(),
-            1.,
-            1.,
-            false,
-        );
-        let p = r.arm.transform_point3(Vec3::ZERO);
-        assert!((p - Vec3::new(11. / 16., -11.4 / 16., -7. / 16.)).length() < 1e-5);
-        assert!((l.arm.transform_point3(Vec3::ZERO).x + 11. / 16.).abs() < 1e-5);
-        assert!(r.item.is_finite() && l.item.is_finite());
-        assert!((r.item.determinant() - 1.).abs() < 1e-5);
-    }
+    use crate::resources::parse_bones;
     #[test]
     fn unowned_arm_keeps_shared_body_motion_without_its_arm_or_grip_track() {
         let resources = crate::resources::embedded().unwrap();

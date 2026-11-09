@@ -9,6 +9,11 @@
 # author's `punchy-rust-0.1.2.hnmod`. The engine crate carries the Punchy
 # custom license (all rights reserved) in mixins/punchy/engine/LICENSE-Punchy;
 # the glue carries the Horizon MIT license. See THIRD_PARTY_NOTICES.md.
+#
+# Local change vs. upstream: the engine's dev-only JAR-oracle helpers
+# (`resources::member`/`load`, two tests reading the original Punchy JAR)
+# and their `zip` dependency are removed - `zip` is not in this fork's
+# Cargo.lock and the runtime path uses only the embedded JSON data.
 id = "punchy"
 kind = "native-mod"
 name = "Punchy"
@@ -20,4 +25,4 @@ version = "0.1.2"
 game = "26.3"
 file = "punchy-rust-0.1.2.hnmod"
 published = "2026-11-09"
-sha256 = "f3835fa959d02122e6f170fafbcf2301bd7d33b5e326eef0ef7ba547530016a9"
+sha256 = "9032d18b4694db2dd4feae500663b9668495f75fe9786746ed3b44fe404213c1"

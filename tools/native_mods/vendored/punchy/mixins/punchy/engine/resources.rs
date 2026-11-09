@@ -1,9 +1,10 @@
-//! Runtime data is compiled into the native mod. JAR access below is for development oracles only.
+//! Runtime data is compiled into the native mod.
+//! (Volt: the upstream JAR-oracle helpers `member`/`load` and their `zip`
+//! dependency are removed here; only the embedded runtime path remains.)
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use serde_json::Value;
-use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
+use std::collections::BTreeMap;
 
-const MAX_MEMBER: u64 = 32 * 1024 * 1024;
 pub const ANIMATIONS: &str =
     "resourcepacks/punchy/assets/minecraft/punchy/animations/player.animation.json";
 pub const GEOMETRY: &str = "assets/punchy/geo/player.geo.json";
@@ -45,42 +46,6 @@ pub fn embedded() -> Result<Resources, String> {
     })
 }
 
-pub fn member(path: &Path, name: &str) -> Result<Vec<u8>, String> {
-    let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-    let mut entry = zip.by_name(name).map_err(|e| format!("{name}: {e}"))?;
-    if entry.size() > MAX_MEMBER {
-        return Err(format!("{name} exceeds 32 MiB"));
-    }
-    let mut bytes = Vec::new();
-    entry
-        .by_ref()
-        .take(MAX_MEMBER + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > MAX_MEMBER {
-        return Err(format!("{name} exceeds 32 MiB"));
-    }
-    Ok(bytes)
-}
-pub fn load(path: &Path) -> Result<Resources, String> {
-    let manifest: Value =
-        serde_json::from_slice(&member(path, "fabric.mod.json")?).map_err(|e| e.to_string())?;
-    if manifest["id"] != "punchy" || manifest["version"] != "3.1b" {
-        return Err("Expected the analyzed Punchy 3.1b JAR".into());
-    }
-    let bones = parse_bones(&member(path, GEOMETRY)?)?;
-    let tuning = serde_json::from_slice(&member(
-        path,
-        "resourcepacks/punchy/assets/minecraft/punchy/compat/tuning_template.json",
-    )?)
-    .map_err(|e| e.to_string())?;
-    Ok(Resources {
-        animations: member(path, ANIMATIONS)?,
-        bones,
-        tuning,
-    })
-}
 fn vec3(v: Option<&Value>) -> Result<Vec3, String> {
     let Some(v) = v else { return Ok(Vec3::ZERO) };
     let a = v.as_array().ok_or("Expected vector array")?;

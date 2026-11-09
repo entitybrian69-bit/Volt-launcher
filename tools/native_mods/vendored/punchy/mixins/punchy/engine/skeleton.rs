@@ -303,23 +303,6 @@ mod tests {
             s.base("arm"),
         );
     }
-    #[test]
-    fn real_geometry_hierarchy_accepts_all_animated_bones() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../MODS/newmods/punchy-3.1b-fabric-26.3.jar");
-        let resources = super::super::resources::load(&path).unwrap();
-        let skeleton = Skeleton::new(&resources.bones).unwrap();
-        let clips = super::super::load_clips(&resources.animations).unwrap();
-        for clip in clips.values() {
-            for bone in resources.bones.keys() {
-                for fraction in [0.0, 0.5, 1.0] {
-                    let t = clip.length * fraction;
-                    let matrix = skeleton.world(bone, Some((clip, t, t)), 1.0);
-                    assert!(matrix.is_finite(), "{bone} {} {t}", clip.name)
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
