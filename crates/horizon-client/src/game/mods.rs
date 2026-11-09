@@ -200,16 +200,40 @@ pub(super) fn content_root(
     paths.retain(|p| !dev.contains(p));
     paths.extend(dev.iter().cloned());
     let mut mods: Vec<ContentMod> = Vec::new();
+    // What each installed mod file came to (`mod_content::REPORT_FILE`):
+    // the Installed page shows these lines, and the player can send the
+    // file when something looks wrong in a world.
+    let mut report: Vec<String> = Vec::new();
     for path in &paths {
-        let Ok(package) = Package::read(path) else {
-            continue;
+        let file = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let package = match Package::read(path) {
+            Ok(p) => p,
+            Err(e) => {
+                report.push(format!("mod file {file}: unreadable package: {e}"));
+                continue;
+            }
         };
         let m = &package.manifest;
         let on = enabled.contains(&m.id) || dev.contains(path);
-        if !on
-            || !m.capabilities.contains(&Capability::Registries)
-            || mods.iter().any(|c| c.id == m.id)
-        {
+        if !on {
+            report.push(format!("mod {} ({file}): installed, not enabled", m.id));
+            continue;
+        }
+        if !m.capabilities.contains(&Capability::Registries) {
+            report.push(format!(
+                "mod {} ({file}): enabled; no `registries` capability, so no content to layer",
+                m.id
+            ));
+            continue;
+        }
+        if mods.iter().any(|c| c.id == m.id) {
+            report.push(format!(
+                "mod {} ({file}): skipped, another file already provides this id",
+                m.id
+            ));
             continue;
         }
         let content = Content::read(path, m).and_then(|content| {
@@ -224,14 +248,36 @@ pub(super) fn content_root(
             }
         });
         match content {
-            Ok(content) => mods.push(ContentMod {
-                id: m.id.clone(),
-                content,
-            }),
-            Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
+            Ok(content) => {
+                let biomes = content
+                    .files
+                    .iter()
+                    .filter(|f| {
+                        f.starts_with("data/")
+                            && f.contains("/worldgen/biome/")
+                            && !f.contains("/tags/")
+                    })
+                    .count();
+                report.push(format!(
+                    "mod {} {} ({file}): enabled - {} block(s), {} item declaration(s), {} biome definition(s)",
+                    m.id,
+                    m.version,
+                    content.blocks.len(),
+                    content.items.len(),
+                    biomes
+                ));
+                mods.push(ContentMod {
+                    id: m.id.clone(),
+                    content,
+                });
+            }
+            Err(e) => {
+                report.push(format!("mod {} ({file}): content NOT loaded: {e}", m.id));
+                log::warn!("Horizon: mod {} content not loaded: {e}", m.id);
+            }
         }
     }
-    match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
+    let out = match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
         Ok(out) => {
             if out != root {
                 log::info!(
@@ -239,15 +285,86 @@ pub(super) fn content_root(
                     mods.len(),
                     out.display()
                 );
+                for m in &mods {
+                    let creative = mod_content::creative_count(&out, &m.content.namespaces);
+                    let placed = mod_content::placed_biomes(&out, &m.content.namespaces);
+                    let placed = if placed.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        placed
+                            .iter()
+                            .map(|(preset, n)| format!("{preset} {n}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    report.push(format!(
+                        "mod {}: in this root - {} creative item(s), placed biomes: {placed}",
+                        m.id, creative
+                    ));
+                }
+                for warning in mod_content::root_warnings(&out) {
+                    report.push(format!("warning: {warning}"));
+                }
+            } else if !mods.is_empty() {
+                report.push("content root is the plain base: nothing was layered".into());
             }
+            report.push(format!("content root: {}", out.display()));
             register_mob_effects(&mods);
             out
         }
         Err(e) => {
+            report.push(format!(
+                "content root FAILED - every content mod is OFF this run: {e}"
+            ));
             log::warn!("Horizon: content mods not loaded: {e}");
             register_mob_effects(&[]);
             root.to_owned()
         }
+    };
+    write_content_report(&here, &report);
+    out
+}
+
+/// Writes `content_root`'s report beside `options.txt` and logs it. A
+/// failure to write only logs: the report must never stop the game.
+fn write_content_report(dir: &std::path::Path, lines: &[String]) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let mut text = format!(
+        "Volt mod content report (game start, unix time {seconds})\n\
+         Send this file when a mod looks wrong in game.\n"
+    );
+    for line in lines {
+        log::info!("Horizon mods: {line}");
+        text.push_str(line);
+        text.push('\n');
+    }
+    if let Err(e) = std::fs::write(
+        dir.join(horizon_client::mod_content::REPORT_FILE),
+        text.as_bytes(),
+    ) {
+        log::warn!("Horizon: mod content report not written: {e}");
+    }
+}
+
+/// Appends one line to the mod content report when a world opens: which
+/// world, and the resource root its server generates from.
+pub(super) fn note_world_open(world: &str, resources: &std::path::Path) {
+    use std::io::Write;
+    let here = std::env::current_dir().unwrap_or_default();
+    let line = format!(
+        "world opened: {world}; resources root: {}\n",
+        resources.display()
+    );
+    log::info!("Horizon mods: {}", line.trim_end());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .open(here.join(horizon_client::mod_content::REPORT_FILE))
+    {
+        let _ = f.write_all(line.as_bytes());
     }
 }
 

@@ -280,8 +280,8 @@ def gen_variant(name, suf, pal):
 def main():
     MOD.mkdir(parents=True, exist_ok=True)
     (MOD/"horizon-mod.toml").write_text(
-      'id = "biomes_unseen"\nname = "Biomes Unseen"\nversion = "1.0.1"\n'
-      'description = "Biomes O\' Plenty-style expansion for Horizon 26.3: 12 wood sets, flowers, plants, nether flesh/brimstone, tanzanite gem tier and more. Biome registration is not exposed by Horizon API 0.2 - see docs/GAPS.md."\n'
+      'id = "biomes_unseen"\nname = "Biomes Unseen"\nversion = "1.0.2"\n'
+      'description = "Biomes O\' Plenty-style expansion for Horizon 26.3: 44 biomes across the Overworld and Nether, 12 wood sets, flowers, plants, nether flesh/brimstone, tanzanite gem tier and more. Blocks, items, creative entries and world generation are all data-driven - no code runs."\n'
       'authors = ["Biomes Unseen Contributors"]\napi = "0.2"\nside = "both"\ncapabilities = ["registries"]\n')
     axe, pick = [], []
     for name,disp,d,kind,pal in BLOCKS:

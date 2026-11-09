@@ -1439,7 +1439,7 @@ license in the repository's `LICENSE` file.
 ## Test fixtures
 
 `crates/horizon-client/testdata/biomes_unseen.hmod` is the Biomes Unseen
-content mod v1.0.1 by the Biomes Unseen Contributors (MIT). It is built,
+content mod v1.0.2 by the Biomes Unseen Contributors (MIT). It is built,
 byte-for-byte reproducibly, by `scripts/generate_biomes_unseen.py` — a port
 of the generator from
 [entitybrian69-bit/Rust-store-](https://github.com/entitybrian69-bit/Rust-store-)

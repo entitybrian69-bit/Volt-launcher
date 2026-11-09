@@ -335,6 +335,10 @@ pub struct LocalItem {
     pub file: String,
     pub title: String,
     pub enabled: bool,
+    /// What the game reported for this file on its last start
+    /// (`mod_content::REPORT_FILE`): counts when it loaded, the reason
+    /// when it was skipped or refused. None before the game first runs.
+    pub status: Option<String>,
 }
 impl Catalog {
     pub fn new(home: &Path) -> Self {
@@ -453,6 +457,12 @@ impl Catalog {
         horizon_client::volt_mods::sync_catalog_from_engine(&mut self.extras, &settings.horizon);
         horizon_threads::set_thread_boost(self.extras.thread_boost);
         self.local.clear();
+        // What the game last reported per mod file (it writes the file at
+        // start; absent until the game first runs with this profile).
+        let report = std::fs::read_to_string(
+            game.join(horizon_client::mod_content::REPORT_FILE),
+        )
+        .unwrap_or_default();
         for kind in horizon_client::content_files::Kind::ALL {
             let dir = game.join(kind.folder());
             if std::fs::symlink_metadata(&dir).is_ok_and(|m| m.file_type().is_symlink()) {
@@ -478,11 +488,15 @@ impl Catalog {
                         on.enabled.contains(&id)
                     }
                 };
+                let status = (kind == horizon_client::content_files::Kind::Mods)
+                    .then(|| mod_report_status(&report, &name))
+                    .flatten();
                 self.local.push(LocalItem {
                     kind,
                     file: name.clone(),
                     title: name,
                     enabled,
+                    status,
                 });
             }
         }
@@ -1214,4 +1228,22 @@ fn fetch_and_round_icon(home: &Path, url: &str) -> Option<(u64, Vec<u8>)> {
     }
     let hash = crate::skin_preview::fnv1a(&rgba);
     Some((hash, rgba))
+}
+
+/// The report's verdict on one installed mod file, for its Installed row:
+/// the text after `(<file>): `, joined with the "in this root" line of the
+/// same mod id when the game wrote one.
+fn mod_report_status(report: &str, file: &str) -> Option<String> {
+    let marker = format!("({file}): ");
+    let line = report.lines().find(|l| l.contains(&marker))?;
+    let mut status = line[line.find(&marker)? + marker.len()..].to_owned();
+    // "mod <id> [version] (<file>): ..." - the id is the second word.
+    if let Some(id) = line.strip_prefix("mod ").and_then(|r| r.split([' ', '(']).next()) {
+        let extra = format!("mod {id}: in this root - ");
+        if let Some(l) = report.lines().find(|l| l.starts_with(&extra)) {
+            status.push_str("; ");
+            status.push_str(&l[extra.len()..]);
+        }
+    }
+    Some(status)
 }

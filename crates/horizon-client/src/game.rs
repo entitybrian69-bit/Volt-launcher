@@ -10948,6 +10948,9 @@ impl Game<'_> {
             "World",
             format!("{} ({})", level.name, save_root.display()),
         );
+        // The mod content report notes which root this world generates
+        // from (mods::content_root wrote what that root holds).
+        mods::note_world_open(&level.name, &self.options.resources);
         self.session_lock = Some(session_lock);
         self.end.set_locator(locator);
         self.share_spawn_conditions();

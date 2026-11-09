@@ -305,4 +305,16 @@ built reproducibly by `scripts/generate_biomes_unseen.py` (which also packages t
 a release asset, not inside the APK. Android install: Volt Launcher > Mods > paste the release asset's
 HTTPS URL > Import .hmod (or drop the file into the launcher's "Mods" folder), enable it, start a new
 world. Format decision and evidence: `docs/biomes_unseen/FORMAT-DECISION.md`. CI proof: the
-`Worldgen mod tests (host)` job (biome registration, asset completeness, creative placement).
+`Worldgen mod tests (host)` job (biome registration, asset completeness, creative placement) and the
+`Runtime proof (real root, live client)` job — the real `resource_root` over the real prepared root,
+`GeneratorData` and the multi-noise tables, plus a LIVE client run where `/locate biome
+biomes_unseen:bayou` and `/give @s biomes_unseen:cherry_planks` must succeed in a new world.
+
+### Content mod diagnostics (`volt-mods-report.txt`)
+
+At every start (and again when a world opens) the game writes a plain-text report beside
+`options.txt` — on Android that is the game home the Files app shows under "Volt Launcher":
+`volt-mods-report.txt`. For every installed `.hmod` it lists what actually happened: loaded (with
+block/item/biome-definition counts, creative items added, and the biomes placed per dimension),
+not enabled, or refused with the exact reason. The launcher's Installed page shows the same line
+under each mod. Send this file when a mod looks wrong in game.

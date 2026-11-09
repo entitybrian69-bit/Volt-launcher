@@ -1468,7 +1468,11 @@ fn shapes_reject_unknown_or_missing_template_values() {
 fn climate_entry_strips_keys_and_quantizes() {
     let text = r#"{"temperature":0.8,"downfall":0.4,"has_precipitation":true,"horizon:dimension":"minecraft:the_nether","horizon:climate":{"temperature":[0.5,1.5],"humidity":0.0,"offset":0.25}}"#;
     let (entry, stripped) = ClimateEntry::take("ruby:cove", text).unwrap().unwrap();
-    assert_eq!(entry.preset, "minecraft:the_nether");
+    // The nether DIMENSION maps to the `minecraft:nether` parameter list:
+    // that is the key the real `presets.json` holds (the engine's built-in
+    // preset holders are `minecraft:overworld` and `minecraft:nether`,
+    // `biome_source/codec.rs`). `minecraft:the_nether` matched nothing.
+    assert_eq!(entry.preset, "minecraft:nether");
     assert!(!stripped.contains("horizon:climate") && !stripped.contains("horizon:dimension"));
     assert!(stripped.contains("\"temperature\":0.8"));
     let q = serde_json::to_string(&entry.quantized()).unwrap();
@@ -1530,7 +1534,7 @@ fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
                 assert!(!stripped.contains("horizon:climate"), "{file}");
                 match entry.preset.as_str() {
                     "minecraft:overworld" => overworld.push(entry),
-                    "minecraft:the_nether" => nether.push(entry),
+                    "minecraft:nether" => nether.push(entry),
                     other => panic!("{file}: unexpected preset {other}"),
                 }
             }
@@ -1558,7 +1562,7 @@ fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
     let vanilla = r#"[{"coordinates":[[-10000,10000],[-5000,5000],[-10000,10000],[-10000,10000],[0,0],[-10000,10000]],"offset":0,"biome":"minecraft:plains"}]"#;
     for (preset, entries) in [
         ("minecraft:overworld", &overworld),
-        ("minecraft:the_nether", &nether),
+        ("minecraft:nether", &nether),
     ] {
         let refs: Vec<&ClimateEntry> = entries.iter().collect();
         let table = append_climates(vanilla, preset, &refs).unwrap();
@@ -1810,4 +1814,178 @@ fn biomes_unseen_hmod_passes_android_import_validation() {
         .unwrap_or_else(|e| panic!("rejected: {e}"));
     assert!(!native_shader);
     println!("android import validation: biomes_unseen.hmod accepted as a Mods package");
+}
+
+/// The DEVICE path end to end, over the REAL prepared root: `resource_root`
+/// with the shipped `biomes_unseen.hmod` (exactly what `game/mods.rs::
+/// content_root` runs on Android at startup), then the loaders a running
+/// game uses - the block registry, the item network ids `/give` resolves,
+/// `GeneratorData::load` and the multi-noise preset tables a new world's
+/// server samples, and the creative export the creative screens read.
+#[test]
+#[ignore = "full prepared root: the CI worldgen job runs it"]
+fn biomes_unseen_full_root_runtime() {
+    use horizon_mods::{Content, Package};
+    use horizon_world::worldgen::biome::MultiNoiseBiomeSource;
+    let Some(base) = prepared() else {
+        panic!("no prepared root: run tools/android_prepare.py first");
+    };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    let m = ContentMod {
+        id: package.manifest.id.clone(),
+        content: Content::read(&path, &package.manifest).unwrap(),
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("volt-biomes-full-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let root = resource_root(&base, std::slice::from_ref(&m), &scratch).unwrap();
+    assert_ne!(root, base, "the overlay must be built");
+
+    // 1. Block registry: every declared block is a real state.
+    let assets = Assets::load(&root).unwrap();
+    let vanilla = Assets::load(&base).unwrap();
+    let mut blocks = 0;
+    for block in &m.content.blocks {
+        assert!(
+            assets.registry.default_state(&block.id).is_some(),
+            "{} missing from the block registry",
+            block.id
+        );
+        blocks += 1;
+    }
+    assert_eq!(blocks, 176);
+    assert!(assets.registry.len() > vanilla.registry.len());
+
+    // 2. /give: the item registry report resolves mod item ids to network ids.
+    let ids =
+        horizon_protocol::registry::Builtin::load(&root.join("registries.json")).unwrap();
+    let items = ids.get("minecraft:item").unwrap();
+    for id in ["biomes_unseen:cherry_planks", "biomes_unseen:tanzanite", "biomes_unseen:fir_door"] {
+        assert!(items.id(id).is_some(), "{id} missing from /give's registry");
+    }
+
+    // 3. The world generator loads the overlay and its preset tables place
+    // the mod biomes (this is what a new world's server samples).
+    let data = horizon_world::worldgen::generator::GeneratorData::load(
+        &root.join("worldgen"),
+        assets.registry,
+    );
+    let data = data.unwrap_or_else(|e| panic!("GeneratorData::load on the overlay: {e}"));
+    drop(data);
+    let presets: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("worldgen/presets.json")).unwrap())
+            .unwrap();
+    for (preset, want) in [("minecraft:overworld", 39), ("minecraft:nether", 5)] {
+        let table = presets[preset].as_str().unwrap_or_else(|| panic!("{preset} table missing"));
+        let source = MultiNoiseBiomeSource::from_quantized_json(table).unwrap();
+        let mut found: Vec<&str> = source
+            .parameters()
+            .entries()
+            .iter()
+            .map(|(_, biome)| biome.as_str())
+            .filter(|b| b.starts_with("biomes_unseen:"))
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found.len(), want, "{preset}");
+        println!(
+            "full root {preset}: {} Biomes Unseen biome(s) in the live preset table",
+            found.len()
+        );
+    }
+
+    // 4. Creative screens: the export the game reads lists the mod items.
+    let creative = creative_count(&root, &m.content.namespaces);
+    assert_eq!(creative, 193, "creative export");
+    println!("full root creative: {creative} Biomes Unseen item(s) in the export");
+    println!("full root runtime: resource_root, registry, /give ids, GeneratorData and creative all verified over the real prepared root");
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// The ANDROID-SHAPED root: the public APK ships no `worldgen/presets.json`
+/// (tools/android_build.py's `generated_engine_file` allowlist), only the
+/// `worldgen/biome_parameters/*.json` reports - the exact shape that made
+/// every mod biome silently vanish on devices. `build` must synthesize the
+/// quantized tables from the reports and append the mod's climates.
+#[test]
+#[cfg(unix)]
+#[ignore = "full prepared root: the CI worldgen job runs it"]
+fn biomes_unseen_android_shaped_root_places_biomes() {
+    use horizon_mods::{Content, Package};
+    use horizon_world::worldgen::biome::MultiNoiseBiomeSource;
+    let Some(base) = prepared() else {
+        panic!("no prepared root: run tools/android_prepare.py first");
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("volt-biomes-android-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    // An Android-shaped copy: the real root minus the quantized tables.
+    // (Links for the bulk, so the copy is cheap; the test only needs the
+    // presets file GONE and the reports present.)
+    let android_base = scratch.join("android-base");
+    fs::create_dir_all(&android_base).unwrap();
+    for entry in fs::read_dir(&base).unwrap().flatten() {
+        std::os::unix::fs::symlink(entry.path(), android_base.join(entry.file_name())).unwrap();
+    }
+    // worldgen/ must be a real directory so presets.json can be absent.
+    fs::remove_file(android_base.join("worldgen")).unwrap();
+    fs::create_dir(android_base.join("worldgen")).unwrap();
+    for entry in fs::read_dir(base.join("worldgen")).unwrap().flatten() {
+        if entry.file_name() == "presets.json" {
+            continue;
+        }
+        std::os::unix::fs::symlink(
+            entry.path(),
+            android_base.join("worldgen").join(entry.file_name()),
+        )
+        .unwrap();
+    }
+    assert!(android_base.join("worldgen/biome_parameters").exists(),
+        "the prepared root ships no biome_parameters reports; the Android shape cannot be reproduced");
+    assert!(!android_base.join("worldgen/presets.json").exists());
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    let m = ContentMod {
+        id: package.manifest.id.clone(),
+        content: Content::read(&path, &package.manifest).unwrap(),
+    };
+    let root = resource_root(&android_base, std::slice::from_ref(&m), &scratch.join("cache")).unwrap();
+    assert_ne!(root, android_base);
+    let presets: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("worldgen/presets.json")).unwrap())
+            .unwrap();
+    for (preset, want) in [("minecraft:overworld", 39), ("minecraft:nether", 5)] {
+        let table = presets[preset]
+            .as_str()
+            .unwrap_or_else(|| panic!("{preset}: no synthesized table"));
+        let source = MultiNoiseBiomeSource::from_quantized_json(table).unwrap();
+        let mut found: Vec<&str> = source
+            .parameters()
+            .entries()
+            .iter()
+            .map(|(_, biome)| biome.as_str())
+            .filter(|b| b.starts_with("biomes_unseen:"))
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found.len(), want, "{preset}");
+        // Vanilla survived the synthesis: plains is still in the table.
+        if preset == "minecraft:overworld" {
+            assert!(
+                source
+                    .parameters()
+                    .entries()
+                    .iter()
+                    .any(|(_, b)| b.as_str() == "minecraft:plains"),
+                "vanilla biomes lost in synthesis"
+            );
+        }
+        println!(
+            "android-shaped root {preset}: {} Biomes Unseen biome(s) placed without a base presets.json",
+            found.len()
+        );
+    }
+    let _ = fs::remove_dir_all(&scratch);
 }

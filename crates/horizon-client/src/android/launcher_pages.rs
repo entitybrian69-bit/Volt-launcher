@@ -58,6 +58,7 @@ pub(crate) mod theme {
     pub fn MUTED() -> u32 { choose(hex(0xc6ccc9,255), hex(0x4b5551,255)) }
     pub fn DIM() -> u32 { choose(hex(0x8f969b,255), hex(0x68726d,255)) }
     pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
+    pub fn STATUS_BAD() -> u32 { choose(hex(0xf87171,255), hex(0xb91c1c,255)) }
     pub fn GLASS() -> u32 {
         if !dark() { return hex(0xffffff, 214); }
         // Neutral smoked glass per the chosen reference, faintly tinted by
@@ -2913,6 +2914,14 @@ impl DrawCtx<'_> {
                         );
                         let tfit = ui.fit_text(Face::LauncherMedium, 13.5, &item.title, col_w - 40.0);
                         ui.text(Face::LauncherMedium, 13.5, col_x + 20.0, iy + 6.0, theme::TEXT(), &tfit);
+                        if let Some(status) = &item.status {
+                            let failed = status.contains("NOT loaded")
+                                || status.contains("FAILED")
+                                || status.contains("unreadable");
+                            let color = if failed { theme::STATUS_BAD() } else { theme::MUTED() };
+                            let sfit = ui.fit_text(Face::LauncherRegular, 10.5, status, col_w - 40.0);
+                            ui.text(Face::LauncherRegular, 10.5, col_x + 20.0, iy + 21.0, color, &sfit);
+                        }
                         if kind == Kind::Mods && !cfg!(target_pointer_width = "64") {
                             ui.text(
                                 Face::LauncherRegular,
@@ -3043,6 +3052,14 @@ impl DrawCtx<'_> {
                     ui.border(cx, y, cw, row_height - 8.0, 10.0, theme::BORDER());
                     let tfit = ui.fit_text(Face::LauncherMedium, 15.0, &item.title, cw - 24.0);
                     ui.text(Face::LauncherMedium, 15.0, cx + 12.0, y + 10.0, theme::TEXT(), &tfit);
+                    if let Some(status) = &item.status {
+                        let failed = status.contains("NOT loaded")
+                            || status.contains("FAILED")
+                            || status.contains("unreadable");
+                        let color = if failed { theme::STATUS_BAD() } else { theme::MUTED() };
+                        let sfit = ui.fit_text(Face::LauncherRegular, 11.5, status, cw - 24.0);
+                        ui.text(Face::LauncherRegular, 11.5, cx + 12.0, y + 30.0, color, &sfit);
+                    }
                     if kind == Kind::Mods && !cfg!(target_pointer_width = "64") {
                         ui.text(
                             Face::LauncherRegular,
