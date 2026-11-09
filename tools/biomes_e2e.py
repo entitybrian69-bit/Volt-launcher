@@ -114,7 +114,8 @@ def main():
                       "seasonal_forest", "wetland", "highland", "marsh",
                       "orchard", "pasture"]
         hard_fail = ("unknown", "incorrect argument", "no such",
-                     "unparseable", "expected")
+                     "unparseable", "expected", "can't find element",
+                     "cant find element", "not_found")
         located = ""
         for biome in candidates:
             since = last_seq()

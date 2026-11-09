@@ -481,6 +481,32 @@ impl Game<'_> {
         reg.enchantments = list("data/minecraft/enchantment");
         reg.structures = list("data/minecraft/worldgen/structure");
         reg.biomes = list("data/minecraft/worldgen/biome");
+        // Content mods' biomes live in data/<ns>/worldgen/biome of the
+        // merged root: list every namespace so /locate biome and the
+        // worldgen/biome resource arguments accept them too.
+        for ns in std::fs::read_dir(root.join("data")).into_iter().flatten().flatten() {
+            let Some(ns_name) = ns.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if ns_name == "minecraft" {
+                continue;
+            }
+            for e in std::fs::read_dir(ns.path().join("worldgen/biome"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if let Some(n) = e
+                    .file_name()
+                    .to_str()
+                    .and_then(|s| s.strip_suffix(".json"))
+                {
+                    reg.biomes.push(format!("{ns_name}:{n}"));
+                }
+            }
+        }
+        reg.biomes.sort();
+        reg.biomes.dedup();
         reg.clocks = list("data/minecraft/world_clock");
         reg.dimensions = vec![
             "minecraft:overworld".into(),
