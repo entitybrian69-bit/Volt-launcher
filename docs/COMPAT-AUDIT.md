@@ -84,3 +84,4 @@ Three patterns exist; new built-ins should pick the cheapest that fits:
    `game/volt_builtins.rs` for rows/settings/keys/persistence, per-frame
    feed beside `native_frame` in `game/extras.rs`. Works identically on PC
    and Android because nothing is platform-gated.
+
