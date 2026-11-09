@@ -220,6 +220,7 @@ impl fmt::Display for Capability {
 /// raised: unknown fields and capability names (a newer Horizon's) are
 /// ignored with a warning, never a refusal, so tomorrow's mods still load
 /// what this build understands.
+#[derive(Debug)]
 pub struct Tolerated {
     pub manifest: Manifest,
     pub warnings: Vec<String>,
