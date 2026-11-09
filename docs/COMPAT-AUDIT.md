@@ -22,7 +22,7 @@ repository at the commit that adds this document.
 | Stage | File | What it does |
 |---|---|---|
 | Registry index | `crates/horizon-client/src/index/native.rs` | Schema-1 index of native mods (id, version, SHA-256, source). |
-| Bundled/woven set | `crates/horizon-client-render/src/bundled_native.rs` | `BUNDLED` (4 official mods) and `WOVEN` (34 registry mods incl. `accurate_block_placement`) compiled into the Android client by the weave pipeline. |
+| Bundled/woven set | `crates/horizon-client-render/src/bundled_native.rs` | `BUNDLED` (4 official mods) and `WOVEN` (35 woven mods: 34 registry mods incl. `accurate_block_placement`, plus the vendored `punchy` 0.1.2) compiled into the Android client by the weave pipeline. |
 | Weave pipeline | `.github/workflows/android-apk.yml` (`WEAVE_SET`), `tools/native_mods/compat.py` | CI fetches each pinned `.hnmod` by hash, checks its hooks against the fork (`check_hooks`, line ~348), applies `FORK_SOURCE_SHIMS` (lines ~240–305), and compiles the sources into the client. `tools/native_mods/build_set.py` (line ~67) rejects untrusted mixin pins. |
 | In-client built-ins | `crates/horizon-client/src/game/volt_builtins.rs` + library modules | Four mods compiled directly into the client (see `docs/BUILTIN-PARITY.md`); no download, no weave. |
 
@@ -72,14 +72,14 @@ Ours-vs-upstream gaps are in `docs/SHADER-AUDIT.md`.
 
 Three patterns exist; new built-ins should pick the cheapest that fits:
 
-1. **Woven `.hnmod`** (34 mods): pinned hash in `WEAVE_SET`
+1. **Woven `.hnmod`** (35 mods): 34 registry pins in `WEAVE_SET` plus the vendored `punchy` (`VENDORED_SET`, rebuilt deterministically from `tools/native_mods/vendored/punchy/` by `pack_vendored.py` and pinned by sha256 in `vendored/punchy.toml`); registry pins are a hash in `WEAVE_SET`
    (android-apk.yml) + `WOVEN` row (`bundled_native.rs`) + the workflow's
    `PY_VERIFY` expected set. Rows render automatically in the Mods screen
    (`crates/horizon-client/src/android/launcher_pages.rs`, ~line 2697).
 2. **Bundled official source** (Zoom, HUD mods): logic module + a
    `bundled_<x>_*` bridge (`official_zoom_bridge.rs` pattern) called from
    `game/native_hooks.rs`.
-3. **In-client built-in** (NEA, Subtle Effects, Punchy, Player Animations):
+3. **In-client built-in** (NEA, Subtle Effects, Player Animations):
    logic in a library module with atomics + unit tests, one shared bridge
    `game/volt_builtins.rs` for rows/settings/keys/persistence, per-frame
    feed beside `native_frame` in `game/extras.rs`. Works identically on PC

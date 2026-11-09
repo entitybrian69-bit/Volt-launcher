@@ -1,0 +1,11 @@
+[package]
+name = "punchy-engine"
+version = "3.1.0"
+edition = "2024"
+publish = false
+[lib]
+path = "engine.rs"
+[dependencies]
+glam = "0.30"
+serde_json = "1.0.151"
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }

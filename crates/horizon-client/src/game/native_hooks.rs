@@ -677,6 +677,38 @@ impl Game<'_> {
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
     pub(super) fn native_tick(&mut self) {}
+    /// Before one first-person hand and its displayed stack are drawn
+    /// (RenderHandEvent). Equip progress is the inverse arm height,
+    /// including the item's swap animation scale. Cancel skips that hand's
+    /// default geometry, including its map and arm geometry. It only
+    /// hides: the hook has no way to draw a replacement.
+    #[allow(dead_code)]
+    pub(super) fn native_render_hand(
+        &self,
+        hand: horizon_client::first_person::Hand,
+        stack: Option<&ItemStack>,
+        partial: f32,
+        swing: f32,
+        equip: f32,
+        canceled: &mut bool,
+    ) {
+        let _ = (hand, stack, partial, swing, equip, canceled);
+    }
+    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
+    /// `animation` arrives with its consumable's (`eat`, `drink`), else
+    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
+    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
+    /// Asked each frame the hand draws an item in use, for an item with no
+    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
+    /// theirs). Client-side.
+    #[allow(dead_code)]
+    pub(super) fn native_use_animation(
+        &self,
+        stack: &ItemStack,
+        animation: &mut horizon_world::consumable::UseAnimation,
+    ) {
+        let _ = (stack, animation);
+    }
     /// The world's phases, read-only; `error_text` carries the engine's
     /// own open-failure text, empty otherwise. Server-side; the deprecated
     /// in-frame path delivers no lifecycle events. A server loop or final

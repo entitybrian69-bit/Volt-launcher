@@ -1,13 +1,15 @@
 //! The bridge for Volt's in-client built-in mods — Not Enough Animations
-//! (`mobs::nea`), Player Animations (`mobs::player_gestures`), Subtle
-//! Effects (`subtle_effects`) and Punchy (`punchy`) — into the native-mod
-//! surface: rows and settings pages in Options > Mods, keybinds, per-key
-//! persistence through `native_setting`, and the per-frame feed of local
-//! player state. The logic lives in the library modules; this file only
-//! translates. Both platforms: nothing here is Android-specific.
+//! (`mobs::nea`), Player Animations (`mobs::player_gestures`) and Subtle
+//! Effects (`subtle_effects`) — into the native-mod surface: rows and
+//! settings pages in Options > Mods, keybinds, per-key persistence through
+//! `native_setting`, and the per-frame feed of local player state. The
+//! logic lives in the library modules; this file only translates. Both
+//! platforms: nothing here is Android-specific. (Punchy is no longer a
+//! built-in: the real Punchy native-mod port is woven into Android builds
+//! from `tools/native_mods/vendored/punchy`.)
 use super::{Game, native_hooks::NativeMod};
 use horizon_client::mobs::{nea, player_gestures as gestures};
-use horizon_client::{punchy, subtle_effects as subtle};
+use horizon_client::subtle_effects as subtle;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -55,14 +57,6 @@ impl Game<'_> {
             slimes: self.stored_bool(subtle::ID, "slimes", true),
             density: self.stored_usize(subtle::ID, "density", 1),
         });
-        punchy::set_flags(punchy::Flags {
-            enabled: self.stored_bool(punchy::ID, "enabled", true),
-            sway: self.stored_bool(punchy::ID, "sway", true),
-            landing: self.stored_bool(punchy::ID, "landing", true),
-            variety: self.stored_bool(punchy::ID, "variety", true),
-            off_hand: self.stored_bool(punchy::ID, "off_hand", false),
-            intensity: self.stored_usize(punchy::ID, "intensity", 1),
-        });
         gestures::set_enabled(self.stored_bool(gestures::ID, "enabled", true));
     }
 
@@ -82,7 +76,6 @@ impl Game<'_> {
             "key.keyboard.unknown".into(),
         ]]));
         mods.push(row(subtle::ID, subtle::NAME, subtle::VERSION, subtle::DESCRIPTION, vec![]));
-        mods.push(row(punchy::ID, punchy::NAME, punchy::VERSION, punchy::DESCRIPTION, vec![]));
         mods.push(row(
             gestures::ID,
             gestures::NAME,
@@ -91,7 +84,7 @@ impl Game<'_> {
             vec![[
                 "gesture".into(),
                 "Play gesture".into(),
-                "key.keyboard.unknown".into(),
+                "key.keyboard.b".into(),
             ]],
         ));
     }
@@ -115,15 +108,6 @@ impl Game<'_> {
                 buttons.push(label("Burning mob embers", f.burning));
                 buttons.push(label("Slime trails", f.slimes));
                 buttons.push(format!("Density: {}", subtle::DENSITY_NAMES[f.density]));
-            }
-            _ if id == punchy::ID => {
-                let f = punchy::flags();
-                buttons.push(label("Punchy", f.enabled));
-                buttons.push(label("Movement sway", f.sway));
-                buttons.push(label("Landing impact", f.landing));
-                buttons.push(label("Attack variety", f.variety));
-                buttons.push(label("Show empty off hand", f.off_hand));
-                buttons.push(format!("Intensity: {}", punchy::INTENSITY_NAMES[f.intensity]));
             }
             _ if id == gestures::ID => {
                 buttons.push(label("Gestures", gestures::enabled()));
@@ -170,25 +154,6 @@ impl Game<'_> {
             } else {
                 self.native_set_setting(subtle::ID, "density", &f.density.to_string());
             }
-        } else if id == punchy::ID {
-            let mut f = punchy::flags();
-            match button {
-                0 => { f.enabled = !f.enabled; }
-                1 => { f.sway = !f.sway; }
-                2 => { f.landing = !f.landing; }
-                3 => { f.variety = !f.variety; }
-                4 => { f.off_hand = !f.off_hand; }
-                5 => { f.intensity = (f.intensity + 1) % 3; }
-                _ => return,
-            }
-            punchy::set_flags(f);
-            let keys = ["enabled", "sway", "landing", "variety", "off_hand"];
-            if button < 5 {
-                let v = [f.enabled, f.sway, f.landing, f.variety, f.off_hand][button];
-                self.store_bool(punchy::ID, keys[button], v);
-            } else {
-                self.native_set_setting(punchy::ID, "intensity", &f.intensity.to_string());
-            }
         } else if id == gestures::ID {
             match button {
                 0 => {
@@ -200,7 +165,11 @@ impl Game<'_> {
                     let name = gestures::select_next();
                     self.native_set_setting(gestures::ID, "selected", name);
                 }
-                2 => self.volt_builtins_gesture(),
+                // "Play now" queues the clip: it starts on the first frame
+                // back in the world (`volt_builtins_frame`), so it is not
+                // already over while the settings page still covers the
+                // screen.
+                2 => gestures::queue_selected(),
                 _ => {}
             }
         }
@@ -220,7 +189,7 @@ impl Game<'_> {
             self.store_bool(nea::ID, "enabled", f.enabled);
         }
         if self.native_on(gestures::ID)
-            && key == self.native_mod_key(gestures::ID, "gesture", "key.keyboard.unknown")
+            && key == self.native_mod_key(gestures::ID, "gesture", "key.keyboard.b")
         {
             self.volt_builtins_gesture();
         }
@@ -232,15 +201,23 @@ impl Game<'_> {
     }
 
     /// Once a frame, beside `native_frame`: feeds the local player's state
-    /// to NEA and Punchy, and runs mob-attached Subtle Effects particles at
-    /// tick rate. Each branch is gated on its row's toggle.
+    /// to NEA, starts queued gestures, and runs mob-attached Subtle Effects
+    /// particles at tick rate. Each branch is gated on its row's toggle.
     pub(super) fn volt_builtins_frame(&mut self, elapsed: Duration) {
         // The row toggles in Options > Mods suspend each mod wholesale,
         // including the code paths that run outside this bridge.
         nea::set_suspended(!self.native_on(nea::ID));
         gestures::set_suspended(!self.native_on(gestures::ID));
         subtle::set_suspended(!self.native_on(subtle::ID));
-        punchy::set_suspended(!self.native_on(punchy::ID));
+        // A gesture queued from the settings page ("Play now") starts on
+        // the first frame the player is back in the world, so the clip is
+        // not already over behind the paused menu.
+        if gestures::pending()
+            && self.native_playing()
+            && let Some(m) = self.player_model.as_ref()
+        {
+            gestures::start_pending(m.age as f32 / 20.0);
+        }
         // Not Enough Animations: the local climbing and boat state (other
         // players' mobs carry theirs on the Mob).
         if self.native_on(nea::ID) {
@@ -265,32 +242,6 @@ impl Game<'_> {
             }
         } else {
             nea::set_local(false, false, false);
-        }
-        // Punchy: the first-person motion state machine.
-        if self.native_on(punchy::ID) {
-            let inputs = match self.player.as_ref() {
-                Some(p) => punchy::Inputs {
-                    dt: elapsed.as_secs_f32(),
-                    on_ground: p.ground.on_ground,
-                    sprinting: p.sprinting,
-                    speed: ((p.velocity.x * p.velocity.x + p.velocity.z * p.velocity.z).sqrt()
-                        * 20.0) as f32,
-                    vel_y: (p.velocity.y * 20.0) as f32,
-                    swinging: self.swing.current.is_some(),
-                },
-                None => punchy::Inputs {
-                    dt: elapsed.as_secs_f32(),
-                    on_ground: true,
-                    ..punchy::Inputs::default()
-                },
-            };
-            punchy::frame(&inputs);
-        } else {
-            punchy::frame(&punchy::Inputs {
-                dt: elapsed.as_secs_f32(),
-                on_ground: true,
-                ..punchy::Inputs::default()
-            });
         }
         // Subtle Effects on mobs, at tick rate: embers on burning mobs and
         // slime trails, for mobs near the camera.

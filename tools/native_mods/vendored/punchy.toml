@@ -1,0 +1,23 @@
+# Vendored registry entry for the Punchy native-mod port. The bundle is not
+# in the pinned horizon-mods registry snapshot; its reviewed source tree is
+# committed under vendored/punchy/ and pack_vendored.py rebuilds the exact
+# archive this entry pins. Everything else (hashing, ZIP safety, revocation,
+# hook checks, the mixin compiler's AST matching) runs the ordinary pipeline.
+#
+# Provenance: mods/official/punchy of github.com/CihuyAkz/horizon-android-more-mods
+# (branch `android`, fetched 2026-11-09), itself the integration of the Punchy
+# author's `punchy-rust-0.1.2.hnmod`. The engine crate carries the Punchy
+# custom license (all rights reserved) in mixins/punchy/engine/LICENSE-Punchy;
+# the glue carries the Horizon MIT license. See THIRD_PARTY_NOTICES.md.
+id = "punchy"
+kind = "native-mod"
+name = "Punchy"
+license = "LicenseRef-Punchy-Custom AND MIT"
+source = "https://github.com/CihuyAkz/horizon-android-more-mods"
+
+[[versions]]
+version = "0.1.2"
+game = "26.3"
+file = "punchy-rust-0.1.2.hnmod"
+published = "2026-11-09"
+sha256 = "f3835fa959d02122e6f170fafbcf2301bd7d33b5e326eef0ef7ba547530016a9"

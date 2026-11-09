@@ -138,7 +138,6 @@ jobs:
             nea::tests \
             player_gestures::tests \
             subtle_effects::tests \
-            punchy::tests \
             --nocapture 2>&1 | tee worldgen-test.log
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -463,6 +462,11 @@ jobs:
         biomecompass=biomecompass-0.2.2.hnmod
         skins_3d=skins_3d-1.1.0.hnmod
         accurate_block_placement=accurate_block_placement-1.0.0.hnmod
+      # Reviewed bundles committed under tools/native_mods/vendored/ and
+      # rebuilt deterministically by pack_vendored.py; they run the same
+      # verified_extract + mixin-compiler checks as the registry set.
+      VENDORED_SET: |
+        punchy=punchy-rust-0.1.2.hnmod
     strategy:
       fail-fast: false
       matrix:
@@ -490,6 +494,13 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/registry"
           curl --retry 3 -fsSL "https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/$REGISTRY_REV" | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+      - name: Pack vendored bundles and install their entries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bundle"
+          python3 tools/native_mods/pack_vendored.py \
+            --bundles "$RUNNER_TEMP/bundle" --registry "$RUNNER_TEMP/registry"
       - name: Download published bundles and verify against the registry
         shell: bash
         run: |
@@ -525,7 +536,9 @@ jobs:
           temp = Path(os.environ['RUNNER_TEMP'])
           registry = temp / 'registry'
           revs = {}
-          pairs = [line.split('=', 1) for line in os.environ['WEAVE_SET'].split() if '=' in line]
+          pairs = [line.split('=', 1)
+                   for line in (os.environ['WEAVE_SET'] + '\n' + os.environ.get('VENDORED_SET', '')).split()
+                   if '=' in line]
           for mod_id, file in pairs:
               entry = compat.read_entry(registry, mod_id)
               data = compat.verified_extract(temp / 'bundle' / file, entry,
@@ -559,6 +572,10 @@ jobs:
             [ -n "$mod_id" ] || continue
             MOD_ARGS+=(--mod "$mod_id=$RUNNER_TEMP/bundle/$file")
           done <<< "$WEAVE_SET"
+          while IFS='=' read -r mod_id file; do
+            [ -n "$mod_id" ] || continue
+            MOD_ARGS+=(--mod "$mod_id=$RUNNER_TEMP/bundle/$file")
+          done <<< "$VENDORED_SET"
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
             "${MOD_ARGS[@]}" \

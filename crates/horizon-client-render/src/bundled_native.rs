@@ -49,6 +49,10 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("biomecompass", "0.2.2"),
     ("skins_3d", "1.1.0"),
     ("accurate_block_placement", "1.0.0"),
+    // Vendored (not registry-published): the Punchy Rust port, packed
+    // deterministically from `tools/native_mods/vendored/punchy/` by
+    // `tools/native_mods/pack_vendored.py` and woven like the rest.
+    ("punchy", "0.1.2"),
 ];
 
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {

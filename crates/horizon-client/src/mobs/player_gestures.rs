@@ -28,6 +28,26 @@ pub fn set_suspended(off: bool) {
 }
 /// The playing clip and the tick-time second it started, if any.
 static PLAYING: Mutex<Option<(usize, f32)>> = Mutex::new(None);
+/// A clip queued from the settings page: it starts on the first frame the
+/// player is back in the world, so the whole gesture is visible instead of
+/// running out behind the paused menu.
+static PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Queues the selected gesture to start when gameplay resumes.
+pub fn queue_selected() {
+    if enabled() {
+        PENDING.store(true, Ordering::Relaxed);
+    }
+}
+pub fn pending() -> bool {
+    PENDING.load(Ordering::Relaxed) && enabled() && !SUSPENDED.load(Ordering::Relaxed)
+}
+/// Starts the queued gesture at age-second `now` and clears the queue.
+pub fn start_pending(now: f32) {
+    if PENDING.swap(false, Ordering::Relaxed) {
+        play_selected(now);
+    }
+}
 
 /// One animated channel: a part's rotation axis through `(time s, radians)`
 /// keys, sampled with smoothstep easing between neighbouring keys.
@@ -98,6 +118,7 @@ pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
     if !on {
         *PLAYING.lock().unwrap() = None;
+        PENDING.store(false, Ordering::Relaxed);
     }
 }
 pub fn selected() -> usize {
@@ -252,5 +273,21 @@ mod tests {
             select_next();
         }
         assert_eq!(GESTURES[selected()].name, next);
+        // "Play now" queues; the clip starts when gameplay resumes.
+        *PLAYING.lock().unwrap() = None;
+        queue_selected();
+        assert!(pending(), "queued, not yet playing");
+        assert!(!playing());
+        start_pending(3.0);
+        assert!(playing(), "starts when gameplay resumes");
+        assert!(!pending(), "the queue is consumed");
+        set_enabled(false);
+        queue_selected();
+        assert!(!pending(), "disabled: nothing queues");
+        set_enabled(true);
+        queue_selected();
+        set_enabled(false);
+        assert!(!pending(), "disabling clears the queue");
+        set_enabled(true);
     }
 }

@@ -28,7 +28,7 @@ weave pipeline); everything else a user can download at runtime is data
 |---|---|---|
 | Weave pipeline: 34 registry `.hnmod`s compiled into both Android ABIs | **Shipped** | `WEAVE_SET` in `.github/workflows/android-apk.yml`; `WOVEN` in `crates/horizon-client-render/src/bundled_native.rs`; CI verifies the expected set (`PY_VERIFY`). |
 | Bundled official mods (Zoom, FPS Overlay, Keystrokes, Minimap) | **Shipped** | `BUNDLED` in `bundled_native.rs`; bridges in `game/official_*_bridge.rs`. |
-| In-client built-ins (NEA, Subtle Effects, Punchy, Player Animations, plus the earlier Carry Block/AppleSkin/etc. set) | **Shipped** | `game/volt_builtins.rs` and `docs/BUILTIN-PARITY.md`. |
+| In-client built-ins (NEA, Subtle Effects, Player Animations, plus the earlier Carry Block/AppleSkin/etc. set; Punchy moved to a vendored woven `.hnmod`) | **Shipped** | `game/volt_builtins.rs` and `docs/BUILTIN-PARITY.md`. |
 | Content-only `.hmod` import on device | **Shipped** | `content_files.rs` `Kind::Mods` accepts manifest + content; proven in CI by the real `validate()` test on `biomes_unseen.hmod`. |
 | Runtime download-and-run of `.hnmod` on Android | **Rejected by design** | See above. |
 

@@ -66,7 +66,7 @@ impl VoltTab {
             Self::ChatVoice => "3D Positional Proximity Voice Chat, Chat Heads, timestamps & spam compaction.",
             Self::Maps => "Xaero's Minimap, Xaero's World Map & 3D world waypoints.",
             Self::Controls => "Controls Studio presets (Pojav, Zalith, FCL, PvP Claw), touch layout & gamepads.",
-            Self::Extras => "Mod Menu (50 native Rust mods), Shader Packs, Video Settings, inventory & system tools.",
+            Self::Extras => "Mod Menu (49 native Rust mods), Shader Packs, Video Settings, inventory & system tools.",
         }
     }
 }
@@ -389,7 +389,7 @@ fn tab_groups(s: &Settings) -> Vec<(VoltTab, Vec<(&'static str, Vec<VoltEntry>)>
                 VoltEntry {
                     kind: VoltRowKind::OpenModMenu,
                     cost: None,
-                    desc: "Open the full Split-Pane Mod Menu to browse, search and toggle all 50 native Rust mods.",
+                    desc: "Open the full Split-Pane Mod Menu to browse, search and toggle all 49 native Rust mods.",
                 },
                 e_mod(VoltModId::InventoryHudPlus, Low),
                 e_mod(VoltModId::ArmorHud, None),
@@ -403,7 +403,6 @@ fn tab_groups(s: &Settings) -> Vec<(VoltTab, Vec<(&'static str, Vec<VoltEntry>)>
                 e_mod(VoltModId::CustomCrosshair, None),
                 e_mod(VoltModId::DynamicCrosshair, None),
                 e_mod(VoltModId::BetterF3, None),
-                e_mod(VoltModId::Punchy, None),
             ],
         ),
     ];
@@ -504,7 +503,7 @@ fn tab_groups(s: &Settings) -> Vec<(VoltTab, Vec<(&'static str, Vec<VoltEntry>)>
         VoltEntry {
             kind: VoltRowKind::OpenModMenu,
             cost: None,
-            desc: "Open the in-game Mod Menu (50 native Rust mods with live toggles).",
+            desc: "Open the in-game Mod Menu (49 native Rust mods with live toggles).",
         },
         e_mod(VoltModId::MouseTweaks, None),
         e_mod(VoltModId::ItemScroller, None),
@@ -626,7 +625,7 @@ fn entry_parts(kind: VoltRowKind, s: &Settings, binding: Option<&'static str>) -
         }
         VoltRowKind::OpenModMenu => (
             format!(
-                "Open Mod Menu ({}/50 Enabled)...",
+                "Open Mod Menu ({}/49 Enabled)...",
                 s.extras.mod_catalog.enabled_count()
             ),
             None,

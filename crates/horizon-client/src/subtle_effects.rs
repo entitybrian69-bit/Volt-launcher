@@ -78,43 +78,52 @@ fn roll(r: &mut LegacyRandom, base: f32) -> bool {
 /// `animate_tick` right where vanilla spawns the flame particle.
 pub fn flame_spark(engine: &mut ParticleEngine, p: [f64; 3]) {
     let f = flags();
-    if !active() || !f.sparks || !roll(engine.random(), 0.22) {
+    if !active() || !f.sparks || !roll(engine.random(), 0.55) {
         return;
     }
     let r = engine.random();
     let v = [
-        f64::from(r.next_float() - 0.5) * 0.015,
-        0.02 + f64::from(r.next_float()) * 0.03,
-        f64::from(r.next_float() - 0.5) * 0.015,
+        f64::from(r.next_float() - 0.5) * 0.025,
+        0.035 + f64::from(r.next_float()) * 0.045,
+        f64::from(r.next_float() - 0.5) * 0.025,
     ];
-    engine.add(&ParticleOptions::simple(T::SmallFlame), p, v);
+    let at = [p[0], p[1] + 0.05, p[2]];
+    engine.add(&ParticleOptions::simple(T::SmallFlame), at, v);
 }
 
 /// Extra embers over a lit campfire, beyond vanilla's occasional lava pop.
 pub fn campfire_sparks(engine: &mut ParticleEngine, p: [f64; 3]) {
     let f = flags();
-    if !active() || !f.sparks || !roll(engine.random(), 0.35) {
+    if !active() || !f.sparks || !roll(engine.random(), 0.7) {
         return;
     }
-    let r = engine.random();
-    let at = [
-        p[0] + f64::from(r.next_float() - 0.5) * 0.5,
-        p[1] + 0.3,
-        p[2] + f64::from(r.next_float() - 0.5) * 0.5,
-    ];
-    let v = [
-        f64::from(r.next_float() - 0.5) * 0.02,
-        0.04 + f64::from(r.next_float()) * 0.05,
-        f64::from(r.next_float() - 0.5) * 0.02,
-    ];
-    engine.add(&ParticleOptions::simple(T::SmallFlame), at, v);
+    // A short column of full-size embers, clearly taller than vanilla's
+    // occasional pop, plus a rare arcing lava spark.
+    for _ in 0..2 {
+        let r = engine.random();
+        let at = [
+            p[0] + f64::from(r.next_float() - 0.5) * 0.5,
+            p[1] + 0.3 + f64::from(r.next_float()) * 0.2,
+            p[2] + f64::from(r.next_float() - 0.5) * 0.5,
+        ];
+        let v = [
+            f64::from(r.next_float() - 0.5) * 0.03,
+            0.06 + f64::from(r.next_float()) * 0.07,
+            f64::from(r.next_float() - 0.5) * 0.03,
+        ];
+        engine.add(&ParticleOptions::simple(T::Flame), at, v);
+    }
+    if engine.random().next_float() < 0.15 {
+        let at = [p[0], p[1] + 0.4, p[2]];
+        engine.add(&ParticleOptions::simple(T::Lava), at, [0.0; 3]);
+    }
 }
 
 /// The glowing dust a block sheds, if any: colour, size and base odds.
 pub fn block_dust(name: &str) -> Option<([f32; 3], f32, f32)> {
     match name {
-        "minecraft:glowstone" => Some(([0.98, 0.83, 0.42], 0.6, 0.08)),
-        "minecraft:redstone_block" => Some(([0.86, 0.09, 0.04], 0.6, 0.08)),
+        "minecraft:glowstone" => Some(([0.98, 0.83, 0.42], 0.9, 0.25)),
+        "minecraft:redstone_block" => Some(([0.86, 0.09, 0.04], 0.9, 0.25)),
         _ => None,
     }
 }
@@ -144,11 +153,7 @@ pub fn ambient_dust(engine: &mut ParticleEngine, name: &str, pos: [i32; 3]) {
         4 => [fx - 0.05, fy + u, fz + v],
         _ => [fx + o, fy + u, fz + v],
     };
-    engine.add(
-        &ParticleOptions::dust(rgb, scale),
-        p,
-        [0.0, -0.004, 0.0],
-    );
+    engine.add(&ParticleOptions::dust(rgb, scale), p, [0.0, -0.01, 0.0]);
 }
 fn next(r: &mut LegacyRandom, bound: i32) -> i32 {
     r.next_int_bound(bound).unwrap_or(0)
@@ -158,37 +163,41 @@ fn next(r: &mut LegacyRandom, bound: i32) -> i32 {
 /// mob's feet position and its size, and spawns within the body.
 pub fn burning_mob(engine: &mut ParticleEngine, feet: [f64; 3], width: f64, height: f64) {
     let f = flags();
-    if !active() || !f.burning || !roll(engine.random(), 0.45) {
+    if !active() || !f.burning || !roll(engine.random(), 0.8) {
         return;
     }
-    let r = engine.random();
-    let p = [
-        feet[0] + f64::from(r.next_float() - 0.5) * width,
-        feet[1] + f64::from(r.next_float()) * height,
-        feet[2] + f64::from(r.next_float() - 0.5) * width,
-    ];
-    let v = [
-        f64::from(r.next_float() - 0.5) * 0.02,
-        0.03 + f64::from(r.next_float()) * 0.04,
-        f64::from(r.next_float() - 0.5) * 0.02,
-    ];
-    let ty = if r.next_float() < 0.3 { T::Smoke } else { T::SmallFlame };
-    engine.add(&ParticleOptions::simple(ty), p, v);
+    // One ember and one smoke puff per pass: unmistakable at a glance.
+    for ty in [T::Flame, T::Smoke] {
+        let r = engine.random();
+        let p = [
+            feet[0] + f64::from(r.next_float() - 0.5) * width,
+            feet[1] + f64::from(r.next_float()) * height,
+            feet[2] + f64::from(r.next_float() - 0.5) * width,
+        ];
+        let v = [
+            f64::from(r.next_float() - 0.5) * 0.03,
+            0.045 + f64::from(r.next_float()) * 0.055,
+            f64::from(r.next_float() - 0.5) * 0.03,
+        ];
+        engine.add(&ParticleOptions::simple(ty), p, v);
+    }
 }
 
 /// A slime trail blob under a slime that is moving on the ground.
 pub fn slime_trail(engine: &mut ParticleEngine, feet: [f64; 3], width: f64) {
     let f = flags();
-    if !active() || !f.slimes || !roll(engine.random(), 0.3) {
+    if !active() || !f.slimes || !roll(engine.random(), 0.55) {
         return;
     }
-    let r = engine.random();
-    let p = [
-        feet[0] + f64::from(r.next_float() - 0.5) * width * 0.8,
-        feet[1] + 0.02,
-        feet[2] + f64::from(r.next_float() - 0.5) * width * 0.8,
-    ];
-    engine.add(&ParticleOptions::simple(T::ItemSlime), p, [0.0; 3]);
+    for _ in 0..2 {
+        let r = engine.random();
+        let p = [
+            feet[0] + f64::from(r.next_float() - 0.5) * width * 0.9,
+            feet[1] + 0.02,
+            feet[2] + f64::from(r.next_float() - 0.5) * width * 0.9,
+        ];
+        engine.add(&ParticleOptions::simple(T::ItemSlime), p, [0.0; 3]);
+    }
 }
 /// Whether a mob kind leaves slime trails.
 pub fn is_slime(kind: &str) -> bool {
@@ -198,6 +207,62 @@ pub fn is_slime(kind: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    /// Tests that touch the global flags take this lock so they cannot
+    /// observe each other's intermediate states.
+    static FLAGS_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn every_effect_spawns_clearly_visible_particles() {
+        let _guard = FLAGS_LOCK.lock().unwrap();
+        let before = flags();
+        set_flags(Flags {
+            enabled: true,
+            sparks: true,
+            dust: true,
+            burning: true,
+            slimes: true,
+            density: 1,
+        });
+        set_suspended(false);
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.seed_randoms(7, 7, 7);
+        // Capture every `add` the way the parity probe's stand-in level does.
+        engine.requested = Some(Vec::new());
+        for i in 0..100 {
+            let at = [f64::from(i), 64.0, 0.0];
+            flame_spark(&mut engine, at);
+            campfire_sparks(&mut engine, at);
+            ambient_dust(&mut engine, "minecraft:glowstone", [i, 64, 0]);
+            burning_mob(&mut engine, at, 0.6, 1.8);
+            slime_trail(&mut engine, at, 1.0);
+        }
+        let got = engine.requested.take().unwrap();
+        let count = |ty: T| got.iter().filter(|(o, _, _)| o.ty == ty).count();
+        // Torch/candle sparks: at ~55% odds, 100 calls make dozens.
+        let small = count(T::SmallFlame);
+        assert!(small > 25, "torch sparks spawn often: {small}");
+        // Campfire embers are full-size flames, two per pass.
+        let embers = count(T::Flame);
+        assert!(embers > 60, "campfire + burning embers: {embers}");
+        assert!(count(T::Lava) > 0, "the rare arcing lava spark happens");
+        assert!(count(T::Dust) > 10, "glowing dust is frequent");
+        assert!(count(T::Smoke) > 25, "burning mobs smoke");
+        assert!(count(T::ItemSlime) > 25, "slime trails leave blobs");
+        // Sparks genuinely rise: every flame's velocity points up, hard.
+        for (o, _, v) in &got {
+            if matches!(o.ty, T::SmallFlame | T::Flame) {
+                assert!(v[1] >= 0.035, "spark rises visibly, vy = {}", v[1]);
+            }
+        }
+        // Dust is big enough to see.
+        let (_, scale, _) = block_dust("minecraft:glowstone").unwrap();
+        assert!(scale >= 0.9, "dust scaled up to be visible");
+        set_flags(before);
+    }
 
     #[test]
     fn density_scales_and_clamps() {
@@ -221,6 +286,7 @@ mod tests {
 
     #[test]
     fn flags_round_trip_and_gate() {
+        let _guard = FLAGS_LOCK.lock().unwrap();
         let before = flags();
         set_flags(Flags {
             enabled: false,

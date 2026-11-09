@@ -4058,6 +4058,10 @@ impl OptionsUi {
             self.mod_menu.draw(s, batch, atlas, cursor, self.in_world);
             return;
         }
+        if self.page() == Page::Mods {
+            self.draw_mods_glass(s, batch, atlas, cursor);
+            return;
+        }
         if self.page() == Page::VoltAtlas {
             ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
             let title_t = tr(Self::title(Page::VoltAtlas));
@@ -4461,6 +4465,177 @@ impl OptionsUi {
                 );
             }
             self.waypoint_name = name_box;
+        }
+        if let Some(lines) = tooltip {
+            ui::tooltip(batch, atlas, &lines, cursor);
+        }
+    }
+    /// `Page::Mods`, reskinned to the Volt Settings frosted-glass look.
+    /// The classic widget geometry is reused untouched — every click
+    /// target, `Act` and test fixture stays exactly where `layout` puts
+    /// it — only the painting differs: a veiled backdrop, a frosted sheet
+    /// behind the list, glass row cards with switch pills, and pill
+    /// buttons for Settings/footer actions.
+    fn draw_mods_glass(
+        &mut self,
+        s: &Settings,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+    ) {
+        use crate::graphics_style as style;
+        let (w, h) = (batch.width, batch.height);
+        let (widgets, top, bottom, content) = self.layout(s, w, h);
+        let in_world = self.in_world;
+        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
+        style::fill(batch, atlas, [0.0, 0.0, w, h], style::VEIL);
+        let list = bottom > top;
+        if list {
+            // The frosted sheet behind the scrolling list.
+            let px = (w / 2.0 - 170.0).max(4.0);
+            let pw = (w - 2.0 * px).min(340.0);
+            style::panel(batch, atlas, [px, top + 1.0, pw, bottom - top - 2.0]);
+        }
+        // Brand corner, as on Volt Settings.
+        style::fill(batch, atlas, [10.0, 9.0, 6.0, 6.0], style::ACCENT);
+        batch.text_styled(atlas, &Text::literal("Volt"), 19.0, 8.0, style::WHITE, true);
+        batch.text_styled(atlas, &Text::literal("Mods"), 10.0, 18.0, style::MUTED, true);
+        // Counter corner: enabled over installed (Volt Replay included).
+        let total = s.mods.installed.len() + 1;
+        let on_total = (0..s.mods.installed.len())
+            .filter(|&i| s.mods.is_on(i))
+            .count()
+            + usize::from(s.extras.volt_qol.replay_buffer);
+        let counter = Text::literal(format!("{on_total}/{total} on"));
+        let cw = atlas.font.width_text(&counter);
+        batch.text_styled(atlas, &counter, w - cw - 10.0, 8.0, style::MUTED, true);
+        let mut tooltip: Option<Vec<Text>> = None;
+        for wd in &widgets {
+            if wd.list && (wd.y + wd.h <= top || wd.y >= bottom) {
+                continue;
+            }
+            let start = batch.vertices.len();
+            let hover = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            match &wd.kind {
+                WKind::Button { label, active, act } => {
+                    let rect = [wd.x, wd.y, wd.w, wd.h];
+                    // Rows with a state of their own become glass cards
+                    // with a switch pill; everything else is a pill button.
+                    let toggle = match act {
+                        Act::ToggleMod(i) => s
+                            .mods
+                            .installed
+                            .get(*i)
+                            .map(|m| (m.title.clone(), s.mods.is_on(*i))),
+                        Act::VoltCustom(crate::options_volt_pages::VoltAct::QolReplay) => Some((
+                            "Volt Replay 1.0.0".to_owned(),
+                            s.extras.volt_qol.replay_buffer,
+                        )),
+                        _ => None,
+                    };
+                    if let Some((title, on)) = toggle {
+                        let face = if hover && *active {
+                            style::HOVER
+                        } else {
+                            style::GROUP
+                        };
+                        style::fill(batch, atlas, rect, face);
+                        style::ring(
+                            batch,
+                            atlas,
+                            rect,
+                            if hover && *active {
+                                style::WHITE
+                            } else {
+                                style::EDGE
+                            },
+                        );
+                        let col = if *active { style::WHITE } else { style::MUTED };
+                        let ty = wd.y + ((wd.h - 8.0) / 2.0).floor();
+                        let pill_w = 24.0;
+                        let fitted = style::fit(atlas, &title, wd.w - pill_w - 18.0);
+                        let shown = Text::literal(fitted);
+                        batch.text_styled(atlas, &shown, wd.x + 6.0, ty, col, true);
+                        // A problem or dev marker rides along, muted.
+                        let note = match act {
+                            Act::ToggleMod(i) => s.mods.installed.get(*i).and_then(|m| {
+                                if m.problem.as_deref() == Some(crate::mod_list::NOT_BUILT) {
+                                    Some(tr("horizon.mods.not_built"))
+                                } else if m.problem.is_some() {
+                                    Some(tr("horizon.mods.stopped"))
+                                } else if m.dev {
+                                    Some(tr("horizon.mods.dev"))
+                                } else {
+                                    None
+                                }
+                            }),
+                            _ => None,
+                        };
+                        if let Some(note) = note {
+                            let tw = atlas.font.width_text(&shown);
+                            let nx = wd.x + 6.0 + tw + 3.0;
+                            if nx < wd.x + wd.w - pill_w - 8.0 {
+                                batch.text_styled(atlas, &note, nx, ty, style::MUTED, true);
+                            }
+                        }
+                        let pr = [
+                            wd.x + wd.w - pill_w - 5.0,
+                            wd.y + ((wd.h - 10.0) / 2.0).floor(),
+                            pill_w,
+                            10.0,
+                        ];
+                        style::switch_pill(batch, atlas, pr, if on { 1.0 } else { 0.0 }, on);
+                    } else {
+                        let primary = matches!(act, Act::Done);
+                        style::button(batch, atlas, rect, label, (hover, *active, primary));
+                    }
+                    if hover
+                        && let Act::ToggleMod(i) = act
+                        && let Some(m) = s.mods.installed.get(*i)
+                    {
+                        let description = m.problem.as_deref().unwrap_or(&m.description);
+                        tooltip = Some(atlas.font.split(
+                            &Text::literal(format!("{}\n{description}", m.title)),
+                            170.0,
+                        ));
+                    }
+                    if hover && let Act::VoltCustom(vact) = act {
+                        tooltip =
+                            Some(atlas.font.split(&Text::literal(vact.description()), 170.0));
+                    }
+                }
+                WKind::Text { text, centered, .. } => {
+                    if *centered {
+                        let tw = atlas.font.width_text(text);
+                        batch.text_styled(
+                            atlas,
+                            text,
+                            wd.x + ((wd.w - tw) / 2.0).floor(),
+                            wd.y,
+                            style::SOFT,
+                            true,
+                        );
+                    } else {
+                        batch.text_styled(atlas, text, wd.x, wd.y, style::SOFT, true);
+                    }
+                }
+                _ => {}
+            }
+            if wd.list && (wd.y < top || wd.y + wd.h > bottom) {
+                batch.clip_since(start, 0.0, top, w, bottom);
+            }
+        }
+        if list {
+            let sx = self.scrollbar_x(w);
+            if let Some((ty, th)) = style::scrollbar_thumb(top, bottom, content, self.scroll) {
+                style::scroller(
+                    batch,
+                    atlas,
+                    [sx, top, style::SCROLLER_W, bottom - top],
+                    [sx, ty, style::SCROLLER_W, th],
+                );
+            }
         }
         if let Some(lines) = tooltip {
             ui::tooltip(batch, atlas, &lines, cursor);

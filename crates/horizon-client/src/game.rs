@@ -136,6 +136,7 @@ mod integrated;
 mod interactions;
 mod item_draw;
 mod item_particles;
+mod item_use;
 mod jigsaw_blocks;
 mod jigsaw_edit;
 mod jukebox;
@@ -12615,10 +12616,7 @@ impl Game<'_> {
         let [sway_x, sway_y] = self.sway.rotation(a, self.pitch, self.yaw);
         let to_world = view.inverse()
             * glam::Mat4::from_rotation_x(sway_x.to_radians())
-            * glam::Mat4::from_rotation_y(sway_y.to_radians())
-            // Punchy (built-in mod): extra procedural hand motion, identity
-            // while the mod is off.
-            * horizon_client::punchy::hand_matrix();
+            * glam::Mat4::from_rotation_y(sway_y.to_radians());
         let eye = self.eye_position().unwrap_or_default();
         let light = self.world.light(
             eye[0].floor() as i32,
@@ -12652,11 +12650,8 @@ impl Game<'_> {
             let Some(stack) = item else {
                 // renderArmWithItem: only the main hand's empty arm shows,
                 // on the main arm (the left one with the main hand set to
-                // left), and not while the player is invisible. Punchy
-                // (built-in mod) can opt the empty off hand in.
-                if (hand == Hand::Off && !horizon_client::punchy::show_empty_off_hand())
-                    || self.own_invisible()
-                {
+                // left), and not while the player is invisible.
+                if hand == Hand::Off || self.own_invisible() {
                     continue;
                 }
                 // renderPlayerArm
@@ -12780,23 +12775,6 @@ impl Game<'_> {
             };
             let mut local_pose =
                 horizon_client::first_person::item_pose(left, inverse_height, eff_attack, pose);
-            if eff_attack > 0.0
-                && self
-                    .settings
-                    .extras
-                    .mod_catalog
-                    .is_on(horizon_client::volt_mods::VoltModId::Punchy)
-            {
-                let punch = (eff_attack * std::f32::consts::PI).sin()
-                    * (f32::from(self.settings.extras.mod_catalog.punchy_intensity) / 100.0);
-                let sign = if left { -1.0 } else { 1.0 };
-                local_pose = glam::Mat4::from_translation(glam::Vec3::new(
-                    -0.015 * sign * punch,
-                    0.026 * punch,
-                    -0.058 * punch,
-                )) * local_pose
-                    * glam::Mat4::from_rotation_x((-9.5 * punch).to_radians());
-            }
             if vm_cfg.viewmodel_custom {
                 let sign = if left { -1.0 } else { 1.0 };
                 let ox = f32::from(vm_cfg.vm_offset_x) * 0.008 * sign;

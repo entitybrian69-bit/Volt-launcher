@@ -120,7 +120,6 @@ pub mod spectator_menu;
 pub mod sprint;
 pub mod stations;
 pub mod stopwatches;
-pub mod punchy;
 pub mod structure_blocks;
 pub mod subtle_effects;
 pub mod text_display;

@@ -16,7 +16,7 @@ use crate::{
     ui,
 };
 
-pub const TOTAL_VOLT_MODS: usize = 50;
+pub const TOTAL_VOLT_MODS: usize = 49;
 
 /// Native zoom steps use Zoomify's default 1.5x ratio and ten tiers. This
 /// is independent of the animated camera FOV, which remains owned by the game.
@@ -70,7 +70,7 @@ pub fn upstream_icon(id: VoltModId) -> Option<(&'static str, &'static [u8])> {
     }
 }
 
-/// Categories organizing all 50 native Rust mods in both the Launcher `Mods` tab
+/// Categories organizing all 49 native Rust mods in both the Launcher `Mods` tab
 /// and the in-game `Mod Menu`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum VoltModCategory {
@@ -111,11 +111,11 @@ impl VoltModCategory {
     }
 }
 
-/// Every single one of the 50 built-in pure-Rust mods in Volt Launcher `0.9.9`.
+/// Every single one of the 49 built-in pure-Rust mods in Volt Launcher `0.9.9`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(usize)]
 pub enum VoltModId {
-    // --- 1. PvP & Utility (13) ---
+    // --- 1. PvP & Utility (12) ---
     AppleSkin = 0,
     BetterF3 = 1,
     BetterPingDisplay = 2,
@@ -128,48 +128,47 @@ pub enum VoltModId {
     Zoomify = 9,
     DynamicCrosshair = 10,
     BetterStats = 11,
-    Punchy = 12,
     // --- 2. PvP HUD & Display (11) ---
-    ModMenu = 13,
-    InventoryHudPlus = 14,
-    ArmorHud = 15,
-    StatusEffectTimer = 16,
-    KeystrokesHud = 17,
-    CpsDisplay = 18,
-    PingDisplay = 19,
-    FpsDisplay = 20,
-    CoordinatesHud = 21,
-    DurabilityDisplay = 22,
-    CustomCrosshair = 23,
+    ModMenu = 12,
+    InventoryHudPlus = 13,
+    ArmorHud = 14,
+    StatusEffectTimer = 15,
+    KeystrokesHud = 16,
+    CpsDisplay = 17,
+    PingDisplay = 18,
+    FpsDisplay = 19,
+    CoordinatesHud = 20,
+    DurabilityDisplay = 21,
+    CustomCrosshair = 22,
     // --- 3. Visual Mods (9) ---
-    Fullbright = 24,
-    LowFire = 25,
-    NoFog = 26,
-    BetterClouds = 27,
-    EnhancedBlockEntities = 28,
-    EntityModelFeatures = 29,
-    EntityTextureFeatures = 30,
-    LambDynamicLights = 31,
-    BetterAnimations = 32,
+    Fullbright = 23,
+    LowFire = 24,
+    NoFog = 25,
+    BetterClouds = 26,
+    EnhancedBlockEntities = 27,
+    EntityModelFeatures = 28,
+    EntityTextureFeatures = 29,
+    LambDynamicLights = 30,
+    BetterAnimations = 31,
     // --- 4. Performance Mods (10) ---
-    Sodium = 33,
-    Lithium = 34,
-    FerriteCore = 35,
-    ImmediatelyFast = 36,
-    EntityCulling = 37,
-    MoreCulling = 38,
-    DynamicFps = 39,
-    ModernFix = 40,
-    BadOptimizations = 41,
-    Krypton = 42,
+    Sodium = 32,
+    Lithium = 33,
+    FerriteCore = 34,
+    ImmediatelyFast = 35,
+    EntityCulling = 36,
+    MoreCulling = 37,
+    DynamicFps = 38,
+    ModernFix = 39,
+    BadOptimizations = 40,
+    Krypton = 41,
     // --- 5. Additional Mods (7) ---
-    ScreenshotToClipboard = 43,
-    BetterMountHud = 44,
-    NotEnoughAnimations = 45,
-    XaerosMinimap = 46,
-    XaerosWorldMap = 47,
-    LanguageReload = 48,
-    FastQuit = 49,
+    ScreenshotToClipboard = 42,
+    BetterMountHud = 43,
+    NotEnoughAnimations = 44,
+    XaerosMinimap = 45,
+    XaerosWorldMap = 46,
+    LanguageReload = 47,
+    FastQuit = 48,
 }
 
 impl VoltModId {
@@ -186,7 +185,6 @@ impl VoltModId {
         Self::Zoomify,
         Self::DynamicCrosshair,
         Self::BetterStats,
-        Self::Punchy,
         Self::ModMenu,
         Self::InventoryHudPlus,
         Self::ArmorHud,
@@ -373,16 +371,6 @@ pub const CATALOG: [VoltModMeta; TOTAL_VOLT_MODS] = [
         summary: "Searchable Statistics screen with non-zero filter & summary.",
         description: "Enhances the pause-menu Statistics screen with an instant live search filter, a Hide Zero Entries toggle, and clean summary totals at the top.",
     },
-    VoltModMeta {
-        id: VoltModId::Punchy,
-        slug: "punchy",
-        title: "Punchy",
-        version: "3.1.0",
-        category: VoltModCategory::PvpUtility,
-        default_on: false,
-        summary: "Crisp 1.7-inspired first-person swing, eat & block-hit feel.",
-        description: "Tunes client-side first-person arm swing arcs, item-use bobbing, and shield/sword guard transitions for snappy PvP responsiveness with zero server protocol changes.",
-    },
     // --- PvP HUD & Display (11) ---
     VoltModMeta {
         id: VoltModId::ModMenu,
@@ -392,7 +380,7 @@ pub const CATALOG: [VoltModMeta; TOTAL_VOLT_MODS] = [
         category: VoltModCategory::PvpHud,
         default_on: true,
         summary: "Interactive in-game Mod Menu screen & live toggle manager.",
-        description: "Provides this split-pane Mod Menu screen (accessible from Options, Volt Settings, or pressing M in-game) to search, favorite, configure, and toggle all 50 native mods live.",
+        description: "Provides this split-pane Mod Menu screen (accessible from Options, Volt Settings, or pressing M in-game) to search, favorite, configure, and toggle all 49 native mods live.",
     },
     VoltModMeta {
         id: VoltModId::InventoryHudPlus,
@@ -949,21 +937,6 @@ pub const fn mod_logo_spec(id: VoltModId) -> ModLogoSpec {
                 "######++",
                 "########",
                 "++++++++",
-            ],
-        },
-        VoltModId::Punchy => ModLogoSpec {
-            bg: 0x281216,
-            primary: 0xfb7185,
-            accent: 0xfde047,
-            rows: [
-                "......++",
-                ".....##+",
-                "....###.",
-                "...###..",
-                ".+###...",
-                "++##....",
-                ".++.....",
-                "+..+....",
             ],
         },
         VoltModId::ModMenu => ModLogoSpec {
@@ -1578,7 +1551,6 @@ pub struct VoltModCatalogState {
     pub better_clouds_density: u8,
     pub mouse_tweaks_rmb: bool,
     pub item_scroller_wheel: bool,
-    pub punchy_intensity: u8,
     /// Controls the native saturation bar and held-food preview independently.
     pub appleskin_saturation: bool,
     pub appleskin_food_preview: bool,
@@ -1614,7 +1586,6 @@ impl Default for VoltModCatalogState {
             better_clouds_density: 100,
             mouse_tweaks_rmb: true,
             item_scroller_wheel: true,
-            punchy_intensity: 85,
             appleskin_saturation: true,
             appleskin_food_preview: true,
             appleskin_tooltip: true,
@@ -1743,12 +1714,6 @@ impl VoltModCatalogState {
                 self.item_scroller_wheel = val == "true";
                 true
             }
-            "voltModCfg.punchyIntensity" => {
-                if let Ok(v) = val.parse::<u8>() {
-                    self.punchy_intensity = v.clamp(50, 100);
-                }
-                true
-            }
             _ => false,
         }
     }
@@ -1798,10 +1763,6 @@ impl VoltModCatalogState {
         push(
             "voltModCfg.itemScrollerWheel",
             bool_s(self.item_scroller_wheel),
-        );
-        push(
-            "voltModCfg.punchyIntensity",
-            &self.punchy_intensity.to_string(),
         );
     }
 }
@@ -2023,7 +1984,6 @@ enum ModCfgKind {
     CloudsDensity,
     MouseTweaksRmb,
     ItemScrollerWheel,
-    PunchyIntensity,
     OpenWorldMap,
     OpenKeyBinds,
 }
@@ -2122,7 +2082,6 @@ impl ModMenuUi {
             VoltModId::BetterClouds => vec![ModCfgKind::CloudsDensity],
             VoltModId::MouseTweaks => vec![ModCfgKind::MouseTweaksRmb],
             VoltModId::ItemScroller => vec![ModCfgKind::ItemScrollerWheel],
-            VoltModId::Punchy => vec![ModCfgKind::PunchyIntensity],
             VoltModId::XaerosWorldMap => vec![
                 ModCfgKind::OpenWorldMap,
                 ModCfgKind::OpenKeyBinds,
@@ -2181,9 +2140,6 @@ impl ModMenuUi {
                 "Mouse Wheel Slot Transfer: {}",
                 if cat.item_scroller_wheel { "ON" } else { "OFF" }
             ),
-            ModCfgKind::PunchyIntensity => {
-                format!("Swing Snappiness: {}%", cat.punchy_intensity)
-            }
             ModCfgKind::OpenWorldMap => "Open Xaero's World Map...".to_owned(),
             ModCfgKind::OpenKeyBinds => "Open Key Binds...".to_owned(),
         }
@@ -2312,7 +2268,7 @@ impl ModMenuUi {
         style::ring(batch, atlas, lay.modal, MM_EDGE);
         batch.fill(atlas, mx + 8.0, my + 26.0, mw - 16.0, 1.0, MM_EDGE);
 
-        // Header: "Mod Menu" + "X/50 on"
+        // Header: "Mod Menu" + "X/49 on"
         let on_total = s.extras.mod_catalog.enabled_count();
         let title = Text::literal("Mod Menu");
         batch.text_styled(atlas, &title, mx + 10.0, my + 11.0, style::WHITE, true);
@@ -3042,16 +2998,6 @@ impl ModMenuUi {
                             !s.extras.mod_catalog.item_scroller_wheel;
                         vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
                     }
-                    ModCfgKind::PunchyIntensity => {
-                        let cur = s.extras.mod_catalog.punchy_intensity;
-                        s.extras.mod_catalog.punchy_intensity = match cur {
-                            60 => 75,
-                            75 => 85,
-                            85 => 100,
-                            _ => 60,
-                        };
-                        vec![ModMenuAction::ButtonClick, ModMenuAction::Changed]
-                    }
                 };
             }
         }
@@ -3266,15 +3212,15 @@ mod tests {
     }
 
     #[test]
-    fn all_fifty_mods_have_exact_category_counts_unique_slugs_and_logos() {
-        assert_eq!(VoltModId::ALL.len(), 50);
+    fn all_forty_nine_mods_have_exact_category_counts_unique_slugs_and_logos() {
+        assert_eq!(VoltModId::ALL.len(), 49);
         let count_cat = |c: VoltModCategory| {
             VoltModId::ALL
                 .iter()
                 .filter(|id| id.meta().category == c)
                 .count()
         };
-        assert_eq!(count_cat(VoltModCategory::PvpUtility), 13);
+        assert_eq!(count_cat(VoltModCategory::PvpUtility), 12);
         assert_eq!(count_cat(VoltModCategory::PvpHud), 11);
         assert_eq!(count_cat(VoltModCategory::Visual), 9);
         assert_eq!(count_cat(VoltModCategory::Performance), 10);

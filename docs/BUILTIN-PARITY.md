@@ -78,22 +78,27 @@ or sounds are unsupported by policy).
 | Falling-block landing poof, egg splat, drip splash extras | UNSUPPORTED | Need block-entity/projectile event hooks; deferred rather than half-done. |
 | Night-vision fade, biome rain colour, composter/anvil effects, flame geysers, `/subtle_effects` command | UNSUPPORTED | Out of scope for a first release; the command adds nothing over the settings page. |
 
-## 4. Punchy → `punchy.rs` (+ matrix hook in `game.rs` first-person path)
+## 4. Punchy → vendored native mod (Android weave)
 
-**Upstream identity:** Punchy! by PunchyDevGuy (All Rights Reserved).
-**Implementation:** clean-room procedural state machine; one extra matrix
-on the vanilla first-person hand transform.
+**Upstream identity:** Punchy! by PunchyDevGuy (All Rights Reserved);
+Rust port by the Horizon community
+([CihuyAkz/horizon-android-more-mods](https://github.com/CihuyAkz/horizon-android-more-mods),
+`mods/official/punchy/`, MIT glue around the ARR engine).
+**Implementation:** the earlier clean-room `punchy.rs` built-in was
+removed. The real port is vendored at `tools/native_mods/vendored/punchy/`,
+packed deterministically by `tools/native_mods/pack_vendored.py` into
+`punchy-rust-0.1.2.hnmod`, and woven into Android builds exactly like the
+registry set (verified extract, pinned mixins, single compiler pass). The
+engine exposes the hooks the port binds to: `game/item_use.rs::use_pose`
+and the `native_render_hand` / `native_use_animation` no-op hooks in
+`game/native_hooks.rs`.
 
-| Upstream feature | Status | Notes |
+| Area | Status | Notes |
 |---|---|---|
-| Livelier first-person hand motion (procedural) | DONE | Walk/sprint sway, idle breathing, jump drift — damped, bounded, intensity setting. |
-| Landing impact | DONE | Spring-damped dip scaled by fall speed. |
-| Varied consecutive attack animations | ADAPTED | Three-variant rotation offsets over the vanilla swing rather than fully re-authored swing animations (the vanilla swing path stays untouched by directive). |
-| Visible hands / off-hand | ADAPTED | Optional "show empty off hand" (off by default); upstream always shows both. |
-| 3D in-hand item models with physics | UNSUPPORTED | Our item renderer draws baked item models; physics-simulated items need a renderer feature, not a mod. |
-| Two-handed spear, water-exit shake, climb/crawl first-person animations | UNSUPPORTED | Each needs state the first-person path doesn't expose yet; deferred. |
-| Triggerable keybind animations | ADAPTED | Covered by the Player Animations built-in's gesture key (shared API) rather than duplicated here. |
-| Camera motion | UNSUPPORTED | By performance directive, camera shake stays out. |
+| First-person combat/movement/interaction animations | DONE (Android) | The port's own animation core: 223 clips, easing, crossfades, tuning template. |
+| Eat/drink/bow/trident/brush hand poses | DONE | `use_pose` picks the pose from remaining/duration/partial ticks (unit tested). |
+| Desktop runtime-proof build | ABSENT | The weave happens only in the Android APK job; the desktop test build carries the hooks but no Punchy code. |
+| Port completeness | PARTIAL (upstream) | The port's own README marks itself a preview: editor, pack mixing, locomotion, physics and some renderers are not ported. |
 
 ## 5. Player Animations → `mobs/player_gestures.rs`
 
@@ -119,7 +124,7 @@ gesture set so the library is usable out of the box.
 
 Each logic module has unit tests compiled into `horizon-client --lib` and
 run by the CI worldgen-test job filter: `nea::tests`,
-`player_gestures::tests`, `subtle_effects::tests`, `punchy::tests` — pose
+`player_gestures::tests`, `subtle_effects::tests` — pose
 math, gating flags, keyframe sampling, spring/landing behaviour, settings
 round-trips. The woven ABP mod is verified by the weave job's expected-set
 check.

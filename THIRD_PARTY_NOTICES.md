@@ -1453,10 +1453,29 @@ feature with its DONE/ADAPTED/UNSUPPORTED status.
   clean-room recreation inspired by the feature set of MincraftEinstein's
   Subtle Effects for Minecraft (All Rights Reserved). No code or assets
   from the original are used; all particles are vanilla sprites.
-- **Punchy** (`crates/horizon-client/src/punchy.rs`) — a clean-room
-  recreation inspired by the feature set of PunchyDevGuy's Punchy! for
-  Minecraft (All Rights Reserved). No code or assets from the original are
-  used; all motion is procedural.
+- **Punchy (vendored native mod)** — the earlier clean-room `punchy.rs`
+  built-in was removed in favour of the real Punchy Rust port, vendored at
+  `tools/native_mods/vendored/punchy/` and woven into Android builds as
+  `punchy-rust-0.1.2.hnmod` (source weave, no downloaded code execution).
+  The port comes from
+  [CihuyAkz/horizon-android-more-mods](https://github.com/CihuyAkz/horizon-android-more-mods)
+  (branch `android`, `mods/official/punchy/`). Licensing is split and both
+  license texts ship verbatim inside the vendored tree:
+  - The Horizon mixin glue is MIT, Copyright (c) 2026 Ludovic Marie and
+    the Horizon contributors
+    (`tools/native_mods/vendored/punchy/mixins/punchy/LICENSE-Horizon`).
+  - The Punchy animation engine and data are under the PUNCHY CUSTOM
+    LICENSE (ALL RIGHTS RESERVED), Copyright (c) 2026 Dev Punchy Man
+    (`tools/native_mods/vendored/punchy/mixins/punchy/engine/LICENSE-Punchy`),
+    which permits personal, non-commercial use only and restricts
+    redistribution to author-authorized channels. It is vendored here on
+    the repository owner's explicit instruction; that instruction does not
+    remove the license's restrictions, so anyone redistributing builds of
+    this repository should obtain the Punchy author's permission first.
+    SPDX for the woven bundle: `LicenseRef-Punchy-Custom AND MIT`.
+  - `crates/horizon-client/src/game/item_use.rs` (the `use_pose` hand-pose
+    picker the weave binds to) is adapted from the same port's MIT-licensed
+    glue code.
 - **Player Animations** (`crates/horizon-client/src/mobs/player_gestures.rs`)
   — a keyframe gesture layer in the spirit of KosmX's playerAnimator
   library for Minecraft (MIT, Copyright (c) KosmX). No playerAnimator code
