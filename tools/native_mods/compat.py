@@ -28,7 +28,9 @@ REV = re.compile(r"[0-9a-f]{40}\Z")
 MAX_ARCHIVE = 16 * 1024 * 1024
 MAX_EXPANDED = 64 * 1024 * 1024
 MAX_FILES = 2048
-EXCLUDED = {"accurate_block_placement"}
+# Accurate Block Placement is woven in since the 2026-11 grand upgrade
+# (the earlier removal directive was reversed); no mod is excluded now.
+EXCLUDED = set()
 
 class Rejected(ValueError):
     pass
