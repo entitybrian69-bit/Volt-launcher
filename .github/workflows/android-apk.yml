@@ -138,6 +138,7 @@ jobs:
             nea::tests \
             player_gestures::tests \
             subtle_effects::tests \
+            hand_sway_to_world_matches_the_inline_first_person_product \
             --nocapture 2>&1 | tee worldgen-test.log
           status=$?
           if [ "$status" -ne 0 ]; then
