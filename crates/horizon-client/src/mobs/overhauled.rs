@@ -343,7 +343,9 @@ mod tests {
             .sum::<f32>();
         assert!(moved > 0.1, "a walking pose visibly changes: {moved}");
         // Arms counter-phase: follow-through pulls them apart, not together.
-        assert_ne!(p.get("right_arm")[3], p.get("left_arm")[3]);
+        let right = p.get("right_arm")[3];
+        let left = p.get("left_arm")[3];
+        assert_ne!(right, left);
     }
 
     #[test]
