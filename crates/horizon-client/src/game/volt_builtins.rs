@@ -486,7 +486,7 @@ impl Game<'_> {
         // Rain impact splashes: random nearby columns, splashing on the
         // first surface under open sky (a covered probe is skipped, so
         // caves and interiors stay dry).
-        if self.raining && f.rain {
+        if self.world.weather.raining && f.rain {
             let top = (eye[1] + 6.0).floor() as i32;
             for _ in 0..6 {
                 let x = eye[0] + f64::from(rnd(1) - 0.5) * 16.0;

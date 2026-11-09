@@ -709,7 +709,9 @@ mod tests {
         let arms = |p: &mut Poses| p.get("right_arm")[3].abs() + p.get("left_arm")[3].abs();
         assert_ne!(arms(&mut dry), arms(&mut wet), "water adds the stroke");
         // The stroke alternates: both arms never share the same x rotation.
-        assert_ne!(wet.get("right_arm")[3], wet.get("left_arm")[3]);
+        let right = wet.get("right_arm")[3];
+        let left = wet.get("left_arm")[3];
+        assert_ne!(right, left);
         // And it stays within a sane budget everywhere.
         for ti in 0..40 {
             let mut p = humanoid_poses();
