@@ -558,6 +558,23 @@ impl Game<'_> {
             }
         }
         let reg = &mut self.ui.registries;
+        // The export's by_registry carries vanilla's worldgen/biome list and
+        // `Registries::ids` prefers it over `biomes`: append the content
+        // mods' biomes there too, or /locate biome rejects their ids.
+        let mod_biomes: Vec<String> = reg
+            .biomes
+            .iter()
+            .filter(|b| !b.starts_with("minecraft:"))
+            .cloned()
+            .collect();
+        if let Some(r) = reg.by_registry.get_mut("minecraft:worldgen/biome") {
+            for b in mod_biomes {
+                if !r.ids.contains(&b) {
+                    r.ids.push(b);
+                }
+            }
+            r.ids.sort();
+        }
         reg.timelines = self.ui.timelines.keys().cloned().collect();
         reg.time_markers = self
             .ui
