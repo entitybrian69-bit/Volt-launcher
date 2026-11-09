@@ -999,6 +999,11 @@ jobs:
                "ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602"),
               ("accurate_block_placement", "1.0.0",
                "e631745f6d267360de6eb51995ee995bf1ab3d64393d287b7b93c332b85939ce"),
+              # Vendored, not registry-published: packed deterministically by
+              # tools/native_mods/pack_vendored.py from the committed source
+              # tree; the sha256 is also pinned in vendored/punchy.toml.
+              ("punchy", "0.1.2",
+               "9032d18b4694db2dd4feae500663b9668495f75fe9786746ed3b44fe404213c1"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libhorizon_android.so"
