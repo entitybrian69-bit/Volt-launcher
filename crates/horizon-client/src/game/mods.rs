@@ -217,6 +217,9 @@ pub(super) fn content_root(
             }
         };
         let m = &package.manifest;
+        for w in &package.warnings {
+            report.push(format!("mod {} ({file}): warning: {w}", m.id));
+        }
         let on = enabled.contains(&m.id) || dev.contains(path);
         if !on {
             report.push(format!("mod {} ({file}): installed, not enabled", m.id));
@@ -249,6 +252,9 @@ pub(super) fn content_root(
         });
         match content {
             Ok(content) => {
+                for w in &content.warnings {
+                    report.push(format!("mod {} ({file}): warning: {w}", m.id));
+                }
                 let biomes = content
                     .files
                     .iter()

@@ -48,6 +48,7 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("coords_hud", "2.0.0"),
     ("biomecompass", "0.2.2"),
     ("skins_3d", "1.1.0"),
+    ("accurate_block_placement", "1.0.0"),
 ];
 
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {

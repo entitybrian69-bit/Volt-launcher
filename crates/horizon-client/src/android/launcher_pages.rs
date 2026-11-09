@@ -278,6 +278,7 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "coords_hud" => "Coordinates HUD",
         "biomecompass" => "BiomeCompass",
         "skins_3d" => "3D Skins",
+        "accurate_block_placement" => "Accurate Block Placement",
         _ => "Horizon Mod",
     }
 }
@@ -321,6 +322,9 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "coords_hud" => "Your coordinates and facing in a corner of the screen; /coords hides it.",
         "biomecompass" => "Craft a Biome Compass, pick a biome and its needle points to the nearest one.",
         "skins_3d" => "Every player's hat, jacket, sleeves and pants as real 3D pixels.",
+        "accurate_block_placement" => {
+            "Hold right click and every new spot you look at gets a block, however fast you move."
+        }
         _ => "An official Horizon registry mod.",
     }
 }

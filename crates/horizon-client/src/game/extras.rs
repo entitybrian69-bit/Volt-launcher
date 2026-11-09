@@ -189,6 +189,7 @@ impl Game<'_> {
         } else {
             self.particles.max_particles = self.settings.extras.particle_budget.max_particles();
         }
+        self.volt_builtins_frame(elapsed);
         self.native_frame(elapsed);
     }
     /// The frame counter for mods: fps, min, 1% low.

@@ -53,6 +53,8 @@ pub mod living;
 pub mod llama;
 pub mod monster_brain;
 pub mod nautilus;
+pub mod nea;
+pub mod player_gestures;
 pub mod nav;
 pub mod nether;
 pub mod panda;
@@ -1057,6 +1059,10 @@ pub struct Mob {
     /// `Entity.needsSync`: knocked back, pushed or jumped since its server
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
+    /// The local player's own third-person model (`tick_player_model`),
+    /// never a server entity: built-in animation mods read the local
+    /// climbing and riding state for it (`mobs::nea`).
+    pub own: bool,
     pub health: f32,
     pub hurt_time: i32,
     pub invulnerable: i32,
@@ -2256,6 +2262,7 @@ impl Mob {
             horizontal_collision: false,
             vertical_collision_below: false,
             needs_sync: false,
+            own: false,
             hurt_time: 0,
             invulnerable: 0,
             death_time: 0,

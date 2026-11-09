@@ -135,6 +135,10 @@ jobs:
             biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries \
             biomes_unseen_hmod_passes_android_import_validation \
             content_files \
+            nea::tests \
+            player_gestures::tests \
+            subtle_effects::tests \
+            punchy::tests \
             --nocapture 2>&1 | tee worldgen-test.log
           status=$?
           if [ "$status" -ne 0 ]; then
@@ -147,6 +151,23 @@ jobs:
               print(f"::error title={title}::{msg or '(empty)'}")
           emit("cargo-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
           emit("log-tail", lines[-35:])
+          PY
+            exit "$status"
+          fi
+      - name: Tolerant .hmod loader tests (horizon-mods)
+        run: |
+          set -u +e -o pipefail
+          cargo test -p horizon-mods --lib --no-default-features -- \
+            --nocapture 2>&1 | tee horizon-mods-test.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("horizon-mods-test.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::error title={title}::{msg or '(empty)'}")
+          emit("horizon-mods-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
+          emit("horizon-mods-log-tail", lines[-35:])
           PY
             exit "$status"
           fi
@@ -441,6 +462,7 @@ jobs:
         coords_hud=coords_hud-2.0.0.hnmod
         biomecompass=biomecompass-0.2.2.hnmod
         skins_3d=skins_3d-1.1.0.hnmod
+        accurate_block_placement=accurate_block_placement-1.0.0.hnmod
     strategy:
       fail-fast: false
       matrix:
@@ -957,6 +979,8 @@ jobs:
                "d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5"),
               ("skins_3d", "1.1.0",
                "ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602"),
+              ("accurate_block_placement", "1.0.0",
+               "e631745f6d267360de6eb51995ee995bf1ab3d64393d287b7b93c332b85939ce"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libhorizon_android.so"

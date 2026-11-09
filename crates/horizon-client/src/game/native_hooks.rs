@@ -2497,6 +2497,7 @@ impl Game<'_> {
         self.native_mods(&mut mods);
         self.bundled_zoom_list(&mut mods);
         self.bundled_hud_list(&mut mods);
+        self.volt_builtins_list(&mut mods);
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings
@@ -2508,6 +2509,7 @@ impl Game<'_> {
             self.native_settings(&m.id, &mut buttons);
             self.bundled_zoom_settings(&m.id, &mut buttons);
             self.bundled_hud_settings(&m.id, &mut buttons);
+            self.volt_builtins_settings(&m.id, &mut buttons);
             let page = NativePage {
                 keys: m.keys,
                 buttons,
@@ -2532,6 +2534,7 @@ impl Game<'_> {
         self.native_settings_click(&id, button);
         self.bundled_zoom_click(&id, button);
         self.bundled_hud_click(&id, button);
+        self.volt_builtins_click(&id, button);
         self.native_settings_refresh(i);
     }
     /// Native mod `i`'s page opened: its labels asked again, so that they
@@ -2544,6 +2547,7 @@ impl Game<'_> {
         self.native_settings(&id, &mut buttons);
         self.bundled_zoom_settings(&id, &mut buttons);
         self.bundled_hud_settings(&id, &mut buttons);
+        self.volt_builtins_settings(&id, &mut buttons);
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
@@ -2593,6 +2597,7 @@ impl Game<'_> {
             }
             self.native_key(name, pressed);
             self.bundled_zoom_key(name, pressed);
+            self.volt_builtins_key(name, pressed);
         }
     }
     /// A mouse button while playing, for `native_key`.

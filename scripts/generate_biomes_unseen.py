@@ -131,9 +131,9 @@ WOODS = {
 }
 for w,(base,border,leaf) in WOODS.items():
     disp=w.replace("_"," ").title()
-    block(f"{w}_log", f"{disp} Log", "minecraft:oak_log", {"hardness":2.0,"resistance":2.0}, "log", (base,border,leaf), "minecraft:wood")
-    block(f"{w}_planks", f"{disp} Planks", "minecraft:oak_planks", {"hardness":2.0,"resistance":3.0}, "cube", (base,border,leaf), "minecraft:wood")
-    block(f"{w}_leaves", f"{disp} Leaves", "minecraft:oak_leaves", {"hardness":0.2,"resistance":0.2}, "leaves", (leaf,border,base), "minecraft:grass")
+    block(f"{w}_log", f"{disp} Log", "minecraft:oak_log", {"hardness":2.0,"resistance":2.0}, "log", (base,border,leaf), "minecraft:oak_planks")
+    block(f"{w}_planks", f"{disp} Planks", "minecraft:oak_planks", {"hardness":2.0,"resistance":3.0}, "cube", (base,border,leaf), "minecraft:oak_planks")
+    block(f"{w}_leaves", f"{disp} Leaves", "minecraft:oak_leaves", {"hardness":0.2,"resistance":0.2}, "leaves", (leaf,border,base), "minecraft:grass_block")
 
 # Wood shape variants (templates are vanilla blocks; behaviour/states copy the template)
 VAR_TEMPLATES = {
@@ -144,7 +144,7 @@ VAR_TEMPLATES = {
 for w,(base,border,leaf) in WOODS.items():
     disp=w.replace("_"," ").title()
     for suf,tpl in VAR_TEMPLATES.items():
-        d={"template":tpl,"properties":{"hardness":2.0,"explosion_resistance":3.0,"sounds":"minecraft:wood"}}
+        d={"template":tpl,"properties":{"hardness":2.0,"explosion_resistance":3.0,"sounds":"minecraft:oak_planks"}}
         if suf=="wall_sign": d["item"]=False
         BLOCKS.append((f"{w}_{suf}", f"{disp} {suf.replace('_',' ').title()}", d, f"variant:{suf}", (base,border,leaf)))
         LANG[f"block.{ID}.{w}_{suf}"]=f"{disp} {suf.replace('_',' ').title()}"
@@ -160,16 +160,16 @@ PLANTS = {
  "cattail":((150,110,60),"minecraft:tall_grass"), "rose":((200,40,60),"minecraft:rose_bush"),
 }
 for n,(col,tpl) in PLANTS.items():
-    block(n, n.replace("_"," ").title(), tpl, {"hardness":0.0,"resistance":0.0}, "cross", (col,(90,120,60),(255,255,255)), "minecraft:grass")
+    block(n, n.replace("_"," ").title(), tpl, {"hardness":0.0,"resistance":0.0}, "cross", (col,(90,120,60),(255,255,255)), "minecraft:grass_block")
 
 # ---- Terrain / nether / misc blocks ----
 block("ash_block","Ash Block","minecraft:sand",{"hardness":0.5,"resistance":0.5},"cube",((170,170,170),(130,130,130),(200,200,200)),"minecraft:sand")
 block("brimstone","Brimstone","minecraft:netherrack",{"hardness":0.4,"resistance":0.4},"cube",((180,160,60),(130,115,40),(220,200,90)),"minecraft:netherrack")
 block("flesh_block","Flesh Block","minecraft:nether_wart_block",{"hardness":0.4,"resistance":0.4},"cube",((170,80,90),(125,55,65),(200,110,120)),"minecraft:nether_wart_block")
 block("porous_flesh","Porous Flesh","minecraft:nether_wart_block",{"hardness":0.4,"resistance":0.4},"ore",((160,75,85),(115,50,60),(220,150,160)),"minecraft:nether_wart_block")
-block("origin_grass_block","Origin Grass Block","minecraft:grass_block",{"hardness":0.6,"resistance":0.6},"cube",((110,170,80),(90,65,40),(140,200,100)),"minecraft:grass")
+block("origin_grass_block","Origin Grass Block","minecraft:grass_block",{"hardness":0.6,"resistance":0.6},"cube",((110,170,80),(90,65,40),(140,200,100)),"minecraft:grass_block")
 block("tanzanite_ore","Tanzanite Ore","minecraft:emerald_ore",{"hardness":3.0,"resistance":3.0},"ore",((128,128,128),(90,90,90),(110,90,220)),"minecraft:stone")
-block("tanzanite_block","Block of Tanzanite","minecraft:emerald_block",{"hardness":5.0,"resistance":6.0},"cube",((110,90,220),(75,60,160),(150,130,255)),"minecraft:metal")
+block("tanzanite_block","Block of Tanzanite","minecraft:emerald_block",{"hardness":5.0,"resistance":6.0},"cube",((110,90,220),(75,60,160),(150,130,255)),"minecraft:iron_block")
 block("mud_brick_block","Mud Brick Block","minecraft:mud_bricks",{"hardness":1.5,"resistance":3.0},"cube",((130,105,80),(95,75,55),(160,135,105)),"minecraft:mud_bricks")
 
 # ---- Items ----

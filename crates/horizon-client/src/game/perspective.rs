@@ -393,6 +393,7 @@ impl Game<'_> {
             };
             let mut m = Mob::new(0, kind, p.position, self.yaw);
             m.head_pitch = self.pitch;
+            m.own = true;
             self.player_model = Some(m);
         }
         let pose = p.pose;

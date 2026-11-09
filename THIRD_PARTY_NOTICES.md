@@ -1425,6 +1425,43 @@ under Mods.
 - **biomecompass 0.2.2** by d3grando — [biomecompass-0.2.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/biomecompass-0.2.2), SHA-256 `d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5`, [source](https://github.com/d3grando/biomecompass)
 - **skins_3d 1.1.0** by _idom_ (MIT) — [skins_3d-1.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/skins_3d-1.1.0), SHA-256 `ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602`, [source](https://github.com/umbx-dot/horizon-3d-skins)
 
+## Accurate Block Placement woven native mod 1.0.0
+
+Volt Launcher weaves the `accurate_block_placement` native mod into the
+Android client the same way as the other woven registry mods, pinned by
+SHA-256 `e631745f6d267360de6eb51995ee995bf1ab3d64393d287b7b93c332b85939ce`
+([accurate_block_placement-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/accurate_block_placement-1.0.0),
+[source](https://github.com/Lutziano888/horizon-accurate-block-placement)).
+It is Lutziano888's MIT-licensed Horizon port of Accurate Block Placement:
+Reborn (MIT) by Clayborn, Flourick, schwar and KadTheHunter. No upstream
+Java code is used.
+
+## Volt built-in mods: credits for reimplemented ideas
+
+The following mods are built into the Volt client itself (Options > Mods).
+Each either ports an MIT-licensed Horizon mod or recreates a mod's
+documented behaviour from scratch; `docs/BUILTIN-PARITY.md` lists every
+feature with its DONE/ADAPTED/UNSUPPORTED status.
+
+- **Not Enough Animations** (`crates/horizon-client/src/mobs/nea.rs`) — a
+  port of the MIT-licensed `not_enough_animations` Horizon native mod,
+  Copyright (c) 2026 CayMac
+  ([CayMac97/not-enough-animations](https://github.com/CayMac97/not-enough-animations)).
+  The mod concept originates with tr7zw's Not Enough Animations for
+  Minecraft; tr7zw's code (custom, non-open license) is not used.
+- **Subtle Effects** (`crates/horizon-client/src/subtle_effects.rs`) — a
+  clean-room recreation inspired by the feature set of MincraftEinstein's
+  Subtle Effects for Minecraft (All Rights Reserved). No code or assets
+  from the original are used; all particles are vanilla sprites.
+- **Punchy** (`crates/horizon-client/src/punchy.rs`) — a clean-room
+  recreation inspired by the feature set of PunchyDevGuy's Punchy! for
+  Minecraft (All Rights Reserved). No code or assets from the original are
+  used; all motion is procedural.
+- **Player Animations** (`crates/horizon-client/src/mobs/player_gestures.rs`)
+  — a keyframe gesture layer in the spirit of KosmX's playerAnimator
+  library for Minecraft (MIT, Copyright (c) KosmX). No playerAnimator code
+  is used; the keyframe data is original.
+
 ## Horizon launcher typography
 
 The launcher display face `crates/horizon-theme/fonts/BricolageGrotesqueDisplay-SemiBold.ttf`

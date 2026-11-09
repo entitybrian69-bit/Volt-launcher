@@ -192,6 +192,7 @@ mod official_keystrokes;
 #[cfg(target_os = "android")]
 mod official_minimap;
 mod official_hud_bridge;
+mod volt_builtins;
 mod native_hooks;
 mod native_lifecycle;
 mod native_menus;
@@ -12614,7 +12615,10 @@ impl Game<'_> {
         let [sway_x, sway_y] = self.sway.rotation(a, self.pitch, self.yaw);
         let to_world = view.inverse()
             * glam::Mat4::from_rotation_x(sway_x.to_radians())
-            * glam::Mat4::from_rotation_y(sway_y.to_radians());
+            * glam::Mat4::from_rotation_y(sway_y.to_radians())
+            // Punchy (built-in mod): extra procedural hand motion, identity
+            // while the mod is off.
+            * horizon_client::punchy::hand_matrix();
         let eye = self.eye_position().unwrap_or_default();
         let light = self.world.light(
             eye[0].floor() as i32,
@@ -12648,8 +12652,11 @@ impl Game<'_> {
             let Some(stack) = item else {
                 // renderArmWithItem: only the main hand's empty arm shows,
                 // on the main arm (the left one with the main hand set to
-                // left), and not while the player is invisible.
-                if hand == Hand::Off || self.own_invisible() {
+                // left), and not while the player is invisible. Punchy
+                // (built-in mod) can opt the empty off hand in.
+                if (hand == Hand::Off && !horizon_client::punchy::show_empty_off_hand())
+                    || self.own_invisible()
+                {
                     continue;
                 }
                 // renderPlayerArm
