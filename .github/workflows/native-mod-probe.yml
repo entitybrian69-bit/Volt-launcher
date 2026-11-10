@@ -2,7 +2,7 @@
 # change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 
-# Probe pass: special_block_model restored, horizonmatica slider shim.
+# Probe pass: grand build #12 expansion wave 1 - nine new registry candidates.
 on:
   workflow_dispatch:
   push:
@@ -36,7 +36,9 @@ jobs:
               enchantmenthints, held_item_info, right_click_crops,
               carryblock, chatheads, smartf3, fast_items, armor_status, customhud,
               coords_hud, crosshair_indicator, hitbox_plus, biomecompass,
-              invisible_frames, freelook, skins_3d]
+              invisible_frames, freelook, skins_3d,
+              freecam, elytratrails, armorhud, treefall, lookat,
+              movement_status, chat_animation, blockscope, basic_hud]
         include:
           - abi: arm64-v8a
             target: aarch64-linux-android
@@ -168,6 +170,42 @@ jobs:
           - mod: skins_3d
             file: skins_3d-1.1.0.hnmod
             tag: skins_3d-1.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: freecam
+            file: freecam-0.1.0.hnmod
+            tag: freecam-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: elytratrails
+            file: elytratrails-0.1.2.hnmod
+            tag: elytratrails-0.1.2
+            raw_targets: "--experimental-raw-targets"
+          - mod: armorhud
+            file: armorhud-1.0.0.hnmod
+            tag: armorhud-1.0.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: treefall
+            file: treefall-0.3.0.hnmod
+            tag: treefall-0.3.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: lookat
+            file: lookat-0.2.1.hnmod
+            tag: lookat-0.2.1
+            raw_targets: "--experimental-raw-targets"
+          - mod: movement_status
+            file: movement_status-0.1.0.hnmod
+            tag: movement_status-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: chat_animation
+            file: chat_animation-0.1.0.hnmod
+            tag: chat_animation-0.1.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: blockscope
+            file: blockscope-0.3.0.hnmod
+            tag: blockscope-0.3.0
+            raw_targets: "--experimental-raw-targets"
+          - mod: basic_hud
+            file: basic_hud-0.5.0.hnmod
+            tag: basic_hud-0.5.0
             raw_targets: "--experimental-raw-targets"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

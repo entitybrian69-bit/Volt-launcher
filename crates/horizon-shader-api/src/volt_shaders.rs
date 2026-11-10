@@ -646,7 +646,7 @@ impl VoltShadersConfig {
                 tonemap: TonemapMode::CrispNeutral,
                 bloom: BloomMode::Off,
                 sun_rays: false,
-                vibrance: 112,
+                vibrance: 104,
                 saturation: 101,
                 contrast: 102,
                 exposure: 101,
@@ -693,7 +693,7 @@ impl VoltShadersConfig {
                 tonemap: TonemapMode::FilmicAces,
                 bloom: BloomMode::Off,
                 sun_rays: false,
-                vibrance: 116,
+                vibrance: 106,
                 saturation: 103,
                 contrast: 103,
                 exposure: 101,
@@ -740,7 +740,7 @@ impl VoltShadersConfig {
                 tonemap: TonemapMode::FilmicAces,
                 bloom: BloomMode::Off,
                 sun_rays: false,
-                vibrance: 120,
+                vibrance: 108,
                 saturation: 104,
                 contrast: 104,
                 exposure: 102,
@@ -787,7 +787,7 @@ impl VoltShadersConfig {
                 tonemap: TonemapMode::FilmicAces,
                 bloom: BloomMode::Low,
                 sun_rays: false,
-                vibrance: 124,
+                vibrance: 110,
                 saturation: 105,
                 contrast: 105,
                 exposure: 103,
@@ -834,7 +834,7 @@ impl VoltShadersConfig {
                 tonemap: TonemapMode::LushCinema,
                 bloom: BloomMode::High,
                 sun_rays: true,
-                vibrance: 126,
+                vibrance: 112,
                 saturation: 106,
                 contrast: 106,
                 exposure: 104,
@@ -1644,10 +1644,11 @@ fn volt_aces(x: vec3<f32>) -> vec3<f32> {
 }
 
 fn volt_neutral(x: vec3<f32>) -> vec3<f32> {
+    // True neutral: identity through blacks and mids, a soft shoulder only
+    // on the highlights. (The old curve lifted 0.2 to 0.70 and 0.5 to 0.87,
+    // which bleached the Potato/Low profiles into the reported white screen.)
     let c = max(x, vec3<f32>(0.0));
-    let num = c * (0.35 * c + vec3<f32>(0.92));
-    let den = c * (0.35 * c + vec3<f32>(0.90)) + vec3<f32>(0.09);
-    return clamp(num / den, vec3<f32>(0.0), vec3<f32>(1.0));
+    return clamp(c / (vec3<f32>(1.0) + c * 0.15) * 1.02, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn volt_cinema(x: vec3<f32>) -> vec3<f32> {
@@ -1671,8 +1672,8 @@ fn volt_grade(hdr: vec3<f32>) -> vec3<f32> {
 
     // BSL Eye-Comfort soft highlight shoulder & velvet shadow lift (zero harsh glare):
     if eye_comfort {
-        c = c / (vec3<f32>(1.0) + c * 0.18) * 1.14;
-        c += vec3<f32>(0.0045, 0.0050, 0.0068) * (1.0 - clamp(volt_luma(c) * 3.0, 0.0, 1.0));
+        c = c / (vec3<f32>(1.0) + c * 0.10) * 1.05;
+        c += vec3<f32>(0.0015, 0.0017, 0.0024) * (1.0 - clamp(volt_luma(c) * 3.0, 0.0, 1.0));
     }
 
     if tonemap_mode == 1u {

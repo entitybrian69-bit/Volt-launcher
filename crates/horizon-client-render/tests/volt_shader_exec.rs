@@ -79,7 +79,10 @@ struct Scenario {
     light: [f32; 2],
     /// The lightmap colour those levels sample to.
     lightmap: [f32; 3],
-    daylight: bool,
+    /// Whether the dome the sky stage paints is a lit (day) sky here.
+    day_sky: bool,
+    /// Whether surfaces should come out dark here (night, caves).
+    dark_surfaces: bool,
 }
 
 fn norm(v: [f32; 3]) -> [f32; 3] {
@@ -124,7 +127,8 @@ fn scenarios() -> Vec<Scenario> {
             ),
             light: [0.0, 1.0],
             lightmap: [1.0, 1.0, 1.0],
-            daylight: true,
+            day_sky: true,
+            dark_surfaces: false,
         },
         Scenario {
             name: "sunset",
@@ -140,7 +144,8 @@ fn scenarios() -> Vec<Scenario> {
             ),
             light: [0.0, 1.0],
             lightmap: [0.78, 0.68, 0.62],
-            daylight: true,
+            day_sky: true,
+            dark_surfaces: false,
         },
         Scenario {
             name: "night",
@@ -156,7 +161,8 @@ fn scenarios() -> Vec<Scenario> {
             ),
             light: [0.0, 0.27],
             lightmap: [0.23, 0.25, 0.36],
-            daylight: false,
+            day_sky: false,
+            dark_surfaces: true,
         },
         Scenario {
             name: "storm",
@@ -172,7 +178,8 @@ fn scenarios() -> Vec<Scenario> {
             ),
             light: [0.0, 1.0],
             lightmap: [0.72, 0.74, 0.80],
-            daylight: true,
+            day_sky: true,
+            dark_surfaces: false,
         },
         Scenario {
             name: "cave",
@@ -188,7 +195,8 @@ fn scenarios() -> Vec<Scenario> {
             ),
             light: [0.87, 0.0],
             lightmap: [1.0, 0.78, 0.53],
-            daylight: false,
+            day_sky: true,
+            dark_surfaces: true,
         },
         Scenario {
             name: "far-lands",
@@ -204,7 +212,8 @@ fn scenarios() -> Vec<Scenario> {
             ),
             light: [0.0, 1.0],
             lightmap: [1.0, 1.0, 1.0],
-            daylight: true,
+            day_sky: true,
+            dark_surfaces: false,
         },
     ]
 }
@@ -533,16 +542,23 @@ fn volt_shader_profiles_execute_sanely_on_real_gpu() {
                     s.name,
                     (white_frac * 100.0) as u32
                 );
-                if s.daylight {
+                let lit = match stage.kind {
+                    StageKind::Material => !s.dark_surfaces,
+                    _ => s.day_sky,
+                };
+                if lit {
+                    // A bleached scene (the reported Potato/Low white screen)
+                    // pushes the mean toward 1; a healthy lit scene sits well
+                    // below 0.9 even with snow and clouds in the mix.
                     assert!(
-                        (0.02..=0.97).contains(&mean_luma),
-                        "{profile:?} {:?} {}: mean luma {mean_luma} outside sane daylight range",
+                        (0.02..=0.90).contains(&mean_luma),
+                        "{profile:?} {:?} {}: mean luma {mean_luma} outside the sane lit range",
                         stage.kind,
                         s.name
                     );
                 } else {
                     assert!(
-                        mean_luma <= 0.75,
+                        mean_luma <= 0.60,
                         "{profile:?} {:?} {}: mean luma {mean_luma} too bright for a dark scene",
                         stage.kind,
                         s.name
