@@ -3,6 +3,7 @@
 //! and screenshots. A `VOLT` pill on the HUD (or F10) opens it; while it
 //! is closed nothing here costs a frame anything beyond that pill.
 use super::*;
+use horizon_client::ui_theme::{Face, Ui};
 
 /// The sidebar tabs, top to bottom.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -83,16 +84,20 @@ pub(super) struct Hub {
     targets: Vec<([f32; 4], Act)>,
     /// The last outcome line (recorder results and such).
     status: String,
+    /// Open/close animation progress, 0 closed .. 1 open.
+    anim: f32,
+    /// The animation clock's last frame.
+    anim_at: Option<std::time::Instant>,
+    /// The target just tapped flashes briefly (GUI rect + when).
+    flash: Option<([f32; 4], std::time::Instant)>,
 }
 
 // Palette: the owner's crimson on near-black glass.
 const CRIMSON: u32 = 0xFF3C14DC; // ABGR of #DC143C
 const PANEL: u32 = 0xF014100E;
-const SIDEBAR: u32 = 0xF61A1012;
 const ROW: u32 = 0x66241A1E;
 const TEXT: u32 = 0xFFF2EFF4;
 const DIM: u32 = 0xFF9A8F96;
-const GREY: u32 = 0xFF5C5258;
 const SCRIM: u32 = 0x8C000000;
 
 impl Game<'_> {
@@ -280,8 +285,8 @@ impl Game<'_> {
             .find(|([x, y, w, h], _)| {
                 cursor.0 >= *x && cursor.0 <= x + w && cursor.1 >= *y && cursor.1 <= y + h
             })
-            .map(|&(_, act)| act);
-        let Some(act) = hit else {
+            .map(|&(rect, act)| (rect, act));
+        let Some((rect, act)) = hit else {
             if self.volt_hub.open {
                 // A tap outside the panel closes the hub; either way the
                 // touch must not reach the world below.
@@ -292,6 +297,7 @@ impl Game<'_> {
         };
         if act != Act::Panel {
             self.audio.play_button_click();
+            self.volt_hub.flash = Some((rect, std::time::Instant::now()));
         }
         match act {
             Act::OpenHub => self.volt_hub.open = true,
@@ -364,397 +370,463 @@ impl Game<'_> {
         true
     }
 
-    /// Draws the pill (closed) or the hub window (open) and rebuilds the
-    /// click targets.
+    /// Draws the floating logo (closed) or the hub window (open) and
+    /// rebuilds the click targets. Rendering goes through the launcher's
+    /// `Ui` layer: the real Volt logo, smooth vector text and rounded
+    /// panels, with a short open/close animation and tap feedback.
     pub(super) fn draw_volt_hub(&mut self, batch: &mut HudBatch) {
-        let mut targets: Vec<([f32; 4], Act)> = Vec::new();
-        let (w, h) = (batch.width, batch.height);
-        let atlas = &self.gui.atlas;
-        if !self.volt_hub.open {
-            // The floating Volt logo: a draggable V badge, red while
-            // recording. A tap opens the hub (volt_hub_logo_touch).
-            let [bx, by, bs, _] = self.volt_hub_logo_rect(w, h);
-            let recording = self.recorder.is_some();
-            let (bg, stroke) = if recording {
-                (CRIMSON, TEXT)
-            } else {
-                (0xDC14100E, CRIMSON)
-            };
-            // Soft-cornered badge: two overlapping fills.
-            batch.fill(atlas, bx + 1.0, by, bs - 2.0, bs, bg);
-            batch.fill(atlas, bx, by + 1.0, bs, bs - 2.0, bg);
-            batch.fill(atlas, bx + 1.0, by, bs - 2.0, 1.0, CRIMSON);
-            // The V mark, stroke by stroke.
-            for i in 0..5 {
-                let t = i as f32;
-                let y = by + 3.0 + t * 2.0;
-                batch.fill(atlas, bx + 3.2 + t * 1.2, y, 1.7, 2.4, stroke);
-                batch.fill(atlas, bx + bs - 4.9 - t * 1.2, y, 1.7, 2.4, stroke);
-            }
-            batch.fill(atlas, bx + bs / 2.0 - 0.9, by + bs - 5.2, 1.8, 2.4, stroke);
-            targets.push(([bx, by, bs, bs], Act::OpenHub));
-            if recording && let Some(rec) = &self.recorder {
-                let t = rec.recorded_seconds() as u64;
-                let label = if rec.settings.clip {
-                    format!("RING {t:02}s")
-                } else {
-                    format!("REC {}:{:02}", t / 60, t % 60)
-                };
-                // Beside the badge, on whichever side has room.
-                let lx = if bx > 50.0 { bx - 44.0 } else { bx + bs + 4.0 };
-                batch.text(atlas, &label, lx, by + 5.0, CRIMSON, true);
-            }
-            self.volt_hub.targets = targets;
-            return;
-        }
-        // Scrim and the ~85% window.
-        batch.fill(atlas, 0.0, 0.0, w, h, SCRIM);
-        let (hx, hy) = ((w * 0.075).round(), (h * 0.075).round());
-        let (hw, hh) = (w - hx * 2.0, h - hy * 2.0);
-        batch.fill(atlas, hx, hy, hw, hh, PANEL);
-        batch.fill(atlas, hx, hy, hw, 1.2, CRIMSON);
-        // Sidebar.
-        let sw = 64.0_f32.min(hw * 0.3);
-        batch.fill(atlas, hx, hy + 1.2, sw, hh - 1.2, SIDEBAR);
-        batch.text(atlas, "VOLT HUB", hx + 6.0, hy + 6.0, CRIMSON, true);
-        let mut ty = hy + 20.0;
-        for tab in HubTab::ALL {
-            let active = tab == self.volt_hub.tab;
-            if active {
-                batch.fill(atlas, hx, ty - 2.0, sw, 13.0, ROW);
-                batch.fill(atlas, hx, ty - 2.0, 1.5, 13.0, CRIMSON);
-            }
-            batch.text(
-                atlas,
-                tab.label(),
-                hx + 7.0,
-                ty,
-                if active { TEXT } else { DIM },
-                false,
-            );
-            targets.push(([hx, ty - 2.0, sw, 13.0], Act::Tab(tab)));
-            ty += 14.0;
-        }
-        // Close button.
-        let (cx, cy) = (hx + hw - 13.0, hy + 4.0);
-        batch.text(atlas, "X", cx + 3.0, cy + 1.0, DIM, false);
-        targets.push(([cx - 3.0, cy - 2.0, 17.0, 16.0], Act::Close));
-        // Content area.
-        let x = hx + sw + 8.0;
-        let cw = hw - sw - 16.0;
-        let mut y = hy + 8.0;
-        let mut row = |batch: &mut HudBatch,
-                       targets: &mut Vec<([f32; 4], Act)>,
-                       y: &mut f32,
-                       label: &str,
-                       value: &str,
-                       act: Option<Act>,
-                       greyed: bool| {
-            batch.fill(atlas, x, *y, cw, 12.0, ROW);
-            batch.text(atlas, label, x + 4.0, *y + 2.5, if greyed { GREY } else { TEXT }, false);
-            let vw = HudBatch::text_width(atlas, value);
-            batch.text(
-                atlas,
-                value,
-                x + cw - vw - 4.0,
-                *y + 2.5,
-                if greyed { GREY } else { CRIMSON },
-                false,
-            );
-            if let Some(act) = act
-                && !greyed
-            {
-                targets.push(([x, *y, cw, 12.0], act));
-            }
-            *y += 14.0;
+        // The open/close animation clock: an exponential approach with a
+        // smoothstep ease reads as "smooth" at any frame rate.
+        let now = std::time::Instant::now();
+        let dt = self
+            .volt_hub
+            .anim_at
+            .map_or(0.0, |at| now.duration_since(at).as_secs_f32())
+            .min(0.1);
+        self.volt_hub.anim_at = Some(now);
+        let target = if self.volt_hub.open { 1.0 } else { 0.0 };
+        let a = self.volt_hub.anim + (target - self.volt_hub.anim) * (dt * 14.0).min(1.0);
+        self.volt_hub.anim = if (a - target).abs() < 0.01 { target } else { a };
+        let t = {
+            let a = self.volt_hub.anim;
+            a * a * (3.0 - 2.0 * a)
         };
-        match self.volt_hub.tab {
-            HubTab::Recorder => {
-                let s = self.recorder_settings;
-                let screen = self.volt_screen_px();
-                let state = match &self.recorder {
-                    Some(rec) if rec.settings.clip => {
-                        format!("Ring: last {:.0}s held", rec.recorded_seconds())
-                    }
-                    Some(rec) => {
-                        let t = rec.recorded_seconds() as u64;
-                        format!("Recording {}:{:02}", t / 60, t % 60)
-                    }
-                    None => "Idle".to_string(),
-                };
-                row(batch, &mut targets, &mut y, "Recorder", &state, None, false);
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    if self.recorder.is_some() { "Stop" } else { "Start" },
-                    if s.clip { "clip ring" } else { "record" },
-                    Some(Act::RecToggle),
-                    false,
+
+        /// `color` with its alpha scaled by `f` (ABGR, alpha in the top byte).
+        fn fade(color: u32, f: f32) -> u32 {
+            let a = ((color >> 24) as f32 * f.clamp(0.0, 1.0)) as u32;
+            (a << 24) | (color & 0x00FF_FFFF)
+        }
+
+        let mut targets: Vec<([f32; 4], Act)> = Vec::new();
+        let scale = batch.scale;
+        let (gw, gh) = (batch.width, batch.height);
+        let logo_rect = self.volt_hub_logo_rect(gw, gh);
+        let recording = self.recorder.is_some();
+        let rec_line = self.recorder.as_ref().map(|rec| {
+            let secs = rec.recorded_seconds();
+            if rec.settings.clip {
+                format!("RING {:02.0}s", secs)
+            } else {
+                let t = secs as u64;
+                format!("REC {}:{:02}", t / 60, t % 60)
+            }
+        });
+        let tab = self.volt_hub.tab;
+        let status = self.volt_hub.status.clone();
+        let flash = self.volt_hub.flash;
+        let open = self.volt_hub.open;
+
+        let mut ui = Ui::new(&self.gui.atlas, batch, (0.0, 0.0));
+        // dp -> GUI pixels, for the click targets the input pipeline reads.
+        let dk = ui.density / scale;
+        // GUI pixels -> dp, for rects kept in GUI coordinates (the logo).
+        let kd = scale / ui.density;
+
+        if !open {
+            // The floating Volt logo on a soft dark chip; crimson while
+            // recording. Its rect stays in GUI coordinates for the drag
+            // gesture, so convert for drawing only.
+            let [bx, by, bs, _] = logo_rect;
+            let (x, y, s) = (bx * kd, by * kd, bs * kd);
+            let chip = if recording { CRIMSON } else { 0xE618100E };
+            ui.rounded(x, y, s, s, s * 0.28, chip);
+            ui.border(x, y, s, s, s * 0.28, fade(CRIMSON, if recording { 0.0 } else { 0.9 }));
+            let pad = s * 0.12;
+            ui.volt_logo(x + pad, y + pad, s - pad * 2.0, s - pad * 2.0);
+            targets.push((logo_rect, Act::OpenHub));
+            if let Some(line) = &rec_line {
+                let size = (s * 0.42).clamp(9.0, 14.0);
+                let tw = ui.measure(Face::LauncherMedium, size, line);
+                let lx = if x > tw + 12.0 { x - tw - 8.0 } else { x + s + 8.0 };
+                ui.text(
+                    Face::LauncherMedium,
+                    size,
+                    lx,
+                    y + (s - size * 1.2) / 2.0,
+                    CRIMSON,
+                    line,
                 );
-                if self.recorder.as_ref().is_some_and(|r| r.settings.clip) {
+            }
+        }
+
+        if t > 0.0 {
+            // Scrim fades in with the window.
+            ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, fade(SCRIM, t));
+            // The window scales in from 96%.
+            // 4% smaller as it opens: extra margin melts away with t.
+            let grow = (1.0 - t) * 0.02;
+            let (mx, my) = (ui.w * (0.075 + grow), ui.h * (0.075 + grow));
+            let (mw, mh) = (ui.w - mx * 2.0, ui.h - my * 2.0);
+            ui.rounded(mx, my, mw, mh, 14.0, fade(PANEL, t));
+            ui.border(mx, my, mw, mh, 14.0, fade(0x5A3C14DC, t));
+            ui.rounded(mx, my, mw, 3.0, 1.5, fade(CRIMSON, t));
+
+            // Header: the logo, the title, the close chip.
+            let head_h = 40.0;
+            ui.volt_logo(mx + 12.0, my + 9.0, 22.0, 22.0);
+            ui.text(
+                Face::LauncherMedium,
+                15.0,
+                mx + 42.0,
+                my + 11.0,
+                fade(TEXT, t),
+                "Volt Hub",
+            );
+            let xr = [mx + mw - 34.0, my + 8.0, 24.0, 24.0];
+            ui.rounded(xr[0], xr[1], xr[2], xr[3], 8.0, fade(ROW, t));
+            let xw = ui.measure(Face::LauncherMedium, 12.5, "X");
+            ui.text(
+                Face::LauncherMedium,
+                12.5,
+                xr[0] + (xr[2] - xw) / 2.0,
+                xr[1] + 4.5,
+                fade(DIM, t),
+                "X",
+            );
+            if open {
+                targets.push((
+                    [
+                        (xr[0] - 6.0) * dk,
+                        (xr[1] - 6.0) * dk,
+                        (xr[2] + 12.0) * dk,
+                        (xr[3] + 12.0) * dk,
+                    ],
+                    Act::Close,
+                ));
+            }
+
+            // Sidebar.
+            let sw = 128.0_f32.min(mw * 0.32);
+            let mut ty = my + head_h + 4.0;
+            for tb in HubTab::ALL {
+                let active = tb == tab;
+                let row_rect = [mx + 8.0, ty, sw - 12.0, 26.0];
+                if active {
+                    ui.rounded(row_rect[0], row_rect[1], row_rect[2], row_rect[3], 8.0, fade(ROW, t));
+                    ui.rounded(row_rect[0], row_rect[1] + 5.0, 3.0, 16.0, 1.5, fade(CRIMSON, t));
+                }
+                let label = ui.fit_text(Face::LauncherMedium, 12.5, tb.label(), row_rect[2] - 18.0);
+                ui.text(
+                    Face::LauncherMedium,
+                    12.5,
+                    row_rect[0] + 12.0,
+                    ty + 6.0,
+                    fade(if active { TEXT } else { DIM }, t),
+                    &label,
+                );
+                if open {
+                    targets.push((
+                        [
+                            row_rect[0] * dk,
+                            row_rect[1] * dk,
+                            row_rect[2] * dk,
+                            row_rect[3] * dk,
+                        ],
+                        Act::Tab(tb),
+                    ));
+                }
+                ty += 28.0;
+            }
+
+            // Content rows.
+            let x = mx + sw + 8.0;
+            let cw = mw - sw - 24.0;
+            let mut y = my + head_h + 4.0;
+            let bottom = my + mh - 26.0;
+            let mut row = |ui: &mut Ui,
+                           targets: &mut Vec<([f32; 4], Act)>,
+                           y: &mut f32,
+                           label: &str,
+                           value: &str,
+                           act: Option<Act>|
+             {
+                if *y + 24.0 > bottom {
+                    return;
+                }
+                ui.rounded(x, *y, cw, 24.0, 8.0, fade(ROW, t));
+                let lab = ui.fit_text(Face::LauncherRegular, 13.0, label, cw * 0.62);
+                ui.text(Face::LauncherRegular, 13.0, x + 10.0, *y + 5.0, fade(TEXT, t), &lab);
+                let vw = ui.measure(Face::LauncherMedium, 13.0, value);
+                ui.text(
+                    Face::LauncherMedium,
+                    13.0,
+                    x + cw - vw - 10.0,
+                    *y + 5.0,
+                    fade(CRIMSON, t),
+                    value,
+                );
+                if let Some(act) = act
+                    && open
+                {
+                    targets.push(([x * dk, *y * dk, cw * dk, 24.0 * dk], act));
+                }
+                *y += 28.0;
+            };
+            let mut note = |ui: &mut Ui, y: &mut f32, text: &str| {
+                if *y + 16.0 > bottom {
+                    return;
+                }
+                let line = ui.fit_text(Face::LauncherRegular, 11.5, text, cw - 4.0);
+                ui.text(Face::LauncherRegular, 11.5, x + 4.0, *y + 2.0, fade(DIM, t), &line);
+                *y += 18.0;
+            };
+            match tab {
+                HubTab::Recorder => {
+                    let s = self.recorder_settings;
+                    let screen = self.volt_screen_px();
+                    let state = match &self.recorder {
+                        Some(rec) if rec.settings.clip => {
+                            format!("Ring: last {:.0}s held", rec.recorded_seconds())
+                        }
+                        Some(rec) => {
+                            let t = rec.recorded_seconds() as u64;
+                            format!("Recording {}:{:02}", t / 60, t % 60)
+                        }
+                        None => "Idle".to_string(),
+                    };
+                    row(&mut ui, &mut targets, &mut y, "Recorder", &state, None);
                     row(
-                        batch,
+                        &mut ui,
                         &mut targets,
                         &mut y,
-                        "Save clip",
-                        "last 30 s",
-                        Some(Act::RecClip),
-                        false,
+                        if recording { "Stop" } else { "Start" },
+                        if s.clip { "clip ring" } else { "record" },
+                        Some(Act::RecToggle),
+                    );
+                    if self.recorder.as_ref().is_some_and(|r| r.settings.clip) {
+                        row(
+                            &mut ui,
+                            &mut targets,
+                            &mut y,
+                            "Save clip",
+                            "last 30 s",
+                            Some(Act::RecClip),
+                        );
+                    }
+                    let hs = super::recorder::Settings::height_supported(s.height, screen);
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Resolution",
+                        &format!("{}p{}", s.height, if hs { "" } else { " (too big)" }),
+                        Some(Act::RecHeight),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Frame rate",
+                        &format!("{} fps", s.fps),
+                        Some(Act::RecFps),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Record with controls",
+                        if s.controls { "ON" } else { "OFF" },
+                        Some(Act::RecControls),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Record with HUD",
+                        if s.hud { "ON" } else { "OFF" },
+                        Some(Act::RecHud),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Clip mode (last 30 s)",
+                        if s.clip { "ON" } else { "OFF" },
+                        Some(Act::RecClipMode),
+                    );
+                    note(
+                        &mut ui,
+                        &mut y,
+                        &format!("~{:.0} MB/min - H.264 + AAC game audio", s.mb_per_min(screen)),
                     );
                 }
-                let hs = super::recorder::Settings::height_supported(s.height, screen);
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Resolution",
-                    &format!("{}p{}", s.height, if hs { "" } else { " (too big)" }),
-                    Some(Act::RecHeight),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Frame rate",
-                    &format!("{} fps", s.fps),
-                    Some(Act::RecFps),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Record with controls",
-                    if s.controls { "ON" } else { "OFF" },
-                    Some(Act::RecControls),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Record with HUD",
-                    if s.hud { "ON" } else { "OFF" },
-                    Some(Act::RecHud),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Clip mode (last 30 s)",
-                    if s.clip { "ON" } else { "OFF" },
-                    Some(Act::RecClipMode),
-                    false,
-                );
-                batch.text(
-                    atlas,
-                    &format!("~{:.0} MB/min - H.264 + AAC game audio", s.mb_per_min(screen)),
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
-                );
-                y += 12.0;
-            }
-            HubTab::Replay => {
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Floating replay button",
-                    if self.settings.extras.volt_qol.replay_button {
-                        "ON"
+                HubTab::Replay => {
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Floating replay button",
+                        if self.settings.extras.volt_qol.replay_button {
+                            "ON"
+                        } else {
+                            "OFF"
+                        },
+                        Some(Act::ReplayButton),
+                    );
+                    let replays = Self::scan_replay_list();
+                    if replays.is_empty() {
+                        note(&mut ui, &mut y, "No replays yet.");
                     } else {
-                        "OFF"
-                    },
-                    Some(Act::ReplayButton),
-                    false,
-                );
-                let replays = Self::scan_replay_list();
-                if replays.is_empty() {
-                    batch.text(atlas, "No replays yet.", x + 2.0, y + 2.0, DIM, false);
-                    y += 12.0;
-                } else {
-                    for r in replays.iter().take(7) {
-                        row(batch, &mut targets, &mut y, &r.title, &r.line, None, false);
+                        for r in replays.iter().take(7) {
+                            row(&mut ui, &mut targets, &mut y, &r.title, &r.line, None);
+                        }
+                    }
+                    note(
+                        &mut ui,
+                        &mut y,
+                        "Watch & export to MP4 from the launcher's Replays tab.",
+                    );
+                }
+                HubTab::Toggles => {
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "FPS counter",
+                        if self.settings.extras.fps { "ON" } else { "OFF" },
+                        Some(Act::FpsCounter),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Keystrokes",
+                        if self.settings.extras.keystrokes { "ON" } else { "OFF" },
+                        Some(Act::Keystrokes),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Performance HUD",
+                        self.settings.extras.perf_hud.as_str(),
+                        Some(Act::PerfHud),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Floating replay button",
+                        if self.settings.extras.volt_qol.replay_button {
+                            "ON"
+                        } else {
+                            "OFF"
+                        },
+                        Some(Act::ReplayButton),
+                    );
+                }
+                HubTab::Performance => {
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Volt Boost preset",
+                        self.settings.extras.volt_preset.label(),
+                        Some(Act::Preset),
+                    );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Performance HUD",
+                        self.settings.extras.perf_hud.as_str(),
+                        Some(Act::PerfHud),
+                    );
+                    row(&mut ui, &mut targets, &mut y, "Purge RAM", "now", Some(Act::PurgeRam));
+                    note(
+                        &mut ui,
+                        &mut y,
+                        "Performance presets also pause cosmetic mods (Mod Lag Shield).",
+                    );
+                }
+                HubTab::Screenshot => {
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Take screenshot",
+                        "F2",
+                        Some(Act::TakeScreenshot),
+                    );
+                    let mut names: Vec<String> = std::fs::read_dir("screenshots")
+                        .map(|dir| {
+                            dir.filter_map(|e| e.ok())
+                                .filter_map(|e| e.file_name().into_string().ok())
+                                .filter(|n| n.ends_with(".png"))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    names.sort_unstable_by(|a, b| b.cmp(a));
+                    if names.is_empty() {
+                        note(&mut ui, &mut y, "No screenshots yet.");
+                    } else {
+                        for name in names.iter().take(7) {
+                            row(&mut ui, &mut targets, &mut y, name, "", None);
+                        }
                     }
                 }
-                batch.text(
-                    atlas,
-                    "Watch & export to MP4 from the launcher's Replays tab.",
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
-                );
-                y += 12.0;
-            }
-            HubTab::Toggles => {
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "FPS counter",
-                    if self.settings.extras.fps { "ON" } else { "OFF" },
-                    Some(Act::FpsCounter),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Keystrokes",
-                    if self.settings.extras.keystrokes { "ON" } else { "OFF" },
-                    Some(Act::Keystrokes),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Performance HUD",
-                    self.settings.extras.perf_hud.as_str(),
-                    Some(Act::PerfHud),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Floating replay button",
-                    if self.settings.extras.volt_qol.replay_button {
-                        "ON"
-                    } else {
-                        "OFF"
-                    },
-                    Some(Act::ReplayButton),
-                    false,
-                );
-            }
-            HubTab::Performance => {
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Volt Boost preset",
-                    self.settings.extras.volt_preset.label(),
-                    Some(Act::Preset),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Performance HUD",
-                    self.settings.extras.perf_hud.as_str(),
-                    Some(Act::PerfHud),
-                    false,
-                );
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Purge RAM",
-                    "now",
-                    Some(Act::PurgeRam),
-                    false,
-                );
-                batch.text(
-                    atlas,
-                    "Performance presets also pause cosmetic mods (Mod Lag Shield).",
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
-                );
-                y += 12.0;
-            }
-            HubTab::Screenshot => {
-                row(
-                    batch,
-                    &mut targets,
-                    &mut y,
-                    "Take screenshot",
-                    "F2",
-                    Some(Act::TakeScreenshot),
-                    false,
-                );
-                let mut names: Vec<String> = std::fs::read_dir("screenshots")
-                    .map(|dir| {
-                        dir.filter_map(|e| e.ok())
-                            .filter_map(|e| e.file_name().into_string().ok())
-                            .filter(|n| n.ends_with(".png"))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                names.sort_unstable_by(|a, b| b.cmp(a));
-                if names.is_empty() {
-                    batch.text(atlas, "No screenshots yet.", x + 2.0, y + 2.0, DIM, false);
-                    y += 12.0;
-                } else {
-                    for name in names.iter().take(7) {
-                        row(batch, &mut targets, &mut y, name, "", None, false);
-                    }
+                HubTab::Settings => {
+                    let s = self.recorder_settings;
+                    note(&mut ui, &mut y, "Recordings save to the game's recordings/ folder.");
+                    note(
+                        &mut ui,
+                        &mut y,
+                        "Screenshots save to screenshots/, replays to replays/.",
+                    );
+                    note(
+                        &mut ui,
+                        &mut y,
+                        &format!(
+                            "Recorder: {}p / {} fps / controls {} / HUD {}",
+                            s.height,
+                            s.fps,
+                            if s.controls { "on" } else { "off" },
+                            if s.hud { "on" } else { "off" }
+                        ),
+                    );
+                    note(
+                        &mut ui,
+                        &mut y,
+                        "Everything else lives in Volt Settings (pause menu).",
+                    );
                 }
             }
-            HubTab::Settings => {
-                let s = self.recorder_settings;
-                batch.text(
-                    atlas,
-                    "Recordings save to the game's recordings/ folder.",
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
+            if !status.is_empty() {
+                let line = ui.fit_text(Face::LauncherRegular, 11.5, &status, cw);
+                ui.text(
+                    Face::LauncherRegular,
+                    11.5,
+                    x,
+                    my + mh - 20.0,
+                    fade(CRIMSON, t),
+                    &line,
                 );
-                y += 12.0;
-                batch.text(
-                    atlas,
-                    "Screenshots save to screenshots/, replays to replays/.",
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
-                );
-                y += 12.0;
-                batch.text(
-                    atlas,
-                    &format!(
-                        "Recorder: {}p / {} fps / controls {} / HUD {}",
-                        s.height,
-                        s.fps,
-                        if s.controls { "on" } else { "off" },
-                        if s.hud { "on" } else { "off" }
-                    ),
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
-                );
-                y += 12.0;
-                batch.text(
-                    atlas,
-                    "Everything else lives in Volt Settings (pause menu).",
-                    x + 2.0,
-                    y + 2.0,
-                    DIM,
-                    false,
-                );
-                y += 12.0;
+            }
+            // A just-tapped control flashes for a moment.
+            if let Some((fr, at)) = flash {
+                let age = now.duration_since(at).as_secs_f32();
+                if age < 0.18 {
+                    let f = 1.0 - age / 0.18;
+                    ui.rounded(
+                        fr[0] * kd,
+                        fr[1] * kd,
+                        fr[2] * kd,
+                        fr[3] * kd,
+                        8.0,
+                        fade(0x66FFFFFF, f),
+                    );
+                } else {
+                    self.volt_hub.flash = None;
+                }
+            }
+            if open {
+                // Pushed last so every control above wins the hit test: a tap
+                // anywhere else on the window body is consumed, not a close.
+                targets.push(([mx * dk, my * dk, mw * dk, mh * dk], Act::Panel));
             }
         }
-        if !self.volt_hub.status.is_empty() {
-            let max = (cw / 5.0) as usize;
-            let line: String = self.volt_hub.status.chars().take(max.max(20)).collect();
-            batch.text(atlas, &line, x + 2.0, hy + hh - 12.0, CRIMSON, false);
-        }
-        let _ = y;
-        // Pushed last so every specific control above wins the hit test:
-        // a tap anywhere else on the window body is consumed, not a close.
-        targets.push(([hx, hy, hw, hh], Act::Panel));
+        ui.finish();
         self.volt_hub.targets = targets;
     }
 }
