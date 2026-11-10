@@ -1516,6 +1516,8 @@ impl Extras {
                 self.cull_sign_text = false;
                 self.fast_shadows = FastShadowMode::Vanilla;
                 self.distant_mob_throttle = false;
+                self.block_tick_range = TickRange::Vanilla;
+                self.entity_tick_range = TickRange::Vanilla;
                 self.hub_lag_shield = false;
                 self.mod_lag_shield = false;
                 self.particle_budget = ParticleBudget::Vanilla16k;
@@ -1549,6 +1551,8 @@ impl Extras {
                 self.cull_sign_text = true;
                 self.fast_shadows = FastShadowMode::Nearby16;
                 self.distant_mob_throttle = true;
+                self.block_tick_range = TickRange::Vanilla;
+                self.entity_tick_range = TickRange::Vanilla;
                 self.hub_lag_shield = false;
                 self.mod_lag_shield = false;
                 self.particle_budget = ParticleBudget::Cap4096;
@@ -1582,6 +1586,8 @@ impl Extras {
                 self.cull_sign_text = true;
                 self.fast_shadows = FastShadowMode::Nearby16;
                 self.distant_mob_throttle = true;
+                self.block_tick_range = TickRange::Chunks8;
+                self.entity_tick_range = TickRange::Chunks8;
                 self.hub_lag_shield = true;
                 self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap2048;
@@ -1615,6 +1621,8 @@ impl Extras {
                 self.cull_sign_text = true;
                 self.fast_shadows = FastShadowMode::Off;
                 self.distant_mob_throttle = true;
+                self.block_tick_range = TickRange::Chunks4;
+                self.entity_tick_range = TickRange::Chunks4;
                 self.hub_lag_shield = true;
                 self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap512;
@@ -1648,6 +1656,8 @@ impl Extras {
                 self.cull_sign_text = true;
                 self.fast_shadows = FastShadowMode::Off;
                 self.distant_mob_throttle = true;
+                self.block_tick_range = TickRange::Chunks4;
+                self.entity_tick_range = TickRange::Chunks4;
                 self.hub_lag_shield = true;
                 self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap2048;
@@ -1681,6 +1691,8 @@ impl Extras {
                 self.cull_sign_text = true;
                 self.fast_shadows = FastShadowMode::Off;
                 self.distant_mob_throttle = true;
+                self.block_tick_range = TickRange::Chunks6;
+                self.entity_tick_range = TickRange::Chunks6;
                 self.hub_lag_shield = true;
                 self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap512;
