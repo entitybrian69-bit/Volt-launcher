@@ -31,6 +31,8 @@ mod device_preferences;
 mod device_runtime;
 #[path = "android/diagnostics.rs"]
 mod diagnostics;
+#[path = "android/discord_sdk.rs"]
+mod discord_sdk;
 #[path = "android/display.rs"]
 mod display;
 #[path = "android/document_bridge.rs"]
@@ -346,6 +348,8 @@ fn android_main(app: AndroidApp) {
         app.enable_motion_axis(axis);
     }
     init_logging();
+    // Rich Presence goes through the Discord app on this phone; before any game start.
+    discord_sdk::register();
     let Some(home) = app.internal_data_path() else {
         log::error!("Android supplied no application data directory");
         return;
