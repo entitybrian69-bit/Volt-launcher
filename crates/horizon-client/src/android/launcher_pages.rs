@@ -85,6 +85,7 @@ pub(super) enum Action {
     WatchReplay(usize),
     ExportReplay(usize),
     DeleteReplay(usize),
+    DeleteRecording(usize),
     ToggleVoltReplay,
     ToggleReplayButton,
     PatchNotes,
@@ -1294,7 +1295,7 @@ impl DrawCtx<'_> {
             let title = match self.home_tab {
                 HomeTab::Worlds => "Worlds",
                 HomeTab::Multiplayer => "Multiplayer",
-                HomeTab::Screenshots => "Screenshots",
+                HomeTab::Screenshots => "Captures",
                 HomeTab::Replays => "Replays",
                 _ => "Launcher log",
             };
@@ -1657,19 +1658,40 @@ impl DrawCtx<'_> {
                 ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
             }
             HomeTab::Screenshots => {
-                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Screenshots");
+                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Captures");
                 let shots = &self.catalog.screenshots;
-                let summary = if shots.is_empty() { "No screenshots yet".to_owned() }
-                    else { format!("{} screenshots in this instance", shots.len()) };
+                let clips = &self.catalog.recordings;
+                let summary = if clips.is_empty() && shots.is_empty() {
+                    "No captures yet. Screenshots and Volt Recorder clips land here.".to_owned()
+                } else {
+                    format!("{} recording(s) \u{2022} {} screenshot(s) in this instance", clips.len(), shots.len())
+                };
+                let summary = ui.fit_text(Face::LauncherRegular, 12.5, &summary, w - 16.0);
                 ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 34.0, theme::MUTED(), &summary);
                 let top = y + 58.0;
                 let bottom = y + h;
-                let maximum = (shots.len() as f32 * 28.0 - (bottom - top).max(0.0)).max(0.0);
+                let clip_h = 40.0;
+                let total = clips.len() as f32 * clip_h + shots.len() as f32 * 28.0;
+                let maximum = (total - (bottom - top).max(0.0)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, maximum);
                 *self.list_view = Some([top, bottom, maximum]);
                 let start = ui.batch_mut().vertices.len();
+                for (i, (name, size)) in clips.iter().enumerate() {
+                    let row_y = top + i as f32 * clip_h - self.catalog.scroll;
+                    if row_y + clip_h < top || row_y > bottom { continue; }
+                    let row = [x + 8.0, row_y, w - 16.0, 34.0];
+                    ui.rounded(row[0], row[1], row[2], row[3], 10.0, theme::GLASS_INNER());
+                    let label = ui.fit_text(Face::LauncherMedium, 12.5, name, row[2] - 150.0);
+                    ui.text(Face::LauncherMedium, 12.5, row[0] + 10.0, row[1] + 3.0, theme::TEXT(), &label);
+                    let mib = *size as f32 / (1024.0 * 1024.0);
+                    let sub = format!("Volt Recorder \u{2022} {mib:.1} MiB");
+                    ui.text(Face::LauncherRegular, 11.0, row[0] + 10.0, row[1] + 18.0, theme::MUTED(), &sub);
+                    let del = [row[0] + row[2] - 50.0, row[1] + 3.0, 42.0, 28.0];
+                    styled_button(ui, self.targets, del, "Del", Action::DeleteRecording(i), BtnStyle::Secondary, true);
+                }
+                let shots_top = top + clips.len() as f32 * clip_h;
                 for (i, shot) in shots.iter().enumerate() {
-                    let row_y = top + i as f32 * 28.0 - self.catalog.scroll;
+                    let row_y = shots_top + i as f32 * 28.0 - self.catalog.scroll;
                     if row_y + 28.0 < top || row_y > bottom { continue; }
                     let label = ui.fit_text(Face::LauncherRegular, 13.0, shot, w - 24.0);
                     ui.text(Face::LauncherRegular, 13.0, x + 12.0, row_y + 3.0, theme::TEXT(), &label);
@@ -5998,6 +6020,17 @@ impl Launcher {
                         Err(error) => format!("Could not delete the replay: {error}"),
                     };
                     self.catalog.refresh_replays(&self.home);
+                }
+            }
+            Some(Action::DeleteRecording(index)) => {
+                if let Some((name, _)) = self.catalog.recordings.get(index) {
+                    let path = self.catalog.config.game_home(&self.home)
+                        .join("recordings").join(name);
+                    self.catalog.status = match std::fs::remove_file(&path) {
+                        Ok(()) => "Recording deleted.".into(),
+                        Err(error) => format!("Could not delete the recording: {error}"),
+                    };
+                    self.catalog.refresh_screenshots(&self.home);
                 }
             }
             Some(Action::Play) => {

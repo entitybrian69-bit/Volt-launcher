@@ -40,3 +40,31 @@ depth. Unverified — listed honestly as such.
 - Compile/link failures surface per-shader in the UI and the log, then
   fall back to the default renderer. Never a crash.
 - Engine validation is never weakened to make a pack load.
+
+## Volt Shaders 2.1 overhaul (owner bug report, grand build #11)
+
+Owner report: Potato / "Super Low" render a full-white screen on device
+(Mali-G57), the grade is "way too yellowish", and water/realism fall
+short. Target look confirmed by the owner: **Complementary Reimagined**.
+
+What changed:
+
+- **Executed-value proof.** `crates/horizon-client-render/tests/volt_shader_exec.rs`
+  compiles the shipped sky + material stages of every profile exactly as
+  the renderer does and executes them on a host GPU (CI: lavapipe) over
+  six scenes (noon, sunset, night, storm, cave, far-lands) and ten
+  surface classes. It asserts no NaN/blow-out, that zero-post profiles
+  stay inside 0..1, and that no scene comes back near-white — the
+  white-screen class of bug is now machine-checked every run, and the
+  per-profile channel means are printed as CI annotations.
+- **NaN scrub.** Both stages clamp their colour (Vulkan `clamp` drops
+  NaN) before the inline grade; a NaN on any path used to be able to
+  paint white/garbage pixels on mobile GPUs.
+- **Neutral daylight.** The permanent warm-sun white balance is gone:
+  daylight is neutral (Complementary Reimagined), and the light only
+  turns golden near the horizon (`golden_hour` term on the sun height).
+  All preset `warmth` values are 0 and every preset now defaults to the
+  Complementary Crisp style (BSL Soft stays selectable, softened).
+- **Water.** Deep azure Complementary palette, clearer body (lower
+  alpha), reflections track the actual sky colour with full Fresnel
+  weight at grazing angles, and the sun glint is tighter (pow 120).

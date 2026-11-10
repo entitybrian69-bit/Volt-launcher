@@ -86,8 +86,8 @@ impl VoltShaderProfile {
 /// Master aesthetic look inspired by BSL Shaders and Complementary Reimagined.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ShaderVisualStyle {
-    #[default]
     BslSoftCinema,
+    #[default]
     ComplementaryCrisp,
     VoltBalanced,
     PastelDream,
@@ -609,7 +609,7 @@ impl VoltShadersConfig {
             VoltShaderProfile::Potato => Self {
                 enabled: true,
                 profile: VoltShaderProfile::Potato,
-                style: ShaderVisualStyle::BslSoftCinema,
+                style: ShaderVisualStyle::ComplementaryCrisp,
                 waving_plants: true,
                 waving_leaves: false,
                 waving_water: false,
@@ -650,13 +650,13 @@ impl VoltShadersConfig {
                 saturation: 101,
                 contrast: 102,
                 exposure: 101,
-                warmth: 2,
+                warmth: 0,
                 vignette: VignetteMode::Off,
             },
             VoltShaderProfile::Low => Self {
                 enabled: true,
                 profile: VoltShaderProfile::Low,
-                style: ShaderVisualStyle::BslSoftCinema,
+                style: ShaderVisualStyle::ComplementaryCrisp,
                 waving_plants: true,
                 waving_leaves: true,
                 waving_water: false,
@@ -697,13 +697,13 @@ impl VoltShadersConfig {
                 saturation: 103,
                 contrast: 103,
                 exposure: 101,
-                warmth: 4,
+                warmth: 0,
                 vignette: VignetteMode::Off,
             },
             VoltShaderProfile::Medium | VoltShaderProfile::Custom => Self {
                 enabled: true,
                 profile,
-                style: ShaderVisualStyle::BslSoftCinema,
+                style: ShaderVisualStyle::ComplementaryCrisp,
                 waving_plants: true,
                 waving_leaves: true,
                 waving_water: true,
@@ -744,7 +744,7 @@ impl VoltShadersConfig {
                 saturation: 104,
                 contrast: 104,
                 exposure: 102,
-                warmth: 5,
+                warmth: 0,
                 vignette: VignetteMode::Off,
             },
             VoltShaderProfile::High => Self {
@@ -791,13 +791,13 @@ impl VoltShadersConfig {
                 saturation: 105,
                 contrast: 105,
                 exposure: 103,
-                warmth: 6,
+                warmth: 0,
                 vignette: VignetteMode::Off,
             },
             VoltShaderProfile::Ultra => Self {
                 enabled: true,
                 profile: VoltShaderProfile::Ultra,
-                style: ShaderVisualStyle::BslSoftCinema,
+                style: ShaderVisualStyle::ComplementaryCrisp,
                 waving_plants: true,
                 waving_leaves: true,
                 waving_water: true,
@@ -838,7 +838,7 @@ impl VoltShadersConfig {
                 saturation: 106,
                 contrast: 106,
                 exposure: 104,
-                warmth: 7,
+                warmth: 0,
                 vignette: VignetteMode::Subtle,
             },
         }
@@ -1660,7 +1660,7 @@ fn volt_cinema(x: vec3<f32>) -> vec3<f32> {
 fn volt_grade(hdr: vec3<f32>) -> vec3<f32> {
     var style_wb = vec3<f32>(1.0, 1.0, 1.0);
     if shader_style == 0u {
-        style_wb = vec3<f32>(1.03, 1.005, 0.985);
+        style_wb = vec3<f32>(1.015, 1.002, 0.992);
     } else if shader_style == 1u {
         style_wb = vec3<f32>(1.01, 1.01, 1.02);
     } else if shader_style == 3u {
@@ -1899,6 +1899,7 @@ fn sky(input: SkyInput) -> vec4<f32> {
         }
     }
 
+    col = clamp(col, vec3<f32>(0.0), vec3<f32>(8.0));
     if !post_active {
         col = volt_grade(col);
     }
@@ -1936,7 +1937,13 @@ fn material(input: MaterialInput) -> Surface {
         let shade_luma = volt_luma(input.tint.rgb);
         let in_shadow = clamp((1.0 - sky_l * 0.85) * 0.55 + (1.0 - shade_luma) * 0.45, 0.0, 1.0) * (1.0 - block_l * 0.75);
         let cool_shadow = select(vec3<f32>(0.83, 0.91, 1.07), vec3<f32>(0.80, 0.89, 1.10), shader_style == 1u);
-        let warm_sun = select(vec3<f32>(1.07, 1.015, 0.94), vec3<f32>(1.06, 1.00, 0.98), shader_style == 3u);
+        // Complementary Reimagined daylight: neutral white sun at height; the
+        // light only turns golden near the horizon (sunrise / sunset).
+        let golden_hour = clamp(1.0 - abs(sun_y - 0.08) * 4.5, 0.0, 1.0) * day;
+        var warm_sun = mix(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(1.10, 0.99, 0.88), golden_hour * 0.85);
+        if shader_style == 0u || shader_style == 3u {
+            warm_sun *= vec3<f32>(1.02, 1.005, 0.99);
+        }
         lit *= mix(warm_sun, cool_shadow, in_shadow * shadow_richness);
     }
 
@@ -2050,13 +2057,13 @@ fn material(input: MaterialInput) -> Surface {
 
         if clear_water {
             let water_palette = select(
-                vec3<f32>(0.10, 0.52, 0.70),
-                vec3<f32>(0.07, 0.56, 0.64),
+                vec3<f32>(0.07, 0.38, 0.62),
+                vec3<f32>(0.05, 0.36, 0.58),
                 shader_style == 1u
             );
-            let deep_tint = mix(input.tint.rgb, water_palette, 0.44);
-            rgb = mix(rgb, deep_tint * lit * 1.10, 0.48);
-            alpha = clamp(alpha * 0.72, 0.24, 0.78);
+            let deep_tint = mix(input.tint.rgb, water_palette, 0.55);
+            rgb = mix(rgb, deep_tint * lit * 1.05, 0.55);
+            alpha = clamp(alpha * 0.62, 0.20, 0.70);
         }
 
         // BSL / Complementary Water Caustics & Crest / Shoreline Foam
@@ -2089,9 +2096,9 @@ fn material(input: MaterialInput) -> Surface {
         if water_reflection > 0.001 {
             let sky_access = clamp(sky_l * 1.05, 0.08, 1.0);
             let twilight = select(0.0, clamp(1.0 - abs(sun_y - 0.04) * 3.0, 0.0, 1.0) * (1.0 - storm * 0.8), frame.dimension == 0);
-            var refl_col = mix(frame.fog_color, frame.sky_color * 1.16 + vec3<f32>(0.04, 0.07, 0.12), 0.68);
-            refl_col += vec3<f32>(0.96, 0.54, 0.26) * (twilight * 0.38);
-            let refl_w = clamp(fresnel * water_reflection * sky_access * 0.80, 0.0, 0.84);
+            var refl_col = mix(frame.fog_color, frame.sky_color * 1.10 + vec3<f32>(0.02, 0.05, 0.10), 0.78);
+            refl_col += vec3<f32>(0.98, 0.52, 0.24) * (twilight * 0.42);
+            let refl_w = clamp(fresnel * water_reflection * sky_access, 0.0, 0.88);
             rgb = mix(rgb, refl_col, refl_w);
             alpha = clamp(alpha + refl_w * 0.32, 0.0, 0.94);
         }
@@ -2104,13 +2111,16 @@ fn material(input: MaterialInput) -> Surface {
             let h_len = length(h_raw);
             if h_len > 0.001 && light_dir.y > 0.01 {
                 let h = h_raw / h_len;
-                let spec = pow(max(dot(n, h), 0.0001), 58.0) * smoothstep(0.55, 0.92, sky_l) * (1.0 - storm * 0.85) * cloud_sun;
-                rgb += glint_tint * (spec * 0.88);
+                let spec = pow(max(dot(n, h), 0.0001), 120.0) * smoothstep(0.55, 0.92, sky_l) * (1.0 - storm * 0.85) * cloud_sun;
+                rgb += glint_tint * (spec * 1.05);
                 alpha = clamp(alpha + spec * 0.36, 0.0, 0.96);
             }
         }
     }
 
+    // A NaN or runaway value on any path would show as a white/garbage
+    // pixel on mobile GPUs: scrub before grading (Vulkan clamp drops NaN).
+    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(8.0));
     if !post_active {
         rgb = volt_grade(rgb);
     }
@@ -2224,7 +2234,7 @@ mod tests {
         let cfg = VoltShadersConfig::default();
         assert!(!cfg.enabled);
         assert_eq!(cfg.profile, VoltShaderProfile::Medium);
-        assert_eq!(cfg.style, ShaderVisualStyle::BslSoftCinema);
+        assert_eq!(cfg.style, ShaderVisualStyle::ComplementaryCrisp);
         assert_eq!(cfg.clouds_mode, CloudMode::BslVolumetric);
         assert!(cfg.glowing_ores);
         assert!(cfg.eye_comfort);

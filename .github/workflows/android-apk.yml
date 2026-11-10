@@ -325,6 +325,37 @@ jobs:
           grep -F "E2E PROOF report: volt-mods-report.txt lists 176 blocks, 193 creative items, 39+5 placed biomes and the opened world" biomes-e2e.log
           grep -F "E2E PASS: the running game locates biomes_unseen:bayou and gives biomes_unseen:cherry_planks" biomes-e2e.log
 
+      - name: Volt Shaders executed-value proof (every profile on lavapipe)
+        run: |
+          set -u +e -o pipefail
+          cargo test --locked --profile fast -p horizon-client-render --test volt_shader_exec -- \
+            --include-ignored --nocapture 2>&1 | tee volt-exec.log
+          status=$?
+          python3 - <<'PY'
+          lines = open("volt-exec.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(kind, title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::{kind} title={title}::{msg or '(empty)'}")
+          grades = [l for l in lines if "VOLT EXEC" in l and ("grade" in l or "PASS" in l or "adapter" in l)]
+          emit("notice", "volt-exec-grades", grades[:30])
+          stats = [l for l in lines if l.startswith("VOLT EXEC ") and "Material" in l]
+          emit("notice", "volt-exec-material", stats[:30])
+          sky = [l for l in lines if l.startswith("VOLT EXEC ") and "Sky" in l]
+          emit("notice", "volt-exec-sky", sky[:30])
+          emit("notice", "volt-exec-material-2", stats[30:60])
+          emit("notice", "volt-exec-sky-2", sky[30:60])
+          PY
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("volt-exec.log", encoding="utf-8", errors="replace").read().splitlines()
+          chosen = [l for l in lines if l.lstrip().startswith(("panicked", "assertion", "thread", "error", "FAILED"))][:25]
+          msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen + lines[-20:])[:3800]
+          print(f"::error title=volt-exec-failure::{msg or '(empty)'}")
+          PY
+            exit "$status"
+          fi
+          grep -F "VOLT EXEC PASS:" volt-exec.log
+
   prepare:
     name: Prepare engine tables
     needs: plan

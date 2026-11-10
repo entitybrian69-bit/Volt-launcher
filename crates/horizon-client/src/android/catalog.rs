@@ -288,6 +288,8 @@ enum Reply {
 pub struct Catalog {
     pub saved_servers: Vec<crate::server_list::Server>,
     pub screenshots: Vec<String>,
+    /// Volt Recorder clips in `recordings/`: file name and size in bytes.
+    pub recordings: Vec<(String, u64)>,
     /// Volt Replays in this instance, newest first.
     pub replays: Vec<horizon_client::replay::Meta>,
     pub local: Vec<LocalItem>,
@@ -359,6 +361,7 @@ impl Catalog {
         let mut result = Self {
             saved_servers: vec![],
             screenshots: vec![],
+            recordings: vec![],
             replays: vec![],
             local: vec![],
             sections: [true, true, true],
@@ -428,6 +431,16 @@ impl Catalog {
                 .filter(|s| s.to_ascii_lowercase().ends_with(".png")).map(str::to_owned))
             .collect();
         self.screenshots.sort_unstable_by(|a, b| b.cmp(a));
+        self.recordings = std::fs::read_dir(self.config.game_home(home).join("recordings"))
+            .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
+            .filter_map(|entry| {
+                let name = entry.file_name().to_str()
+                    .filter(|s| s.to_ascii_lowercase().ends_with(".mp4")).map(str::to_owned)?;
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                Some((name, size))
+            })
+            .collect();
+        self.recordings.sort_unstable_by(|a, b| b.0.cmp(&a.0));
     }
     pub fn show_installed(&mut self, kind: Option<horizon_client::content_files::Kind>) {
         self.searches.cancel_interest();
