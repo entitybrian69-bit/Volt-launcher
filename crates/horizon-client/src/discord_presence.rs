@@ -1,10 +1,11 @@
-//! Discord Rich Presence: "Playing Horizon" on the player's Discord profile, with what they are
-//! doing (docs/native-client.md). A thread of its own talks to the Discord app on this computer
-//! through its local IPC socket (Discord's RPC docs: `discord-ipc-N`, frames of opcode u32 LE +
-//! length u32 LE + JSON). The game only calls [`set`] each frame: a change wakes the thread,
-//! which connects when Discord runs, retries every 15 s when it doesn't, keeps under Discord's
-//! update limit and clears the activity on quit. Nothing is sent with the setting off,
-//! or with `HORIZON_NO_DISCORD=1`.
+//! Discord Rich Presence: "Playing Volt Launcher" on the player's Discord profile, with what
+//! they are doing (docs/native-client.md). A thread of its own talks to Discord: on desktop
+//! through the Discord app's local IPC socket (Discord's RPC docs: `discord-ipc-N`, frames of
+//! opcode u32 LE + length u32 LE + JSON), on Android through the Social SDK's unauthenticated
+//! transport to the signed-in Discord app on the same phone ([`sdk`]). The game only calls
+//! [`set`] each frame: a change wakes the thread, which connects when Discord runs, retries
+//! every 15 s when it doesn't, keeps under Discord's update limit and clears the activity on
+//! quit. Nothing is sent with the setting off, or with `HORIZON_NO_DISCORD=1`.
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -16,9 +17,12 @@ use serde_json::{Value, json};
 
 use crate::command::args::GameMode;
 
-/// The "Horizon" application on Discord's developer portal (public: it names the game). Its
-/// Rich Presence assets: `horizon`, the logo.
-pub const DISCORD_APP_ID: &str = "1563857609738690560";
+/// The "Volt Launcher" application on Discord's developer portal (public: it names the game).
+/// Its Rich Presence assets: `volt`, the logo.
+pub const DISCORD_APP_ID: &str = "1569578048133533747";
+/// The two buttons under the activity (Discord allows at most two).
+pub const WEBSITE: &str = "https://entitybrian69-bit.github.io/Volt-launcher/";
+pub const DISCORD_INVITE: &str = "https://discord.gg/ED2bhF77";
 /// Whether the application has the game-mode images (`survival`, `creative`, `adventure`,
 /// `spectator`) beside the logo; it doesn't yet.
 const MODE_IMAGES: bool = false;
@@ -165,7 +169,7 @@ fn unix_now() -> u64 {
 }
 
 fn run() {
-    let mut client: Option<Client> = None;
+    let mut client: Option<Conn> = None;
     let mut sent: Option<(Wanted, Instant)> = None;
     let mut last_try: Option<Instant> = None;
     let mut limit = RateLimit::default();
@@ -195,7 +199,7 @@ fn run() {
                 continue;
             }
             last_try = Some(now);
-            client = Client::connect();
+            client = Conn::connect();
             if client.is_none() {
                 continue;
             }
@@ -203,12 +207,12 @@ fn run() {
         let due = sent.is_none_or(|(w, at)| w != wanted || now - at >= REFRESH);
         if !due {
             let (_, at) = sent.expect("sent");
-            std::thread::park_timeout(REFRESH - (now - at));
+            rest(client.as_mut(), REFRESH - (now - at));
             continue;
         }
         let wait = limit.wait(now);
         if !wait.is_zero() {
-            std::thread::park_timeout(wait);
+            rest(client.as_mut(), wait);
             continue;
         }
         limit.record(now);
@@ -224,9 +228,53 @@ fn run() {
     }
 }
 
+/// Parks between updates. On Android with the Social SDK connected, it wakes about once a
+/// second to pump the SDK's completion callbacks so they never pile up.
+fn rest(conn: Option<&mut Conn>, timeout: Duration) {
+    match conn {
+        #[cfg(target_os = "android")]
+        Some(Conn::Sdk(s)) => {
+            s.pump();
+            std::thread::park_timeout(timeout.min(Duration::from_secs(1)));
+        }
+        _ => std::thread::park_timeout(timeout),
+    }
+}
+
+/// One connection to Discord: the IPC socket of the desktop app, or on Android the Social SDK
+/// talking to the Discord app on this phone.
+enum Conn {
+    Ipc(Client),
+    #[cfg(target_os = "android")]
+    Sdk(sdk::Sdk),
+}
+impl Conn {
+    fn connect() -> Option<Self> {
+        #[cfg(target_os = "android")]
+        if let Some(s) = sdk::Sdk::connect() {
+            return Some(Conn::Sdk(s));
+        }
+        Client::connect().map(Conn::Ipc)
+    }
+    fn set_activity(&mut self, activity: Option<Value>) -> io::Result<()> {
+        match self {
+            Conn::Ipc(c) => c.set_activity(activity),
+            #[cfg(target_os = "android")]
+            Conn::Sdk(s) => s.set_activity(activity.as_ref()),
+        }
+    }
+    fn close(self) {
+        match self {
+            Conn::Ipc(c) => c.close(),
+            #[cfg(target_os = "android")]
+            Conn::Sdk(s) => s.close(),
+        }
+    }
+}
+
 /// The activity Discord shows for `status`; `None` clears it.
 fn activity(status: Status, since: Option<u64>) -> Option<Value> {
-    let mut assets = json!({"large_image": "horizon", "large_text": "Horizon"});
+    let mut assets = json!({"large_image": "volt", "large_text": "Volt Launcher"});
     let (details, state, party) = match status {
         Status::Off => return None,
         Status::Menus => ("In the menus", None, None),
@@ -259,6 +307,10 @@ fn activity(status: Status, since: Option<u64>) -> Option<Value> {
         }
     };
     let mut a = json!({"details": details, "assets": assets});
+    a["buttons"] = json!([
+        {"label": "Website", "url": WEBSITE},
+        {"label": "Join the Discord", "url": DISCORD_INVITE},
+    ]);
     if let Some(state) = state {
         a["state"] = state.into();
     }
@@ -437,6 +489,238 @@ fn open(path: &std::path::Path) -> io::Result<Box<dyn Pipe>> {
     Ok(Box::new(pipe))
 }
 
+/// Android: Rich Presence through the signed-in Discord app on this phone, with the Social
+/// SDK's unauthenticated transport (SDK 1.10+): only the public application id is set and
+/// activities published — no account linking, no `Authorize`, no `Connect`, no tokens. The
+/// proprietary `libdiscord_partner_sdk.so` is in the APK only when the owner's SDK package was
+/// present at build time (HorizonActivity loads it so its JNI hooks see the app class loader);
+/// without it, or without the Discord app installed, everything here is a quiet no-op.
+///
+/// Signatures match `cdiscord.h` of the Social SDK: every object is one opaque pointer that
+/// `*_Init` fills and `*_Drop` frees; `Discord_String` is a pointer + length (not NUL-ended);
+/// strings passed in are copied by the SDK during the call.
+#[cfg(target_os = "android")]
+mod sdk {
+    use std::ffi::{CStr, c_char, c_int, c_void};
+    use std::io;
+    use std::sync::OnceLock;
+
+    use serde_json::Value;
+
+    #[link(name = "dl")]
+    unsafe extern "C" {
+        fn dlopen(name: *const c_char, flags: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+
+    /// `Discord_String`: UTF-8 bytes + length. The SDK copies the bytes during each call.
+    #[repr(C)]
+    struct DStr {
+        ptr: *mut u8,
+        size: usize,
+    }
+    /// Every SDK object (`Discord_Client`, `Discord_Activity`, ...) is one opaque pointer.
+    #[repr(C)]
+    struct Handle {
+        opaque: *mut c_void,
+    }
+
+    type InitFn = unsafe extern "C" fn(*mut Handle);
+    type UpdateCb = unsafe extern "C" fn(*mut c_void, *mut c_void);
+    type FreeFn = unsafe extern "C" fn(*mut c_void);
+
+    struct Api {
+        run_callbacks: unsafe extern "C" fn(),
+        client_init: InitFn,
+        client_drop: InitFn,
+        client_set_application_id: unsafe extern "C" fn(*mut Handle, u64),
+        client_update_rich_presence: unsafe extern "C" fn(
+            *mut Handle,
+            *mut Handle,
+            Option<UpdateCb>,
+            Option<FreeFn>,
+            *mut c_void,
+        ),
+        client_clear_rich_presence: unsafe extern "C" fn(*mut Handle),
+        activity_init: InitFn,
+        activity_drop: InitFn,
+        activity_set_type: unsafe extern "C" fn(*mut Handle, i32),
+        activity_set_details: unsafe extern "C" fn(*mut Handle, *mut DStr),
+        activity_set_state: unsafe extern "C" fn(*mut Handle, *mut DStr),
+        activity_set_timestamps: unsafe extern "C" fn(*mut Handle, *mut Handle),
+        activity_add_button: unsafe extern "C" fn(*mut Handle, *const Handle),
+        timestamps_init: InitFn,
+        timestamps_drop: InitFn,
+        timestamps_set_start: unsafe extern "C" fn(*mut Handle, u64),
+        button_init: InitFn,
+        button_drop: InitFn,
+        button_set_label: unsafe extern "C" fn(*mut Handle, DStr),
+        button_set_url: unsafe extern "C" fn(*mut Handle, DStr),
+    }
+
+    fn api() -> Option<&'static Api> {
+        static API: OnceLock<Option<Api>> = OnceLock::new();
+        API.get_or_init(load).as_ref()
+    }
+
+    fn load() -> Option<Api> {
+        unsafe {
+            // RTLD_NOW; already loaded by HorizonActivity, so this only takes a handle.
+            let lib = dlopen(c"libdiscord_partner_sdk.so".as_ptr(), 2);
+            if lib.is_null() {
+                log::info!("Volt: this build carries no Discord Social SDK");
+                return None;
+            }
+            let sym = |name: &CStr| -> Option<*mut c_void> {
+                let p = dlsym(lib, name.as_ptr());
+                if p.is_null() {
+                    log::warn!("Volt: Discord SDK misses {}", name.to_string_lossy());
+                }
+                (!p.is_null()).then_some(p)
+            };
+            macro_rules! f {
+                ($name:literal) => {
+                    std::mem::transmute(sym($name)?)
+                };
+            }
+            Some(Api {
+                run_callbacks: f!(c"Discord_RunCallbacks"),
+                client_init: f!(c"Discord_Client_Init"),
+                client_drop: f!(c"Discord_Client_Drop"),
+                client_set_application_id: f!(c"Discord_Client_SetApplicationId"),
+                client_update_rich_presence: f!(c"Discord_Client_UpdateRichPresence"),
+                client_clear_rich_presence: f!(c"Discord_Client_ClearRichPresence"),
+                activity_init: f!(c"Discord_Activity_Init"),
+                activity_drop: f!(c"Discord_Activity_Drop"),
+                activity_set_type: f!(c"Discord_Activity_SetType"),
+                activity_set_details: f!(c"Discord_Activity_SetDetails"),
+                activity_set_state: f!(c"Discord_Activity_SetState"),
+                activity_set_timestamps: f!(c"Discord_Activity_SetTimestamps"),
+                activity_add_button: f!(c"Discord_Activity_AddButton"),
+                timestamps_init: f!(c"Discord_ActivityTimestamps_Init"),
+                timestamps_drop: f!(c"Discord_ActivityTimestamps_Drop"),
+                timestamps_set_start: f!(c"Discord_ActivityTimestamps_SetStart"),
+                button_init: f!(c"Discord_ActivityButton_Init"),
+                button_drop: f!(c"Discord_ActivityButton_Drop"),
+                button_set_label: f!(c"Discord_ActivityButton_SetLabel"),
+                button_set_url: f!(c"Discord_ActivityButton_SetUrl"),
+            })
+        }
+    }
+
+    fn dstr(s: &str) -> DStr {
+        DStr {
+            ptr: s.as_ptr().cast_mut(),
+            size: s.len(),
+        }
+    }
+
+    /// `Discord_Client_UpdateRichPresenceCallback`: the result is the SDK's, nothing to free.
+    unsafe extern "C" fn updated(_result: *mut c_void, _user_data: *mut c_void) {}
+
+    /// Lives and dies on the presence thread; never crosses threads.
+    pub struct Sdk {
+        client: Handle,
+    }
+
+    impl Sdk {
+        /// Some only when the SDK library is in this APK and the application id parses.
+        pub fn connect() -> Option<Self> {
+            let api = api()?;
+            let id: u64 = super::DISCORD_APP_ID.parse().ok()?;
+            let mut client = Handle {
+                opaque: std::ptr::null_mut(),
+            };
+            unsafe {
+                (api.client_init)(&mut client);
+                (api.client_set_application_id)(&mut client, id);
+            }
+            log::info!("Volt: Discord presence through the Social SDK on this phone");
+            Some(Sdk { client })
+        }
+
+        /// Publishes the same JSON activity the IPC path sends; `None` clears it. Failures
+        /// (no Discord app, not signed in) surface in the completion callback, which is
+        /// ignored: the SDK keeps retrying the transport on its own.
+        pub fn set_activity(&mut self, activity: Option<&Value>) -> io::Result<()> {
+            let api = api().expect("connected only with the API loaded");
+            let Some(a) = activity else {
+                unsafe {
+                    (api.client_clear_rich_presence)(&mut self.client);
+                    (api.run_callbacks)();
+                }
+                return Ok(());
+            };
+            let details = a["details"].as_str().unwrap_or_default().to_owned();
+            let state = a["state"].as_str().map(str::to_owned);
+            unsafe {
+                let mut act = Handle {
+                    opaque: std::ptr::null_mut(),
+                };
+                (api.activity_init)(&mut act);
+                (api.activity_set_type)(&mut act, 0); // ActivityTypes::Playing
+                let mut d = dstr(&details);
+                (api.activity_set_details)(&mut act, &mut d);
+                if let Some(state) = &state {
+                    let mut s = dstr(state);
+                    (api.activity_set_state)(&mut act, &mut s);
+                }
+                if let Some(start) = a["timestamps"]["start"].as_u64() {
+                    let mut ts = Handle {
+                        opaque: std::ptr::null_mut(),
+                    };
+                    (api.timestamps_init)(&mut ts);
+                    // The IPC payload counts unix seconds; the SDK wants milliseconds.
+                    (api.timestamps_set_start)(&mut ts, start.saturating_mul(1000));
+                    (api.activity_set_timestamps)(&mut act, &mut ts);
+                    (api.timestamps_drop)(&mut ts);
+                }
+                for b in a["buttons"].as_array().into_iter().flatten() {
+                    let (Some(label), Some(url)) = (b["label"].as_str(), b["url"].as_str())
+                    else {
+                        continue;
+                    };
+                    let mut button = Handle {
+                        opaque: std::ptr::null_mut(),
+                    };
+                    (api.button_init)(&mut button);
+                    (api.button_set_label)(&mut button, dstr(label));
+                    (api.button_set_url)(&mut button, dstr(url));
+                    (api.activity_add_button)(&mut act, &button);
+                    (api.button_drop)(&mut button);
+                }
+                (api.client_update_rich_presence)(
+                    &mut self.client,
+                    &mut act,
+                    Some(updated),
+                    None,
+                    std::ptr::null_mut(),
+                );
+                (api.activity_drop)(&mut act);
+                (api.run_callbacks)();
+            }
+            Ok(())
+        }
+
+        /// Dispatches queued SDK completion callbacks; called about once a second while parked.
+        pub fn pump(&mut self) {
+            if let Some(api) = api() {
+                unsafe { (api.run_callbacks)() }
+            }
+        }
+
+        pub fn close(mut self) {
+            if let Some(api) = api() {
+                unsafe {
+                    (api.client_clear_rich_presence)(&mut self.client);
+                    (api.run_callbacks)();
+                    (api.client_drop)(&mut self.client);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,7 +802,11 @@ mod tests {
         let menus = activity(Status::Menus, None).unwrap();
         assert_eq!(menus["details"], "In the menus");
         assert!(menus.get("state").is_none() && menus.get("timestamps").is_none());
-        assert_eq!(menus["assets"]["large_image"], "horizon");
+        assert_eq!(menus["assets"]["large_image"], "volt");
+        assert_eq!(menus["buttons"][0]["label"], "Website");
+        assert_eq!(menus["buttons"][0]["url"], WEBSITE);
+        assert_eq!(menus["buttons"][1]["label"], "Join the Discord");
+        assert_eq!(menus["buttons"][1]["url"], DISCORD_INVITE);
 
         let single = activity(world(Play::Singleplayer, Dimension::Nether), Some(1000)).unwrap();
         assert_eq!(single["details"], "Singleplayer");

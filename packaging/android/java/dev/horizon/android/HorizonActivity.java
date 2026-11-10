@@ -4,6 +4,9 @@ package dev.horizon.android;
 public final class HorizonActivity extends android.app.NativeActivity {
     private static final String ACTION_PACKAGE_INSTALLED = "ae.net.Voltlauncher.PACKAGE_INSTALLED";
     static { System.loadLibrary("horizon_android"); }
+    // Discord's Social SDK, when packaged: loading from Java runs its JNI hooks with the app
+    // class loader; Rust then drives it for Rich Presence. A build without it is fine.
+    static { try { System.loadLibrary("discord_partner_sdk"); } catch (Throwable ignored) {} }
 
     private String pendingUpdateApkPath;
 

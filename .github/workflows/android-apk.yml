@@ -1061,6 +1061,26 @@ jobs:
               raise SystemExit(rc)
           PY
 
+      # Discord's Social SDK is proprietary and never enters the public tree. When the owner
+      # configured its key, the encrypted package in third_party/ is decrypted into the
+      # gitignored packaging/android/libs/ for Gradle to bundle; otherwise this is a no-op and
+      # the APK simply ships without the on-phone Rich Presence transport.
+      - name: Add Discord Social SDK when configured (${{ matrix.abi }})
+        env:
+          DISCORD_SDK_KEY: ${{ secrets.DISCORD_SDK_KEY }}
+        run: |
+          if [ -z "${DISCORD_SDK_KEY:-}" ] || [ ! -f third_party/discord_social_sdk.aar.enc ]; then
+            echo "Discord Social SDK not configured; building without it."
+            exit 0
+          fi
+          mkdir -p packaging/android/libs
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:DISCORD_SDK_KEY \
+            -in third_party/discord_social_sdk.aar.enc \
+            -out packaging/android/libs/discord_partner_sdk.aar
+          echo "Discord Social SDK staged:"
+          sha256sum packaging/android/libs/discord_partner_sdk.aar
+
       - name: Package, sign, verify and audit public APK (${{ matrix.abi }})
         env:
           ABI: ${{ matrix.abi }}

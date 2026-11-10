@@ -1507,3 +1507,17 @@ definitions; the script's header documents each change). No gameplay values
 were altered relative to the upstream release. Its textures are original
 procedural pixel art; no Biomes O' Plenty assets are included. The same
 file ships as the `biomes_unseen.hmod` asset on GitHub releases.
+
+## Discord Social SDK (official builds only, not in this repository)
+
+Official Volt Launcher APKs may bundle the Discord Social SDK
+(`libdiscord_partner_sdk.so` and its Java components), Copyright (c) Discord
+Inc., used under the Discord Social SDK Terms. Discord distributes the SDK
+per application through its Developer Portal and it is not redistributable,
+so no part of it is tracked in this repository: CI decrypts the owner's
+privately provided package (`third_party/discord_social_sdk.aar.enc`, present
+only as ciphertext) at build time when its key is configured. Builds without
+it carry no Discord code; Rich Presence then only uses Discord's documented
+local IPC protocol on desktop. The Rust bindings in
+`crates/horizon-client/src/discord_presence.rs` are original declarations
+written against the SDK's published C interface (`cdiscord.h`).
