@@ -203,6 +203,7 @@ mod native_panel;
 mod native_panel_recipes;
 mod native_recipes;
 mod native_server;
+mod native_visuals;
 mod native_shaders;
 mod native_world_read;
 mod natural_spawning;
@@ -14039,6 +14040,12 @@ impl Game<'_> {
         let g = self.debug_gizmos(alpha as f32, camera.to_array());
         lines.extend(g.lines);
         self.append_volt_world_gizmos(&mut lines);
+        // Woven native mods' frame visuals (upstream hook API 46 line path):
+        // HEAD injections push world-space lines, scrubbed to finite,
+        // bounded geometry before they reach the vertex buffer.
+        let before_mod_lines = lines.len();
+        self.native_frame_visuals(alpha, &mut lines);
+        native_visuals::scrub_mod_lines(&mut lines, before_mod_lines);
         let on_top = g.on_top;
         let view = horizon_client::camera::view_matrix(view_yaw, view_pitch);
         let at = camera.to_array();

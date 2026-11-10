@@ -220,6 +220,29 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(compat.Rejected, 'missing from Volt'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40, raw_targets=True)
 
+    def test_revision_pinned_bundle_accepted_when_every_injection_is_a_served_hook(self):
+        import json as _json
+        hooks = _json.loads((compat.ROOT / 'native-hooks.json').read_text())['hooks']
+        named, target = hooks[0], hooks[-1]
+        manifest = {'mod': {}, 'compatibility': {}, 'module': {},
+                    'injection': [{'target': target['target']},
+                                  {'hook': named['name'], 'hook_version': named['version']}]}
+        data = {'meta': dict(self.meta), 'manifest': manifest}
+        data['meta'].pop('hooks', None)
+        # No hook-API declaration, but every injection verifies one by one
+        # against the served manifest: capability-based acceptance, no flag.
+        self.assertTrue(compat.check_hooks(data, compat.ROOT, 'c' * 40))
+        # An engine-internal target outside the served hook points still
+        # fails closed without the probe-only flag.
+        manifest['injection'][0] = {'target': 'horizon_client::game::Game::attack'}
+        with self.assertRaisesRegex(compat.Rejected, 'pins Horizon .* exactly without a hook-API'):
+            compat.check_hooks(data, compat.ROOT, 'c' * 40)
+        # So does a named hook Volt does not serve.
+        manifest['injection'][0] = {'target': target['target']}
+        manifest['injection'][1] = {'hook': 'definitely_not_served', 'hook_version': 1}
+        with self.assertRaisesRegex(compat.Rejected, 'missing from Volt'):
+            compat.check_hooks(data, compat.ROOT, 'c' * 40)
+
     def test_source_archive_rejects_traversal_and_skips_symlinks(self):
         archive_path = self.root / 'source.tar'
         source = self.root / 'source'

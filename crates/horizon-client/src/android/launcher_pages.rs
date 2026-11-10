@@ -281,6 +281,9 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "biomecompass" => "BiomeCompass",
         "skins_3d" => "3D Skins",
         "accurate_block_placement" => "Accurate Block Placement",
+        "armorhud" => "Armor HUD",
+        "lookat" => "LookAt",
+        "blockscope" => "Blockscope",
         _ => "Horizon Mod",
     }
 }
@@ -326,6 +329,9 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "accurate_block_placement" => {
             "Hold right click and every new spot you look at gets a block, however fast you move."
         }
+        "armorhud" => "Worn armor and its durability beside the hotbar; K toggles the numbers.",
+        "lookat" => "The block or mob under your crosshair as a vanilla tooltip, with health and harvest tool.",
+        "blockscope" => "The aimed block's name, id, distance, hardness, states and a container's slots.",
         _ => "An official Horizon registry mod.",
     }
 }

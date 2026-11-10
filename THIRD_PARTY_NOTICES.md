@@ -1424,6 +1424,9 @@ under Mods.
 - **coords_hud 2.0.0** by Horizon — [coords_hud-2.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/coords_hud-2.0.0), SHA-256 `432376fad3062b3517e274d3b8c0d0b52fc5d6de2aee20a0b340c8cab5a8cf08`, [source](https://github.com/horizon-rust/horizon-mods/tree/main/native/coords-hud)
 - **biomecompass 0.2.2** by d3grando — [biomecompass-0.2.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/biomecompass-0.2.2), SHA-256 `d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5`, [source](https://github.com/d3grando/biomecompass)
 - **skins_3d 1.1.0** by _idom_ (MIT) — [skins_3d-1.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/skins_3d-1.1.0), SHA-256 `ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602`, [source](https://github.com/umbx-dot/horizon-3d-skins)
+- **armorhud 1.0.0** by Thomas9950 (MIT) — [armorhud-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/armorhud-1.0.0), SHA-256 `8bd85e1584f307201bce5de2e60466d603b61d4807803d4ebc02772b4f6b704b`, [source](https://github.com/Thomas-Slot/horizon-armor-hud)
+- **lookat 0.2.1** by d3grando (MIT) — [lookat-0.2.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/lookat-0.2.1), SHA-256 `6c15726116825b5955984223d0e1bccd5d18375005af243a061b2ba2b9139f33`, [source](https://github.com/d3grando/lookat)
+- **blockscope 0.3.0** by Domanffe (MIT) — [blockscope-0.3.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/blockscope-0.3.0), SHA-256 `ba4a1c887ab26a2a9189c671cbdbea3ce2ed212a6e3d32f1fffaa60386198358`, [source](https://github.com/Domanffe/blockscope)
 
 ## Accurate Block Placement woven native mod 1.0.0
 

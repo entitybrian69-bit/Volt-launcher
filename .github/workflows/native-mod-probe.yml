@@ -2,7 +2,7 @@
 # change to this file; the probe only triggers on worker or workflow edits.
 name: Native mod compatibility probe
 
-# Probe pass: grand build #12 expansion wave 1 - nine new registry candidates.
+# Probe pass: grand build #12 expansion wave 1 retrigger: frame_visuals hook port - nine new registry candidates.
 on:
   workflow_dispatch:
   push:

@@ -369,6 +369,11 @@
       "name": "render_needs",
       "version": 1,
       "target": "horizon_client_render::gfx::native_render::native_render_needs"
+    },
+    {
+      "name": "frame_visuals",
+      "version": 1,
+      "target": "horizon_client::game::native_visuals::Game<'_>::native_frame_visuals"
     }
   ]
 }

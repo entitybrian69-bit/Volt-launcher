@@ -262,6 +262,15 @@ FORK_SOURCE_SHIMS = {
          "Slots::Ender => Vec::new(),",
          "Slots::Ender | Slots::Native => Vec::new(),"),
     ),
+    "chat_animation": (
+        # Same drift as horizonmatica below: the fork restored upstream's
+        # nine-argument ui::slider; the drag-aware form is ui::slider_dragging.
+        ("anim.rs",
+         "ui::slider(batch, atlas, vx, y, vw, &label, value, hover, true,"
+         " dragging == Some(i));",
+         "ui::slider_dragging(batch, atlas, vx, y, vw, &label, value, hover, true,"
+         " dragging == Some(i));"),
+    ),
     "horizonmatica": (
         # ui::slider lost its tenth (dragging) argument when the fork
         # restored the upstream signature; the drag-aware track moved to
@@ -377,6 +386,17 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
             # Experimental probe-only path: rebind the revision and let the
             # mixin compiler's strict AST matching decide whether each raw
             # target still exists unchanged in Volt. Never used for signing.
+            return True
+        targets = {item["target"] for item in available}
+        if injections and not missing and all(t in targets for t in raw):
+            # Capability-based acceptance: the bundle declares no hook-API
+            # level, but every one of its injections is individually
+            # verified against the served hook manifest - named hooks by
+            # (name, version), explicit targets by exact match against the
+            # hook points native-hooks.json serves (never arbitrary engine
+            # internals). That is the same per-injection check the declared
+            # path runs below, and the mixin compiler's strict AST matching
+            # still decides whether each application fits.
             return True
         raise Rejected(
             f"bundle pins Horizon {meta.get('horizon', '')[:12]} exactly without a hook-API "

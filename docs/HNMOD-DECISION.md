@@ -26,7 +26,7 @@ weave pipeline); everything else a user can download at runtime is data
 
 | Route | Status | Evidence |
 |---|---|---|
-| Weave pipeline: 34 registry `.hnmod`s compiled into both Android ABIs | **Shipped** | `WEAVE_SET` in `.github/workflows/android-apk.yml`; `WOVEN` in `crates/horizon-client-render/src/bundled_native.rs`; CI verifies the expected set (`PY_VERIFY`). |
+| Weave pipeline: 36 registry `.hnmod`s compiled into both Android ABIs | **Shipped** | `WEAVE_SET` in `.github/workflows/android-apk.yml`; `WOVEN` in `crates/horizon-client-render/src/bundled_native.rs`; CI verifies the expected set (`PY_VERIFY`). |
 | Bundled official mods (Zoom, FPS Overlay, Keystrokes, Minimap) | **Shipped** | `BUNDLED` in `bundled_native.rs`; bridges in `game/official_*_bridge.rs`. |
 | In-client built-ins (NEA, Subtle Effects, Player Animations, plus the earlier Carry Block/AppleSkin/etc. set; Punchy moved to a vendored woven `.hnmod`) | **Shipped** | `game/volt_builtins.rs` and `docs/BUILTIN-PARITY.md`. |
 | Content-only `.hmod` import on device | **Shipped** | `content_files.rs` `Kind::Mods` accepts manifest + content; proven in CI by the real `validate()` test on `biomes_unseen.hmod`. |
@@ -46,3 +46,31 @@ weave pipeline); everything else a user can download at runtime is data
 Adding a native mod to the Android set is a pull request: pin the release
 hash in `WEAVE_SET`, add the `WOVEN` row, and let CI prove the weave. This
 is intentionally a build-time step, not a runtime one.
+
+## Grand build #12: data-driven hook expansion (wave 1)
+
+The fork cannot port 375 upstream hook-API levels in one pass, so coverage
+grows from evidence: `.github/workflows/native-mod-probe.yml` builds every
+registry candidate against the real engine on both ABIs and the failures
+name exactly what is missing. Wave 1 (9 candidates, pinned snapshot
+`63daa89`):
+
+| Candidate | Probe verdict | Action |
+|---|---|---|
+| armorhud 1.0.0 | Green, both ABIs | **Promoted** into `WEAVE_SET` |
+| lookat 0.2.1 | Green, both ABIs | **Promoted** into `WEAVE_SET` |
+| blockscope 0.3.0 | Green, both ABIs | **Promoted** into `WEAVE_SET` |
+| elytratrails 0.1.2 | One missing target: `native_visuals::native_frame_visuals` | **Hook ported** (upstream API 46 line path, `game/native_visuals.rs`); re-probing |
+| chat_animation 0.1.0 | Upstream's old ten-argument `ui::slider` | **Shimmed** to `ui::slider_dragging` (same drift as horizonmatica); re-probing |
+| treefall 0.3.0 | Calls `destroy_progress` as `&self` (its pinned rev had it so) | Needs a read-only attribute value path; next wave |
+| freecam 0.1.0 | `E_UNSUPPORTED_CFG` on the fork's `mapped_key` (android cfg in body) | Needs a cfg-free refactor of `mapped_key`; next wave |
+| movement_status 0.1.0 | Its pinned mixin compiler fails to install in the probe | Infra, not hooks; investigating |
+| basic_hud 0.5.0 | Non-hook transformations; needs its exact pinned Horizon source | Not unlockable by hook porting |
+
+Bundles that pin a Horizon revision without a hook-API level are now
+accepted when — and only when — **every** injection verifies against the
+served hook manifest (`native-hooks.json`): named hooks by (name, version),
+explicit targets by exact match against served hook points. Engine
+internals stay closed; the mixin compiler's strict AST matching still
+judges every application (`tools/native_mods/compat.py::check_hooks`,
+tested in `test_compat.py`).
