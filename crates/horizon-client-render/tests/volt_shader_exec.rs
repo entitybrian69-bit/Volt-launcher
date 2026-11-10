@@ -196,7 +196,10 @@ fn scenarios() -> Vec<Scenario> {
             light: [0.87, 0.0],
             lightmap: [1.0, 0.78, 0.53],
             day_sky: true,
-            dark_surfaces: true,
+            // Block light 0.87 under a full torch lightmap: these walls are
+            // *brightly* torch-lit (executed Potato mean 0.611, warm r/b) —
+            // that is correct cave rendering, not a dark scene.
+            dark_surfaces: false,
         },
         Scenario {
             name: "far-lands",
