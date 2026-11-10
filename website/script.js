@@ -44,6 +44,30 @@ const counter = new IntersectionObserver(
 );
 document.querySelectorAll("[data-count]").forEach((el) => counter.observe(el));
 
+/* Resolve latest release download links (all builds are pre-releases,
+   so /releases/latest doesn't apply — ask the API for the newest one). */
+(async () => {
+  const arm64 = document.getElementById("dl-arm64");
+  const v7a = document.getElementById("dl-v7a");
+  if (!arm64 && !v7a) return;
+  try {
+    const res = await fetch(
+      "https://api.github.com/repos/entitybrian69-bit/Volt-launcher/releases?per_page=5"
+    );
+    if (!res.ok) return;
+    const releases = await res.json();
+    releases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const assets = releases[0]?.assets ?? [];
+    const find = (s) => assets.find((a) => a.name.includes(s));
+    const a64 = find("arm64-v8a");
+    const a32 = find("armeabi-v7a");
+    if (arm64 && a64) arm64.href = a64.browser_download_url;
+    if (v7a && a32) v7a.href = a32.browser_download_url;
+  } catch {
+    /* keep the releases-page fallback links */
+  }
+})();
+
 /* Card cursor glow */
 document.querySelectorAll(".card").forEach((card) => {
   card.addEventListener("pointermove", (ev) => {
