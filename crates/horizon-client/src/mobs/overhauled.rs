@@ -23,7 +23,7 @@
 //! or code are used. Powered by the hidden `emf`/`etf` engine layers.
 //! Credits in THIRD_PARTY_NOTICES.md.
 use super::anim::{Anim, Poses, State};
-use super::{Mob, emf, overhauled_clips as clips};
+use super::{Mob, emf, etf, overhauled_clips as clips};
 use horizon_core::geometry::trig::Mth;
 use std::f32::consts::PI;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
