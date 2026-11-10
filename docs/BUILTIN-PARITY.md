@@ -141,13 +141,13 @@ check.
 
 ---
 
-## Woven-mod behaviour note: Light Overlay
+## Woven-mod behaviour note: Light Overlay (removed)
 
-The woven `light_overlay` registry mod persists its `active` flag across
-sessions, and its only toggle is the F7 key — which touch devices do not
+The woven `light_overlay` registry mod persisted its `active` flag across
+sessions, and its only toggle was the F7 key — which touch devices do not
 have. A once-enabled overlay therefore came back on every launch as
-"random X crosses on the blocks". Volt keeps the mod but makes the overlay
-session-only, enforced at the read level: `native_hooks::native_setting`
-returns "false" for `light_overlay`/`active` until the first in-session
-write of that key, so no frame-order race can resurrect a stale flag. The
-in-session toggle still works unchanged.
+"random X crosses on the blocks". A read-level session-only fix shipped
+first; the owner then ordered the mod removed entirely, so the weave no
+longer includes it (34 mods) and the read interception is gone with it.
+Volt QoL's own "Mob-Spawn Light Crosses" gizmo (off by default, plainly
+labelled) remains the supported way to see spawnable blocks.

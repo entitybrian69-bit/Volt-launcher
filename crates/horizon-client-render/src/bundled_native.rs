@@ -28,7 +28,6 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("itemnew", "0.1.1"),
     ("eatinganimation", "0.1.0"),
     ("enchantmenthints", "0.1.0"),
-    ("light_overlay", "1.0.0"),
     ("right_click_crops", "1.0.0"),
     ("smartf3", "0.1.0"),
     ("armor_status", "1.0.0"),
@@ -52,7 +51,7 @@ pub const WOVEN: &[(&str, &str)] = &[
     // Vendored (not registry-published): the Punchy Rust port, packed
     // deterministically from `tools/native_mods/vendored/punchy/` by
     // `tools/native_mods/pack_vendored.py` and woven like the rest.
-    ("punchy", "0.1.2"),
+    ("punchy", "0.1.3"),
 ];
 
 pub fn is_bundled(id: &str, version: &str, sha256: &str) -> bool {

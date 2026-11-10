@@ -110,6 +110,9 @@ pub(super) enum Action {
     ExportDiagnostics,
     Account,
     Discord,
+    AboutWebsite,
+    AboutOwner,
+    CheckUpdates,
     AccountProviderTab(crate::volt_accounts::AccountProvider),
     SelectVoltAccount(usize),
     RemoveVoltAccount(usize),
@@ -256,7 +259,6 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "itemnew" => "ItemNew",
         "eatinganimation" => "Eating Animation",
         "enchantmenthints" => "Enchantment Hints",
-        "light_overlay" => "Light Overlay",
         "right_click_crops" => "Right Click Crops",
         "smartf3" => "SmartF3",
         "armor_status" => "Armor Status",
@@ -300,7 +302,6 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "itemnew" => "Newly picked-up items glow until you look at them.",
         "eatinganimation" => "Food and drinks show their bites while you consume them.",
         "enchantmenthints" => "A short description under every enchantment in tooltips.",
-        "light_overlay" => "Press F7 to mark blocks where mobs can spawn.",
         "right_click_crops" => "Right-click ripe crops to harvest and replant them.",
         "smartf3" => "A tidier F3 debug screen in modules you can rearrange.",
         "armor_status" => "Equipped armor and held items with their durability.",
@@ -3143,7 +3144,7 @@ impl DrawCtx<'_> {
             ),
         ];
 
-        let right_items: [(&str, String, Action, Option<bool>, bool); 8] = [
+        let right_items: [(&str, String, Action, Option<bool>, bool); 13] = [
             (
                 "Profile",
                 format!("Profile {}", c.profile),
@@ -3195,6 +3196,46 @@ impl DrawCtx<'_> {
                 "Raw performance data",
                 "Open Reports".to_owned(),
                 Action::ExportPerformance,
+                None,
+                false,
+            ),
+            (
+                "Discord webhook",
+                if c.discord_webhook.is_empty() {
+                    "Off".to_owned()
+                } else {
+                    "Configured".to_owned()
+                },
+                Action::Field("discord_webhook"),
+                None,
+                false,
+            ),
+            // --- About ---
+            (
+                "About · Website",
+                "volt-launcher".to_owned(),
+                Action::AboutWebsite,
+                None,
+                false,
+            ),
+            (
+                "About · Discord",
+                "Join the server".to_owned(),
+                Action::Discord,
+                None,
+                false,
+            ),
+            (
+                "About · Owner",
+                "entitybrian".to_owned(),
+                Action::AboutOwner,
+                None,
+                false,
+            ),
+            (
+                "Check for updates",
+                format!("v{}", crate::native_ime::app_version_name()),
+                Action::CheckUpdates,
                 None,
                 false,
             ),
@@ -3868,6 +3909,7 @@ impl DrawCtx<'_> {
                 "Multiplayer hub lag shield",
                 String::new(),
                 Action::VoltExtra(Item::VoltHubLagShield),
+                Action::VoltExtra(Item::VoltModLagShield),
                 Some(ex.hub_lag_shield),
                 false,
             ),
@@ -5249,6 +5291,7 @@ impl Launcher {
             let (value, font_sz, pad_x) = match name {
                 "name" => (self.catalog.config.name.clone(), 15.5, 14.0),
                 "server" => (self.catalog.config.server.clone(), 15.5, 12.0),
+                "discord_webhook" => (self.catalog.config.discord_webhook.clone(), 13.0, 12.0),
                 "render_scale" => (self.catalog.render_scale_text.clone(), 15.5, 12.0),
                 "offline_name" => (self.catalog.offline_name_input.clone(), 14.5, 12.0),
                 "ely_user" => (self.catalog.ely_user_input.clone(), 14.5, 12.0),
@@ -5630,6 +5673,29 @@ impl Launcher {
                 }
                 .into();
             }
+            Some(Action::AboutWebsite) => {
+                self.catalog.status = if crate::platform::open_website() {
+                    "Volt Launcher website opened in browser."
+                } else {
+                    "No browser available to open the website."
+                }
+                .into();
+            }
+            Some(Action::AboutOwner) => {
+                self.catalog.status = if crate::platform::open_owner_page() {
+                    "Owner page opened in browser."
+                } else {
+                    "No browser available to open the owner page."
+                }
+                .into();
+            }
+            Some(Action::CheckUpdates) => {
+                if self.manual_check_rx.is_none() {
+                    self.catalog.status = "Checking for updates…".into();
+                    self.manual_check_rx =
+                        Some(crate::volt_updater::spawn_manual_check(self.home.clone()));
+                }
+            }
             Some(Action::AccountProviderTab(prov)) => {
                 crate::platform::hide();
                 self.catalog.editing = None;
@@ -5951,6 +6017,7 @@ impl Launcher {
                 let initial = match name {
                     "name" => &self.catalog.config.name,
                     "server" => &self.catalog.config.server,
+                    "discord_webhook" => &self.catalog.config.discord_webhook,
                     "render_scale" => &self.catalog.render_scale_text,
                     "client_id" => &self.catalog.config.microsoft_client_id,
                     "offline_name" => &self.catalog.offline_name_input,
@@ -6793,6 +6860,7 @@ fn draw_volt_boost_modal(
         Item::VoltFastShadows,
         Item::VoltDistantMobThrottle,
         Item::VoltHubLagShield,
+        Item::VoltModLagShield,
         Item::VoltParticleBudget,
         Item::VoltParticleFrustum,
         Item::VoltChaosShield,

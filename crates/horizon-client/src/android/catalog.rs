@@ -73,6 +73,10 @@ pub struct Config {
     /// of joining a server; cleared by an ordinary Play.
     #[serde(default)]
     pub replay: String,
+    /// Tier-1 Discord presence: the owner's webhook URL for session embeds
+    /// (empty = off). Passed to the game as VOLT_DISCORD_WEBHOOK.
+    #[serde(default)]
+    pub discord_webhook: String,
     #[serde(skip)]
     pub microsoft_client_id: String,
     pub renderer: RendererMode,
@@ -1052,6 +1056,7 @@ impl Catalog {
         let field = match self.editing {
             Some("name") => &mut self.config.name,
             Some("server") => &mut self.config.server,
+            Some("discord_webhook") => &mut self.config.discord_webhook,
             Some("render_scale") => &mut self.render_scale_text,
             Some("client_id") => &mut self.config.microsoft_client_id,
             Some("offline_name") => &mut self.offline_name_input,

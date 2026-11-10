@@ -304,7 +304,13 @@ pub fn open_repository() -> bool {
     open_url("https://github.com/entitybrian69-bit/Volt-launcher")
 }
 pub fn open_discord() -> bool {
-    open_url("https://discord.gg/RS7q9KaCm6")
+    open_url(horizon_client::discord_presence::DISCORD_INVITE)
+}
+pub fn open_website() -> bool {
+    open_url(horizon_client::discord_presence::WEBSITE)
+}
+pub fn open_owner_page() -> bool {
+    open_url("https://entitybrian69-bit.github.io/Volt-launcher/owner.html")
 }
 pub fn open_ely_register() -> bool {
     open_url("https://account.ely.by/register")

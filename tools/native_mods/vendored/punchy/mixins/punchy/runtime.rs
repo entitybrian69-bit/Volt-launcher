@@ -110,12 +110,26 @@ fn load(state: &mut State) {
 fn enabled(game: &Game<'_>) -> bool {
     game.native_on(ID)
 }
-fn global_speed(game: &Game<'_>) -> f32 {
-    game.native_setting(ID, "speed")
+/// The player's animation speed in Punchy's own units: 1.0 = the mod's
+/// normal pace, lower is slower, 0.1 the slowest. Stored as set.
+fn ui_speed(game: &Game<'_>) -> f32 {
+    let stored = game
+        .native_setting(ID, "speed")
         .and_then(|s| s.parse::<f32>().ok())
         .filter(|s| s.is_finite())
-        .unwrap_or(5.5)
-        .clamp(0.5, 5.5)
+        .unwrap_or(1.0);
+    // Builds before the 1.0-normal scale stored the engine value (0.5–5.5,
+    // 5.5 = normal); a stored value above the player scale is one of those
+    // and simply means "normal" again.
+    if stored > 1.0 { 1.0 } else { stored.clamp(0.1, 1.0) }
+}
+fn global_speed(game: &Game<'_>) -> f32 {
+    // The engine's configured scale puts normal pace at 5.5: ordinary
+    // attack clips play at `speed ×` and the use/hold clips at `1 ÷ speed`,
+    // so only 5.5 gives the mod's intended pace on both paths. The player
+    // dials 1.0 = normal; map it onto the engine scale here, once, so both
+    // paths stay consistent at every setting.
+    (ui_speed(game) * 5.5).clamp(0.5, 5.5)
 }
 fn hand(h: Hand) -> action::Hand {
     if h == Hand::Main {
@@ -123,6 +137,33 @@ fn hand(h: Hand) -> action::Hand {
     } else {
         action::Hand::Off
     }
+}
+/// A float setting with a default, clamped to `lo..=hi`.
+fn tweak_value(game: &Game<'_>, key: &str, default: f32, lo: f32, hi: f32) -> f32 {
+    game.native_setting(ID, key)
+        .and_then(|s| s.parse::<f32>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(default)
+        .clamp(lo, hi)
+}
+/// The player's per-hand viewmodel tweak (Punchy's hand settings): size and
+/// a view-space offset, for the physical `left`/right hand. Stored per
+/// logical hand (main/off), like the settings page edits them.
+fn hand_tweak(game: &Game<'_>, left: bool) -> Mat4 {
+    let logical = if game.settings.main_hand_left != left {
+        "off"
+    } else {
+        "main"
+    };
+    let size = tweak_value(game, &format!("hand_{logical}_size"), 1., 0.7, 1.3);
+    let x = tweak_value(game, &format!("hand_{logical}_x"), 0., -0.25, 0.25);
+    let y = tweak_value(game, &format!("hand_{logical}_y"), 0., -0.25, 0.25);
+    let z = tweak_value(game, &format!("hand_{logical}_z"), 0., -0.25, 0.25);
+    if size == 1. && x == 0. && y == 0. && z == 0. {
+        return Mat4::IDENTITY;
+    }
+    // View space: +x sideways, +y up, -z forward (further from the camera).
+    Mat4::from_translation(Vec3::new(x, y, -z)) * Mat4::from_scale(Vec3::splat(size))
 }
 fn tuning_animation(
     state: &State,
@@ -293,7 +334,7 @@ pub(super) fn key(game: &mut Game<'_>, key: &str, pressed: bool) {
     }
 }
 pub(super) fn settings(game: &Game<'_>, buttons: &mut Vec<String>) {
-    buttons.push(format!("Animation speed: {:.1}", global_speed(game)));
+    buttons.push(format!("Animation speed: {:.1}", ui_speed(game)));
     buttons.push("Reload animations".into());
     buttons.push(format!(
         "Hand poses: {}",
@@ -308,18 +349,52 @@ pub(super) fn settings(game: &Game<'_>, buttons: &mut Vec<String>) {
         load(&mut s);
         buttons.push(s.error.clone().unwrap_or_else(|| s.status.clone()));
     });
+    // Punchy's hand viewmodel settings: size and view-space offsets per hand.
+    let sel = selected_hand(game);
+    buttons.push(format!(
+        "Edit hand: {}",
+        if sel == "off" { "Off hand" } else { "Main hand" }
+    ));
+    buttons.push(format!(
+        "Hand size: {:.0}%",
+        tweak_value(game, &format!("hand_{sel}_size"), 1., 0.7, 1.3) * 100.
+    ));
+    for (label, axis) in [("sideways", "x"), ("height", "y"), ("distance", "z")] {
+        buttons.push(format!(
+            "Hand {label}: {:+.2}",
+            tweak_value(game, &format!("hand_{sel}_{axis}"), 0., -0.25, 0.25)
+        ));
+    }
+    buttons.push("Reset this hand".into());
+}
+fn selected_hand(game: &Game<'_>) -> &'static str {
+    if game.native_setting(ID, "hand_sel").as_deref() == Some("off") {
+        "off"
+    } else {
+        "main"
+    }
+}
+/// Steps `key` through `lo..=hi` by `step`, wrapping back to `lo` past `hi`.
+fn cycle_tweak(game: &Game<'_>, key: &str, default: f32, lo: f32, hi: f32, step: f32) {
+    let current = tweak_value(game, key, default, lo, hi);
+    let next = if current + step > hi + step / 2. {
+        lo
+    } else {
+        current + step
+    };
+    game.native_set_setting(ID, key, &format!("{next:.2}"));
 }
 pub(super) fn click(game: &Game<'_>, button: usize) {
     match button {
         0 => {
-            let speed = global_speed(game);
+            let speed = ui_speed(game);
             game.native_set_setting(
                 ID,
                 "speed",
-                &if speed >= 5.5 {
-                    "0.5".into()
+                &if speed >= 0.95 {
+                    "0.1".into()
                 } else {
-                    format!("{:.1}", speed + 0.5)
+                    format!("{:.1}", speed + 0.1)
                 },
             );
         }
@@ -333,6 +408,32 @@ pub(super) fn click(game: &Game<'_>, button: usize) {
                 "horizon"
             },
         ),
+        // 3 is the status line; 4.. are the hand viewmodel rows.
+        4 => game.native_set_setting(
+            ID,
+            "hand_sel",
+            if selected_hand(game) == "off" {
+                "main"
+            } else {
+                "off"
+            },
+        ),
+        5 => {
+            let sel = selected_hand(game);
+            cycle_tweak(game, &format!("hand_{sel}_size"), 1., 0.7, 1.3, 0.1);
+        }
+        6 | 7 | 8 => {
+            let sel = selected_hand(game);
+            let axis = ["x", "y", "z"][button - 6];
+            cycle_tweak(game, &format!("hand_{sel}_{axis}"), 0., -0.25, 0.25, 0.05);
+        }
+        9 => {
+            let sel = selected_hand(game);
+            game.native_set_setting(ID, &format!("hand_{sel}_size"), "1");
+            for axis in ["x", "y", "z"] {
+                game.native_set_setting(ID, &format!("hand_{sel}_{axis}"), "0");
+            }
+        }
         _ => {}
     }
 }
@@ -442,7 +543,7 @@ pub(super) fn arms(game: &mut Game<'_>, alpha: f64, out: &mut Vec<Vertex>) {
                 continue;
             }
             let left = game.settings.main_hand_left != (i == 1);
-            let m = world * arm_pose(left, 0., 0.);
+            let m = world * hand_tweak(game, left) * arm_pose(left, 0., 0.);
             game.first_person_arm(left, m, packed, out);
         }
     });
@@ -455,8 +556,8 @@ pub(super) fn begin(game: &mut Game<'_>, alpha: f64) {
         s.render_alpha = (alpha as f32).clamp(0., 1.);
         s.main_left = game.settings.main_hand_left;
         let deltas = [
-            hand_delta(&s, false, s.render_alpha),
-            hand_delta(&s, true, s.render_alpha),
+            hand_tweak(game, false) * hand_delta(&s, false, s.render_alpha),
+            hand_tweak(game, true) * hand_delta(&s, true, s.render_alpha),
         ];
         let active = if let Some(p) = &s.active {
             let left = s.main_left != (p.hand == action::Hand::Off);

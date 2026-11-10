@@ -163,6 +163,10 @@ pub struct Extras {
     pub fast_shadows: FastShadowMode,
     pub distant_mob_throttle: bool,
     pub hub_lag_shield: bool,
+    /// Rests cosmetic-only mods (particles, 3D skin layers, eating and item
+    /// animations…) so performance presets also stop mod CPU work, not just
+    /// graphics work. Their settings and saved state stay untouched.
+    pub mod_lag_shield: bool,
     pub particle_budget: ParticleBudget,
     pub chaos_particle_shield: bool,
     pub anim_throttle: bool,
@@ -271,6 +275,7 @@ impl Default for Extras {
             fast_shadows: FastShadowMode::Vanilla,
             distant_mob_throttle: false,
             hub_lag_shield: false,
+            mod_lag_shield: false,
             particle_budget: ParticleBudget::Vanilla16k,
             chaos_particle_shield: false,
             anim_throttle: false,
@@ -472,6 +477,7 @@ impl Extras {
                     e.distant_mob_throttle = flag(e.distant_mob_throttle)
                 }
                 "voltHubLagShield" => e.hub_lag_shield = flag(e.hub_lag_shield),
+                "voltModLagShield" => e.mod_lag_shield = flag(e.mod_lag_shield),
                 "voltParticleBudget" => {
                     if let Some(v) = ParticleBudget::parse(value) {
                         e.particle_budget = v;
@@ -1070,6 +1076,7 @@ impl Extras {
             bool_text(self.distant_mob_throttle),
         );
         push("voltHubLagShield", bool_text(self.hub_lag_shield));
+        push("voltModLagShield", bool_text(self.mod_lag_shield));
         push("voltParticleBudget", self.particle_budget.as_str());
         push("voltChaosShield", bool_text(self.chaos_particle_shield));
         push("voltAnimThrottle", bool_text(self.anim_throttle));
@@ -1494,6 +1501,7 @@ impl Extras {
             self.fast_shadows != FastShadowMode::Vanilla,
             self.distant_mob_throttle,
             self.hub_lag_shield,
+            self.mod_lag_shield,
             self.particle_budget != ParticleBudget::Vanilla16k,
             self.chaos_particle_shield,
             self.anim_throttle,
@@ -1549,6 +1557,7 @@ impl Extras {
                 self.fast_shadows = FastShadowMode::Vanilla;
                 self.distant_mob_throttle = false;
                 self.hub_lag_shield = false;
+                self.mod_lag_shield = false;
                 self.particle_budget = ParticleBudget::Vanilla16k;
                 self.chaos_particle_shield = false;
                 self.anim_throttle = false;
@@ -1581,6 +1590,7 @@ impl Extras {
                 self.fast_shadows = FastShadowMode::Nearby16;
                 self.distant_mob_throttle = true;
                 self.hub_lag_shield = false;
+                self.mod_lag_shield = false;
                 self.particle_budget = ParticleBudget::Cap4096;
                 self.chaos_particle_shield = true;
                 self.anim_throttle = false;
@@ -1613,6 +1623,7 @@ impl Extras {
                 self.fast_shadows = FastShadowMode::Nearby16;
                 self.distant_mob_throttle = true;
                 self.hub_lag_shield = true;
+                self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap2048;
                 self.chaos_particle_shield = true;
                 self.anim_throttle = false;
@@ -1645,6 +1656,7 @@ impl Extras {
                 self.fast_shadows = FastShadowMode::Off;
                 self.distant_mob_throttle = true;
                 self.hub_lag_shield = true;
+                self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap512;
                 self.chaos_particle_shield = true;
                 self.anim_throttle = true;
@@ -1677,6 +1689,7 @@ impl Extras {
                 self.fast_shadows = FastShadowMode::Off;
                 self.distant_mob_throttle = true;
                 self.hub_lag_shield = true;
+                self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap2048;
                 self.chaos_particle_shield = true;
                 self.anim_throttle = true;
@@ -1709,6 +1722,7 @@ impl Extras {
                 self.fast_shadows = FastShadowMode::Off;
                 self.distant_mob_throttle = true;
                 self.hub_lag_shield = true;
+                self.mod_lag_shield = true;
                 self.particle_budget = ParticleBudget::Cap512;
                 self.chaos_particle_shield = true;
                 self.anim_throttle = true;
@@ -1940,6 +1954,7 @@ pub enum Item {
     VoltFastShadows,
     VoltDistantMobThrottle,
     VoltHubLagShield,
+    VoltModLagShield,
     VoltParticleBudget,
     VoltChaosShield,
     VoltAnimThrottle,
@@ -2104,6 +2119,7 @@ pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
         Ok(VoltFastShadows),
         Ok(VoltDistantMobThrottle),
         Ok(VoltHubLagShield),
+        Ok(VoltModLagShield),
         Err("Tier 1 & 2 - Particles, Animations & Shaders"),
         Ok(VoltParticleBudget),
         Ok(VoltParticleFrustum),
@@ -2189,6 +2205,7 @@ impl Item {
             Item::VoltFastShadows => "Entity Shadows",
             Item::VoltDistantMobThrottle => "Mob Pose Throttle",
             Item::VoltHubLagShield => "Hub Lag Shield",
+            Item::VoltModLagShield => "Mod Lag Shield",
             Item::VoltParticleBudget => "Particle Budget",
             Item::VoltChaosShield => "Burst Lag Shield",
             Item::VoltAnimThrottle => "Smart 10Hz Atlas",
@@ -2295,6 +2312,7 @@ impl Item {
             | VoltFastShadows
             | VoltDistantMobThrottle
             | VoltHubLagShield
+            | VoltModLagShield
             | VoltParticleBudget
             | VoltChaosShield
             | VoltAnimThrottle
@@ -2451,7 +2469,7 @@ impl Item {
             Item::MinimapZoomKey => "Press in-game to cycle minimap zoom levels on the fly. Escape unbinds.",
             // Volt Boost:
             Item::VoltPreset => {
-                "Applies a curated one-tap Volt Boost profile (OFF, Balanced, Competitive PvP, Ultra FPS, Battery Saver or Low-RAM Rescue)."
+                "Applies a curated one-tap Volt Boost profile (OFF, Balanced, Competitive PvP, Ultra FPS, Battery Saver or Low-RAM Rescue). Performance profiles also arm the Mod Lag Shield, pausing cosmetic mods' per-frame work."
             }
             Item::VoltAutoOptimize => {
                 "Inspects your device's CPU core count, 32/64-bit ABI and system RAM to automatically configure the optimal Volt Boost profile."
@@ -2503,6 +2521,9 @@ impl Item {
             }
             Item::VoltHubLagShield => {
                 "Automatically trims distant crowd armor stands, pets and players beyond 16m whenever more than 24 entities pack into one area."
+            }
+            Item::VoltModLagShield => {
+                "Rests cosmetic-only mods (ambient particles, 3D skin layers, eating/item animations, chat heads) so their CPU work stops; their settings stay saved. On in every performance preset."
             }
             Item::VoltParticleBudget => {
                 "Caps active particles (16K Vanilla, 4,096, 2,048, 512 or OFF) and culls tiny distant particles."
@@ -2684,6 +2705,7 @@ impl Item {
             Item::VoltCullSignText => e.cull_sign_text,
             Item::VoltDistantMobThrottle => e.distant_mob_throttle,
             Item::VoltHubLagShield => e.hub_lag_shield,
+            Item::VoltModLagShield => e.mod_lag_shield,
             Item::VoltChaosShield => e.chaos_particle_shield,
             Item::VoltAnimThrottle => e.anim_throttle,
             Item::VoltThermalGuard => e.thermal_guard,
@@ -2901,6 +2923,7 @@ impl Item {
             }
             Item::VoltDistantMobThrottle => e.distant_mob_throttle = !e.distant_mob_throttle,
             Item::VoltHubLagShield => e.hub_lag_shield = !e.hub_lag_shield,
+            Item::VoltModLagShield => e.mod_lag_shield = !e.mod_lag_shield,
             Item::VoltParticleBudget => {
                 e.particle_budget = step(&ParticleBudget::ALL, e.particle_budget, back)
             }

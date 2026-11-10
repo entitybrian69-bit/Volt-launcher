@@ -445,7 +445,6 @@ jobs:
         itemnew=itemnew-0.1.1.hnmod
         eatinganimation=eatinganimation-0.1.0.hnmod
         enchantmenthints=enchantmenthints-0.1.0.hnmod
-        light_overlay=light_overlay-1.0.0.hnmod
         right_click_crops=right_click_crops-1.0.0.hnmod
         smartf3=smartf3-0.1.0.hnmod
         armor_status=armor_status-1.0.0.hnmod
@@ -470,7 +469,7 @@ jobs:
       # rebuilt deterministically by pack_vendored.py; they run the same
       # verified_extract + mixin-compiler checks as the registry set.
       VENDORED_SET: |
-        punchy=punchy-rust-0.1.2.hnmod
+        punchy=punchy-rust-0.1.3.hnmod
     strategy:
       fail-fast: false
       matrix:
@@ -960,8 +959,6 @@ jobs:
                "07ef4fde3ebbc4f132aab593b12187bce15e1a46689ab40bd3067c685aca85b9"),
               ("enchantmenthints", "0.1.0",
                "6f1b80a7c22e02b086d5eea2ed6f7c5481b3e40d6a974bf9e382a3df4a2de9df"),
-              ("light_overlay", "1.0.0",
-               "b4aeb56b13d9c73df267a1dc7b1f588f4db39bfd55f7beaef97a014fffb5b076"),
               ("right_click_crops", "1.0.0",
                "681ce896c50dd041132900e7bbab71167f133b3f3862f86e8b1a0cac52754b97"),
               ("smartf3", "0.1.0",
@@ -1005,8 +1002,8 @@ jobs:
               # Vendored, not registry-published: packed deterministically by
               # tools/native_mods/pack_vendored.py from the committed source
               # tree; the sha256 is also pinned in vendored/punchy.toml.
-              ("punchy", "0.1.2",
-               "9032d18b4694db2dd4feae500663b9668495f75fe9786746ed3b44fe404213c1"),
+              ("punchy", "0.1.3",
+               "339e7522cbd5ad175609d4829d1902ace422d81f88a5a53ba7f5cb74dcdcb057"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libhorizon_android.so"

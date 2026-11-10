@@ -33,7 +33,7 @@ jobs:
         mod: [jei, jade, veinminer, horizon_physics, appleskin, status_effect_hud,
               toggle_sprint, inventory_profiles, shulker_peek, mousetricks, itemnew,
               voicechat, worldedit, horizonmatica, visuality_horizon, eatinganimation,
-              enchantmenthints, held_item_info, light_overlay, right_click_crops,
+              enchantmenthints, held_item_info, right_click_crops,
               carryblock, chatheads, smartf3, fast_items, armor_status, customhud,
               coords_hud, crosshair_indicator, hitbox_plus, biomecompass,
               invisible_frames, freelook, skins_3d]
@@ -113,9 +113,6 @@ jobs:
             file: held_item_info-0.1.0.hnmod
             tag: held_item_info-0.1.0
             raw_targets: "--experimental-raw-targets"
-          - mod: light_overlay
-            file: light_overlay-1.0.0.hnmod
-            tag: light_overlay-1.0.0
             raw_targets: "--experimental-raw-targets"
           - mod: right_click_crops
             file: right_click_crops-1.0.0.hnmod

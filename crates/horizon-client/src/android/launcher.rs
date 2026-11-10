@@ -77,6 +77,7 @@ pub(super) struct Launcher {
     focus: Option<usize>,
     diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
     update_check_rx: Option<mpsc::Receiver<crate::volt_updater::UpdateInfo>>,
+    pub(super) manual_check_rx: Option<mpsc::Receiver<Option<crate::volt_updater::UpdateInfo>>>,
     update_prompt: Option<crate::volt_updater::UpdatePrompt>,
     pub(super) controls_studio: controls_studio::ControlsStudio,
     pub(super) pending_play: bool,
@@ -202,6 +203,7 @@ impl Launcher {
             focus: None,
             diagnostic_export: None,
             update_check_rx,
+            manual_check_rx: None,
             update_prompt: None,
             controls_studio: Default::default(),
             pending_play: false,
@@ -577,6 +579,9 @@ impl Launcher {
                 None
             };
             horizon_threads::release_free_memory();
+            // Tier-1 Discord presence: hand the configured webhook (if any)
+            // to the game before the session starts.
+            horizon_client::discord_webhook::configure(&self.catalog.config.discord_webhook);
             let game = match game::android_game(handoff) {
                 Ok(game) => game,
                 Err(error) => {
@@ -989,6 +994,29 @@ impl ApplicationHandler for Launcher {
             } else if notice.changed {
                 self.catalog.refresh(&self.home);
                 self.catalog.show_installed(notice.kind);
+            }
+        }
+        if let Some(rx) = &self.manual_check_rx {
+            match rx.try_recv() {
+                Ok(Some(info)) => {
+                    self.manual_check_rx = None;
+                    self.catalog.status = format!("Update available: {}", info.display_version);
+                    if self.update_prompt.is_none() {
+                        self.update_prompt = Some(crate::volt_updater::UpdatePrompt {
+                            info,
+                            state: crate::volt_updater::UpdateModalState::Ready,
+                            scroll: 0.0,
+                        });
+                    }
+                }
+                Ok(None) => {
+                    self.manual_check_rx = None;
+                    self.catalog.status = "You're on the latest version.".into();
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.manual_check_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
             }
         }
         if let Some(rx) = &self.update_check_rx {

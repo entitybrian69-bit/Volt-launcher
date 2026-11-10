@@ -181,11 +181,37 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
-/// Whether `light_overlay`'s `active` setting was written this session;
-/// until then reads of it are forced to "false" (session-only overlay —
-/// touch devices have no F7 to clear a stale persisted flag).
-static LIGHT_OVERLAY_ACTIVE_WRITTEN: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+/// Cosmetic-only mods Volt Boost's Mod Lag Shield rests: purely visual,
+/// no gameplay or storage behaviour, so stopping their hooks mid-session
+/// loses nothing. Keep gameplay aids (sorting, placement, HUD info) out.
+const COSMETIC_MODS: &[&str] = &[
+    "visuality_horizon",
+    "skins_3d",
+    "eatinganimation",
+    "itemnew",
+    "chatheads",
+    "hitbox_plus",
+    "not_enough_animations",
+    "player_animations",
+    "subtle_effects",
+];
+
+/// Mod settings are tiny one-value files read through `native_setting`;
+/// mods poll them freely (some per frame), so reads come from this RAM
+/// cache and only ever touch the filesystem once per key. Writes go
+/// through the cache to disk. Keyed `mod_id\u{1f}key`; one data root per
+/// process, shared by the window's and the integrated server's `Game`.
+static SETTING_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
+> = std::sync::OnceLock::new();
+
+fn setting_cache()
+-> std::sync::MutexGuard<'static, std::collections::HashMap<String, Option<String>>> {
+    SETTING_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
 
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
@@ -1564,8 +1590,13 @@ impl Game<'_> {
     }
     /// Whether the player left mod `mod_id` on in Options > Mods. A mod
     /// turned off does nothing (check this first in each hook) until the
-    /// launcher's next build leaves it out.
+    /// launcher's next build leaves it out. Volt Boost's Mod Lag Shield
+    /// additionally rests cosmetic-only mods — their hooks answer "off" so
+    /// their per-frame work stops — without touching the player's choices.
     pub(super) fn native_on(&self, mod_id: &str) -> bool {
+        if self.settings.extras.mod_lag_shield && COSMETIC_MODS.contains(&mod_id) {
+            return false;
+        }
         !self.settings.mods.disabled.contains(mod_id)
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
@@ -1956,29 +1987,22 @@ impl Game<'_> {
         let mods = Self::options_path().with_file_name(mod_list::DIR);
         mods.join(".horizon-mod-data").join(mod_id)
     }
-    /// A mod's setting `key` (one file per key in `native_data_dir`).
+    /// A mod's setting `key` (one file per key in `native_data_dir`),
+    /// served from the RAM cache: mods may poll settings every frame
+    /// without touching the filesystem.
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        // Light Overlay's persisted `active` flag is forced off until the
-        // first in-session write: its only toggles are F7 (absent on touch
-        // devices) and its settings page, so a stale persisted overlay came
-        // back on every launch as unremovable X crosses over the blocks.
-        // Reads are intercepted here, before the mod's first settings load,
-        // so no frame-order race can resurrect the stale flag; once the
-        // player toggles it this session, reads pass through unchanged.
-        if mod_id == "light_overlay"
-            && key == "active"
-            && !LIGHT_OVERLAY_ACTIVE_WRITTEN.load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Some("false".to_owned());
+        let cache_key = format!("{mod_id}\u{1f}{key}");
+        if let Some(cached) = setting_cache().get(&cache_key) {
+            return cached.clone();
         }
         let path = self.native_data_dir(mod_id).join(key);
-        fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
+        let value = fs::read_to_string(path).ok().map(|v| v.trim().to_owned());
+        setting_cache().insert(cache_key, value.clone());
+        value
     }
-    /// Keeps a mod's setting `key`.
+    /// Keeps a mod's setting `key`, in the cache and on disk.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {
-        if mod_id == "light_overlay" && key == "active" {
-            LIGHT_OVERLAY_ACTIVE_WRITTEN.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
+        setting_cache().insert(format!("{mod_id}\u{1f}{key}"), Some(value.to_owned()));
         let dir = self.native_data_dir(mod_id);
         let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
     }

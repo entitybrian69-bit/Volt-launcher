@@ -12,7 +12,7 @@ use std::{
 };
 
 const RELEASES_LIST_URL: &str =
-    "https://api.github.com/repos/entitybrian69-bit/Volt-launcher/releases?per_page=5";
+    "https://api.github.com/repos/entitybrian69-bit/Volt-launcher/releases?per_page=15";
 const RELEASES_LATEST_URL: &str =
     "https://api.github.com/repos/entitybrian69-bit/Volt-launcher/releases/latest";
 const SEEN_FILE: &str = "volt-seen-updates.json";
@@ -214,7 +214,7 @@ pub fn spawn_startup_check(home: PathBuf) -> mpsc::Receiver<UpdateInfo> {
         .name("volt-update-check".into())
         .spawn(move || {
             std::thread::sleep(Duration::from_millis(900));
-            if let Some(info) = check_once_blocking(&home) {
+            if let Some(info) = check_once_blocking(&home, false) {
                 let _ = tx.send(info);
             }
         })
@@ -222,7 +222,29 @@ pub fn spawn_startup_check(home: PathBuf) -> mpsc::Receiver<UpdateInfo> {
     rx
 }
 
-fn check_once_blocking(home: &Path) -> Option<UpdateInfo> {
+/// The About section's "Check for updates": always answers (`None` = up to
+/// date), includes build prereleases, and ignores the seen store — the
+/// player explicitly asked.
+pub fn spawn_manual_check(home: PathBuf) -> mpsc::Receiver<Option<UpdateInfo>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("volt-update-check".into())
+        .spawn(move || {
+            let _ = tx.send(check_once_blocking(&home, true));
+        })
+        .ok();
+    rx
+}
+
+/// Whether `rel` is a full release: not a prerelease, and not a per-commit
+/// `-build.` tag. Only these may interrupt the player with the startup
+/// update popup.
+fn is_full_release(rel: &serde_json::Value, tag: &str) -> bool {
+    rel.get("prerelease").and_then(|v| v.as_bool()) != Some(true)
+        && tag_commit_suffix(tag).is_none()
+}
+
+fn check_once_blocking(home: &Path, manual: bool) -> Option<UpdateInfo> {
     let mut seen = SeenStore::load(home);
     let abis = crate::native_ime::device_supported_abis();
     let (target_abi, abi_label) = select_device_abi(&abis);
@@ -248,10 +270,15 @@ fn check_once_blocking(home: &Path) -> Option<UpdateInfo> {
         let Some(tag) = rel.get("tag_name").and_then(|v| v.as_str()) else {
             continue;
         };
+        // The automatic popup only ever interrupts for full releases; the
+        // About section's manual check reports every build.
+        if !manual && !is_full_release(&rel, tag) {
+            continue;
+        }
         if !is_newer_release(&installed_ver, installed_commit, tag) {
             continue;
         }
-        if seen.contains(tag) {
+        if !manual && seen.contains(tag) {
             return None;
         }
         let Some(assets) = rel.get("assets").and_then(|v| v.as_array()) else {
@@ -284,7 +311,9 @@ fn check_once_blocking(home: &Path) -> Option<UpdateInfo> {
             .unwrap_or_else(|| tag.to_owned());
 
         // Persist immediately so this release reminder only appears ONCE and never nags again!
-        seen.mark_seen(home, tag);
+        if !manual {
+            seen.mark_seen(home, tag);
+        }
 
         return Some(UpdateInfo {
             tag_name: tag.to_owned(),
