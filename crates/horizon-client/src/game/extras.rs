@@ -801,7 +801,7 @@ impl Game<'_> {
             && let Some(mm) = self.player_model.as_ref()
             && mm.is_on_fire()
         {
-            let t = (mm.age as f32 + self.clock.camera_fraction()) / 20.0;
+            let t = (mm.age as f32 + self.clock.camera_fraction() as f32) / 20.0;
             extras_hud::draw_fire_overlay(batch, &self.gui.atlas, t);
         }
         // 1. In-world 3D Waypoints (beams, diamonds, distance/XYZ labels, rim chevrons):
