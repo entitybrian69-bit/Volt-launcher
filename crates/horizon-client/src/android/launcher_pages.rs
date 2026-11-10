@@ -284,6 +284,7 @@ fn bundled_mod_title(id: &str) -> &'static str {
         "armorhud" => "Armor HUD",
         "lookat" => "LookAt",
         "blockscope" => "Blockscope",
+        "elytratrails" => "Elytra Trails",
         _ => "Horizon Mod",
     }
 }
@@ -332,6 +333,7 @@ fn bundled_mod_blurb(id: &str) -> &'static str {
         "armorhud" => "Worn armor and its durability beside the hotbar; K toggles the numbers.",
         "lookat" => "The block or mob under your crosshair as a vanilla tooltip, with health and harvest tool.",
         "blockscope" => "The aimed block's name, id, distance, hardness, states and a container's slots.",
+        "elytratrails" => "Colorful particle trails behind elytra flight, yours and other players'.",
         _ => "An official Horizon registry mod.",
     }
 }

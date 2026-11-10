@@ -1427,6 +1427,7 @@ under Mods.
 - **armorhud 1.0.0** by Thomas9950 (MIT) — [armorhud-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/armorhud-1.0.0), SHA-256 `8bd85e1584f307201bce5de2e60466d603b61d4807803d4ebc02772b4f6b704b`, [source](https://github.com/Thomas-Slot/horizon-armor-hud)
 - **lookat 0.2.1** by d3grando (MIT) — [lookat-0.2.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/lookat-0.2.1), SHA-256 `6c15726116825b5955984223d0e1bccd5d18375005af243a061b2ba2b9139f33`, [source](https://github.com/d3grando/lookat)
 - **blockscope 0.3.0** by Domanffe (MIT) — [blockscope-0.3.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/blockscope-0.3.0), SHA-256 `ba4a1c887ab26a2a9189c671cbdbea3ce2ed212a6e3d32f1fffaa60386198358`, [source](https://github.com/Domanffe/blockscope)
+- **elytratrails 0.1.2** by soufi (MIT) — [elytratrails-0.1.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/elytratrails-0.1.2), SHA-256 `ad6758f1ff0fa1b50750764bf2eb1f78ea94af8ecc84d75a7cc6ec5dcffb31a6`, [source](https://github.com/soufied/ElytraTrails-Horizon)
 
 ## Accurate Block Placement woven native mod 1.0.0
 

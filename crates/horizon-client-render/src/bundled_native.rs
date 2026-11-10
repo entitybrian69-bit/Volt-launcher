@@ -51,6 +51,7 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("armorhud", "1.0.0"),
     ("lookat", "0.2.1"),
     ("blockscope", "0.3.0"),
+    ("elytratrails", "0.1.2"),
     // Vendored (not registry-published): the Punchy Rust port, packed
     // deterministically from `tools/native_mods/vendored/punchy/` by
     // `tools/native_mods/pack_vendored.py` and woven like the rest.

@@ -499,6 +499,7 @@ jobs:
         armorhud=armorhud-1.0.0.hnmod
         lookat=lookat-0.2.1.hnmod
         blockscope=blockscope-0.3.0.hnmod
+        elytratrails=elytratrails-0.1.2.hnmod
       # Reviewed bundles committed under tools/native_mods/vendored/ and
       # rebuilt deterministically by pack_vendored.py; they run the same
       # verified_extract + mixin-compiler checks as the registry set.
@@ -1039,6 +1040,8 @@ jobs:
                "6c15726116825b5955984223d0e1bccd5d18375005af243a061b2ba2b9139f33"),
               ("blockscope", "0.3.0",
                "ba4a1c887ab26a2a9189c671cbdbea3ce2ed212a6e3d32f1fffaa60386198358"),
+              ("elytratrails", "0.1.2",
+               "ad6758f1ff0fa1b50750764bf2eb1f78ea94af8ecc84d75a7cc6ec5dcffb31a6"),
               # Vendored, not registry-published: packed deterministically by
               # tools/native_mods/pack_vendored.py from the committed source
               # tree; the sha256 is also pinned in vendored/punchy.toml.

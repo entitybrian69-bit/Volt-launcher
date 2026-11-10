@@ -26,7 +26,7 @@ weave pipeline); everything else a user can download at runtime is data
 
 | Route | Status | Evidence |
 |---|---|---|
-| Weave pipeline: 36 registry `.hnmod`s compiled into both Android ABIs | **Shipped** | `WEAVE_SET` in `.github/workflows/android-apk.yml`; `WOVEN` in `crates/horizon-client-render/src/bundled_native.rs`; CI verifies the expected set (`PY_VERIFY`). |
+| Weave pipeline: 37 registry `.hnmod`s compiled into both Android ABIs | **Shipped** | `WEAVE_SET` in `.github/workflows/android-apk.yml`; `WOVEN` in `crates/horizon-client-render/src/bundled_native.rs`; CI verifies the expected set (`PY_VERIFY`). |
 | Bundled official mods (Zoom, FPS Overlay, Keystrokes, Minimap) | **Shipped** | `BUNDLED` in `bundled_native.rs`; bridges in `game/official_*_bridge.rs`. |
 | In-client built-ins (NEA, Subtle Effects, Player Animations, plus the earlier Carry Block/AppleSkin/etc. set; Punchy moved to a vendored woven `.hnmod`) | **Shipped** | `game/volt_builtins.rs` and `docs/BUILTIN-PARITY.md`. |
 | Content-only `.hmod` import on device | **Shipped** | `content_files.rs` `Kind::Mods` accepts manifest + content; proven in CI by the real `validate()` test on `biomes_unseen.hmod`. |
@@ -60,8 +60,8 @@ name exactly what is missing. Wave 1 (9 candidates, pinned snapshot
 | armorhud 1.0.0 | Green, both ABIs | **Promoted** into `WEAVE_SET` |
 | lookat 0.2.1 | Green, both ABIs | **Promoted** into `WEAVE_SET` |
 | blockscope 0.3.0 | Green, both ABIs | **Promoted** into `WEAVE_SET` |
-| elytratrails 0.1.2 | One missing target: `native_visuals::native_frame_visuals` | **Hook ported** (upstream API 46 line path, `game/native_visuals.rs`); re-probing |
-| chat_animation 0.1.0 | Upstream's old ten-argument `ui::slider` | **Shimmed** to `ui::slider_dragging` (same drift as horizonmatica); re-probing |
+| elytratrails 0.1.2 | One missing target: `native_visuals::native_frame_visuals` | **Hook ported** (upstream API 46 line path, `game/native_visuals.rs`), probe green on both ABIs, **promoted** into `WEAVE_SET` |
+| chat_animation 0.1.0 | Upstream's old ten-argument `ui::slider` | **Shimmed** to `ui::slider_dragging`, probe green; stays probe-only — its raw targets are render internals the signing path correctly refuses |
 | treefall 0.3.0 | Calls `destroy_progress` as `&self` (its pinned rev had it so) | Needs a read-only attribute value path; next wave |
 | freecam 0.1.0 | `E_UNSUPPORTED_CFG` on the fork's `mapped_key` (android cfg in body) | Needs a cfg-free refactor of `mapped_key`; next wave |
 | movement_status 0.1.0 | Its pinned mixin compiler fails to install in the probe | Infra, not hooks; investigating |
