@@ -114,6 +114,7 @@ pub(super) enum Action {
     Discord,
     AboutWebsite,
     AboutOwner,
+    PresenceStatus,
     CheckUpdates,
     AccountProviderTab(crate::volt_accounts::AccountProvider),
     SelectVoltAccount(usize),
@@ -3177,7 +3178,7 @@ impl DrawCtx<'_> {
             ),
         ];
 
-        let right_items: [(&str, String, Action, Option<bool>, bool); 13] = [
+        let right_items: [(&str, String, Action, Option<bool>, bool); 14] = [
             (
                 "Profile",
                 format!("Profile {}", c.profile),
@@ -3262,6 +3263,13 @@ impl DrawCtx<'_> {
                 "About · Owner",
                 "entitybrian".to_owned(),
                 Action::AboutOwner,
+                None,
+                false,
+            ),
+            (
+                "About · Rich Presence",
+                crate::discord_rpc::status_text().to_owned(),
+                Action::PresenceStatus,
                 None,
                 false,
             ),
@@ -5728,6 +5736,20 @@ impl Launcher {
                 }
                 .into();
             }
+            Some(Action::PresenceStatus) => {
+                self.catalog.status = match crate::discord_rpc::status_text() {
+                    s if s.starts_with("Connected") => {
+                        "Rich Presence is live through the Discord app on this phone."
+                    }
+                    "Unavailable on this device" => {
+                        "This build has no Discord presence bridge."
+                    }
+                    _ => {
+                        "Install or update the Discord app and stay signed in; presence retries every 15 seconds."
+                    }
+                }
+                .into();
+            }
             Some(Action::CheckUpdates) => {
                 if self.manual_check_rx.is_none() {
                     self.catalog.status = "Checking for updates…".into();
@@ -6906,7 +6928,7 @@ fn draw_volt_boost_modal(
         );
     }
 
-    let items: [Item; 29] = [
+    let items: [Item; 31] = [
         Item::VoltPerfHud,
         Item::VoltAutoDrs,
         Item::VoltCullLeaves,
@@ -6923,6 +6945,8 @@ fn draw_volt_boost_modal(
         Item::VoltCullSignText,
         Item::VoltFastShadows,
         Item::VoltDistantMobThrottle,
+        Item::VoltBlockTickRange,
+        Item::VoltEntityTickRange,
         Item::VoltHubLagShield,
         Item::VoltModLagShield,
         Item::VoltParticleBudget,

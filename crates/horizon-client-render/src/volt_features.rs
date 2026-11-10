@@ -987,6 +987,78 @@ impl ChunkUploadCap {
     }
 }
 
+/// How far away from the player blocks or entities keep simulating, in
+/// chunks (Chebyshev rings). Vanilla leaves every loaded ticking chunk live;
+/// a limit stops e.g. ten thousand far-away crops from random-ticking every
+/// game tick. Opt-in: it changes gameplay (far farms pause until revisited).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TickRange {
+    #[default]
+    Vanilla,
+    Chunks8,
+    Chunks6,
+    Chunks4,
+    Chunks2,
+}
+
+impl TickRange {
+    pub const ALL: [Self; 5] = [
+        Self::Vanilla,
+        Self::Chunks8,
+        Self::Chunks6,
+        Self::Chunks4,
+        Self::Chunks2,
+    ];
+
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|&v| v == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    /// The ring radius in chunks, None for vanilla behaviour.
+    pub fn limit(self) -> Option<i32> {
+        match self {
+            Self::Vanilla => None,
+            Self::Chunks8 => Some(8),
+            Self::Chunks6 => Some(6),
+            Self::Chunks4 => Some(4),
+            Self::Chunks2 => Some(2),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Vanilla => "vanilla",
+            Self::Chunks8 => "8",
+            Self::Chunks6 => "6",
+            Self::Chunks4 => "4",
+            Self::Chunks2 => "2",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "vanilla" | "unlimited" | "off" => Some(Self::Vanilla),
+            "8" => Some(Self::Chunks8),
+            "6" => Some(Self::Chunks6),
+            "4" => Some(Self::Chunks4),
+            "2" => Some(Self::Chunks2),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Vanilla => "Vanilla",
+            Self::Chunks8 => "8 Chunks",
+            Self::Chunks6 => "6 Chunks",
+            Self::Chunks4 => "4 Chunks",
+            Self::Chunks2 => "2 Chunks",
+        }
+    }
+}
+
 /// Maximum rendered entities (nearest-first priority so nearby combat targets never vanish).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

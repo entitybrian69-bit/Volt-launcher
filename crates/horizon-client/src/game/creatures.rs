@@ -650,7 +650,28 @@ impl Game<'_> {
     /// (block coordinates), from every player's tickets (`update_chunk_tickets`).
     pub(super) fn entity_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
         let levels = self.tickets.levels();
-        move |x, z| levels.entity_ticking_at(x, z)
+        // Volt Boost's Entity Tick Range: when limited, mobs and dropped
+        // items only tick within the chosen chunk ring around the player.
+        let ring = self
+            .settings
+            .extras
+            .entity_tick_range
+            .limit()
+            .zip(self.player.as_ref().map(|p| {
+                (
+                    (p.position.x.floor() as i32).div_euclid(16),
+                    (p.position.z.floor() as i32).div_euclid(16),
+                )
+            }));
+        move |x, z| {
+            levels.entity_ticking_at(x, z)
+                && match ring {
+                    Some((r, (cx, cz))) => {
+                        (x.div_euclid(16) - cx).abs().max((z.div_euclid(16) - cz).abs()) <= r
+                    }
+                    None => true,
+                }
+        }
     }
     /// The entity phase of `tick_creatures`: every mob's tick, deaths, and the
     /// projectiles and effects that follow from them.

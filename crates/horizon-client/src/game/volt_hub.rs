@@ -41,6 +41,8 @@ impl HubTab {
 #[derive(Clone, Copy, PartialEq)]
 enum Act {
     OpenHub,
+    /// A tap on the open window's body: consumed, never closes the hub.
+    Panel,
     Close,
     Tab(HubTab),
     RecToggle,
@@ -59,10 +61,23 @@ enum Act {
     TakeScreenshot,
 }
 
+/// A finger dragging the floating logo.
+pub(super) struct LogoDrag {
+    id: u64,
+    offset: [f32; 2],
+    start: (f32, f32),
+    moved: bool,
+}
+
 /// The overlay's state on the `Game`.
 #[derive(Default)]
 pub(super) struct Hub {
     pub open: bool,
+    /// Where the floating logo was dragged to (GUI px, top-left);
+    /// None keeps the default top-right spot.
+    pos: Option<[f32; 2]>,
+    /// The touch currently dragging the logo.
+    drag: Option<LogoDrag>,
     tab: HubTab,
     /// Click targets rebuilt every drawn frame, in GUI coordinates.
     targets: Vec<([f32; 4], Act)>,
@@ -173,6 +188,83 @@ impl Game<'_> {
         }
     }
 
+    /// The floating logo's rectangle in GUI coordinates, clamped on screen.
+    pub(super) fn volt_hub_logo_rect(&self, w: f32, h: f32) -> [f32; 4] {
+        const S: f32 = 18.0;
+        let [x, y] = self.volt_hub.pos.unwrap_or([w - S - 4.0, 4.0]);
+        [
+            x.clamp(0.0, (w - S).max(0.0)),
+            y.clamp(0.0, (h - S).max(0.0)),
+            S,
+            S,
+        ]
+    }
+
+    /// The logo's own gesture, owning its touch from press to release like
+    /// the floating replay button: a tap opens the hub, a drag moves the
+    /// logo anywhere on screen. Idle frames reject in a couple of compares.
+    pub(super) fn volt_hub_logo_touch(
+        &mut self,
+        id: u64,
+        p: (f32, f32),
+        phase: winit::event::TouchPhase,
+    ) -> bool {
+        use winit::event::TouchPhase;
+        let owns = self.volt_hub.drag.as_ref().is_some_and(|d| d.id == id);
+        if !owns
+            && (phase != TouchPhase::Started
+                || self.volt_hub.open
+                || self.title.is_some()
+                || self.ui.hide_gui
+                || self.screen != Screen::Playing)
+        {
+            return false;
+        }
+        let (w, h) = self.gui_size();
+        if owns {
+            match phase {
+                TouchPhase::Started => false,
+                TouchPhase::Moved => {
+                    let r = self.volt_hub_logo_rect(w, h);
+                    let (ox, oy, moved) = {
+                        let d = self.volt_hub.drag.as_mut().expect("owned drag");
+                        if (p.0 - d.start.0).abs() >= 4.0 || (p.1 - d.start.1).abs() >= 4.0 {
+                            d.moved = true;
+                        }
+                        (d.offset[0], d.offset[1], d.moved)
+                    };
+                    if moved {
+                        self.volt_hub.pos = Some([
+                            (p.0 - ox).clamp(0.0, (w - r[2]).max(0.0)),
+                            (p.1 - oy).clamp(0.0, (h - r[3]).max(0.0)),
+                        ]);
+                    }
+                    true
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled => {
+                    let d = self.volt_hub.drag.take().expect("owned drag");
+                    if phase == TouchPhase::Ended && !d.moved {
+                        self.volt_hub.open = true;
+                        self.audio.play_button_click();
+                    }
+                    true
+                }
+            }
+        } else {
+            let r = self.volt_hub_logo_rect(w, h);
+            if p.0 < r[0] || p.0 > r[0] + r[2] || p.1 < r[1] || p.1 > r[1] + r[3] {
+                return false;
+            }
+            self.volt_hub.drag = Some(LogoDrag {
+                id,
+                offset: [p.0 - r[0], p.1 - r[1]],
+                start: p,
+                moved: false,
+            });
+            true
+        }
+    }
+
     /// Handles a press at `cursor` (GUI coordinates). Returns whether the
     /// hub consumed it.
     pub(super) fn try_click_volt_hub_overlay(&mut self, cursor: (f32, f32)) -> bool {
@@ -198,9 +290,14 @@ impl Game<'_> {
             }
             return false;
         };
-        self.audio.play_button_click();
+        if act != Act::Panel {
+            self.audio.play_button_click();
+        }
         match act {
             Act::OpenHub => self.volt_hub.open = true,
+            // The window body swallows its taps: only the X (or a tap on
+            // the scrim outside the window, or F10) closes the hub.
+            Act::Panel => {}
             Act::Close => self.volt_hub.open = false,
             Act::Tab(tab) => self.volt_hub.tab = tab,
             Act::RecToggle => self.volt_recorder_toggle(),
@@ -274,15 +371,28 @@ impl Game<'_> {
         let (w, h) = (batch.width, batch.height);
         let atlas = &self.gui.atlas;
         if !self.volt_hub.open {
-            // The HUD pill, top right; red while recording.
-            let (pw, ph) = (34.0, 13.0);
-            let (px, py) = (w - pw - 4.0, 4.0);
+            // The floating Volt logo: a draggable V badge, red while
+            // recording. A tap opens the hub (volt_hub_logo_touch).
+            let [bx, by, bs, _] = self.volt_hub_logo_rect(w, h);
             let recording = self.recorder.is_some();
-            let bg = if recording { CRIMSON } else { 0xDC14100E };
-            batch.fill(atlas, px, py, pw, ph, bg);
-            batch.fill(atlas, px, py, pw, 1.0, CRIMSON);
-            batch.text(atlas, "VOLT", px + 6.0, py + 3.0, TEXT, true);
-            targets.push(([px, py, pw, ph], Act::OpenHub));
+            let (bg, stroke) = if recording {
+                (CRIMSON, TEXT)
+            } else {
+                (0xDC14100E, CRIMSON)
+            };
+            // Soft-cornered badge: two overlapping fills.
+            batch.fill(atlas, bx + 1.0, by, bs - 2.0, bs, bg);
+            batch.fill(atlas, bx, by + 1.0, bs, bs - 2.0, bg);
+            batch.fill(atlas, bx + 1.0, by, bs - 2.0, 1.0, CRIMSON);
+            // The V mark, stroke by stroke.
+            for i in 0..5 {
+                let t = i as f32;
+                let y = by + 3.0 + t * 2.0;
+                batch.fill(atlas, bx + 3.2 + t * 1.2, y, 1.7, 2.4, stroke);
+                batch.fill(atlas, bx + bs - 4.9 - t * 1.2, y, 1.7, 2.4, stroke);
+            }
+            batch.fill(atlas, bx + bs / 2.0 - 0.9, by + bs - 5.2, 1.8, 2.4, stroke);
+            targets.push(([bx, by, bs, bs], Act::OpenHub));
             if recording && let Some(rec) = &self.recorder {
                 let t = rec.recorded_seconds() as u64;
                 let label = if rec.settings.clip {
@@ -290,7 +400,9 @@ impl Game<'_> {
                 } else {
                     format!("REC {}:{:02}", t / 60, t % 60)
                 };
-                batch.text(atlas, &label, px - 42.0, py + 3.0, CRIMSON, true);
+                // Beside the badge, on whichever side has room.
+                let lx = if bx > 50.0 { bx - 44.0 } else { bx + bs + 4.0 };
+                batch.text(atlas, &label, lx, by + 5.0, CRIMSON, true);
             }
             self.volt_hub.targets = targets;
             return;
@@ -326,7 +438,7 @@ impl Game<'_> {
         // Close button.
         let (cx, cy) = (hx + hw - 13.0, hy + 4.0);
         batch.text(atlas, "X", cx + 3.0, cy + 1.0, DIM, false);
-        targets.push(([cx, cy, 11.0, 11.0], Act::Close));
+        targets.push(([cx - 3.0, cy - 2.0, 17.0, 16.0], Act::Close));
         // Content area.
         let x = hx + sw + 8.0;
         let cw = hw - sw - 16.0;
@@ -640,6 +752,9 @@ impl Game<'_> {
             batch.text(atlas, &line, x + 2.0, hy + hh - 12.0, CRIMSON, false);
         }
         let _ = y;
+        // Pushed last so every specific control above wins the hit test:
+        // a tap anywhere else on the window body is consumed, not a close.
+        targets.push(([hx, hy, hw, hh], Act::Panel));
         self.volt_hub.targets = targets;
     }
 }

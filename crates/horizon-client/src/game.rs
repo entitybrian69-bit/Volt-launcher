@@ -4039,12 +4039,31 @@ impl Game<'_> {
         let levels = self.tickets.levels();
         // Keep the world map's chunk order, including empty chunks
         // (tick_chunk_random still draws for precipitation in those).
+        // Volt Boost's Block Tick Range: when limited, only the chunks within
+        // the chosen ring around the player random-tick (crops, fire, leaf
+        // decay...), so huge far-away farms stop costing CPU every game tick.
+        // Scheduled ticks, block events and block entities are untouched.
+        let tick_ring = self
+            .settings
+            .extras
+            .block_tick_range
+            .limit()
+            .zip(self.player.as_ref().map(|p| {
+                (
+                    (p.position.x.floor() as i32).div_euclid(16),
+                    (p.position.z.floor() as i32).div_euclid(16),
+                )
+            }));
         let ticking: Vec<_> = self
             .world
             .chunks
             .keys()
             .copied()
             .filter(|&(x, z)| levels.random_ticking(x, z) && ticking_chunk(&self.world, x, z))
+            .filter(|&(x, z)| match tick_ring {
+                Some((r, (cx, cz))) => (x - cx).abs().max((z - cz).abs()) <= r,
+                None => true,
+            })
             .collect();
         // Entity.checkInsideBlocks for the plates, tripwires, detector rails and
         // buttons under the players (the host and the LAN guests), the minecarts

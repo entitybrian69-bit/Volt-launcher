@@ -5,7 +5,7 @@
 use crate::volt_features::{
     AutoDrsMode, AudioVoiceCap, BlockEntityCap, ChunkUploadCap, DynamicIdleFps, EntityCap,
     FastShadowMode, GlintTrimMode, ItemRenderCap, MenuBgMode, MinimapEntities, MinimapFrame,
-    MinimapTerrainMode, ParticleBudget, PerfHudMode, VoltBoostPreset, WaypointColor,
+    MinimapTerrainMode, ParticleBudget, PerfHudMode, TickRange, VoltBoostPreset, WaypointColor,
 };
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -162,6 +162,11 @@ pub struct Extras {
     pub cull_sign_text: bool,
     pub fast_shadows: FastShadowMode,
     pub distant_mob_throttle: bool,
+    /// How far from the player random block ticks (crop growth, fire,
+    /// leaf decay...) keep running; vanilla ticks every simulated chunk.
+    pub block_tick_range: TickRange,
+    /// How far from the player mobs and dropped items keep ticking.
+    pub entity_tick_range: TickRange,
     pub hub_lag_shield: bool,
     /// Rests cosmetic-only mods (particles, 3D skin layers, eating and item
     /// animations…) so performance presets also stop mod CPU work, not just
@@ -274,6 +279,8 @@ impl Default for Extras {
             cull_sign_text: false,
             fast_shadows: FastShadowMode::Vanilla,
             distant_mob_throttle: false,
+            block_tick_range: TickRange::Vanilla,
+            entity_tick_range: TickRange::Vanilla,
             hub_lag_shield: false,
             mod_lag_shield: false,
             particle_budget: ParticleBudget::Vanilla16k,
@@ -475,6 +482,16 @@ impl Extras {
                 }
                 "voltDistantMobThrottle" => {
                     e.distant_mob_throttle = flag(e.distant_mob_throttle)
+                }
+                "voltBlockTickRange" => {
+                    if let Some(v) = TickRange::parse(value) {
+                        e.block_tick_range = v;
+                    }
+                }
+                "voltEntityTickRange" => {
+                    if let Some(v) = TickRange::parse(value) {
+                        e.entity_tick_range = v;
+                    }
                 }
                 "voltHubLagShield" => e.hub_lag_shield = flag(e.hub_lag_shield),
                 "voltModLagShield" => e.mod_lag_shield = flag(e.mod_lag_shield),
@@ -1075,6 +1092,8 @@ impl Extras {
             "voltDistantMobThrottle",
             bool_text(self.distant_mob_throttle),
         );
+        push("voltBlockTickRange", self.block_tick_range.as_str());
+        push("voltEntityTickRange", self.entity_tick_range.as_str());
         push("voltHubLagShield", bool_text(self.hub_lag_shield));
         push("voltModLagShield", bool_text(self.mod_lag_shield));
         push("voltParticleBudget", self.particle_budget.as_str());
@@ -1500,6 +1519,8 @@ impl Extras {
             self.cull_sign_text,
             self.fast_shadows != FastShadowMode::Vanilla,
             self.distant_mob_throttle,
+            self.block_tick_range != TickRange::Vanilla,
+            self.entity_tick_range != TickRange::Vanilla,
             self.hub_lag_shield,
             self.mod_lag_shield,
             self.particle_budget != ParticleBudget::Vanilla16k,
@@ -1953,6 +1974,8 @@ pub enum Item {
     VoltCullSignText,
     VoltFastShadows,
     VoltDistantMobThrottle,
+    VoltBlockTickRange,
+    VoltEntityTickRange,
     VoltHubLagShield,
     VoltModLagShield,
     VoltParticleBudget,
@@ -2118,6 +2141,8 @@ pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
         Ok(VoltCullSignText),
         Ok(VoltFastShadows),
         Ok(VoltDistantMobThrottle),
+        Ok(VoltBlockTickRange),
+        Ok(VoltEntityTickRange),
         Ok(VoltHubLagShield),
         Ok(VoltModLagShield),
         Err("Tier 1 & 2 - Particles, Animations & Shaders"),
@@ -2204,6 +2229,8 @@ impl Item {
             Item::VoltCullSignText => "Sign Text Cull",
             Item::VoltFastShadows => "Entity Shadows",
             Item::VoltDistantMobThrottle => "Mob Pose Throttle",
+            Item::VoltBlockTickRange => "Block Tick Range",
+            Item::VoltEntityTickRange => "Entity Tick Range",
             Item::VoltHubLagShield => "Hub Lag Shield",
             Item::VoltModLagShield => "Mod Lag Shield",
             Item::VoltParticleBudget => "Particle Budget",
@@ -2311,6 +2338,8 @@ impl Item {
             | VoltCullSignText
             | VoltFastShadows
             | VoltDistantMobThrottle
+            | VoltBlockTickRange
+            | VoltEntityTickRange
             | VoltHubLagShield
             | VoltModLagShield
             | VoltParticleBudget
@@ -2518,6 +2547,12 @@ impl Item {
             }
             Item::VoltDistantMobThrottle => {
                 "Simplifies distant entity feature overlays and pose work beyond 24 blocks."
+            }
+            Item::VoltBlockTickRange => {
+                "Limits random block ticks (crop growth, fire spread, leaf decay) to chunks near you, so 10,000 far-away crops stop costing CPU. Vanilla keeps full-range ticking."
+            }
+            Item::VoltEntityTickRange => {
+                "Limits mob and dropped-item ticking to chunks near you; far farms and crowds pause until you come back. Vanilla keeps full-range ticking."
             }
             Item::VoltHubLagShield => {
                 "Automatically trims distant crowd armor stands, pets and players beyond 16m whenever more than 24 entities pack into one area."
@@ -2794,6 +2829,8 @@ impl Item {
             },
             Item::VoltPerfHudCorner => e.perf_hud_corner.label().into(),
             Item::VoltChunkUploadCap => e.chunk_upload_cap.label().into(),
+            Item::VoltBlockTickRange => e.block_tick_range.label().into(),
+            Item::VoltEntityTickRange => e.entity_tick_range.label().into(),
             Item::VoltEntityCap => e.entity_cap.label().into(),
             Item::VoltItemCap => e.item_render_cap.label().into(),
             Item::VoltBlockEntityCap => e.block_entity_cap.label().into(),
@@ -2922,6 +2959,12 @@ impl Item {
                 e.fast_shadows = step(&FastShadowMode::ALL, e.fast_shadows, back)
             }
             Item::VoltDistantMobThrottle => e.distant_mob_throttle = !e.distant_mob_throttle,
+            Item::VoltBlockTickRange => {
+                e.block_tick_range = step(&TickRange::ALL, e.block_tick_range, back)
+            }
+            Item::VoltEntityTickRange => {
+                e.entity_tick_range = step(&TickRange::ALL, e.entity_tick_range, back)
+            }
             Item::VoltHubLagShield => e.hub_lag_shield = !e.hub_lag_shield,
             Item::VoltModLagShield => e.mod_lag_shield = !e.mod_lag_shield,
             Item::VoltParticleBudget => {

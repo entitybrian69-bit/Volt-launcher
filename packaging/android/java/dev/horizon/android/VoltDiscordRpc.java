@@ -30,7 +30,7 @@ public final class VoltDiscordRpc {
 
     private static final String ACTION = "com.discord.socialsdk.rpc.IDiscordRpcService";
     /** The official app first, then the main client mod that keeps the same service. */
-    private static final String[] PACKAGES = {"com.discord", "cocobo1.pupu.app"};
+    private static final String[] PACKAGES = {"com.discord", "app.revenge", "cocobo1.pupu.app"};
 
     private static final Object LOCK = new Object();
     private static Context app;

@@ -470,6 +470,17 @@ impl Game<'_> {
         if matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
             let _ = self.try_click_volt_hud((p[0], p[1]), false);
         }
+        // The floating Volt logo: its own gesture owns the touch from the
+        // press to the release (tap opens the hub, drag moves the logo).
+        if (!self.pad_in_menu() || t.phase != TouchPhase::Started)
+            && self.volt_hub_logo_touch(t.id, (p[0], p[1]), t.phase)
+        {
+            if t.phase == TouchPhase::Started {
+                self.pad.touch.clear();
+                self.pad.touch.ignore(t.id);
+            }
+            return Ok(true);
+        }
         // The floating replay button: its own gesture owns the touch from
         // the press to the release (tap, drag, or hold-to-adjust).
         if (!self.pad_in_menu() || t.phase != TouchPhase::Started)

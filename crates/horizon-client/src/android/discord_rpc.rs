@@ -77,6 +77,20 @@ pub fn initialize(vm: JavaVM, activity: &JObject) {
     }
 }
 
+/// A short launcher-facing status for the About tab, so "presence is not
+/// showing" is diagnosable on the phone itself.
+pub fn status_text() -> &'static str {
+    if JAVA.get().is_none() {
+        return "Unavailable on this device";
+    }
+    match bridge_state() {
+        1 => "Connecting to the Discord app...",
+        2 | 3 => "Connected through the Discord app",
+        FAILED => "Not connected - Discord app missing or outdated",
+        _ => "Waiting for the Discord app...",
+    }
+}
+
 /// Runs `f` with the bridge class (as a `&GlobalRef` class descriptor) on an attached JNI env.
 fn with_java<R>(f: impl FnOnce(&mut JNIEnv<'_>, &GlobalRef) -> jni::errors::Result<R>) -> Option<R> {
     let java = JAVA.get()?;
@@ -150,8 +164,11 @@ fn connect() -> Option<Box<dyn Backend>> {
     }
     // Binding and connecting finish on the main thread within moments; frames sent before
     // READY wait on the Java side either way.
+    // A cold Discord process can take several seconds to spawn and bind on a
+    // low-end phone; waiting under ten seconds here beats failing and holding
+    // the 15-second retry.
     let mut state = state;
-    for _ in 0..30 {
+    for _ in 0..100 {
         if state >= CONNECTED {
             break;
         }

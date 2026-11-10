@@ -12,7 +12,11 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <!-- The Discord app, for Rich Presence through its exported RPC service (Android 11+ package visibility). -->
     <queries>
+        <intent>
+            <action android:name="com.discord.socialsdk.rpc.IDiscordRpcService" />
+        </intent>
         <package android:name="com.discord" />
+        <package android:name="app.revenge" />
         <package android:name="cocobo1.pupu.app" />
     </queries>
     <application android:label="Volt Launcher" android:appCategory="game" android:icon="@drawable/launcher_icon" android:banner="@drawable/tv_banner" android:extractNativeLibs="false" android:hasFragileUserData="true" android:usesCleartextTraffic="false">

@@ -194,6 +194,7 @@ const COSMETIC_MODS: &[&str] = &[
     "not_enough_animations",
     "player_animations",
     "subtle_effects",
+    "elytratrails",
 ];
 
 /// Mod settings are tiny one-value files read through `native_setting`;
