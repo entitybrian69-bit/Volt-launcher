@@ -35,6 +35,7 @@ struct OwnState {
     fell_sprinting: bool,
     prev_slot: usize,
     slot_known: bool,
+    had_hook: bool,
 }
 static OWN_STATE: Mutex<OwnState> = Mutex::new(OwnState {
     prev_ground: false,
@@ -45,6 +46,7 @@ static OWN_STATE: Mutex<OwnState> = Mutex::new(OwnState {
     fell_sprinting: false,
     prev_slot: 0,
     slot_known: false,
+    had_hook: false,
 });
 /// Whether the gesture layer currently borrows the third-person front
 /// camera (set while a clip plays from first person, cleared on restore).
@@ -97,6 +99,7 @@ impl Game<'_> {
             mobs: self.stored_bool(overhauled::ID, "mobs", true),
             rain: self.stored_bool(overhauled::ID, "rain", true),
             swap: self.stored_bool(overhauled::ID, "swap", true),
+            totem: self.stored_usize(overhauled::ID, "totem", 0),
             intensity: self.stored_usize(overhauled::ID, "intensity", 1),
         });
     }
@@ -164,6 +167,7 @@ impl Game<'_> {
                 buttons.push(label("Mob animations", f.mobs));
                 buttons.push(label("Better rain particles", f.rain));
                 buttons.push(label("Item swap sounds", f.swap));
+                buttons.push(format!("Totem pop-up: {}", overhauled::TOTEM_NAMES[f.totem]));
                 buttons.push(format!(
                     "Intensity: {}",
                     overhauled::INTENSITY_NAMES[f.intensity]
@@ -222,7 +226,8 @@ impl Game<'_> {
                 2 => { f.mobs = !f.mobs; }
                 3 => { f.rain = !f.rain; }
                 4 => { f.swap = !f.swap; }
-                5 => { f.intensity = (f.intensity + 1) % 3; }
+                5 => { f.totem = (f.totem + 1) % 3; }
+                6 => { f.intensity = (f.intensity + 1) % 3; }
                 _ => return,
             }
             overhauled::set_flags(f);
@@ -230,6 +235,8 @@ impl Game<'_> {
                 let keys = ["enabled", "players", "mobs", "rain", "swap"];
                 let v = [f.enabled, f.players, f.mobs, f.rain, f.swap][button];
                 self.store_bool(overhauled::ID, keys[button], v);
+            } else if button == 5 {
+                self.native_set_setting(overhauled::ID, "totem", &f.totem.to_string());
             } else {
                 self.native_set_setting(overhauled::ID, "intensity", &f.intensity.to_string());
             }
@@ -505,7 +512,8 @@ impl Game<'_> {
             overhauled::set_own_edge(p.ground.on_ground && !crouch && !air(bx, bz) && open >= 2);
         }
         // The fishing feed: who has a hook out (the rod-holding pose) and
-        // whether the own line has a bite (the rod-jerk layer).
+        // whether the own line has a bite (the rod-jerk layer). Pulling
+        // the line back in plays the reel yank.
         {
             let mut fishers: Vec<u32> = self.remote_hooks.iter().map(|h| h.owner).collect();
             if self.hook.is_some()
@@ -515,7 +523,20 @@ impl Game<'_> {
             }
             let bite = self.hook.as_ref().is_some_and(|h| h.nibble > 0);
             overhauled::set_fishing(&fishers, bite);
+            let reel = {
+                let mut st = OWN_STATE.lock().unwrap();
+                let gone = st.had_hook && self.hook.is_none();
+                st.had_hook = self.hook.is_some();
+                gone
+            };
+            if reel && f.players
+                && let Some(mm) = self.player_model.as_ref()
+            {
+                clips::trigger(mm.id, clips::Clip::Reel, mm.age as f32 / 20.0);
+            }
         }
+        // First-person food shrink rides the player-animation flag.
+        overhauled::set_fp_shrink(f.players);
         // Stateless randomness for the particle pass.
         let rnd = |stream: u32| etf::entity_random(FX_SALT.fetch_add(1, Ordering::Relaxed), stream);
         let mut spawn: Vec<(T, [f64; 3], [f64; 3])> = Vec::new();
@@ -634,13 +655,31 @@ impl Game<'_> {
             let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(0.001);
             let rate = mi.progress / mi.ticks.max(1) as f32;
             let count = (1.0 + rate * 30.0).clamp(1.0, 5.0) as usize;
-            for _ in 0..count {
+            // The spark palette follows the block's material (read off
+            // its break-sound family): stone and metal strike hot embers,
+            // wood and soft ground puff, glass glitters.
+            let state = self.world.block(mi.pos[0], mi.pos[1], mi.pos[2]);
+            let family = self.res.facts().get(state).sounds.break_sound.clone();
+            let hard = ["stone", "deepslate", "metal", "anvil", "netherite", "copper"]
+                .iter()
+                .any(|k| family.contains(k));
+            let soft = ["wood", "bamboo", "grass", "gravel", "sand", "dirt", "wool", "snow"]
+                .iter()
+                .any(|k| family.contains(k));
+            for i in 0..count {
                 let at = [
                     center[0] + d[0] / len * 0.55 + f64::from(rnd(19) - 0.5) * 0.5,
                     center[1] + d[1] / len * 0.55 + f64::from(rnd(20) - 0.5) * 0.5,
                     center[2] + d[2] / len * 0.55 + f64::from(rnd(21) - 0.5) * 0.5,
                 ];
-                spawn.push((T::Crit, at, [0.0, 0.02, 0.0]));
+                let ty = if hard && i % 3 == 2 {
+                    T::Lava
+                } else if soft {
+                    T::Poof
+                } else {
+                    T::Crit
+                };
+                spawn.push((ty, at, [0.0, 0.02, 0.0]));
             }
         }
         // Mobs: glow-squid twinkles and dive-entry bubble bursts.

@@ -512,6 +512,9 @@ pub fn body_color(m: &Mob, alpha: f32) -> u32 {
     match m.species() {
         Species::Wolf => super::tame::tint(m, alpha),
         Species::TropicalFish => abgr(DYE[m.extra.variant2 as usize & 15]),
+        // Overhauled Entities: about 1 in 100 dolphins is pink — a
+        // procedural body tint, stable per entity, white while off.
+        Species::Dolphin => super::overhauled::dolphin_tint(m.id),
         _ => 0xFFFF_FFFF,
     }
 }

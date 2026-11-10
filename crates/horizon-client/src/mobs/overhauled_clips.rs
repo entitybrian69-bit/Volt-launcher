@@ -38,6 +38,7 @@ pub enum Clip {
     Howl,
     Loaf,
     Lay,
+    Reel,
 }
 
 /// One additive channel: a part, a pose axis (3 = x rot, 4 = y rot,
@@ -146,6 +147,14 @@ const LAY: &[Channel] = &[
     ch("real_tail", 3, &[(0.0, 0.0), (0.7, 0.3)]),
     ch("tail", 3, &[(0.0, 0.0), (0.7, 0.3)]),
 ];
+const REEL: &[Channel] = &[
+    // Reeling the line in: a sharp yank of the rod arm up and back with
+    // a small body lean, then settling.
+    ch("right_arm", 3, &[(0.0, 0.0), (0.12, -1.6), (0.3, -1.1), (0.45, 0.0)]),
+    ch("right_arm", 5, &[(0.0, 0.0), (0.12, -0.3), (0.45, 0.0)]),
+    ch("body", 3, &[(0.0, 0.0), (0.15, -0.14), (0.45, 0.0)]),
+    ch("head", 3, &[(0.0, 0.0), (0.15, 0.12), (0.45, 0.0)]),
+];
 const HOWL: &[Channel] = &[
     // The wolf model names its articulated head/tail `real_head`/
     // `real_tail`; `head`/`tail` cover other canine-shaped models
@@ -171,6 +180,7 @@ pub fn channels(c: Clip) -> &'static [Channel] {
         Clip::Howl => HOWL,
         Clip::Loaf => LOAF,
         Clip::Lay => LAY,
+        Clip::Reel => REEL,
     }
 }
 pub fn duration(c: Clip) -> f32 {
@@ -187,6 +197,7 @@ pub fn duration(c: Clip) -> f32 {
         Clip::Howl => 3.2,
         Clip::Loaf => 0.6,
         Clip::Lay => 0.7,
+        Clip::Reel => 0.45,
     }
 }
 /// Sustained clips hold their last key until `clear` instead of expiring.
@@ -400,7 +411,7 @@ mod tests {
     use super::*;
     use crate::mobs::Part;
 
-    const ALL: [Clip; 12] = [
+    const ALL: [Clip; 13] = [
         Clip::Stretch,
         Clip::LookAround,
         Clip::ArmCross,
@@ -413,6 +424,7 @@ mod tests {
         Clip::Howl,
         Clip::Loaf,
         Clip::Lay,
+        Clip::Reel,
     ];
 
     fn poses() -> Poses {

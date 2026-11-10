@@ -331,15 +331,41 @@ glow-squid light branch; `extras.rs` overlay call at `draw_extras` top;
 render light path, explosion particles, HUD extras — all behind
 `active()` gates, zero cost while the mod is off.
 
-**Honest remaining list (not silently dropped):** E5/E6 enchant-glint
-colour/strength, E7 totem opacity (item render pipeline), A10/A11
-item-render parts (shrinking food, liquid depletion), C14/C15/C16/X1
-authored-texture variant pipeline (C1: needs original art, no
-third-party bytes), B6 spark colour by material, B7 cast/reel
-sub-phases, A13 authored death-pose cycle (F-BACKLOG), A14/B8/C13/E12
-owner-deferred rows, FN1, F-BACKLOG. E-toggle defaults stay provisional
-until the owner's defaults screenshot arrives. On-device verification
-(Class D) remains owner-side for every row above.
+**Honest remaining list after v1.2 (superseded by the v1.3 pass
+below):** E5/E6 glint, E7 totem opacity, A10/A11 item-render parts,
+C14/C15/C16/X1 asset pipeline, B6 spark colour, B7 cast/reel, A13
+authored cycle, owner-deferred rows, FN1, F-BACKLOG.
+
+## v1.3.0 one-go pass (owner one-go override repeated; this build)
+
+Third completion sweep. Unit-tested where reachable; everything is
+IMPLEMENTED-UNVERIFIED on-device until the owner's pass.
+
+| Row | Status after v1.3 | What shipped |
+|---|---|---|
+| E6 glint strength | NATIVE (pre-existing) | the engine already exposes `glintSpeed` / `glintStrength` as vanilla video options (`options_file.rs`, `options_ui.rs` `Opt::GlintStrength`) plus the Volt `GlintTrimMode` extra — the reference pack's "Glint" setting maps 1:1 onto knobs the player already has. No duplicate row added |
+| E5 ench glint colour | BLOCKED (unchanged) | the glint tint lives in the entity/HUD WGSL glint pass; recolouring it means shader changes on a shared path (Naga 30 / Mali limits, "never weaken validation") — Class A, needs an owner call on a shader-touching substitute |
+| E7 totem opacity | IMPLEMENTED-UNVERIFIED | "Totem pop-up: Full / Subtle / Hidden" dial in the mod settings. **Named substitution (C2): Subtle = 45% scale instead of translucency** — the activation item pass has no per-draw alpha; Hidden skips the pop-up (particles/sound untouched). Unit-tested (dial clamps, suspended = Full) |
+| A10 shrinking food | IMPLEMENTED-PARTIAL | first-person food now shrinks bite by bite while eating (55%–100% over the use). Frame-fed gate, off by default, so the pure `item_pose` fixtures never drift. Third-person item shrink + A11 liquid depletion remain BLOCKED (item-model geometry states) |
+| B6 spark colour | IMPLEMENTED-UNVERIFIED | spark palette follows the mined block's material, read off its break-sound family: stone/metal mix in hot embers, wood/ground puff, everything else glitters. Zero new assets |
+| B7 reel yank | IMPLEMENTED-UNVERIFIED | pulling the line in (hook despawn edge) plays a 0.45 s rod-arm yank clip. Cast keeps the vanilla swing (correct in vanilla). B7 now covers hold / bite / reel — the full client-visible rod cycle |
+| C14 rare variants | IMPLEMENTED-PARTIAL | ~1 in 100 dolphins is pink (stable per entity id, etf-seeded). **Named substitution (C2): a procedural body tint via `body_color`, not an authored variant texture (C1: no third-party art; original authored art stays open).** Baby-enderman/zombie/cat/golem variants remain BLOCKED — they need drawn textures, not tints |
+| A13 authored cycle | F-BACKLOG (unchanged) | the limp layer from v1.2 stands; the 1.13 authored death-pose cycle stays deferred with F-BACKLOG per the logged decision |
+
+Engine hooks this pass: `totem.rs` dial gate in
+`item_activation_geometry`; `first_person.rs` one gated scale in the
+`Eat` branch; `render.rs` one `body_color` arm for dolphins; spark
+palette inside the existing `volt_builtins` spark block. All behind
+mod gates, zero cost while off.
+
+**Honest remaining list (not silently dropped):** E5 glint colour
+(shader path, Class A), A10 third-person part + A11 liquid depletion
+(item-model geometry states), C14 drawn-texture variants + C15/C16/X1
+authored-asset pipeline (needs original art), A14/B8/C13/E12
+owner-deferred rows, FN1, F-BACKLOG (incl. the authored death cycle).
+E-toggle defaults stay provisional until the owner's defaults
+screenshot arrives. On-device verification (Class D) remains owner-side
+for every row.
 
 ## Known-good / known-bad devices (Class D)
 

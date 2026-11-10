@@ -30,19 +30,25 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const ID: &str = "overhauled_entities";
 pub const NAME: &str = "Overhauled Entities";
-pub const VERSION: &str = "1.2.0";
+pub const VERSION: &str = "1.3.0";
 pub const DESCRIPTION: &str = "Animation overhaul for every entity, the player included: \
 weighted walks, swim strokes, sword stances, ledge balancing, dives, flips, rolls, sits, \
 idle emotes, death limps, fishing poses, wolf howls and lay-downs, cat loafs, horse \
-stomps, wither head drift, glow-squid pulses. Plus rain splashes, boat wakes, richer \
-explosions, XP-orb trails, mining sparks, item swap sounds and an on-fire overlay. \
-Purely visual, works on any server.";
+stomps, wither head drift, glow-squid pulses, reel yanks, shrinking food and a rare \
+pink dolphin. Plus rain splashes, boat wakes, richer explosions, XP-orb trails, \
+material-coloured mining sparks, item swap sounds, a totem pop-up dial and an on-fire \
+overlay. Purely visual, works on any server.";
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static PLAYERS: AtomicBool = AtomicBool::new(true);
 static MOBS: AtomicBool = AtomicBool::new(true);
 static RAIN: AtomicBool = AtomicBool::new(true);
 static SWAP: AtomicBool = AtomicBool::new(true);
+/// Totem pop-up mode: 0 = full, 1 = subtle (shrunk), 2 = hidden.
+static TOTEM: AtomicUsize = AtomicUsize::new(0);
+/// First-person food shrink: set by the game each frame (defaults off so
+/// the pure `item_pose` fixtures never drift in tests).
+static FP_SHRINK: AtomicBool = AtomicBool::new(false);
 /// 0 = Subtle, 1 = Balanced, 2 = Dramatic.
 static INTENSITY: AtomicUsize = AtomicUsize::new(1);
 /// Set while the mod's row in Options > Mods is switched off entirely.
@@ -88,6 +94,38 @@ pub fn fire_overlay_on() -> bool {
     active() && PLAYERS.load(Ordering::Relaxed)
 }
 
+/// The totem pop-up dial for the item-activation overlay: 0 = full,
+/// 1 = subtle (shrunk), 2 = hidden. Full whenever the mod is off.
+pub fn totem_mode() -> usize {
+    if active() { TOTEM.load(Ordering::Relaxed).min(2) } else { 0 }
+}
+pub const TOTEM_NAMES: [&str; 3] = ["Full", "Subtle", "Hidden"];
+
+/// First-person food shrink gate: the game feeds it each frame from the
+/// player-animation flag; defaults off so pure pose fixtures never move.
+pub fn set_fp_shrink(on: bool) {
+    FP_SHRINK.store(on, Ordering::Relaxed);
+}
+pub fn fp_shrink_on() -> bool {
+    FP_SHRINK.load(Ordering::Relaxed)
+}
+
+/// The rare-variant tint for a dolphin: about 1 in 100 dolphins is pink,
+/// stable per entity id. White (no tint) while the mod or its mob layer
+/// is off. **Named substitution:** a procedural body tint stands in for
+/// the reference pack's authored variant texture — no third-party art.
+pub fn dolphin_tint(id: u32) -> u32 {
+    if !active() || !MOBS.load(Ordering::Relaxed) {
+        return 0xFFFF_FFFF;
+    }
+    if etf::entity_random(id, 800) < 0.01 {
+        // Pink RGB (255, 175, 201), packed ABGR like every body tint.
+        0xFFC9_AFFF
+    } else {
+        0xFFFF_FFFF
+    }
+}
+
 /// The glow squid's rhythmic light pulse: raises the packed block-light
 /// byte on a slow per-entity cycle, leaving the sky bits (and everything
 /// above them) untouched. Returns the light unchanged while the mod or
@@ -124,6 +162,7 @@ pub struct Flags {
     pub mobs: bool,
     pub rain: bool,
     pub swap: bool,
+    pub totem: usize,
     pub intensity: usize,
 }
 pub fn flags() -> Flags {
@@ -133,6 +172,7 @@ pub fn flags() -> Flags {
         mobs: MOBS.load(Ordering::Relaxed),
         rain: RAIN.load(Ordering::Relaxed),
         swap: SWAP.load(Ordering::Relaxed),
+        totem: TOTEM.load(Ordering::Relaxed).min(2),
         intensity: INTENSITY.load(Ordering::Relaxed).min(2),
     }
 }
@@ -142,6 +182,7 @@ pub fn set_flags(f: Flags) {
     MOBS.store(f.mobs, Ordering::Relaxed);
     RAIN.store(f.rain, Ordering::Relaxed);
     SWAP.store(f.swap, Ordering::Relaxed);
+    TOTEM.store(f.totem.min(2), Ordering::Relaxed);
     INTENSITY.store(f.intensity.min(2), Ordering::Relaxed);
 }
 pub fn active() -> bool {
@@ -1043,6 +1084,7 @@ mod tests {
             mobs: true,
             rain: false,
             swap: false,
+            totem: 1,
             intensity: 2,
         });
         assert_eq!(
@@ -1053,6 +1095,7 @@ mod tests {
                 mobs: true,
                 rain: false,
                 swap: false,
+                totem: 1,
                 intensity: 2,
             }
         );
@@ -1062,13 +1105,45 @@ mod tests {
             mobs: true,
             rain: true,
             swap: true,
+            totem: 9,
             intensity: 9,
         });
         assert_eq!(flags().intensity, 2, "intensity clamps to the names table");
+        assert_eq!(flags().totem, 2, "the totem dial clamps to its names table");
         set_suspended(true);
         assert!(!active(), "the row toggle suspends everything");
         set_suspended(false);
         assert!(active());
+        set_flags(before);
+    }
+
+    #[test]
+    fn dolphin_tint_and_totem_and_shrink_gates() {
+        let _g = FLAGS_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = flags();
+        let mut f = flags();
+        f.enabled = true;
+        f.mobs = true;
+        f.totem = 1;
+        set_flags(f);
+        set_suspended(false);
+        // About 1 in 100 dolphins goes pink, stable per id.
+        let pink = (0..3000u32).find(|&id| dolphin_tint(id) != 0xFFFF_FFFF);
+        let pink = pink.expect("a pink dolphin exists in three thousand");
+        assert_eq!(dolphin_tint(pink), 0xFFC9_AFFF, "stable per entity");
+        let rate = (0..3000u32).filter(|&id| dolphin_tint(id) != 0xFFFF_FFFF).count();
+        assert!((10..=80).contains(&rate), "about 1%, got {rate}/3000");
+        // Off while suspended.
+        set_suspended(true);
+        assert_eq!(dolphin_tint(pink), 0xFFFF_FFFF, "suspended: vanilla");
+        assert_eq!(totem_mode(), 0, "suspended: full totem");
+        set_suspended(false);
+        assert_eq!(totem_mode(), 1, "the dial reads back");
+        // The first-person shrink gate is frame-fed and defaults off.
+        assert!(!fp_shrink_on(), "defaults off: pose fixtures never move");
+        set_fp_shrink(true);
+        assert!(fp_shrink_on());
+        set_fp_shrink(false);
         set_flags(before);
     }
 
