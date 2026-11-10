@@ -196,7 +196,7 @@ pub struct Extras {
     pub volt_shaders: horizon_shader_api::volt_shaders::VoltShadersConfig,
     /// Built-in Volt QoL suite (`#2, #3, #8, #9, #15, #17, #18, #25`).
     pub volt_qol: crate::volt_qol::VoltQolConfig,
-    /// Built-in Volt Chat & 3D Proximity Voice Chat (`#21`).
+    /// Built-in Volt Chat enhancements (`#21`).
     pub volt_chat: crate::volt_qol::VoltChatConfig,
     /// Built-in Volt Visuals (`#19` Connected Textures, Better Grass & 3D Items).
     pub volt_visuals: crate::volt_qol::VoltVisualsConfig,
@@ -897,38 +897,7 @@ impl Extras {
                         e.volt_qol.vm_totem_scale_pct = v.clamp(25, 120);
                     }
                 }
-                // --- Volt Chat & Voice (#21) ---
-                "voltVoiceEnabled" => e.volt_chat.voice_enabled = flag(e.volt_chat.voice_enabled),
-                "voltVoicePtt" => e.volt_chat.voice_ptt_mode = flag(e.volt_chat.voice_ptt_mode),
-                "voltVoiceVad" => {
-                    if let Ok(v) = value.parse::<u16>() {
-                        e.volt_chat.voice_vad_threshold = v.clamp(5, 80);
-                    }
-                }
-                "voltVoiceMicGain" => {
-                    if let Ok(v) = value.parse::<u16>() {
-                        e.volt_chat.voice_mic_gain_pct = v.clamp(0, 200);
-                    }
-                }
-                "voltVoiceOutGain" => {
-                    if let Ok(v) = value.parse::<u16>() {
-                        e.volt_chat.voice_output_gain_pct = v.clamp(0, 200);
-                    }
-                }
-                "voltVoiceDist" => {
-                    if let Ok(v) = value.parse::<u16>() {
-                        e.volt_chat.voice_distance_blocks = v.clamp(12, 96);
-                    }
-                }
-                "voltVoiceCaveMuffle" => {
-                    e.volt_chat.voice_cave_muffle = flag(e.volt_chat.voice_cave_muffle)
-                }
-                "voltVoiceHudBtn" => {
-                    e.volt_chat.voice_hud_button = flag(e.volt_chat.voice_hud_button)
-                }
-                "voltVoiceLoopback" => {
-                    e.volt_chat.voice_loopback_test = flag(e.volt_chat.voice_loopback_test)
-                }
+                // --- Volt Chat (#21) ---
                 "voltChatTimestamps" => {
                     e.volt_chat.chat_timestamps = flag(e.volt_chat.chat_timestamps)
                 }
@@ -1397,37 +1366,7 @@ impl Extras {
             "voltQolVmTotem",
             &self.volt_qol.vm_totem_scale_pct.to_string(),
         );
-        // Volt Chat & Voice
-        push("voltVoiceEnabled", bool_text(self.volt_chat.voice_enabled));
-        push("voltVoicePtt", bool_text(self.volt_chat.voice_ptt_mode));
-        push(
-            "voltVoiceVad",
-            &self.volt_chat.voice_vad_threshold.to_string(),
-        );
-        push(
-            "voltVoiceMicGain",
-            &self.volt_chat.voice_mic_gain_pct.to_string(),
-        );
-        push(
-            "voltVoiceOutGain",
-            &self.volt_chat.voice_output_gain_pct.to_string(),
-        );
-        push(
-            "voltVoiceDist",
-            &self.volt_chat.voice_distance_blocks.to_string(),
-        );
-        push(
-            "voltVoiceCaveMuffle",
-            bool_text(self.volt_chat.voice_cave_muffle),
-        );
-        push(
-            "voltVoiceHudBtn",
-            bool_text(self.volt_chat.voice_hud_button),
-        );
-        push(
-            "voltVoiceLoopback",
-            bool_text(self.volt_chat.voice_loopback_test),
-        );
+        // Volt Chat
         push(
             "voltChatTimestamps",
             bool_text(self.volt_chat.chat_timestamps),

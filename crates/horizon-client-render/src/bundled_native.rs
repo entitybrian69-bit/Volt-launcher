@@ -35,7 +35,6 @@ pub const WOVEN: &[(&str, &str)] = &[
     ("hitbox_plus", "1.3.0"),
     ("invisible_frames", "0.1.1"),
     ("freelook", "0.3.1"),
-    ("voicechat", "1.0.0"),
     ("worldedit", "1.2.1"),
     ("horizonmatica", "0.1.1"),
     ("visuality_horizon", "1.0.2"),

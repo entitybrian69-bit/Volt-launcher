@@ -22,7 +22,7 @@ TARGETS = {"arm64-v8a": "aarch64-linux-android", "armeabi-v7a": "armv7-linux-and
 # Volt already has handwritten integrations for these exact module names.
 # Applying them a second time can produce duplicate Rust modules/hooks.
 BUILTIN = {"zoom", "fps_overlay", "keystrokes", "minimap"}
-MAX_MODS = 38
+MAX_MODS = 37
 
 
 def selection(value: str) -> tuple[str, Path]:

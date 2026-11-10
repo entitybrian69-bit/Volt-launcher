@@ -66,16 +66,7 @@ pub enum VoltAct {
     QolVmClassic,
     QolVmTotem,
     QolVmReset,
-    // --- Volt Chat & #21 3D Proximity Voice ---
-    VoiceEnable,
-    VoiceModePtt,
-    VoiceVad,
-    VoiceMicGain,
-    VoiceOutGain,
-    VoiceDistance,
-    VoiceCaveMuffle,
-    VoiceHudBtn,
-    VoiceLoopback,
+    // --- Volt Chat (#21) ---
     ChatTimestamps,
     ChatCompactSpam,
     ChatMentionPing,
@@ -197,15 +188,6 @@ impl VoltAct {
             Self::QolVmClassic => "1.7 Classic Eat & Guard",
             Self::QolVmTotem => "Totem Pop Scale",
             Self::QolVmReset => "Reset Viewmodel",
-            Self::VoiceEnable => "3D Proximity Voice",
-            Self::VoiceModePtt => "Activation Mode",
-            Self::VoiceVad => "Voice Gate Sensitivity",
-            Self::VoiceMicGain => "Microphone Boost",
-            Self::VoiceOutGain => "Voice Chat Volume",
-            Self::VoiceDistance => "Proximity Range",
-            Self::VoiceCaveMuffle => "Cave Acoustic Muffle",
-            Self::VoiceHudBtn => "On-Screen PTT Button",
-            Self::VoiceLoopback => "Mic Loopback Test",
             Self::ChatTimestamps => "Chat Timestamps",
             Self::ChatCompactSpam => "Compact Duplicate Chat",
             Self::ChatMentionPing => "Name Mention Highlight",
@@ -300,21 +282,6 @@ impl VoltAct {
             Self::QolVmClassic => on_off(e.volt_qol.vm_classic_animations).into(),
             Self::QolVmTotem => format!("{}%", e.volt_qol.vm_totem_scale_pct),
             Self::QolVmReset => "Tap to Reset".into(),
-            Self::VoiceEnable => on_off(e.volt_chat.voice_enabled).into(),
-            Self::VoiceModePtt => {
-                if e.volt_chat.voice_ptt_mode {
-                    "Push-to-Talk".into()
-                } else {
-                    "Voice Activity".into()
-                }
-            }
-            Self::VoiceVad => format!("{}%", e.volt_chat.voice_vad_threshold),
-            Self::VoiceMicGain => format!("{}%", e.volt_chat.voice_mic_gain_pct),
-            Self::VoiceOutGain => format!("{}%", e.volt_chat.voice_output_gain_pct),
-            Self::VoiceDistance => format!("{}m", e.volt_chat.voice_distance_blocks),
-            Self::VoiceCaveMuffle => on_off(e.volt_chat.voice_cave_muffle).into(),
-            Self::VoiceHudBtn => on_off(e.volt_chat.voice_hud_button).into(),
-            Self::VoiceLoopback => on_off(e.volt_chat.voice_loopback_test).into(),
             Self::ChatTimestamps => on_off(e.volt_chat.chat_timestamps).into(),
             Self::ChatCompactSpam => on_off(e.volt_chat.chat_compact_spam).into(),
             Self::ChatMentionPing => on_off(e.volt_chat.chat_mention_ping).into(),
@@ -403,15 +370,6 @@ impl VoltAct {
             Self::QolVmClassic => "Enables smooth 1.7-style eating and sword/shield guard posture.",
             Self::QolVmTotem => "Scales the Totem of Undying pop animation so it never blocks your screen.",
             Self::QolVmReset => "Restores all first-person hand & viewmodel sliders to vanilla defaults.",
-            Self::VoiceEnable => "Enables pure-Rust 3D positional UDP proximity voice chat on LAN & compatible servers.",
-            Self::VoiceModePtt => "Choose Push-to-Talk (HUD mic button / V key) or automatic Voice Activity Detection.",
-            Self::VoiceVad => "Microphone volume threshold required to trigger Voice Activity transmission.",
-            Self::VoiceMicGain => "Amplifies or attenuates your outgoing microphone voice level.",
-            Self::VoiceOutGain => "Master volume of nearby players speaking in 3D proximity voice chat.",
-            Self::VoiceDistance => "Maximum distance in blocks over which 3D proximity voices fade out.",
-            Self::VoiceCaveMuffle => "Gently muffles distant voices inside deep underground caves.",
-            Self::VoiceHudBtn => "Displays a convenient Push-to-Talk microphone button on the touch HUD.",
-            Self::VoiceLoopback => "Plays back your own spatialized mic audio locally to test volume and clarity.",
             Self::ChatTimestamps => "Prefixes incoming chat messages with [HH:MM] timestamps.",
             Self::ChatCompactSpam => "Stacks identical consecutive chat messages into compact (x2), (x3) counters.",
             Self::ChatMentionPing => "Highlights messages mentioning your username with a subtle chime.",
@@ -581,31 +539,6 @@ impl VoltAct {
                 e.volt_qol.vm_swing_speed_pct = 100;
                 e.volt_qol.vm_totem_scale_pct = 100;
             }
-            Self::VoiceEnable => e.volt_chat.voice_enabled = !e.volt_chat.voice_enabled,
-            Self::VoiceModePtt => e.volt_chat.voice_ptt_mode = !e.volt_chat.voice_ptt_mode,
-            Self::VoiceVad => {
-                e.volt_chat.voice_vad_threshold =
-                    step_u16(e.volt_chat.voice_vad_threshold, 10, 70, 10, back)
-            }
-            Self::VoiceMicGain => {
-                e.volt_chat.voice_mic_gain_pct =
-                    step_u16(e.volt_chat.voice_mic_gain_pct, 25, 200, 25, back)
-            }
-            Self::VoiceOutGain => {
-                e.volt_chat.voice_output_gain_pct =
-                    step_u16(e.volt_chat.voice_output_gain_pct, 0, 200, 25, back)
-            }
-            Self::VoiceDistance => {
-                e.volt_chat.voice_distance_blocks =
-                    step_u16(e.volt_chat.voice_distance_blocks, 16, 96, 16, back)
-            }
-            Self::VoiceCaveMuffle => {
-                e.volt_chat.voice_cave_muffle = !e.volt_chat.voice_cave_muffle
-            }
-            Self::VoiceHudBtn => e.volt_chat.voice_hud_button = !e.volt_chat.voice_hud_button,
-            Self::VoiceLoopback => {
-                e.volt_chat.voice_loopback_test = !e.volt_chat.voice_loopback_test
-            }
             Self::ChatTimestamps => e.volt_chat.chat_timestamps = !e.volt_chat.chat_timestamps,
             Self::ChatCompactSpam => e.volt_chat.chat_compact_spam = !e.volt_chat.chat_compact_spam,
             Self::ChatMentionPing => e.volt_chat.chat_mention_ping = !e.volt_chat.chat_mention_ping,
@@ -714,20 +647,6 @@ pub const QOL_SECTIONS: &[(&str, &[VoltAct])] = &[
 ];
 
 pub const CHAT_SECTIONS: &[(&str, &[VoltAct])] = &[
-    (
-        "3D Positional Proximity Voice Chat (#21)",
-        &[
-            VoltAct::VoiceEnable,
-            VoltAct::VoiceModePtt,
-            VoltAct::VoiceMicGain,
-            VoltAct::VoiceOutGain,
-            VoltAct::VoiceDistance,
-            VoltAct::VoiceVad,
-            VoltAct::VoiceCaveMuffle,
-            VoltAct::VoiceHudBtn,
-            VoltAct::VoiceLoopback,
-        ],
-    ),
     (
         "Chat Enhancements & Quick Macros",
         &[

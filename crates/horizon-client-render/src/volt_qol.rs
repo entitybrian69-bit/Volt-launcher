@@ -3,7 +3,7 @@
 //!   `#8` Volt Blueprint 3D Hologram, `#9` Volt Cam & Replay Ring, `#15` Sound
 //!   Physics Lite & Muffler, `#17` Interactive World Atlas, `#18` Volt JEI Recipe
 //!   Browser, `#25` First-Person Hand & Viewmodel Customizer)
-//! - **Volt Chat** (`#21` 3D Positional Proximity Voice Chat UDP LAN/SVC engine +
+//! - **Volt Chat** (`#21` chat enhancements:
 //!   Chat Timestamps, Spam Stacker, Quick-Chat Bar & Mention Ping)
 //! - **Volt Visuals** (`#19` Seamless Connected Glass/Textures, Better Grass Sides,
 //!   3D Dropped Items)
@@ -11,8 +11,7 @@
 //!   Offscreen Entity Skip, Smart Frame Pacer)
 //! - **Volt Mods** (24 built-in pure-Rust native gameplay/PvP/survival/tech mods)
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::collections::HashMap;
 
 use crate::hud::{self, HudAtlas, HudBatch};
 
@@ -255,22 +254,11 @@ pub struct VoltBoostPlusConfig {
 }
 
 // ============================================================================
-// 3. VOLT CHAT & 3D PROXIMITY VOICE CONFIG + UDP ENGINE (`#21`)
+// 3. VOLT CHAT CONFIG (`#21`)
 // ============================================================================
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct VoltChatConfig {
-    pub voice_enabled: bool,
-    pub voice_ptt_mode: bool,
-    pub voice_vad_threshold: u16,
-    pub voice_mic_gain_pct: u16,
-    pub voice_output_gain_pct: u16,
-    pub voice_distance_blocks: u16,
-    pub voice_cave_muffle: bool,
-    pub voice_hud_button: bool,
-    pub voice_loopback_test: bool,
-    pub voice_port: u16,
-    // Chat enhancements
     pub chat_timestamps: bool,
     pub chat_compact_spam: bool,
     pub chat_mention_ping: bool,
@@ -280,291 +268,11 @@ pub struct VoltChatConfig {
 impl Default for VoltChatConfig {
     fn default() -> Self {
         Self {
-            voice_enabled: false,
-            voice_ptt_mode: true,
-            voice_vad_threshold: 22,
-            voice_mic_gain_pct: 100,
-            voice_output_gain_pct: 100,
-            voice_distance_blocks: 48,
-            voice_cave_muffle: true,
-            voice_hud_button: true,
-            voice_loopback_test: false,
-            voice_port: 24454,
             chat_timestamps: false,
             chat_compact_spam: false,
             chat_mention_ping: true,
             chat_quick_bar: false,
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VoicePeerState {
-    pub name: String,
-    pub pos: [f32; 3],
-    pub level: f32,
-    pub last_seen_s: f32,
-    pub distance_m: f32,
-}
-
-/// ITU G.711 mu-law companding for ultra-low-CPU 16kHz voice frames (zero unsafe).
-pub fn encode_mulaw(sample: i16) -> u8 {
-    const BIAS: i32 = 0x84;
-    const CLIP: i32 = 32635;
-    let mut pcm = i32::from(sample);
-    let sign = if pcm < 0 {
-        pcm = -pcm;
-        0x80u8
-    } else {
-        0x00u8
-    };
-    if pcm > CLIP {
-        pcm = CLIP;
-    }
-    pcm += BIAS;
-    let mut exp = 7u8;
-    let mut mask = 0x4000i32;
-    while exp > 0 && (pcm & mask) == 0 {
-        exp -= 1;
-        mask >>= 1;
-    }
-    let mantissa = ((pcm >> (exp + 3)) & 0x0F) as u8;
-    !(sign | (exp << 4) | mantissa)
-}
-
-pub fn decode_mulaw(byte: u8) -> i16 {
-    let u = !byte;
-    let sign = (u & 0x80) != 0;
-    let exp = ((u >> 4) & 0x07) as i32;
-    let mantissa = (u & 0x0F) as i32;
-    let mut sample = ((mantissa << 3) + 0x84) << exp;
-    sample -= 0x84;
-    if sign {
-        (-sample).clamp(-32768, 32767) as i16
-    } else {
-        sample.clamp(-32768, 32767) as i16
-    }
-}
-
-/// Safe-Rust non-blocking UDP 3D Positional Proximity Voice Chat engine.
-/// Supports LAN broadcast (`255.255.255.255:port`) AND direct server relay
-/// (`server_ip:port`, default `24454` matching Simple Voice Chat port).
-pub struct VoltVoiceRuntime {
-    socket: Option<UdpSocket>,
-    bound_port: u16,
-    pub ptt_held: bool,
-    pub local_speaking: bool,
-    pub local_mic_level: f32,
-    pub peers: HashMap<u64, VoicePeerState>,
-    pub muted_peers: HashSet<String>,
-    pub mixed_pcm_out: VecDeque<[f32; 2]>,
-    seq: u32,
-    last_tx_s: f32,
-}
-
-impl Default for VoltVoiceRuntime {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            bound_port: 0,
-            ptt_held: false,
-            local_speaking: false,
-            local_mic_level: 0.0,
-            peers: HashMap::new(),
-            muted_peers: HashSet::new(),
-            mixed_pcm_out: VecDeque::with_capacity(4096),
-            seq: 0,
-            last_tx_s: 0.0,
-        }
-    }
-}
-
-impl VoltVoiceRuntime {
-    pub fn tick(
-        &mut self,
-        cfg: &VoltChatConfig,
-        local_id: u64,
-        local_name: &str,
-        listener_pos: [f32; 3],
-        listener_yaw_deg: f32,
-        in_cave: bool,
-        server_host: Option<&str>,
-        mic_samples_16k: &[i16],
-        now_s: f32,
-    ) {
-        if !cfg.voice_enabled {
-            if self.socket.is_some() {
-                self.socket = None;
-                self.peers.clear();
-                self.mixed_pcm_out.clear();
-                self.local_speaking = false;
-                self.local_mic_level = 0.0;
-            }
-            return;
-        }
-
-        if self.socket.is_none() || self.bound_port != cfg.voice_port {
-            self.bound_port = cfg.voice_port;
-            let sock = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, cfg.voice_port))
-                .or_else(|_| UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)));
-            if let Ok(s) = sock {
-                let _ = s.set_nonblocking(true);
-                let _ = s.set_broadcast(true);
-                self.socket = Some(s);
-            }
-        }
-
-        // Compute mic RMS & transmit 20ms frame (`VV01` packet) when PTT or VAD active
-        let mic_gain = f32::from(cfg.voice_mic_gain_pct.clamp(0, 200)) / 100.0;
-        let mut rms = 0.0f32;
-        if !mic_samples_16k.is_empty() {
-            let sum_sq: f32 = mic_samples_16k
-                .iter()
-                .map(|&s| {
-                    let v = (f32::from(s) / 32768.0) * mic_gain;
-                    v * v
-                })
-                .sum();
-            rms = (sum_sq / mic_samples_16k.len() as f32).sqrt();
-        } else if cfg.voice_ptt_mode && self.ptt_held {
-            // Subtle carrier comfort indicator when holding PTT without hardware mic capture
-            rms = 0.18 + (now_s * 9.0).sin().abs() * 0.14;
-        }
-        self.local_mic_level = (rms * 2.4).clamp(0.0, 1.0);
-        let vad_gate = f32::from(cfg.voice_vad_threshold.clamp(5, 80)) / 200.0;
-        self.local_speaking = if cfg.voice_ptt_mode {
-            self.ptt_held
-        } else {
-            self.local_mic_level >= vad_gate
-        };
-
-        if self.local_speaking && (now_s - self.last_tx_s) >= 0.020 {
-            self.last_tx_s = now_s;
-            self.seq = self.seq.wrapping_add(1);
-            let mut pkt = Vec::with_capacity(384);
-            pkt.extend_from_slice(b"VV01");
-            pkt.extend_from_slice(&local_id.to_le_bytes());
-            pkt.extend_from_slice(&self.seq.to_le_bytes());
-            for c in listener_pos {
-                pkt.extend_from_slice(&c.to_le_bytes());
-            }
-            let name_bytes = local_name.as_bytes();
-            let nlen = name_bytes.len().min(24) as u8;
-            pkt.push(nlen);
-            pkt.extend_from_slice(&name_bytes[..usize::from(nlen)]);
-            let frame_len = mic_samples_16k.len().min(320);
-            pkt.extend_from_slice(&(frame_len as u16).to_le_bytes());
-            for &s in &mic_samples_16k[..frame_len] {
-                let scaled = (f32::from(s) * mic_gain).clamp(-32767.0, 32767.0) as i16;
-                pkt.push(encode_mulaw(scaled));
-            }
-            if let Some(sock) = &self.socket {
-                let bcast = SocketAddr::V4(SocketAddrV4::new(
-                    Ipv4Addr::BROADCAST,
-                    cfg.voice_port.max(1024),
-                ));
-                let _ = sock.send_to(&pkt, bcast);
-                if let Some(host) = server_host
-                    && let Ok(ip) = host.split(':').next().unwrap_or("").parse::<Ipv4Addr>()
-                {
-                    let _ = sock.send_to(
-                        &pkt,
-                        SocketAddr::V4(SocketAddrV4::new(ip, cfg.voice_port.max(1024))),
-                    );
-                }
-            }
-            if cfg.voice_loopback_test && !mic_samples_16k.is_empty() {
-                let out_gain = f32::from(cfg.voice_output_gain_pct.clamp(0, 200)) / 100.0;
-                for &s in &mic_samples_16k[..frame_len] {
-                    if self.mixed_pcm_out.len() < 8192 {
-                        let f = (f32::from(s) / 32768.0) * mic_gain * out_gain * 0.6;
-                        self.mixed_pcm_out.push_back([f, f]);
-                    }
-                }
-            }
-        }
-
-        // Receive & 3D spatialize incoming peer voice packets
-        let max_dist = f32::from(cfg.voice_distance_blocks.clamp(8, 128));
-        let out_gain = f32::from(cfg.voice_output_gain_pct.clamp(0, 200)) / 100.0;
-        let (yaw_s, yaw_c) = listener_yaw_deg.to_radians().sin_cos();
-
-        if let Some(sock) = &self.socket {
-            let mut buf = [0u8; 640];
-            while let Ok((len, _addr)) = sock.recv_from(&mut buf) {
-                if len < 31 || &buf[0..4] != b"VV01" {
-                    continue;
-                }
-                let sender_id = u64::from_le_bytes([
-                    buf[4], buf[5], buf[6], buf[7], buf[8], buf[9], buf[10], buf[11],
-                ]);
-                if sender_id == local_id && !cfg.voice_loopback_test {
-                    continue;
-                }
-                let px = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
-                let py = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
-                let pz = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
-                let nlen = usize::from(buf[28]);
-                if 29 + nlen + 2 > len {
-                    continue;
-                }
-                let peer_name = String::from_utf8_lossy(&buf[29..29 + nlen]).into_owned();
-                if self.muted_peers.contains(&peer_name) {
-                    continue;
-                }
-                let dx = px - listener_pos[0];
-                let dy = py - listener_pos[1];
-                let dz = pz - listener_pos[2];
-                let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-                if dist > max_dist {
-                    continue;
-                }
-                let atten = (1.0 - (dist / max_dist)).powi(2)
-                    * if cfg.voice_cave_muffle && in_cave && dist > 10.0 {
-                        0.68
-                    } else {
-                        1.0
-                    };
-                // Right-ear vector in Minecraft camera coords
-                let right_x = -yaw_c;
-                let right_z = -yaw_s;
-                let pan = if dist > 0.25 {
-                    ((dx * right_x + dz * right_z) / dist).clamp(-0.85, 0.85)
-                } else {
-                    0.0
-                };
-                let gain_l = atten * out_gain * (1.0 - pan * 0.45);
-                let gain_r = atten * out_gain * (1.0 + pan * 0.45);
-
-                let audio_off = 29 + nlen;
-                let audio_len =
-                    usize::from(u16::from_le_bytes([buf[audio_off], buf[audio_off + 1]]));
-                let payload = &buf[audio_off + 2..len.min(audio_off + 2 + audio_len)];
-                let mut peak = 0.15f32;
-                for &b in payload {
-                    let s = f32::from(decode_mulaw(b)) / 32768.0;
-                    peak = peak.max(s.abs() * 2.2);
-                    if self.mixed_pcm_out.len() < 8192 {
-                        // Upsample 16kHz -> ~48kHz (3x hold) for smooth playback mixing
-                        let frame = [s * gain_l, s * gain_r];
-                        self.mixed_pcm_out.push_back(frame);
-                        self.mixed_pcm_out.push_back(frame);
-                        self.mixed_pcm_out.push_back(frame);
-                    }
-                }
-                self.peers.insert(
-                    sender_id,
-                    VoicePeerState {
-                        name: peer_name,
-                        pos: [px, py, pz],
-                        level: peak.clamp(0.0, 1.0),
-                        last_seen_s: now_s,
-                        distance_m: dist,
-                    },
-                );
-            }
-        }
-        self.peers.retain(|_, p| (now_s - p.last_seen_s) < 1.25);
     }
 }
 
@@ -1274,19 +982,6 @@ pub fn preset_blueprint_blocks(preset: BlueprintPreset) -> Vec<BlueprintBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mulaw_codec_roundtrips_speech_waveform_accurately() {
-        for sample in [-24000i16, -4200, -320, 0, 320, 4200, 24000] {
-            let enc = encode_mulaw(sample);
-            let dec = decode_mulaw(enc);
-            let tol = (i32::from(sample).abs() / 16).max(32);
-            assert!(
-                (i32::from(sample) - i32::from(dec)).abs() <= tol,
-                "sample {sample} decoded as {dec}"
-            );
-        }
-    }
 
     #[test]
     fn chat_calculator_evaluates_stack_arithmetic() {

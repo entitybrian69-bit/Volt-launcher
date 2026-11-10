@@ -32,7 +32,7 @@ jobs:
         abi: [arm64-v8a, armeabi-v7a]
         mod: [jei, jade, veinminer, horizon_physics, appleskin, status_effect_hud,
               toggle_sprint, inventory_profiles, shulker_peek, mousetricks, itemnew,
-              voicechat, worldedit, horizonmatica, visuality_horizon, eatinganimation,
+              worldedit, horizonmatica, visuality_horizon, eatinganimation,
               enchantmenthints, held_item_info, right_click_crops,
               carryblock, chatheads, smartf3, fast_items, armor_status, customhud,
               coords_hud, crosshair_indicator, hitbox_plus, biomecompass,
@@ -86,10 +86,6 @@ jobs:
           - mod: itemnew
             file: itemnew-0.1.1.hnmod
             tag: itemnew-0.1.1
-            raw_targets: "--experimental-raw-targets"
-          - mod: voicechat
-            file: voicechat-1.0.0.hnmod
-            tag: voicechat-1.0.0
             raw_targets: "--experimental-raw-targets"
           - mod: worldedit
             file: worldedit-1.2.1.hnmod

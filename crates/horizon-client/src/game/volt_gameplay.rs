@@ -1,6 +1,6 @@
 //! Live in-world & HUD runtime hooks for **Volt Settings 0.9.9**:
 //! - **`Volt QoL` (`#2`, `#3`, `#8`, `#9`, `#15`, `#17`, `#18`, `#25`)**
-//! - **`Volt Chat` (`#21` 3D UDP Proximity Voice + Chat Suite)**
+//! - **`Volt Chat` (`#21` Chat Suite)**
 //! - **`Volt Visuals` (`#19` Connected Glass, Better Grass, 3D Dropped Items)**
 //! - **`Volt 50-Mod Catalog` (`volt_mods` pure-Rust HUDs & gameplay mechanics)**
 
@@ -15,14 +15,14 @@ use horizon_client::{
     volt_features::project_waypoint,
     volt_mods::VoltModId,
     volt_qol::{
-        AtlasChunkTile, ClientTimeWeather, CrosshairStyle, VoltChatConfig,
-        VoltVoiceRuntime, eval_chat_math, is_slime_chunk, preset_blueprint_blocks,
+        AtlasChunkTile, ClientTimeWeather, CrosshairStyle, eval_chat_math, is_slime_chunk,
+        preset_blueprint_blocks,
     },
 };
 use std::collections::{HashMap, VecDeque};
 use winit::keyboard::KeyCode;
 
-/// Transient per-session runtime state for Volt QoL, Voice, JEI & Mods.
+/// Transient per-session runtime state for Volt QoL, JEI & Mods.
 pub(super) struct VoltRuntime {
     pub freelook_active: bool,
     freelook_key_was_down: bool,
@@ -34,9 +34,6 @@ pub(super) struct VoltRuntime {
     zoom_display_smooth: bool,
     pub freelook_yaw: f32,
     pub freelook_pitch: f32,
-    pub voice: VoltVoiceRuntime,
-    pub voice_ptt_touch_held: bool,
-    pub voice_mic_scratch: Vec<i16>,
     pub blueprint_anchor: Option<[i32; 3]>,
     pub blueprint_dim: String,
     pub atlas_scope_dim: Option<(String, String)>,
@@ -89,9 +86,6 @@ impl Default for VoltRuntime {
             zoom_display_smooth: true,
             freelook_yaw: 0.0,
             freelook_pitch: 0.0,
-            voice: VoltVoiceRuntime::default(),
-            voice_ptt_touch_held: false,
-            voice_mic_scratch: Vec::with_capacity(320),
             blueprint_anchor: None,
             blueprint_dim: String::new(),
             atlas_scope_dim: None,
@@ -341,7 +335,7 @@ impl Game<'_> {
         false
     }
 
-    /// Per-frame background tick for World Atlas, Sound Physics Lite, 3D Voice,
+    /// Per-frame background tick for World Atlas, Sound Physics Lite,
     /// Damage Popups, Replay Buffer, and Cosmetics skin sync.
     pub(super) fn tick_volt_frame(&mut self, underwater: bool) {
         let now = self.started.elapsed().as_secs_f64();
@@ -404,7 +398,6 @@ impl Game<'_> {
 
         let qol = &self.settings.extras.volt_qol;
         let mods = &self.settings.extras.volt_mods;
-        let chat_cfg = &self.settings.extras.volt_chat;
 
         // 1. #15 Sound Physics Lite (Cave Reverb + Underwater LPF + Wall Muffle + Muffler)
         let mut cave_reverb = 0.0f32;
@@ -433,59 +426,6 @@ impl Game<'_> {
                 qol.muffle_rain_pct,
             ],
         );
-
-        // 2. #21 3D Positional Proximity Voice Chat
-        let ptt_held = self.extras.volt.voice_ptt_touch_held
-            || (self.screen == Screen::Playing && self.keys.contains(&KeyCode::KeyV));
-        let mic_active = chat_cfg.voice_enabled
-            && self.title.is_none()
-            && (!chat_cfg.voice_ptt_mode || ptt_held);
-        self.audio
-            .poll_voice_mic(mic_active, &mut self.extras.volt.voice_mic_scratch);
-        if chat_cfg.voice_enabled && self.title.is_none() {
-            let listener_pos = self.player.as_ref().map_or([0.0; 3], |p| {
-                [
-                    p.position.x as f32,
-                    (p.position.y + 1.62) as f32,
-                    p.position.z as f32,
-                ]
-            });
-            let in_cave = self.player.as_ref().is_some_and(|p| {
-                (self.world.light(
-                    p.position.x.floor() as i32,
-                    (p.position.y + 1.6).floor() as i32,
-                    p.position.z.floor() as i32,
-                ) >> 4)
-                    == 0
-            });
-            let relay_host = self
-                .server_address()
-                .and_then(|s| s.split(':').next().map(str::to_owned));
-            let uname = self.player_display_name().plain();
-            let uid = horizon_core::random::java_string_hash(uname.encode_utf16()) as u64;
-            let mic_slice = std::mem::take(&mut self.extras.volt.voice_mic_scratch);
-            self.extras.volt.voice.ptt_held = ptt_held;
-            self.extras.volt.voice.tick(
-                chat_cfg,
-                uid ^ 0x564F_4C54,
-                &uname,
-                listener_pos,
-                self.yaw,
-                in_cave,
-                relay_host.as_deref(),
-                &mic_slice,
-                now as f32,
-            );
-            self.audio
-                .push_voice_frames(&mut self.extras.volt.voice.mixed_pcm_out);
-            self.extras.volt.voice_mic_scratch = mic_slice;
-        } else {
-            let off_cfg = VoltChatConfig::default();
-            self.extras
-                .volt
-                .voice
-                .tick(&off_cfg, 0, "", [0.0; 3], 0.0, false, None, &[], now as f32);
-        }
 
         if self.title.is_some() {
             self.extras.volt.blueprint_anchor = None;
@@ -898,7 +838,7 @@ impl Game<'_> {
         }
     }
 
-    /// Draws all active Volt QoL, Volt Voice, and 50-Mod Catalog HUDs!
+    /// Draws all active Volt QoL and Mod Catalog HUDs!
     pub(super) fn draw_volt_all_huds(&mut self, batch: &mut HudBatch, corners: &mut Corners) {
         if self.title.is_some() || self.ui.hide_gui {
             return;
@@ -933,7 +873,6 @@ impl Game<'_> {
         let qol = &self.settings.extras.volt_qol;
         let mods = &self.settings.extras.volt_mods;
         let cat = &self.settings.extras.mod_catalog;
-        let chat_cfg = &self.settings.extras.volt_chat;
 
         // 1. #3 World Inspector (Jade / WTHIT Top-Center Card)
         if qol.world_inspector && self.screen == Screen::Playing {
@@ -1043,46 +982,6 @@ impl Game<'_> {
                     rgba(235, 238, 248, 255),
                     true,
                 );
-            }
-        }
-
-        // 3. #21 Proximity Voice PTT Button & Active Speaker Pills
-        if chat_cfg.voice_enabled {
-            if chat_cfg.voice_hud_button {
-                let [vx, vy, vw, vh] = Self::voice_ptt_rect(w, h);
-                let active = self.extras.volt.voice.local_speaking;
-                let bg = if active {
-                    rgba(34, 156, 86, 225)
-                } else {
-                    rgba(22, 26, 36, 205)
-                };
-                batch.fill(atlas, vx, vy, vw, vh, bg);
-                batch.fill(atlas, vx, vy, vw, 1.2, rgba(224, 52, 72, 240));
-                let lbl = if active { "MIC ON" } else { "MIC [V]" };
-                batch.text(
-                    atlas,
-                    lbl,
-                    vx + 5.0,
-                    vy + 5.0,
-                    rgba(250, 252, 255, 255),
-                    true,
-                );
-            }
-            if !self.extras.volt.voice.peers.is_empty() {
-                let n = self.extras.volt.voice.peers.len().min(4);
-                let bh = 4.0 + n as f32 * 11.0;
-                let (px, py) = corners.place(Corner::BottomLeft, 120.0, bh);
-                batch.fill(atlas, px, py, 120.0, bh, rgba(12, 18, 24, 195));
-                for (i, peer) in self.extras.volt.voice.peers.values().take(4).enumerate() {
-                    batch.text(
-                        atlas,
-                        &format!("\u{25cf} {} ({:.0}m)", peer.name, peer.distance_m),
-                        px + 5.0,
-                        py + 3.0 + i as f32 * 11.0,
-                        rgba(96, 245, 152, 255),
-                        true,
-                    );
-                }
             }
         }
 
@@ -1557,10 +1456,6 @@ impl Game<'_> {
                 }
             }
         }
-    }
-
-    pub(super) fn voice_ptt_rect(w: f32, h: f32) -> [f32; 4] {
-        [(w - 58.0).max(4.0), (h * 0.52).floor(), 52.0, 18.0]
     }
 
     /// The floating replay button's rectangle, from its saved centre
@@ -2906,32 +2801,13 @@ impl Game<'_> {
         }
     }
 
-    /// Handles touch/mouse press on the HUD Push-to-Talk `[MIC]` button.
+    /// Handles touch/mouse press on the Volt HUD (the hub pill or window).
     pub(super) fn try_click_volt_hud(&mut self, cursor: (f32, f32), pressed: bool) -> bool {
         self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
-        if !pressed {
-            self.extras.volt.voice_ptt_touch_held = false;
+        if !pressed || self.title.is_some() || self.ui.hide_gui {
             return false;
         }
-        if self.title.is_some() || self.ui.hide_gui {
-            return false;
-        }
-        // The Volt Hub pill / open hub window owns its taps first.
-        if self.try_click_volt_hub_overlay(cursor) {
-            return true;
-        }
-        let (w, h) = self.gui_size();
-        if self.settings.extras.volt_chat.voice_enabled
-            && self.settings.extras.volt_chat.voice_hud_button
-        {
-            let [vx, vy, vw, vh] = Self::voice_ptt_rect(w, h);
-            if cursor.0 >= vx && cursor.0 <= vx + vw && cursor.1 >= vy && cursor.1 <= vy + vh {
-                self.extras.volt.voice_ptt_touch_held = true;
-                self.audio.play_button_click();
-                return true;
-            }
-        }
-        false
+        self.try_click_volt_hub_overlay(cursor)
     }
 
     /// Evaluates `= <math>` inline calculator expressions in chat when `ChatCalculator` is ON!

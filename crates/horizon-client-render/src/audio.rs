@@ -54,7 +54,6 @@ struct Mixer {
     reverb_buf: Vec<[f32; 2]>,
     reverb_pos: usize,
     wall_occlusion: f32,
-    voice_pcm: std::collections::VecDeque<[f32; 2]>,
     /// The output device the stream was opened on (`Library.currentDeviceName`).
     #[cfg(feature = "audio")]
     device_name: String,
@@ -247,9 +246,6 @@ pub struct Audio {
     pub master: f32,
     /// Per-category Volt Sound Muffler gains (`0.0..=1.0`): `[portal, piston, minecart, explosion, rain]`.
     pub volt_mufflers: [f32; 5],
-    /// Dedicated-thread mic capture queue (`16 kHz` mono `i16`) for `#21` Proximity Voice Chat.
-    mic_buf_16k: Arc<Mutex<std::collections::VecDeque<i16>>>,
-    mic_stop: Option<std::sync::mpsc::SyncSender<()>>,
     /// Seeds of positional plays (the client level random's `nextLong`).
     random: LegacyRandom,
     /// A `SoundSource` index the next sound plays on (`/playsound`).
@@ -621,22 +617,6 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         }
     }
 
-    // #21 3D Positional Proximity Voice Chat stereo output mixing
-    if !mixer.voice_pcm.is_empty() {
-        for frame in data.chunks_mut(channels) {
-            if let Some([vl, vr]) = mixer.voice_pcm.pop_front() {
-                if channels >= 2 {
-                    frame[0] += vl;
-                    frame[1] += vr;
-                } else {
-                    frame[0] += (vl + vr) * 0.5;
-                }
-            } else {
-                break;
-            }
-        }
-    }
-
     // Limit the whole buffer together, preserving waveform and stereo balance
     // instead of flattening each overloaded sample; release over 200 ms
     // (OpenAL Soft's output limiter, `ALC_OUTPUT_LIMITER_SOFT`, releases
@@ -932,8 +912,6 @@ impl Audio {
             listener_yaw: 0.0,
             master: 1.0,
             volt_mufflers: [1.0; 5],
-            mic_buf_16k: Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(2048))),
-            mic_stop: None,
             random: LegacyRandom::new(crate::sound_engine::unique_seed()),
             source_override: None,
             capture: None,
@@ -1109,115 +1087,6 @@ impl Audio {
             self.volt_mufflers[4]
         } else {
             1.0
-        }
-    }
-
-    /// Feeds spatialized `#21` Proximity Voice Chat stereo samples into the output mixer.
-    pub fn push_voice_frames(&self, frames: &mut std::collections::VecDeque<[f32; 2]>) {
-        if frames.is_empty() {
-            return;
-        }
-        if let Ok(mut m) = self.backend.mixer.lock() {
-            while let Some(f) = frames.pop_front() {
-                if m.voice_pcm.len() < 9600 {
-                    m.voice_pcm.push_back(f);
-                }
-            }
-        } else {
-            frames.clear();
-        }
-    }
-
-    /// Starts or stops the dedicated-thread `#21` 16 kHz microphone capture stream,
-    /// draining up to `max_samples` for the current voice tick.
-    pub fn poll_voice_mic(&mut self, enabled: bool, out: &mut Vec<i16>) {
-        out.clear();
-        if !enabled {
-            self.mic_stop = None;
-            if let Ok(mut q) = self.mic_buf_16k.lock() {
-                q.clear();
-            }
-            return;
-        }
-        #[cfg(feature = "audio")]
-        if self.mic_stop.is_none() {
-            let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
-            let sink = self.mic_buf_16k.clone();
-            let _ = std::thread::Builder::new()
-                .name("volt-voice-mic".into())
-                .spawn(move || {
-                    let Some(dev) = cpal::default_host().default_input_device() else {
-                        return;
-                    };
-                    let mut opened_stream: Option<cpal::Stream> = None;
-                    for (rate, step) in [(16_000u32, 1usize), (48_000u32, 3usize), (44_100u32, 3usize)] {
-                        for ch in [1u16, 2u16] {
-                            let cfg = cpal::StreamConfig {
-                                channels: ch,
-                                sample_rate: cpal::SampleRate(rate),
-                                buffer_size: cpal::BufferSize::Default,
-                            };
-                            let sink_cb = sink.clone();
-                            let ch_usize = usize::from(ch);
-                            if let Ok(st) = dev.build_input_stream(
-                                &cfg,
-                                move |data: &[i16], _| {
-                                    if let Ok(mut q) = sink_cb.lock() {
-                                        for frame in data.chunks(ch_usize * step) {
-                                            if q.len() < 3200
-                                                && let Some(&s) = frame.first()
-                                            {
-                                                q.push_back(s);
-                                            }
-                                        }
-                                    }
-                                },
-                                |err| log::warn!("Volt Voice mic error: {err}"),
-                                None,
-                            ) && st.play().is_ok()
-                            {
-                                opened_stream = Some(st);
-                                break;
-                            }
-                            let sink_f32 = sink.clone();
-                            if let Ok(st) = dev.build_input_stream(
-                                &cfg,
-                                move |data: &[f32], _| {
-                                    if let Ok(mut q) = sink_f32.lock() {
-                                        for frame in data.chunks(ch_usize * step) {
-                                            if q.len() < 3200
-                                                && let Some(&s) = frame.first()
-                                            {
-                                                let pcm =
-                                                    (s.clamp(-1.0, 1.0) * 32767.0) as i16;
-                                                q.push_back(pcm);
-                                            }
-                                        }
-                                    }
-                                },
-                                |err| log::warn!("Volt Voice mic error: {err}"),
-                                None,
-                            ) && st.play().is_ok()
-                            {
-                                opened_stream = Some(st);
-                                break;
-                            }
-                        }
-                        if opened_stream.is_some() {
-                            break;
-                        }
-                    }
-                    if let Some(_live) = opened_stream {
-                        let _ = rx.recv();
-                    }
-                });
-            self.mic_stop = Some(tx);
-        }
-        if let Ok(mut q) = self.mic_buf_16k.lock() {
-            while out.len() < 320 {
-                let Some(s) = q.pop_front() else { break };
-                out.push(s);
-            }
         }
     }
 
