@@ -113,7 +113,6 @@ jobs:
             file: held_item_info-0.1.0.hnmod
             tag: held_item_info-0.1.0
             raw_targets: "--experimental-raw-targets"
-            raw_targets: "--experimental-raw-targets"
           - mod: right_click_crops
             file: right_click_crops-1.0.0.hnmod
             tag: right_click_crops-1.0.0
