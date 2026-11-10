@@ -23,7 +23,7 @@ use crate::command::args::GameMode;
 pub const DISCORD_APP_ID: &str = "1569578048133533747";
 /// The two buttons under the activity (Discord allows at most two).
 pub const WEBSITE: &str = "https://entitybrian69-bit.github.io/Volt-launcher/";
-pub const DISCORD_INVITE: &str = "https://discord.gg/ED2bhF77";
+pub const DISCORD_INVITE: &str = "https://discord.gg/WsBxGsKyhU";
 /// Whether the application has the game-mode images (`survival`, `creative`, `adventure`,
 /// `spectator`) beside the logo; it doesn't yet.
 const MODE_IMAGES: bool = false;
