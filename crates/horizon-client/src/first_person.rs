@@ -79,12 +79,6 @@ pub fn item_pose(left: bool, inverse_height: f32, attack: f32, pose: ItemPose) -
         eat *= Mat4::from_rotation_y((invert * jiggle * 90.0).to_radians());
         eat *= Mat4::from_rotation_x((jiggle * 10.0).to_radians());
         eat *= Mat4::from_rotation_z((invert * jiggle * 30.0).to_radians());
-        // Overhauled Entities: the food shrinks bite by bite as it is
-        // eaten (frame-fed gate, off by default so fixtures never move).
-        if crate::mobs::overhauled::fp_shrink_on() {
-            let left01 = (fraction).clamp(0.0, 1.0);
-            eat *= Mat4::from_scale(Vec3::splat(0.55 + 0.45 * left01));
-        }
         return eat * m;
     }
     if matches!(pose, ItemPose::Using) {

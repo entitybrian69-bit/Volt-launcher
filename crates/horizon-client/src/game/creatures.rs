@@ -4218,10 +4218,6 @@ impl Game<'_> {
                 return Ok(false);
             }
         }
-        // Overhauled Entities: a click on a cat or wolf can settle it
-        // into the loaf / lay-down visual, or wake it (purely visual; the
-        // vanilla interaction below is untouched).
-        horizon_client::mobs::overhauled::note_interact(&self.mobs[index]);
         if self.name_mob(index) {
             return Ok(true);
         }

@@ -170,22 +170,12 @@ impl Game<'_> {
         if self.ui.hide_gui {
             return;
         }
-        // Overhauled Entities totem pop-up dial: Subtle shrinks the
-        // activation item, Hidden skips it (the particles, sound and
-        // rumble above are untouched).
-        let totem_mode = horizon_client::mobs::overhauled::totem_mode();
-        if totem_mode == 2 {
-            return;
-        }
         let (Some(stack), Some(mut pose)) = (
             self.item_activation.active(),
             self.item_activation.pose(partial, aspect),
         ) else {
             return;
         };
-        if totem_mode == 1 {
-            pose *= glam::Mat4::from_scale(glam::Vec3::splat(0.45));
-        }
         if self.settings.extras.volt_qol.viewmodel_custom
             && self.settings.extras.volt_qol.vm_totem_scale_pct != 100
         {

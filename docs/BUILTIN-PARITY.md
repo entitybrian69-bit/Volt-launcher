@@ -118,29 +118,14 @@ gesture set so the library is usable out of the box.
 | API for other mods | DONE | `play_keyframes(index, now)` is public to the other built-ins. |
 | Built-in gestures + keybind | DONE | Wave, Point, Salute, Nod, Shake head, Clap; gesture key + selection in settings. (This part is ours; upstream ships no gestures.) |
 
-## 6. Overhauled Entities → `mobs/overhauled.rs` (+ `mobs/emf.rs`, `mobs/etf.rs`)
+## 6. Overhauled Entities — REMOVED
 
-**Upstream identity:** inspired by FreshLX's Fresh Animations / Fresh
-Moves resource packs (All Rights Reserved CEM keyframe data) and powered
-in upstream Minecraft by Traben's Entity Model Features (EMF) and Entity
-Texture Features (ETF). **Implementation:** fully clean-room native
-procedural animation — no upstream CEM data, assets or code. One visible
-mod row ("Overhauled Entities", default ON); the EMF/ETF counterparts are
-internal engine layers with no row or settings anywhere, by design.
-
-| Area | Status | Notes |
-|---|---|---|
-| Full-body walk overhaul (player + humanoids) | DONE | Eased double-frequency gait follow-through on arms/legs, body roll + sway, head counter-roll; additive over the vanilla pose, hitboxes untouched. |
-| Idle life (all entities) | DONE | Breathing arms, layered-noise head wander, weight shifts; `ambient` fallback covers every living model via part-name no-op writes. |
-| Zombie family reaches | DONE | Drifting raised-arm reach for Zombie/Drowned/Zombie Villager/Zombified Piglin and `Humanoid { zombie_arms }`. |
-| Quadruped gait + grazing + tail flicks | DONE | Cows, pigs, sheep, bears, pandas, goats, hoglins, horses, llamas; gated slow graze dip while idle. |
-| Tail wags (wolf/cat/fox) | DONE | Eager wag scaling with speed, lazy curl at rest. |
-| Creeper tiptoe, spider leg waves, chicken pecks, villager nods, enderman sway | DONE | Per-family routines matched to each model's part names. |
-| Per-entity personality (EMF/ETF layer) | DONE | Stable SplitMix64 phase/amplitude/tempo per entity id, so herds never sync (`etf::entity_random` avalanche-tested). |
-| Keyframe-exact Fresh Animations clips | UNSUPPORTED | The upstream packs' CEM keyframes are ARR data; shipping them would violate the licensing directive. The procedural recreation targets the same visible behaviours. |
-| ETF texture features (blinking, random skins, emissives) | UNSUPPORTED / already-vanilla | Need third-party texture assets (none ship by policy); emissive eyes are already vanilla-parity in `mobs/render.rs`. |
-| Settings | DONE | Master toggle, player/mob switches, Better rain particles, Subtle/Balanced/Dramatic intensity; all persisted per profile. |
-| Actions & Stuff behavioral-parity layer (v1.3.0) | DONE (code) / device verification pending | Keyframed clips (`mobs/overhauled_clips.rs`): idle emotes (stretch / look around / arm cross), flip (crouch mid-air), roll (sprint-fall landing), sit (sneak 5 s + look down), water entries (dive / cannonball / belly flop) with bubble bursts, full-moon wolf howl. Procedural: swim stroke + flutter kick, sprint lean, sword stance, drawn-bow tremble, shield brace, per-tool swing variation with a 3-path swing counter, ledge balancing, wolf play-bow/hops, cat loaf, horse swish/toss/stomp, wither head drift, happy-ghast sway, creeper fuse tremble. Environment pass (`volt_builtins`): rain impact splashes, ambient motes, boat wakes + oar splashes, XP-orb trails, mining sparks, glow-squid twinkles. v1.2 additions: death limp layer, fishing rod pose + bite jerk, interact-to-loaf/lay for cats and wolves, on-fire screen overlay, radius-scaled explosion bursts, glow-squid whole-body light pulse, break-rate-scaled mining sparks, item swap sounds (vanilla page-turn event, named substitution). v1.3 additions: totem pop-up dial (Full/Subtle/Hidden), first-person food shrink, reel-in rod yank, material-coloured mining sparks, procedural rare pink dolphin tint. Full per-row ledger: `docs/overhauled-entities/LEDGER.md`. |
+The Overhauled Entities built-in (procedural entity-animation overhaul,
+`mobs/overhauled.rs`, `mobs/overhauled_clips.rs`, plus the internal
+`mobs/emf.rs` / `mobs/etf.rs` layers) was removed at the owner's
+direction. No mod row, settings page, animation layer, particle pass or
+render hook from it remains; all engine call sites were reverted to the
+vanilla paths.
 
 ---
 
@@ -148,8 +133,7 @@ internal engine layers with no row or settings anywhere, by design.
 
 Each logic module has unit tests compiled into `horizon-client --lib` and
 run by the CI worldgen-test job filter: `nea::tests`,
-`player_gestures::tests`, `subtle_effects::tests`, `overhauled::tests`, `overhauled_clips::tests`,
-`emf::tests`, `etf::tests` — pose
+`player_gestures::tests`, `subtle_effects::tests` — pose
 math, gating flags, keyframe sampling, spring/landing behaviour, additive
 rotation budgets, randomizer stability and settings
 round-trips. The woven ABP mod is verified by the weave job's expected-set

@@ -94,54 +94,6 @@ fn white_uv(atlas: &HudAtlas) -> [[f32; 2]; 4] {
     [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]]
 }
 
-/// The Overhauled Entities on-fire screen overlay: translucent flame
-/// tongues licking up from the bottom edge, flickering with `t` (game
-/// seconds). Flat-colour quads off the HUD atlas white texel — no new
-/// assets, cheap enough to draw every frame while burning.
-pub fn draw_fire_overlay(batch: &mut HudBatch, atlas: &HudAtlas, t: f32) {
-    let uv = white_uv(atlas);
-    let (w, h) = (batch.width, batch.height);
-    // A soft orange wash over the lower third.
-    let wash_a = 46.0 + 10.0 * (t * 7.3).sin();
-    let wash = ((wash_a as u32) << 24) | 0x00E8_5A1A;
-    batch.quad([[0.0, h * 0.62], [w, h * 0.62], [w, h], [0.0, h]], uv, wash);
-    // Flame tongues: a row of tapered quads of varying height and phase.
-    let tongues = 9;
-    for i in 0..tongues {
-        let fi = i as f32;
-        let cx = w * (fi + 0.5) / tongues as f32;
-        let half = w / tongues as f32 * 0.62;
-        let flick = (t * 9.0 + fi * 1.7).sin() * 0.5 + 0.5;
-        let flick2 = (t * 12.7 + fi * 2.9).sin() * 0.5 + 0.5;
-        let rise = h * (0.16 + 0.10 * flick + 0.05 * flick2);
-        let sway = half * 0.35 * (t * 5.1 + fi * 0.9).sin();
-        let a = (60.0 + 70.0 * flick) as u32;
-        // Outer tongue, deep orange.
-        batch.quad(
-            [
-                [cx + sway, h - rise],
-                [cx + half, h + 2.0],
-                [cx + half * 0.4, h + 2.0],
-                [cx - half, h + 2.0],
-            ],
-            uv,
-            (a << 24) | 0x00D9_4A10,
-        );
-        // Inner tongue, hotter and brighter.
-        let a2 = (40.0 + 60.0 * flick2) as u32;
-        batch.quad(
-            [
-                [cx + sway * 0.6, h - rise * 0.62],
-                [cx + half * 0.55, h + 2.0],
-                [cx + half * 0.2, h + 2.0],
-                [cx - half * 0.55, h + 2.0],
-            ],
-            uv,
-            (a2 << 24) | 0x00F5_9B2B,
-        );
-    }
-}
-
 fn draw_diamond(batch: &mut HudAtlasBatch<'_>, cx: f32, cy: f32, rad: f32, color: u32) {
     batch.batch.quad(
         [

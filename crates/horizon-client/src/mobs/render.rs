@@ -512,9 +512,6 @@ pub fn body_color(m: &Mob, alpha: f32) -> u32 {
     match m.species() {
         Species::Wolf => super::tame::tint(m, alpha),
         Species::TropicalFish => abgr(DYE[m.extra.variant2 as usize & 15]),
-        // Overhauled Entities: about 1 in 100 dolphins is pink — a
-        // procedural body tint, stable per entity, white while off.
-        Species::Dolphin => super::overhauled::dolphin_tint(m.id),
         _ => 0xFFFF_FFFF,
     }
 }
@@ -1641,13 +1638,6 @@ fn render_visible(
 ) {
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha);
-    // Overhauled Entities: the glow squid's rhythmic light pulse — the
-    // whole body brightens and dims on a slow per-squid cycle.
-    let light = if m.species() == Species::GlowSquid {
-        super::overhauled::glow_pulse(m.id, s.age, light)
-    } else {
-        light
-    };
     let (model_key, texture) = body(m);
     // 3D skin layers: the player's own outer layer, one slab per painted
     // texel, in place of the flat inflated box.
