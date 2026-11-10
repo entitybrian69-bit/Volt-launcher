@@ -36,6 +36,8 @@ pub enum Clip {
     CannonBall,
     BellyFlop,
     Howl,
+    Loaf,
+    Lay,
 }
 
 /// One additive channel: a part, a pose axis (3 = x rot, 4 = y rot,
@@ -119,6 +121,31 @@ const BELLY_FLOP: &[Channel] = &[
     ch("left_leg", 3, &[(0.0, 0.0), (0.4, 0.3), (1.0, 0.0)]),
     ch("head", 3, &[(0.0, 0.0), (0.4, -0.55), (1.0, 0.0)]),
 ];
+const LOAF: &[Channel] = &[
+    // The cat loaf: all four legs folded under, tail curled around the
+    // body, chin settled. Sustained until the next interact wakes it.
+    ch("right_front_leg", 3, &[(0.0, 0.0), (0.6, 1.25)]),
+    ch("left_front_leg", 3, &[(0.0, 0.0), (0.6, 1.25)]),
+    ch("right_hind_leg", 3, &[(0.0, 0.0), (0.6, 1.25)]),
+    ch("left_hind_leg", 3, &[(0.0, 0.0), (0.6, 1.25)]),
+    ch("body", 3, &[(0.0, 0.0), (0.6, 0.12)]),
+    ch("head", 3, &[(0.0, 0.0), (0.6, 0.18)]),
+    ch("tail1", 4, &[(0.0, 0.0), (0.6, 0.85)]),
+    ch("tail2", 4, &[(0.0, 0.0), (0.6, 0.95)]),
+];
+const LAY: &[Channel] = &[
+    // The wolf lay-down: a sphinx rest — chest low, front legs folded,
+    // hind legs tucked, head settled. Sustained until the next interact.
+    ch("upper_body", 3, &[(0.0, 0.0), (0.7, 0.35)]),
+    ch("right_front_leg", 3, &[(0.0, 0.0), (0.7, 1.2)]),
+    ch("left_front_leg", 3, &[(0.0, 0.0), (0.7, 1.2)]),
+    ch("right_hind_leg", 3, &[(0.0, 0.0), (0.7, 1.1)]),
+    ch("left_hind_leg", 3, &[(0.0, 0.0), (0.7, 1.1)]),
+    ch("real_head", 3, &[(0.0, 0.0), (0.7, 0.2)]),
+    ch("head", 3, &[(0.0, 0.0), (0.7, 0.2)]),
+    ch("real_tail", 3, &[(0.0, 0.0), (0.7, 0.3)]),
+    ch("tail", 3, &[(0.0, 0.0), (0.7, 0.3)]),
+];
 const HOWL: &[Channel] = &[
     // The wolf model names its articulated head/tail `real_head`/
     // `real_tail`; `head`/`tail` cover other canine-shaped models
@@ -142,6 +169,8 @@ pub fn channels(c: Clip) -> &'static [Channel] {
         Clip::CannonBall => CANNONBALL,
         Clip::BellyFlop => BELLY_FLOP,
         Clip::Howl => HOWL,
+        Clip::Loaf => LOAF,
+        Clip::Lay => LAY,
     }
 }
 pub fn duration(c: Clip) -> f32 {
@@ -156,11 +185,13 @@ pub fn duration(c: Clip) -> f32 {
         Clip::CannonBall => 0.9,
         Clip::BellyFlop => 1.0,
         Clip::Howl => 3.2,
+        Clip::Loaf => 0.6,
+        Clip::Lay => 0.7,
     }
 }
 /// Sustained clips hold their last key until `clear` instead of expiring.
 pub fn sustained(c: Clip) -> bool {
-    c == Clip::Sit
+    matches!(c, Clip::Sit | Clip::Loaf | Clip::Lay)
 }
 
 /// Sample a channel's keys at `t` seconds: cosine-eased between keys,
@@ -228,6 +259,7 @@ struct Ent {
     crouch_early: bool,
     active: Option<(Clip, f32)>,
     splash: bool,
+    interacts: u32,
 }
 
 static ENTS: Mutex<Option<HashMap<u32, Ent>>> = Mutex::new(None);
@@ -343,12 +375,32 @@ pub fn take_splash(id: u32) -> bool {
     with_ent(id, |e| std::mem::take(&mut e.splash))
 }
 
+/// An interact on a cat or wolf: a loafing/laying pet wakes; otherwise a
+/// stable 50% roll settles it into the loaf (cats) or the lay (wolves).
+/// Purely visual — the vanilla interaction outcome is untouched.
+pub fn interact_toggle(id: u32, family: Family, now: f32) {
+    let want = match family {
+        Family::Cat => Clip::Loaf,
+        Family::Wolf => Clip::Lay,
+        _ => return,
+    };
+    with_ent(id, |e| {
+        e.interacts = e.interacts.wrapping_add(1);
+        if matches!(e.active, Some((c, _)) if c == want) {
+            e.active = None;
+        } else if e.active.is_none() && etf::entity_random(id, 700u32.wrapping_add(e.interacts)) < 0.5
+        {
+            e.active = Some((want, now));
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mobs::Part;
 
-    const ALL: [Clip; 10] = [
+    const ALL: [Clip; 12] = [
         Clip::Stretch,
         Clip::LookAround,
         Clip::ArmCross,
@@ -359,6 +411,8 @@ mod tests {
         Clip::CannonBall,
         Clip::BellyFlop,
         Clip::Howl,
+        Clip::Loaf,
+        Clip::Lay,
     ];
 
     fn poses() -> Poses {
@@ -379,6 +433,12 @@ mod tests {
             "real_head",
             "real_tail",
             "tail",
+            "right_front_leg",
+            "left_front_leg",
+            "right_hind_leg",
+            "left_hind_leg",
+            "tail1",
+            "tail2",
         ]
         .map(part)
         .into();
@@ -423,7 +483,7 @@ mod tests {
             let mut p = poses();
             apply_clip(&mut p, c, duration(c) * 0.45, 1.0);
             let total: f32 = ["head", "body", "right_arm", "left_arm", "right_leg", "left_leg",
-                "upper_body", "real_head", "real_tail", "tail"]
+                "upper_body", "real_head", "real_tail", "tail", "right_front_leg", "tail1"]
                 .iter()
                 .map(|n| (3..6).map(|a| p.get(n)[a].abs()).sum::<f32>())
                 .sum();
@@ -560,6 +620,48 @@ mod tests {
         let mut o = obs(id, now);
         o.idle = false;
         assert!(tick(&o).clip.is_none(), "emotes are idle-only");
+    }
+
+    #[test]
+    fn interacts_toggle_the_loaf_and_the_lay() {
+        // The 50% roll is stable per (entity, interact count): poke until
+        // one lands, then the next interact must wake it.
+        let mut settled = None;
+        for id in 920_000..920_040u32 {
+            interact_toggle(id, Family::Cat, 5.0);
+            let mut o = obs(id, 5.1);
+            o.family = Family::Cat;
+            if let Some((c, _, emote)) = tick(&o).clip {
+                assert_eq!(c, Clip::Loaf, "cats loaf");
+                assert!(!emote, "the loaf is a trigger");
+                settled = Some(id);
+                break;
+            }
+        }
+        let id = settled.expect("about half of forty cats loaf");
+        // Sustained: still loafing much later.
+        let mut o = obs(id, 400.0);
+        o.family = Family::Cat;
+        assert_eq!(tick(&o).clip.expect("still loafing").0, Clip::Loaf);
+        // The next interact wakes it, every time.
+        interact_toggle(id, Family::Cat, 400.0);
+        assert!(tick(&o).clip.is_none(), "woken");
+        // Wolves lay instead, and other families never react.
+        let mut laid = false;
+        for id in 921_000..921_040u32 {
+            interact_toggle(id, Family::Wolf, 5.0);
+            let mut o = obs(id, 5.1);
+            o.family = Family::Wolf;
+            if let Some((c, _, _)) = tick(&o).clip {
+                assert_eq!(c, Clip::Lay, "wolves lay");
+                laid = true;
+                break;
+            }
+        }
+        assert!(laid, "about half of forty wolves lay");
+        interact_toggle(922_000, Family::Humanoid, 5.0);
+        let o = obs(922_000, 5.1);
+        assert!(tick(&o).clip.is_none(), "players never loaf");
     }
 
     #[test]

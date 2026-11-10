@@ -298,13 +298,48 @@ only evidence attached at ship time.
 | H1–H7, H10 | LANDED | as scoped (H1 needed no engine hook; H10 lives in volt_builtins, not a separate fx file) |
 | H5, H8, H9 | NOT LANDED | listed above against their rows |
 
-**Honest remaining list (not silently dropped):** A13 death anims,
-B7 fishing, B6 material scaling, H8 interact triggers (cat loaf / wolf
-lay on interact), D7 fire overlay, D8 explosions, E5/E6/E7 glint+totem,
-E9 swap sounds, A10/A11 item-render parts, C14/C15/C16/X1 asset
-pipeline, render-path glow pulse (C12 full), A14/B8/C13/E12 owner-
-deferred rows, FN1, F-BACKLOG. E-toggle defaults stay provisional until
-the owner's defaults screenshot arrives.
+**Honest remaining list after v1.1 (superseded by the v1.2 pass below):**
+A13 death anims, B7 fishing, B6 material scaling, H8 interact triggers,
+D7 fire overlay, D8 explosions, E5/E6/E7 glint+totem, E9 swap sounds,
+A10/A11 item-render parts, C14/C15/C16/X1 asset pipeline, render-path
+glow pulse (C12 full), A14/B8/C13/E12 owner-deferred rows, FN1,
+F-BACKLOG.
+
+## v1.2.0 one-go pass (owner one-go override; this build)
+
+Second completion sweep over the v1.1 remaining list. Everything below
+is CI-tested where a unit test can reach it, and IMPLEMENTED-UNVERIFIED
+on-device until the owner's device pass.
+
+| Row | Status after v1.2 | What shipped |
+|---|---|---|
+| A13 | IMPLEMENTED-UNVERIFIED | death limp layer: while `death_time > 0`, limbs slacken and spread, head lolls, eased over the 20 death ticks, additive over the vanilla tip-over (players and mobs). Unit-tested (ease-in from zero, movement, budget). Note: a *limp*, not the 1.13 authored death-pose cycle — named scope (C2) |
+| B6 | IMPLEMENTED-UNVERIFIED | spark count now scales with the actual break rate (`progress/ticks`), 1–5 per tick — fast tools on soft blocks spray, slow tools trickle. Colour variation still NOT shipped (named residue) |
+| B7 | IMPLEMENTED-PARTIAL | rod-holding pose (rod arm up/forward) for every entity with a hook out — own player via `Game.hook`, remote players via `remote_hooks.owner`; bite jerk (8 Hz rod fight) on the own line via `Hook.nibble`. Unit-tested. Cast/reel sub-phases NOT separately animated (named residue) |
+| H8 / C4 / C5 | IMPLEMENTED-UNVERIFIED | interact-to-loaf (cats) / interact-to-lay (wolves) landed: `interact_mob` → `note_interact` → stable 50% roll (etf-seeded per entity+count) settles the pet into a sustained loaf/sphinx-lay clip; the next interact wakes it. Idle windows damped while sustained. Unit-tested (determinism, wake, family gating). Named approximation (C2): fires on any mob interact incl. feeding |
+| D7 | IMPLEMENTED-UNVERIFIED | on-fire screen overlay: flickering flame tongues + orange wash over the lower screen, first person only, gated on `fire_overlay_on()` (mod + players layer) and the own model burning. Flat-colour HUD quads off the atlas white texel — zero new assets. Limitation: draws inside `draw_extras` (hidden with the HUD by F1/hide-gui) |
+| D8 | IMPLEMENTED-UNVERIFIED | explosion burst layered over the vanilla particles: radius-scaled spherical spray (10 + 6·radius, cap 40) of poof / large-smoke / ember particles, vanilla sprites only, gated on `active()` |
+| C12 | IMPLEMENTED-UNVERIFIED | render-path glow pulse landed: glow squid whole-body block-light byte pulses 150–240 on a slow per-squid cycle (emf tempo/phase), sky bits untouched, never darkens below scene light, zero cost for every other species (one species check). Unit-tested (suspended = unchanged, sky preserved, moving, never darkens) |
+| E9 | IMPLEMENTED-UNVERIFIED | "Item swap sounds" toggle (default ON) + soft page-turn flick on hotbar slot change. **Named substitution (C2): the vanilla `item.book.page_turn` event at low volume stands in for the pack's authored swap sounds — no third-party audio ships (C1)** |
+
+Engine hooks this pass (all minimal, named per C5): `fishing.rs`
+`Hook.nibble` + `RemoteHook.owner` → `pub(super)` (visibility only, no
+behavior change); `creatures.rs` `interact_mob` one `note_interact`
+call; `explosion.rs` post-vanilla particle burst; `render.rs` one
+glow-squid light branch; `extras.rs` overlay call at `draw_extras` top;
+`extras_hud.rs` new `draw_fire_overlay`. Shared paths touched: mob
+render light path, explosion particles, HUD extras — all behind
+`active()` gates, zero cost while the mod is off.
+
+**Honest remaining list (not silently dropped):** E5/E6 enchant-glint
+colour/strength, E7 totem opacity (item render pipeline), A10/A11
+item-render parts (shrinking food, liquid depletion), C14/C15/C16/X1
+authored-texture variant pipeline (C1: needs original art, no
+third-party bytes), B6 spark colour by material, B7 cast/reel
+sub-phases, A13 authored death-pose cycle (F-BACKLOG), A14/B8/C13/E12
+owner-deferred rows, FN1, F-BACKLOG. E-toggle defaults stay provisional
+until the owner's defaults screenshot arrives. On-device verification
+(Class D) remains owner-side for every row above.
 
 ## Known-good / known-bad devices (Class D)
 

@@ -793,6 +793,17 @@ impl Game<'_> {
     /// Renders Volt 3D waypoints, touch `[+WP]` pin button, Volt Minimap,
     /// and mod corner panels.
     pub(super) fn draw_extras(&mut self, batch: &mut HudBatch) {
+        // 0. Overhauled Entities on-fire screen overlay: flame tongues
+        // over the lower screen while the own player burns, first person
+        // only (third person already shows the burning body).
+        if self.camera_type.first_person()
+            && horizon_client::mobs::overhauled::fire_overlay_on()
+            && let Some(mm) = self.player_model.as_ref()
+            && mm.is_on_fire()
+        {
+            let t = (mm.age as f32 + self.clock.camera_fraction()) / 20.0;
+            extras_hud::draw_fire_overlay(batch, &self.gui.atlas, t);
+        }
         // 1. In-world 3D Waypoints (beams, diamonds, distance/XYZ labels, rim chevrons):
         let world_wps = self.collect_world_waypoints(batch.width, batch.height);
         if !world_wps.is_empty() {

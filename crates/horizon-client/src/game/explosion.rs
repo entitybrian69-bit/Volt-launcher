@@ -765,6 +765,38 @@ impl Game<'_> {
             .explosion(center, small, block_count, radius, &|b| {
                 facts.is_air(world.block(b[0], b[1], b[2]))
             });
+        // Overhauled Entities: a richer burst layered over the vanilla
+        // one — a spherical spray of smoke, poofs and embers scaled by
+        // the blast radius (vanilla sprites, purely visual).
+        if horizon_client::mobs::overhauled::active() {
+            use horizon_client::particles::{ParticleOptions, ParticleType};
+            let n = (10.0 + radius * 6.0).min(40.0) as usize;
+            let mut rolls = Vec::with_capacity(n);
+            {
+                let random = self.particles.level_random();
+                for _ in 0..n {
+                    rolls.push((random.next_float(), random.next_float(), random.next_float()));
+                }
+            }
+            for (i, (a, b, c)) in rolls.into_iter().enumerate() {
+                let theta = f64::from(a) * std::f64::consts::TAU;
+                let z = f64::from(b) * 2.0 - 1.0;
+                let r = (1.0 - z * z).max(0.0).sqrt();
+                let dir = [r * theta.cos(), z, r * theta.sin()];
+                let speed = (0.08 + f64::from(c) * 0.22) * f64::from(radius.clamp(1.0, 4.0)) / 2.0;
+                let ty = [ParticleType::Poof, ParticleType::LargeSmoke, ParticleType::Lava]
+                    [i % 3];
+                self.particles.add(
+                    &ParticleOptions::simple(ty),
+                    [
+                        center[0] + dir[0] * 0.6,
+                        center[1] + dir[1] * 0.6,
+                        center[2] + dir[2] * 0.6,
+                    ],
+                    [dir[0] * speed, dir[1] * speed + 0.05, dir[2] * speed],
+                );
+            }
+        }
         self.lan_explode(center, small, radius, block_count, pushed);
         Ok(())
     }

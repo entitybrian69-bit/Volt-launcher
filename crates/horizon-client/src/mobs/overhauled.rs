@@ -30,17 +30,19 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub const ID: &str = "overhauled_entities";
 pub const NAME: &str = "Overhauled Entities";
-pub const VERSION: &str = "1.1.0";
+pub const VERSION: &str = "1.2.0";
 pub const DESCRIPTION: &str = "Animation overhaul for every entity, the player included: \
 weighted walks, swim strokes, sword stances, ledge balancing, dives, flips, rolls, sits, \
-idle emotes, wolf howls under a full moon, cat loafs, horse stomps, wither head drift. \
-Plus rain splashes, boat wakes, XP-orb trails and mining sparks. Purely visual, works on \
-any server.";
+idle emotes, death limps, fishing poses, wolf howls and lay-downs, cat loafs, horse \
+stomps, wither head drift, glow-squid pulses. Plus rain splashes, boat wakes, richer \
+explosions, XP-orb trails, mining sparks, item swap sounds and an on-fire overlay. \
+Purely visual, works on any server.";
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static PLAYERS: AtomicBool = AtomicBool::new(true);
 static MOBS: AtomicBool = AtomicBool::new(true);
 static RAIN: AtomicBool = AtomicBool::new(true);
+static SWAP: AtomicBool = AtomicBool::new(true);
 /// 0 = Subtle, 1 = Balanced, 2 = Dramatic.
 static INTENSITY: AtomicUsize = AtomicUsize::new(1);
 /// Set while the mod's row in Options > Mods is switched off entirely.
@@ -51,6 +53,10 @@ static SUSPENDED: AtomicBool = AtomicBool::new(false);
 static NIGHT_MOON: AtomicBool = AtomicBool::new(false);
 static OWN_EDGE: AtomicBool = AtomicBool::new(false);
 static OWN_CROUCH: AtomicBool = AtomicBool::new(false);
+/// Entities with a fishing hook in the water right now, and whether the
+/// own player's line has a bite (fed by the game bridge each tick).
+static FISHING: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+static OWN_BITE: AtomicBool = AtomicBool::new(false);
 
 pub const INTENSITY_NAMES: [&str; 3] = ["Subtle", "Balanced", "Dramatic"];
 const INTENSITY_SCALE: [f32; 3] = [0.6, 1.0, 1.45];
@@ -67,6 +73,49 @@ pub fn set_own_edge(edge: bool) {
 pub fn set_own_crouch(crouch: bool) {
     OWN_CROUCH.store(crouch, Ordering::Relaxed);
 }
+pub fn set_fishing(ids: &[u32], own_bite: bool) {
+    let mut f = FISHING.lock().unwrap();
+    f.clear();
+    f.extend_from_slice(ids);
+    OWN_BITE.store(own_bite, Ordering::Relaxed);
+}
+fn is_fishing(id: u32) -> bool {
+    FISHING.lock().unwrap().contains(&id)
+}
+
+/// Whether the on-fire screen overlay should draw (the HUD asks).
+pub fn fire_overlay_on() -> bool {
+    active() && PLAYERS.load(Ordering::Relaxed)
+}
+
+/// The glow squid's rhythmic light pulse: raises the packed block-light
+/// byte on a slow per-entity cycle, leaving the sky bits (and everything
+/// above them) untouched. Returns the light unchanged while the mod or
+/// its mob layer is off, and never darkens below the scene light.
+pub fn glow_pulse(id: u32, age: f32, light: u32) -> u32 {
+    if !active() || !MOBS.load(Ordering::Relaxed) {
+        return light;
+    }
+    let per = emf::personality(id);
+    let s = 0.5 + 0.5 * (age / 20.0 * per.tempo * 1.2 * std::f32::consts::TAU + per.phase).msin();
+    let block = (150.0 + 90.0 * s) as u32;
+    let block = block.min(240).max(light & 0xFF);
+    (light & !0xFFu32) | block
+}
+
+/// The game's interact-entity path reports a click on a mob: cats may
+/// settle into the loaf, wolves into the lay (50%, purely visual).
+pub fn note_interact(m: &Mob) {
+    if !active() || !MOBS.load(Ordering::Relaxed) {
+        return;
+    }
+    let family = match m.kind.anim {
+        Anim::Feline => clips::Family::Cat,
+        Anim::Wolf => clips::Family::Wolf,
+        _ => return,
+    };
+    clips::interact_toggle(m.id, family, m.age as f32 / 20.0);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Flags {
@@ -74,6 +123,7 @@ pub struct Flags {
     pub players: bool,
     pub mobs: bool,
     pub rain: bool,
+    pub swap: bool,
     pub intensity: usize,
 }
 pub fn flags() -> Flags {
@@ -82,6 +132,7 @@ pub fn flags() -> Flags {
         players: PLAYERS.load(Ordering::Relaxed),
         mobs: MOBS.load(Ordering::Relaxed),
         rain: RAIN.load(Ordering::Relaxed),
+        swap: SWAP.load(Ordering::Relaxed),
         intensity: INTENSITY.load(Ordering::Relaxed).min(2),
     }
 }
@@ -90,6 +141,7 @@ pub fn set_flags(f: Flags) {
     PLAYERS.store(f.players, Ordering::Relaxed);
     MOBS.store(f.mobs, Ordering::Relaxed);
     RAIN.store(f.rain, Ordering::Relaxed);
+    SWAP.store(f.swap, Ordering::Relaxed);
     INTENSITY.store(f.intensity.min(2), Ordering::Relaxed);
 }
 pub fn active() -> bool {
@@ -167,11 +219,15 @@ pub struct Motion {
     pub tense: f32,
     /// What the main hand holds.
     pub tool: Tool,
+    /// A fishing hook is out: the rod-holding pose.
+    pub fishing: bool,
+    /// The own player's line has a bite: the rod jerks.
+    pub bite: bool,
 }
 
 /// The post-pass over the finished vanilla pose, for every mob kind.
 pub fn apply(m: &Mob, s: &State, p: &mut Poses) {
-    if !active() || m.death_time > 0 {
+    if !active() {
         return;
     }
     let f = flags();
@@ -180,6 +236,13 @@ pub fn apply(m: &Mob, s: &State, p: &mut Poses) {
         return;
     }
     let per = emf::personality(m.id);
+    if m.death_time > 0 {
+        // Dying: the limp collapse layer over the vanilla tip-over, and
+        // nothing else.
+        let t01 = (m.death_time as f32 + s.partial) / 20.0;
+        death_limp(p, t01, INTENSITY_SCALE[f.intensity] * per.amp, per.phase);
+        return;
+    }
     let family = match m.kind.anim {
         Anim::Humanoid { .. }
         | Anim::Zombie
@@ -218,7 +281,7 @@ pub fn apply(m: &Mob, s: &State, p: &mut Poses) {
         family,
         howl_ok: NIGHT_MOON.load(Ordering::Relaxed),
     });
-    let mo = Motion {
+    let mut mo = Motion {
         t: s.age / 20.0 * per.tempo * if s.baby { 1.15 } else { 1.0 },
         pos: s.pos,
         speed: s.speed.min(1.0),
@@ -233,7 +296,16 @@ pub fn apply(m: &Mob, s: &State, p: &mut Poses) {
         on_edge: m.own && OWN_EDGE.load(Ordering::Relaxed),
         tense: (m.swell as f32 / 30.0).clamp(0.0, 1.0),
         tool: tool_of(m.extra.main_hand.as_deref()),
+        fishing: is_fishing(m.id),
+        bite: m.own && OWN_BITE.load(Ordering::Relaxed),
     };
+    // A sustained clip (sit, loaf, lay) owns the pose: damp the idle
+    // windows so a loafing cat does not also graze or play.
+    if let Some((c, _, _)) = sig.clip
+        && clips::sustained(c)
+    {
+        mo.idle *= 0.25;
+    }
     match m.kind.anim {
         Anim::Humanoid { zombie_arms } => humanoid(p, &mo, zombie_arms),
         Anim::Zombie | Anim::Drowned | Anim::ZombieVillager | Anim::ZombifiedPiglin => {
@@ -366,6 +438,43 @@ pub fn stance(p: &mut Poses, mo: &Motion) {
         emf::add(p, "body", 3, 0.09 * k);
         emf::add(p, "head", 3, 0.12 * k);
     }
+    if mo.fishing && mo.swing <= 0.0 {
+        // The rod out over the water: the rod arm up and forward, the
+        // body turned a touch, patient.
+        emf::add(p, "right_arm", 3, -0.85 * k);
+        emf::add(p, "right_arm", 5, -0.12 * k);
+        emf::add(p, "body", 4, -0.08 * k);
+        if mo.bite {
+            // A bite! The rod tip jerks and the whole arm fights it.
+            let jerk = (mo.t * 8.0 * PI * 2.0).msin() * 0.14 * k;
+            emf::add(p, "right_arm", 3, jerk);
+            emf::add(p, "head", 3, 0.5 * jerk);
+        }
+    }
+}
+
+/// The dying collapse: limbs go slack and spread, the head lolls — an
+/// additive limp over the vanilla death tip-over, easing in across the
+/// twenty death ticks. Part names cover humanoids and quadrupeds alike
+/// (absent parts are a no-op).
+pub fn death_limp(p: &mut Poses, t01: f32, k: f32, phase: f32) {
+    let u = t01.clamp(0.0, 1.0);
+    let e = u * u * (3.0 - 2.0 * u);
+    let kk = k * e;
+    emf::add(p, "right_arm", 3, 0.45 * kk);
+    emf::add(p, "left_arm", 3, 0.38 * kk);
+    emf::add(p, "right_arm", 5, 0.35 * kk);
+    emf::add(p, "left_arm", 5, -0.35 * kk);
+    emf::add(p, "head", 5, 0.4 * kk * (0.6 + 0.4 * (phase).msin()));
+    emf::add(p, "head", 3, 0.2 * kk);
+    emf::add(p, "right_leg", 3, 0.2 * kk);
+    emf::add(p, "left_leg", 3, -0.15 * kk);
+    for leg in ["right_front_leg", "left_front_leg", "right_hind_leg", "left_hind_leg"] {
+        emf::add(p, leg, 3, 0.3 * kk);
+    }
+    emf::add(p, "tail", 3, 0.3 * kk);
+    emf::add(p, "real_tail", 3, 0.3 * kk);
+    emf::add(p, "body", 5, 0.1 * kk);
 }
 
 /// Attack variation: each swing picks a different lateral path, axes chop
@@ -607,6 +716,11 @@ pub fn ambient(p: &mut Poses, mo: &Motion) {
 mod tests {
     use super::*;
     use crate::mobs::Part;
+    use std::sync::Mutex;
+
+    /// Tests that mutate the global flag statics serialize on this lock
+    /// (the test harness runs tests in parallel).
+    static FLAGS_LOCK: Mutex<()> = Mutex::new(());
 
     fn humanoid_poses() -> Poses {
         let part = |name: &str| Part {
@@ -657,6 +771,8 @@ mod tests {
             on_edge: false,
             tense: 0.0,
             tool: Tool::None,
+            fishing: false,
+            bite: false,
         }
     }
 
@@ -919,19 +1035,117 @@ mod tests {
 
     #[test]
     fn flags_round_trip_and_gate() {
+        let _g = FLAGS_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let before = flags();
-        set_flags(Flags { enabled: true, players: false, mobs: true, rain: false, intensity: 2 });
+        set_flags(Flags {
+            enabled: true,
+            players: false,
+            mobs: true,
+            rain: false,
+            swap: false,
+            intensity: 2,
+        });
         assert_eq!(
             flags(),
-            Flags { enabled: true, players: false, mobs: true, rain: false, intensity: 2 }
+            Flags {
+                enabled: true,
+                players: false,
+                mobs: true,
+                rain: false,
+                swap: false,
+                intensity: 2,
+            }
         );
-        set_flags(Flags { enabled: true, players: true, mobs: true, rain: true, intensity: 9 });
+        set_flags(Flags {
+            enabled: true,
+            players: true,
+            mobs: true,
+            rain: true,
+            swap: true,
+            intensity: 9,
+        });
         assert_eq!(flags().intensity, 2, "intensity clamps to the names table");
         set_suspended(true);
         assert!(!active(), "the row toggle suspends everything");
         set_suspended(false);
         assert!(active());
         set_flags(before);
+    }
+
+    #[test]
+    fn dying_bodies_go_limp_within_budget() {
+        let mut p = humanoid_poses();
+        death_limp(&mut p, 0.0, 1.0, 0.7);
+        let start: f32 = (3..6).map(|a| p.get("right_arm")[a].abs()).sum();
+        assert!(start < 1e-6, "the limp eases in from nothing");
+        let mut q = humanoid_poses();
+        death_limp(&mut q, 1.0, 1.0, 0.7);
+        assert!(q.get("right_arm")[3] > 0.2, "arms slacken");
+        assert!(q.get("head")[5].abs() > 0.02, "the head lolls");
+        for t in 0..20 {
+            let mut r = humanoid_poses();
+            death_limp(&mut r, t as f32 / 19.0, 1.45, 2.0);
+            for n in ["head", "body", "right_arm", "left_arm", "right_leg", "left_leg"] {
+                for a in 3..6 {
+                    assert!(r.get(n)[a].abs() < 1.0, "{n}[{a}] limp budget");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glow_pulse_brightens_only_while_the_mob_layer_is_on() {
+        let _g = FLAGS_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = flags();
+        let sky = 0x60u32 << 8;
+        let dim = sky | 0x20;
+        set_suspended(true);
+        assert_eq!(glow_pulse(7, 100.0, dim), dim, "suspended: untouched");
+        set_suspended(false);
+        let mut f = flags();
+        f.enabled = true;
+        f.mobs = true;
+        set_flags(f);
+        let lit = glow_pulse(7, 100.0, dim);
+        assert_eq!(lit >> 8, dim >> 8, "sky bits preserved");
+        assert!((lit & 0xFF) >= 150 && (lit & 0xFF) <= 240, "block light pulses bright");
+        // The pulse actually moves over time.
+        let a = glow_pulse(7, 40.0, dim) & 0xFF;
+        let b = glow_pulse(7, 47.0, dim) & 0xFF;
+        assert_ne!(a, b, "a living pulse, not a constant");
+        // And it never darkens an already-bright squid.
+        let bright = sky | 0xF0;
+        assert_eq!(glow_pulse(7, 40.0, bright) & 0xFF, 0xF0);
+        set_flags(before);
+    }
+
+    #[test]
+    fn fishing_raises_the_rod_arm_and_bites_jerk_it() {
+        let mut idle_pose = humanoid_poses();
+        humanoid(&mut idle_pose, &motion(2.0, 0.0, 0.0), false);
+        let mut rod = humanoid_poses();
+        let mut mo = motion(2.0, 0.0, 0.0);
+        mo.fishing = true;
+        humanoid(&mut rod, &mo, false);
+        assert!(
+            rod.get("right_arm")[3] < idle_pose.get("right_arm")[3] - 0.5,
+            "the rod arm rides up"
+        );
+        let mut mo2 = motion(2.03, 0.0, 0.0);
+        mo2.fishing = true;
+        let mut rod2 = humanoid_poses();
+        humanoid(&mut rod2, &mo2, false);
+        let mut bite = humanoid_poses();
+        mo2.bite = true;
+        humanoid(&mut bite, &mo2, false);
+        let delta = (bite.get("right_arm")[3] - rod2.get("right_arm")[3]).abs();
+        assert!(delta > 0.02, "the bite jerks the rod arm: {delta}");
+        // The feed round-trips.
+        set_fishing(&[42], true);
+        assert!(is_fishing(42));
+        assert!(!is_fishing(43));
+        set_fishing(&[], false);
+        assert!(!is_fishing(42));
     }
 
     #[test]

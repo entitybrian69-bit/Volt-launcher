@@ -33,6 +33,8 @@ struct OwnState {
     sitting: bool,
     peak_fall: f32,
     fell_sprinting: bool,
+    prev_slot: usize,
+    slot_known: bool,
 }
 static OWN_STATE: Mutex<OwnState> = Mutex::new(OwnState {
     prev_ground: false,
@@ -41,6 +43,8 @@ static OWN_STATE: Mutex<OwnState> = Mutex::new(OwnState {
     sitting: false,
     peak_fall: 0.0,
     fell_sprinting: false,
+    prev_slot: 0,
+    slot_known: false,
 });
 /// Whether the gesture layer currently borrows the third-person front
 /// camera (set while a clip plays from first person, cleared on restore).
@@ -92,6 +96,7 @@ impl Game<'_> {
             players: self.stored_bool(overhauled::ID, "players", true),
             mobs: self.stored_bool(overhauled::ID, "mobs", true),
             rain: self.stored_bool(overhauled::ID, "rain", true),
+            swap: self.stored_bool(overhauled::ID, "swap", true),
             intensity: self.stored_usize(overhauled::ID, "intensity", 1),
         });
     }
@@ -158,6 +163,7 @@ impl Game<'_> {
                 buttons.push(label("Player animations", f.players));
                 buttons.push(label("Mob animations", f.mobs));
                 buttons.push(label("Better rain particles", f.rain));
+                buttons.push(label("Item swap sounds", f.swap));
                 buttons.push(format!(
                     "Intensity: {}",
                     overhauled::INTENSITY_NAMES[f.intensity]
@@ -215,13 +221,14 @@ impl Game<'_> {
                 1 => { f.players = !f.players; }
                 2 => { f.mobs = !f.mobs; }
                 3 => { f.rain = !f.rain; }
-                4 => { f.intensity = (f.intensity + 1) % 3; }
+                4 => { f.swap = !f.swap; }
+                5 => { f.intensity = (f.intensity + 1) % 3; }
                 _ => return,
             }
             overhauled::set_flags(f);
-            if button < 4 {
-                let keys = ["enabled", "players", "mobs", "rain"];
-                let v = [f.enabled, f.players, f.mobs, f.rain][button];
+            if button < 5 {
+                let keys = ["enabled", "players", "mobs", "rain", "swap"];
+                let v = [f.enabled, f.players, f.mobs, f.rain, f.swap][button];
                 self.store_bool(overhauled::ID, keys[button], v);
             } else {
                 self.native_set_setting(overhauled::ID, "intensity", &f.intensity.to_string());
@@ -453,6 +460,23 @@ impl Game<'_> {
             st.prev_crouch = crouch;
             st.prev_ground = p.ground.on_ground;
         }
+        // Item swap sounds: a soft page-flick when the hotbar selection
+        // changes (a vanilla sound event; no third-party audio ships).
+        {
+            let slot = self.selected;
+            let play = {
+                let mut st = OWN_STATE.lock().unwrap();
+                let changed = st.slot_known && st.prev_slot != slot;
+                st.prev_slot = slot;
+                st.slot_known = true;
+                changed
+            };
+            if play && f.swap && self.native_playing() {
+                let r = etf::entity_random(FX_SALT.fetch_add(1, Ordering::Relaxed), 60);
+                self.audio
+                    .play("minecraft:item.book.page_turn", None, 0.35, 1.1 + 0.25 * r);
+            }
+        }
         // Everything below runs at tick rate, not frame rate.
         let due = {
             let mut clock = OVH_FX_CLOCK.lock().unwrap();
@@ -479,6 +503,18 @@ impl Game<'_> {
                 .filter(|&&(dx, dz)| air(bx + dx, bz + dz))
                 .count();
             overhauled::set_own_edge(p.ground.on_ground && !crouch && !air(bx, bz) && open >= 2);
+        }
+        // The fishing feed: who has a hook out (the rod-holding pose) and
+        // whether the own line has a bite (the rod-jerk layer).
+        {
+            let mut fishers: Vec<u32> = self.remote_hooks.iter().map(|h| h.owner).collect();
+            if self.hook.is_some()
+                && let Some(mm) = self.player_model.as_ref()
+            {
+                fishers.push(mm.id);
+            }
+            let bite = self.hook.as_ref().is_some_and(|h| h.nibble > 0);
+            overhauled::set_fishing(&fishers, bite);
         }
         // Stateless randomness for the particle pass.
         let rnd = |stream: u32| etf::entity_random(FX_SALT.fetch_add(1, Ordering::Relaxed), stream);
@@ -584,7 +620,8 @@ impl Game<'_> {
                 [0.0, 0.01, 0.0],
             ));
         }
-        // Mining sparks: chips fly from the face being broken.
+        // Mining sparks: chips fly from the face being broken, more of
+        // them the faster the tool eats the block (material scaling).
         if let Some(mi) = self.mining.as_ref()
             && mi.progress > 0.02
         {
@@ -595,7 +632,9 @@ impl Game<'_> {
             ];
             let d = [eye[0] - center[0], eye[1] - center[1], eye[2] - center[2]];
             let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(0.001);
-            for _ in 0..2 {
+            let rate = mi.progress / mi.ticks.max(1) as f32;
+            let count = (1.0 + rate * 30.0).clamp(1.0, 5.0) as usize;
+            for _ in 0..count {
                 let at = [
                     center[0] + d[0] / len * 0.55 + f64::from(rnd(19) - 0.5) * 0.5,
                     center[1] + d[1] / len * 0.55 + f64::from(rnd(20) - 0.5) * 0.5,

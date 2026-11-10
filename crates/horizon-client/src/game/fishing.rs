@@ -38,7 +38,8 @@ pub(super) struct Hook {
     state: State,
     life: i32,
     on_ground: bool,
-    nibble: i32,
+    /// Read by the Overhauled Entities bridge for the rod-jerk pose.
+    pub(super) nibble: i32,
     time_until_lured: i32,
     time_until_hooked: i32,
     fish_angle: f32,
@@ -906,7 +907,8 @@ impl Game<'_> {
 /// running to that player's hand.
 pub(super) struct RemoteHook {
     id: u32,
-    owner: u32,
+    /// Read by the Overhauled Entities bridge for the rod-holding pose.
+    pub(super) owner: u32,
     pub(super) position: Vec3,
     pub(super) previous: Vec3,
     velocity: Vec3,
