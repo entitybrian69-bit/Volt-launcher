@@ -651,6 +651,53 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         }
         mixer.limiter_peak = (mixer.limiter_peak * release).max(peak);
     }
+    tap::feed(data, channels as u32, rate);
+}
+/// Volt Recorder's game-audio tap: while installed, every mixed output
+/// buffer is copied to the recorder (interleaved `f32`, with the channel
+/// count and sample rate). One relaxed atomic read per callback when off —
+/// the real-time thread never takes the lock unless recording.
+pub mod tap {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::SyncSender;
+
+    /// One mixed output buffer.
+    pub struct Chunk {
+        /// Interleaved samples, `-1..1`.
+        pub samples: Vec<f32>,
+        pub channels: u32,
+        pub rate: u32,
+    }
+
+    static ON: AtomicBool = AtomicBool::new(false);
+    static SINK: Mutex<Option<SyncSender<Chunk>>> = Mutex::new(None);
+
+    /// Starts copying mixed audio into `sink`; replaces any previous tap.
+    pub fn install(sink: SyncSender<Chunk>) {
+        *SINK.lock().unwrap() = Some(sink);
+        ON.store(true, Ordering::Release);
+    }
+    /// Stops the copies; the receiver sees its channel disconnect.
+    pub fn clear() {
+        ON.store(false, Ordering::Release);
+        *SINK.lock().unwrap() = None;
+    }
+    pub(super) fn feed(data: &[f32], channels: u32, rate: u32) {
+        if !ON.load(Ordering::Acquire) {
+            return;
+        }
+        // The callback must never block: skip when contended or full.
+        if let Ok(guard) = SINK.try_lock()
+            && let Some(sink) = guard.as_ref()
+        {
+            let _ = sink.try_send(Chunk {
+                samples: data.to_vec(),
+                channels,
+                rate,
+            });
+        }
+    }
 }
 /// Why the game should not open an output, if it should not:
 /// `HORIZON_NO_AUDIO`, or a virtual screen (`vscreen`), where agents and

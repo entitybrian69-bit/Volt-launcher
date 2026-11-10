@@ -914,6 +914,8 @@ impl Game<'_> {
         if self.settings.extras.volt_qol.replay_button {
             self.draw_replay_button(batch);
         }
+        // Volt Hub: the pill, or the whole overlay while open.
+        self.draw_volt_hub(batch);
         let now = self.started.elapsed().as_secs_f64();
         let (w, h) = (batch.width, batch.height);
         let my_name = self.options.player_name();
@@ -2869,6 +2871,19 @@ impl Game<'_> {
     /// restarts playback at the end while LP (loop) is on.
     pub(super) fn replay_export_tick(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
+        // The launcher's one-tap "MP4" button: the watch opened with the
+        // export requested, so start recording as soon as playback exists.
+        if self.options.replay_export
+            && self.replay_control().is_some()
+            && self
+                .remote
+                .as_ref()
+                .and_then(|r| r.replay.as_ref())
+                .is_some_and(|rp| rp.export.is_none())
+        {
+            self.options.replay_export = false;
+            self.replay_toggle_export();
+        }
         let ended = self
             .remote
             .as_ref()
@@ -2900,6 +2915,10 @@ impl Game<'_> {
         }
         if self.title.is_some() || self.ui.hide_gui {
             return false;
+        }
+        // The Volt Hub pill / open hub window owns its taps first.
+        if self.try_click_volt_hub_overlay(cursor) {
+            return true;
         }
         let (w, h) = self.gui_size();
         if self.settings.extras.volt_chat.voice_enabled

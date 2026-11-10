@@ -920,6 +920,10 @@ pub struct HudBatch {
     pub glint_alpha: f32,
     /// Screen's first vertex: the preceding HUD is part of its blurred background.
     pub blur_at: u32,
+    /// Volt Recorder: first vertex of the on-screen touch controls (and
+    /// everything after them, like the on-screen keyboard). Vertices below
+    /// this are the game HUD. `u32::MAX` = the frame has no controls layer.
+    pub controls_at: u32,
     /// Player object profiles encountered while painting text this frame.
     pub inline_profiles: Vec<serde_json::Value>,
 }
@@ -973,6 +977,7 @@ impl HudBatch {
             end_portal: EndPortalFill::default(),
             glint_alpha: 0.75,
             blur_at: 0,
+            controls_at: u32::MAX,
             inline_profiles: Vec::new(),
         }
     }
@@ -2984,6 +2989,7 @@ mod tests {
                 end_portal: EndPortalFill::default(),
                 glint_alpha: 0.75,
                 blur_at: 0,
+                controls_at: u32::MAX,
                 inline_profiles: Vec::new(),
             };
             for (image_width, image_height) in [(195, 136), (176, 166), (176, 222)] {

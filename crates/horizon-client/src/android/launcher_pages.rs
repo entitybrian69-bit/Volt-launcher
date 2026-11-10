@@ -83,6 +83,7 @@ pub(super) enum Action {
     ConnectServer(usize),
     SaveServer,
     WatchReplay(usize),
+    ExportReplay(usize),
     DeleteReplay(usize),
     ToggleVoltReplay,
     ToggleReplayButton,
@@ -1698,7 +1699,7 @@ impl DrawCtx<'_> {
                     if row_y < top || row_y + 48.0 > bottom { continue; }
                     ui.rounded(row[0], row[1], row[2], row[3], 12.0, theme::GLASS_INNER());
                     let title = if replay.server.is_empty() { &replay.file_name } else { &replay.server };
-                    let title = ui.fit_text(Face::LauncherMedium, 13.0, title, row[2] - 150.0);
+                    let title = ui.fit_text(Face::LauncherMedium, 13.0, title, row[2] - 200.0);
                     ui.text(Face::LauncherMedium, 13.0, row[0] + 12.0, row[1] + 4.0, theme::TEXT(), &title);
                     let mib = replay.size as f32 / (1024.0 * 1024.0);
                     let sub = format!(
@@ -1707,10 +1708,12 @@ impl DrawCtx<'_> {
                         replay.name,
                         mib,
                     );
-                    let sub = ui.fit_text(Face::LauncherRegular, 11.5, &sub, row[2] - 150.0);
+                    let sub = ui.fit_text(Face::LauncherRegular, 11.5, &sub, row[2] - 200.0);
                     ui.text(Face::LauncherRegular, 11.5, row[0] + 12.0, row[1] + 25.0, theme::MUTED(), &sub);
-                    let watch = [row[0] + row[2] - 128.0, row[1] + 8.0, 70.0, 32.0];
+                    let watch = [row[0] + row[2] - 184.0, row[1] + 8.0, 70.0, 32.0];
                     styled_button(ui, self.targets, watch, "Watch", Action::WatchReplay(i), BtnStyle::Primary, true);
+                    let export = [row[0] + row[2] - 106.0, row[1] + 8.0, 48.0, 32.0];
+                    styled_button(ui, self.targets, export, "MP4", Action::ExportReplay(i), BtnStyle::Secondary, true);
                     let del = [row[0] + row[2] - 50.0, row[1] + 8.0, 42.0, 32.0];
                     styled_button(ui, self.targets, del, "Del", Action::DeleteReplay(i), BtnStyle::Secondary, true);
                 }
@@ -3909,8 +3912,14 @@ impl DrawCtx<'_> {
                 "Multiplayer hub lag shield",
                 String::new(),
                 Action::VoltExtra(Item::VoltHubLagShield),
-                Action::VoltExtra(Item::VoltModLagShield),
                 Some(ex.hub_lag_shield),
+                false,
+            ),
+            (
+                "Mod lag shield",
+                String::new(),
+                Action::VoltExtra(Item::VoltModLagShield),
+                Some(ex.mod_lag_shield),
                 false,
             ),
             (
@@ -5937,6 +5946,20 @@ impl Launcher {
             Some(Action::WatchReplay(index)) => {
                 if let Some(replay) = self.catalog.replays.get(index) {
                     self.catalog.config.replay = replay.path.to_string_lossy().into_owned();
+                    self.catalog.config.replay_export = false;
+                    self.catalog.config.save(&self.home)?;
+                    self.pending_play = true;
+                    self.needs_redraw = true;
+                } else {
+                    self.catalog.status = "Replay list changed; please choose again.".into();
+                }
+            }
+            Some(Action::ExportReplay(index)) => {
+                if let Some(replay) = self.catalog.replays.get(index) {
+                    // One tap: watch the replay with the MP4 export already
+                    // running; the file lands in replays/exports/.
+                    self.catalog.config.replay = replay.path.to_string_lossy().into_owned();
+                    self.catalog.config.replay_export = true;
                     self.catalog.config.save(&self.home)?;
                     self.pending_play = true;
                     self.needs_redraw = true;
@@ -6842,7 +6865,7 @@ fn draw_volt_boost_modal(
         );
     }
 
-    let items: [Item; 28] = [
+    let items: [Item; 29] = [
         Item::VoltPerfHud,
         Item::VoltAutoDrs,
         Item::VoltCullLeaves,

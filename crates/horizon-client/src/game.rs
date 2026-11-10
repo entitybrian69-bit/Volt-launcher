@@ -298,7 +298,9 @@ mod tutorial;
 mod tweaks;
 mod ui_control;
 mod vault;
+mod recorder;
 mod video_export;
+mod volt_hub;
 mod villagers;
 mod wandering_trader;
 mod win;
@@ -422,6 +424,8 @@ struct Options {
     server: Option<String>,
     /// Volt Replay: `--replay PATH` watches a recorded session at start.
     replay: Option<String>,
+    /// Volt Replay: start the MP4 export as soon as the watch opens.
+    replay_export: bool,
     /// `--name`, `HORIZON_PLAYER_NAME` or the signed-in account's name; else
     /// [`Options::player_name`] uses the kept offline name.
     player_name: Option<String>,
@@ -565,6 +569,7 @@ impl Options {
                 .and_then(|v| v.parse().ok()),
             server: None,
             replay: None,
+            replay_export: false,
             player_name: std::env::var("HORIZON_PLAYER_NAME")
                 .ok()
                 .filter(|n| !n.is_empty()),
@@ -683,6 +688,7 @@ impl Options {
                             }
                             "--server" | "--quickPlayMultiplayer" => o.server = Some(value),
                             "--replay" => o.replay = Some(value),
+                            "--replay-export" => o.replay_export = value == "1" || value == "true",
                             "--name" => o.player_name = Some(value),
                             "--session-file" => o.session_file = Some(value),
                             "--control-socket" => o.control = Some(value.into()),
@@ -2322,6 +2328,12 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
+    /// Volt Recorder: the live recording, when one is running.
+    recorder: Option<recorder::Recording>,
+    /// Volt Recorder: the player's settings (loaded once, saved on change).
+    recorder_settings: recorder::Settings,
+    /// Volt Hub: the in-game overlay's state.
+    volt_hub: volt_hub::Hub,
     /// `LocalPlayer.postEffects`: the chains the server has the screen run
     /// (`ClientboundPostEffectsPacket`), in order.
     post_effects: Vec<String>,
@@ -14109,6 +14121,10 @@ impl Game<'_> {
                 Vec::new()
             };
         let mut hud = horizon_client::spans::time("hud", || self.hud(size));
+        // Volt Recorder: everything in the batch so far is the game HUD;
+        // what follows (touch controls, keypad UI, IME) is the controls
+        // layer, so "Record with controls/HUD" can keep or drop each.
+        hud.controls_at = hud.vertices.len() as u32;
         #[cfg(target_os = "android")]
         {
             self.pad.touch.auxiliary_only =
@@ -14625,6 +14641,7 @@ impl Game<'_> {
             || self.sort_key_press(key)
             || self.hdr_key_press(key)
             || self.volt_key_press(key)
+            || self.volt_hub_key(key)
         {
             return Ok(());
         }
@@ -16621,6 +16638,7 @@ impl Game<'_> {
                     // For the "I'm playing" ping: an atomic, sent on when it changes.
                     horizon_client::heartbeat::set_lan(self.is_published());
                     self.update_discord_presence();
+                    self.volt_recorder_tick();
                     let steps = self.clock.advance(elapsed);
                     // The world ticking in the frame: once its ticks took a
                     // tick's length, the rest are dropped (`FixedStep::tick_fits`).
@@ -17349,6 +17367,11 @@ impl<'a> Game<'a> {
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
             locator_camera: None,
+            recorder: None,
+            // The game runs chdir'ed into its data dir (like `screenshots`
+            // and `replays`): recorder paths are relative to it too.
+            recorder_settings: recorder::Settings::load(std::path::Path::new("")),
+            volt_hub: Default::default(),
             post_effects: Vec::new(),
             spectated_post_effect: None,
             experience_display: Default::default(),

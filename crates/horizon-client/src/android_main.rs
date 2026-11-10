@@ -191,6 +191,9 @@ pub(crate) fn android_arguments() -> horizon_client::Result<Vec<String>> {
     if !config.replay.is_empty() {
         // Volt Replay: watch the chosen recording instead of joining.
         args.extend(["--replay".into(), config.replay.clone()]);
+        if config.replay_export {
+            args.extend(["--replay-export".into(), "1".into()]);
+        }
     } else if !config.server.is_empty() {
         args.extend(["--server".into(), config.server.clone()]);
     }

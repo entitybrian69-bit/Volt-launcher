@@ -20,6 +20,48 @@ pub struct Frame {
     pub pixels: Vec<[u8; 4]>,
 }
 
+/// Box-averages `frame` down to `w`×`h` (both at most the source size);
+/// the Volt Recorder's resolution setting. Runs on the encoder thread.
+pub(super) fn downscale(frame: &Frame, w: u32, h: u32) -> Frame {
+    let (sw, sh) = (frame.size[0] as usize, frame.size[1] as usize);
+    let (w, h) = (w as usize, h as usize);
+    if w == 0 || h == 0 || sw == 0 || sh == 0 || (w == sw && h == sh) {
+        return Frame {
+            size: frame.size,
+            bgra: frame.bgra,
+            pts_us: frame.pts_us,
+            pixels: frame.pixels.clone(),
+        };
+    }
+    let mut pixels = Vec::with_capacity(w * h);
+    for oy in 0..h {
+        // The source rows/columns this output pixel covers.
+        let y0 = oy * sh / h;
+        let y1 = (((oy + 1) * sh).div_ceil(h)).clamp(y0 + 1, sh);
+        for ox in 0..w {
+            let x0 = ox * sw / w;
+            let x1 = (((ox + 1) * sw).div_ceil(w)).clamp(x0 + 1, sw);
+            let mut sum = [0u32; 4];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let px = frame.pixels[y * sw + x];
+                    for (acc, c) in sum.iter_mut().zip(px) {
+                        *acc += u32::from(c);
+                    }
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)) as u32;
+            pixels.push(sum.map(|c| ((c + n / 2) / n) as u8));
+        }
+    }
+    Frame {
+        size: [w as u32, h as u32],
+        bgra: frame.bgra,
+        pts_us: frame.pts_us,
+        pixels,
+    }
+}
+
 /// The encoder thread and the channel the renderer's capture closure
 /// feeds. Dropping it finalizes the file (bounded: the worker polls a stop
 /// flag, so a forgotten sender clone cannot hang the join).
@@ -119,7 +161,7 @@ fn encode(
 }
 
 #[cfg(target_os = "android")]
-mod media {
+pub(super) mod media {
     use super::{Frame, next_frame};
     use std::ffi::{CStr, c_char, c_int, c_void};
     use std::path::Path;
@@ -128,87 +170,87 @@ mod media {
 
     /// `AMediaCodecBufferInfo`.
     #[repr(C)]
-    struct BufferInfo {
-        offset: i32,
-        size: i32,
-        presentation_time_us: i64,
-        flags: u32,
+    pub(in crate::game) struct BufferInfo {
+        pub offset: i32,
+        pub size: i32,
+        pub presentation_time_us: i64,
+        pub flags: u32,
     }
 
     #[link(name = "dl")]
     unsafe extern "C" {
         fn dlopen(name: *const c_char, flags: c_int) -> *mut c_void;
         fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-        fn close(fd: c_int) -> c_int;
+        pub(in crate::game) fn close(fd: c_int) -> c_int;
     }
 
     /// `off_t` in Bionic: 32-bit on armeabi-v7a, 64-bit on arm64-v8a.
     #[cfg(target_pointer_width = "64")]
-    type OffT = i64;
+    pub(in crate::game) type OffT = i64;
     #[cfg(target_pointer_width = "32")]
-    type OffT = i32;
+    pub(in crate::game) type OffT = i32;
 
     // Every signature matches media/NdkMediaCodec.h, NdkMediaFormat.h and
     // NdkMediaMuxer.h in the NDK (API 21+).
-    type CreateEncoder = unsafe extern "C" fn(*const c_char) -> *mut c_void;
-    type Configure =
+    pub(in crate::game) type CreateEncoder = unsafe extern "C" fn(*const c_char) -> *mut c_void;
+    pub(in crate::game) type Configure =
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void, u32) -> c_int;
-    type Simple = unsafe extern "C" fn(*mut c_void) -> c_int;
-    type DequeueIn = unsafe extern "C" fn(*mut c_void, i64) -> isize;
-    type GetBuf = unsafe extern "C" fn(*mut c_void, usize, *mut usize) -> *mut u8;
-    type QueueIn = unsafe extern "C" fn(*mut c_void, usize, OffT, usize, u64, u32) -> c_int;
-    type DequeueOut = unsafe extern "C" fn(*mut c_void, *mut BufferInfo, i64) -> isize;
-    type ReleaseOut = unsafe extern "C" fn(*mut c_void, usize, bool) -> c_int;
-    type GetFormat = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
-    type FormatNew = unsafe extern "C" fn() -> *mut c_void;
-    type FormatSetString = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char);
-    type FormatSetInt = unsafe extern "C" fn(*mut c_void, *const c_char, i32);
-    type FormatGetInt = unsafe extern "C" fn(*mut c_void, *const c_char, *mut i32) -> bool;
-    type MuxerNew = unsafe extern "C" fn(c_int, c_int) -> *mut c_void;
-    type MuxerAddTrack = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
-    type MuxerWrite =
+    pub(in crate::game) type Simple = unsafe extern "C" fn(*mut c_void) -> c_int;
+    pub(in crate::game) type DequeueIn = unsafe extern "C" fn(*mut c_void, i64) -> isize;
+    pub(in crate::game) type GetBuf = unsafe extern "C" fn(*mut c_void, usize, *mut usize) -> *mut u8;
+    pub(in crate::game) type QueueIn = unsafe extern "C" fn(*mut c_void, usize, OffT, usize, u64, u32) -> c_int;
+    pub(in crate::game) type DequeueOut = unsafe extern "C" fn(*mut c_void, *mut BufferInfo, i64) -> isize;
+    pub(in crate::game) type ReleaseOut = unsafe extern "C" fn(*mut c_void, usize, bool) -> c_int;
+    pub(in crate::game) type GetFormat = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+    pub(in crate::game) type FormatNew = unsafe extern "C" fn() -> *mut c_void;
+    pub(in crate::game) type FormatSetString = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char);
+    pub(in crate::game) type FormatSetInt = unsafe extern "C" fn(*mut c_void, *const c_char, i32);
+    pub(in crate::game) type FormatGetInt = unsafe extern "C" fn(*mut c_void, *const c_char, *mut i32) -> bool;
+    pub(in crate::game) type MuxerNew = unsafe extern "C" fn(c_int, c_int) -> *mut c_void;
+    pub(in crate::game) type MuxerAddTrack = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
+    pub(in crate::game) type MuxerWrite =
         unsafe extern "C" fn(*mut c_void, usize, *const u8, *const BufferInfo) -> c_int;
 
-    const CONFIGURE_ENCODE: u32 = 1;
-    const FLAG_CODEC_CONFIG: u32 = 2;
-    const FLAG_END_OF_STREAM: u32 = 4;
-    const INFO_TRY_AGAIN: isize = -1;
-    const INFO_FORMAT_CHANGED: isize = -2;
-    const INFO_BUFFERS_CHANGED: isize = -3;
+    pub(in crate::game) const CONFIGURE_ENCODE: u32 = 1;
+    pub(in crate::game) const FLAG_CODEC_CONFIG: u32 = 2;
+    pub(in crate::game) const FLAG_END_OF_STREAM: u32 = 4;
+    pub(in crate::game) const INFO_TRY_AGAIN: isize = -1;
+    pub(in crate::game) const INFO_FORMAT_CHANGED: isize = -2;
+    pub(in crate::game) const INFO_BUFFERS_CHANGED: isize = -3;
     /// `COLOR_FormatYUV420SemiPlanar` (NV12) and `...Planar` (I420): tried
     /// in that order, whichever the device's encoder accepts.
-    const COLOR_FORMATS: [i32; 2] = [21, 19];
-    const MUXER_MPEG_4: c_int = 0;
+    pub(in crate::game) const COLOR_FORMATS: [i32; 2] = [21, 19];
+    pub(in crate::game) const MUXER_MPEG_4: c_int = 0;
 
-    struct Lib {
-        create: CreateEncoder,
-        configure: Configure,
-        start: Simple,
-        stop: Simple,
-        delete: Simple,
-        dq_in: DequeueIn,
-        in_buf: GetBuf,
-        q_in: QueueIn,
-        dq_out: DequeueOut,
-        out_buf: GetBuf,
-        rel_out: ReleaseOut,
-        out_fmt: GetFormat,
-        in_fmt: GetFormat,
-        fmt_new: FormatNew,
-        fmt_del: Simple,
-        fmt_str: FormatSetString,
-        fmt_i32: FormatSetInt,
-        fmt_get: FormatGetInt,
-        mux_new: MuxerNew,
-        mux_track: MuxerAddTrack,
-        mux_start: Simple,
-        mux_stop: Simple,
-        mux_del: Simple,
-        mux_write: MuxerWrite,
+    pub(in crate::game) struct Lib {
+        pub(in crate::game) create: CreateEncoder,
+        pub(in crate::game) configure: Configure,
+        pub(in crate::game) start: Simple,
+        pub(in crate::game) stop: Simple,
+        pub(in crate::game) delete: Simple,
+        pub(in crate::game) dq_in: DequeueIn,
+        pub(in crate::game) in_buf: GetBuf,
+        pub(in crate::game) q_in: QueueIn,
+        pub(in crate::game) dq_out: DequeueOut,
+        pub(in crate::game) out_buf: GetBuf,
+        pub(in crate::game) rel_out: ReleaseOut,
+        pub(in crate::game) out_fmt: GetFormat,
+        pub(in crate::game) in_fmt: GetFormat,
+        pub(in crate::game) fmt_new: FormatNew,
+        pub(in crate::game) fmt_del: Simple,
+        pub(in crate::game) fmt_str: FormatSetString,
+        pub(in crate::game) fmt_i32: FormatSetInt,
+        pub(in crate::game) fmt_get: FormatGetInt,
+        pub(in crate::game) mux_new: MuxerNew,
+        pub(in crate::game) mux_track: MuxerAddTrack,
+        pub(in crate::game) mux_start: Simple,
+        pub(in crate::game) mux_stop: Simple,
+        pub(in crate::game) mux_del: Simple,
+        pub(in crate::game) mux_write: MuxerWrite,
     }
 
     impl Lib {
-        fn open() -> Result<Lib, String> {
+        pub(in crate::game) fn open() -> Result<Lib, String> {
             unsafe {
                 let lib = dlopen(c"libmediandk.so".as_ptr(), 2);
                 if lib.is_null() {
@@ -383,35 +425,7 @@ mod media {
                 return Err(format!("input buffer holds {cap}, frame needs {needed}"));
             }
             let out = unsafe { std::slice::from_raw_parts_mut(buf, cap) };
-            let src_w = frame.size[0] as usize;
-            let (ri, bi) = if frame.bgra { (2usize, 0usize) } else { (0usize, 2usize) };
-            for row in 0..h {
-                let src = &frame.pixels[row * src_w..row * src_w + w];
-                let dst = &mut out[row * stride..row * stride + w];
-                for (d, px) in dst.iter_mut().zip(src) {
-                    let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
-                    *d = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
-                }
-            }
-            let chroma_at = stride * slice;
-            for row in 0..h / 2 {
-                for col in 0..w / 2 {
-                    let px = frame.pixels[row * 2 * src_w + col * 2];
-                    let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
-                    let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                    let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                    if self.semi_planar {
-                        let at = chroma_at + row * stride + col * 2;
-                        out[at] = u;
-                        out[at + 1] = v;
-                    } else {
-                        let cs = stride / 2;
-                        let plane = cs * slice.div_ceil(2);
-                        out[chroma_at + row * cs + col] = u;
-                        out[chroma_at + plane + row * cs + col] = v;
-                    }
-                }
-            }
+            fill_yuv(out, frame, w, h, stride, slice, self.semi_planar);
             let rc = unsafe {
                 (self.lib.q_in)(self.codec, idx, 0, needed, frame.pts_us.max(0) as u64, 0)
             };
@@ -444,6 +458,48 @@ mod media {
                 }
             }
             Err("the encoder never flushed its last frames".to_string())
+        }
+    }
+
+    /// Converts `frame`'s packed pixels (cropped to `w`×`h`) into the
+    /// encoder's YUV 4:2:0 layout inside `out` (BT.601 limited range).
+    pub(in crate::game) fn fill_yuv(
+        out: &mut [u8],
+        frame: &Frame,
+        w: usize,
+        h: usize,
+        stride: usize,
+        slice: usize,
+        semi_planar: bool,
+    ) {
+        let src_w = frame.size[0] as usize;
+        let (ri, bi) = if frame.bgra { (2usize, 0usize) } else { (0usize, 2usize) };
+        for row in 0..h {
+            let src = &frame.pixels[row * src_w..row * src_w + w];
+            let dst = &mut out[row * stride..row * stride + w];
+            for (d, px) in dst.iter_mut().zip(src) {
+                let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
+                *d = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
+            }
+        }
+        let chroma_at = stride * slice;
+        for row in 0..h / 2 {
+            for col in 0..w / 2 {
+                let px = frame.pixels[row * 2 * src_w + col * 2];
+                let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
+                let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+                let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+                if semi_planar {
+                    let at = chroma_at + row * stride + col * 2;
+                    out[at] = u;
+                    out[at + 1] = v;
+                } else {
+                    let cs = stride / 2;
+                    let plane = cs * slice.div_ceil(2);
+                    out[chroma_at + row * cs + col] = u;
+                    out[chroma_at + plane + row * cs + col] = v;
+                }
+            }
         }
     }
 

@@ -73,6 +73,10 @@ pub struct Config {
     /// of joining a server; cleared by an ordinary Play.
     #[serde(default)]
     pub replay: String,
+    /// Volt Replay: start the MP4 export as soon as the watch opens (the
+    /// launcher's one-tap "MP4" button).
+    #[serde(default)]
+    pub replay_export: bool,
     /// Tier-1 Discord presence: the owner's webhook URL for session embeds
     /// (empty = off). Passed to the game as VOLT_DISCORD_WEBHOOK.
     #[serde(default)]
@@ -113,7 +117,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             profile: 0, launcher_dark: default_launcher_dark(), launcher_accent: default_launcher_accent(),
-            proxy: None, name: String::new(), server: String::new(), replay: String::new(),
+            proxy: None, name: String::new(), server: String::new(), replay: String::new(), replay_export: false,
+            discord_webhook: String::new(),
             microsoft_client_id: String::new(),
             renderer: Default::default(), render_scale: Default::default(), orientation: Default::default(),
             screen: Default::default(), input_host: Default::default(), keypad_controls: false,

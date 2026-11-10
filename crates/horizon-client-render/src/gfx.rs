@@ -748,6 +748,16 @@ pub struct Renderer {
     /// tightly packed rows of 4-byte pixels, red and blue swapped when
     /// `bgra` is true.
     pub video_sink: Option<Box<dyn FnMut([u32; 2], bool, Vec<[u8; 4]>) + Send>>,
+    /// Volt Recorder: which 2D layers the capture keeps — `(game HUD,
+    /// on-screen controls)`. `(true, true)` records the frame as shown
+    /// (Volt Replay's export); anything else re-composes the capture from
+    /// the pre-GUI frame plus the kept `HudBatch` layers.
+    pub video_layers: (bool, bool),
+    /// Volt Recorder: minimum time between captured frames (the recording
+    /// frame rate); Volt Replay's export keeps the ~30 fps default.
+    pub video_interval: std::time::Duration,
+    /// The pre-GUI frame copy layered captures compose onto.
+    video_layer_tex: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Export readbacks in flight: asynchronously mapped copies, oldest
     /// first, so the render thread never waits on the GPU for a video
     /// frame (the old synchronous readback froze gameplay while
@@ -3458,6 +3468,9 @@ impl Renderer {
             video_pending: VecDeque::new(),
             video_free: Vec::new(),
             video_last_capture: None,
+            video_layers: (true, true),
+            video_interval: std::time::Duration::from_millis(31),
+            video_layer_tex: None,
             gamma: 0.5,
             improved_transparency: false,
             oit: None,
@@ -7168,6 +7181,61 @@ impl Renderer {
             let first = debug_depth + debug_top;
             pass.draw(0..4, first..first + crosshair);
         }
+        // Volt Recorder: whether this frame is captured, decided before the
+        // GUI draws so a capture excluding the HUD or the touch controls can
+        // put the pre-GUI frame aside and re-compose the kept layers on it.
+        let video_due = self.video_sink.is_some()
+            && self.config.format.block_copy_size(None) == Some(4)
+            && self.video_pending.len() < 3
+            && self
+                .video_last_capture
+                .is_none_or(|at| at.elapsed() >= self.video_interval);
+        let video_layered = video_due
+            && self.video_layers != (true, true)
+            && target_texture
+                .usage()
+                .contains(wgpu::TextureUsages::COPY_SRC);
+        if video_layered {
+            let (w, h) = (self.config.width, self.config.height);
+            let stale = self
+                .video_layer_tex
+                .as_ref()
+                .is_none_or(|(t, _)| t.width() != w || t.height() != h);
+            if stale {
+                let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Volt recorder capture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: target_texture.format(),
+                    usage: wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[self.config.format.remove_srgb_suffix()],
+                });
+                let view = tex.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.config.format.remove_srgb_suffix()),
+                    ..Default::default()
+                });
+                self.video_layer_tex = Some((tex, view));
+            }
+            if let Some((tex, _)) = &self.video_layer_tex {
+                encoder.copy_texture_to_texture(
+                    target_texture.as_image_copy(),
+                    tex.as_image_copy(),
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
         let menu_blur = frame
             .menu_blur
             .filter(|_| target_texture.usage().contains(wgpu::TextureUsages::COPY_SRC));
@@ -7203,6 +7271,27 @@ impl Renderer {
             [self.config.width, self.config.height],
             blur_at..frame.hud.vertices.len() as u32,
         );
+        // Volt Recorder: compose the capture — the pre-GUI copy plus only
+        // the layers the recording keeps (the screen above got them all).
+        if video_layered && let Some((_, view)) = &self.video_layer_tex {
+            let total = frame.hud.vertices.len() as u32;
+            let controls_at = frame.hud.controls_at.min(total);
+            let size = [self.config.width, self.config.height];
+            if self.video_layers.0 {
+                self.hud
+                    .draw_range(&mut encoder, view, &self.depth, frame.hud, size, 0..controls_at);
+            }
+            if self.video_layers.1 {
+                self.hud.draw_range(
+                    &mut encoder,
+                    view,
+                    &self.depth,
+                    frame.hud,
+                    size,
+                    controls_at..total,
+                );
+            }
+        }
         if culling && let Some(cull) = &mut self.cull {
             cull.end(&self.device, &mut encoder);
         }
@@ -7233,13 +7322,7 @@ impl Renderer {
         // longer drags the game down. Capture is capped near 30 fps (the
         // export's frame rate).
         let mut video_frame: Option<wgpu::Buffer> = None;
-        if self.video_sink.is_some()
-            && self.config.format.block_copy_size(None) == Some(4)
-            && self.video_pending.len() < 3
-            && self
-                .video_last_capture
-                .is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(31))
-        {
+        if video_due {
             self.video_last_capture = Some(Instant::now());
             let size = [self.config.width, self.config.height];
             let required = u64::from(padded_row(size[0])) * u64::from(size[1]);
@@ -7258,8 +7341,12 @@ impl Renderer {
                     })
                 }
             };
+            let capture_src = match (video_layered, &self.video_layer_tex) {
+                (true, Some((tex, _))) => tex,
+                _ => &target_texture,
+            };
             encoder.copy_texture_to_buffer(
-                target_texture.as_image_copy(),
+                capture_src.as_image_copy(),
                 wgpu::TexelCopyBufferInfo {
                     buffer: &buffer,
                     layout: wgpu::TexelCopyBufferLayout {
@@ -7386,6 +7473,11 @@ impl Renderer {
                 self.video_pending.clear();
                 self.video_free.clear();
                 self.video_last_capture = None;
+            }
+            if self.video_layer_tex.is_some() {
+                self.video_layer_tex = None;
+                self.video_layers = (true, true);
+                self.video_interval = std::time::Duration::from_millis(31);
             }
         } else if !self.video_pending.is_empty() {
             // Nudge the map callbacks along without waiting, then hand
