@@ -31,8 +31,8 @@ mod device_preferences;
 mod device_runtime;
 #[path = "android/diagnostics.rs"]
 mod diagnostics;
-#[path = "android/discord_sdk.rs"]
-mod discord_sdk;
+#[path = "android/discord_rpc.rs"]
+mod discord_rpc;
 #[path = "android/display.rs"]
 mod display;
 #[path = "android/document_bridge.rs"]
@@ -348,8 +348,6 @@ fn android_main(app: AndroidApp) {
         app.enable_motion_axis(axis);
     }
     init_logging();
-    // Rich Presence goes through the Discord app on this phone; before any game start.
-    discord_sdk::register();
     let Some(home) = app.internal_data_path() else {
         log::error!("Android supplied no application data directory");
         return;
@@ -363,6 +361,11 @@ fn android_main(app: AndroidApp) {
         // never churn ART AttachCurrentThread/DetachCurrentThread per frame.
         let _ = vm.attach_current_thread_permanently();
         secure_store::initialize(vm);
+    }
+    // Rich Presence through the Discord app on this phone; before any game start.
+    if let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
+        let activity = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr().cast()) };
+        discord_rpc::initialize(vm, &activity);
     }
     let app_for_engine = app.clone();
     APP.with(|slot| *slot.borrow_mut() = Some(app));

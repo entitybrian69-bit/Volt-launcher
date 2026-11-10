@@ -1,9 +1,9 @@
 //! Discord Rich Presence: "Playing Volt Launcher" on the player's Discord profile, with what
 //! they are doing (docs/native-client.md). A thread of its own talks to Discord: on desktop
 //! through the Discord app's local IPC socket (Discord's RPC docs: `discord-ipc-N`, frames of
-//! opcode u32 LE + length u32 LE + JSON), on Android through the Social SDK's unauthenticated
-//! transport to the signed-in Discord app on the same phone (a [`Backend`] the Android entry
-//! point registers; the FFI lives in its crate root, this library forbids it). The game only calls
+//! opcode u32 LE + length u32 LE + JSON), on Android through the Rich Presence service the
+//! signed-in Discord app on the same phone exports (a [`Backend`] the Android entry point
+//! registers; the JNI lives in its crate root, this library forbids such FFI). The game only calls
 //! [`set`] each frame: a change wakes the thread, which connects when Discord runs, retries
 //! every 15 s when it doesn't, keeps under Discord's update limit and clears the activity on
 //! quit. Nothing is sent with the setting off, or with `HORIZON_NO_DISCORD=1`.
@@ -242,8 +242,9 @@ fn rest(conn: Option<&mut Conn>, timeout: Duration) {
 }
 
 /// A platform transport for the same JSON activities the IPC path sends (Android: the Discord
-/// Social SDK). It lives in the platform's crate root — this library forbids the FFI such a
-/// transport needs — and only ever runs on the presence thread that connected it.
+/// app's exported Rich Presence service). It lives in the platform's crate root — this library
+/// forbids the FFI such a transport needs — and only ever runs on the presence thread that
+/// connected it.
 pub trait Backend {
     /// Publishes `activity` ([`activity`]'s JSON: `details`, `state`, `timestamps.start` in
     /// unix seconds, `buttons`); `None` clears it. `Err` drops the connection for a reconnect.
@@ -631,8 +632,8 @@ mod tests {
         assert_eq!(w.since, None);
     }
 
-    /// A registered platform backend (Android's Social SDK) wins over the IPC socket scan and
-    /// receives the same JSON activities.
+    /// A registered platform backend (Android's Discord-app bridge) wins over the IPC socket
+    /// scan and receives the same JSON activities.
     #[test]
     fn registered_backend_carries_the_activity() {
         struct Fake;

@@ -1508,16 +1508,40 @@ were altered relative to the upstream release. Its textures are original
 procedural pixel art; no Biomes O' Plenty assets are included. The same
 file ships as the `biomes_unseen.hmod` asset on GitHub releases.
 
-## Discord Social SDK (official builds only, not in this repository)
+## antisocialcord-kt (interface definitions)
 
-Official Volt Launcher APKs may bundle the Discord Social SDK
-(`libdiscord_partner_sdk.so` and its Java components), Copyright (c) Discord
-Inc., used under the Discord Social SDK Terms. Discord distributes the SDK
-per application through its Developer Portal and it is not redistributable,
-so no part of it is tracked in this repository: CI decrypts the owner's
-privately provided package (`third_party/discord_social_sdk.aar.enc`, present
-only as ciphertext) at build time when its key is configured. Builds without
-it carry no Discord code; Rich Presence then only uses Discord's documented
-local IPC protocol on desktop. The Rust bindings in
-`crates/horizon-client/src/discord_presence.rs` are original declarations
-written against the SDK's published C interface (`cdiscord.h`).
+The AIDL interface definitions in
+`packaging/android/aidl/com/discord/socialsdk/rpc/` describe the Rich
+Presence service (`com.discord.socialsdk.rpc.IDiscordRpcService`) that the
+Discord Android app exports for its own Social SDK. The interface was
+reverse-engineered and published by Nightdavisao in
+[antisocialcord-kt](https://github.com/Nightdavisao/antisocialcord-kt),
+Copyright (c) Nightdavisao, MIT License. Volt's bridge
+(`packaging/android/java/dev/horizon/android/VoltDiscordRpc.java` and
+`crates/horizon-client/src/android/discord_rpc.rs`) is an original
+implementation that speaks Discord's documented `SET_ACTIVITY` JSON frames
+over that service; no Discord code or proprietary SDK binary is bundled, and
+only the launcher's public application id crosses the connection. On desktop,
+Rich Presence uses Discord's documented local IPC protocol.
+
+MIT License
+
+Copyright (c) Nightdavisao
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

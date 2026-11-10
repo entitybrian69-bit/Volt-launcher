@@ -41,17 +41,13 @@ android {
     sourceSets.main {
         java.srcDirs = ['java']
         manifest.srcFile 'AndroidManifest.xml'
+        // The Discord app's Rich Presence service interface (see THIRD_PARTY_NOTICES.md).
+        aidl.srcDirs = ['aidl']
         jniLibs.srcDirs = ['../../.local/android/gradle-jni']
         assets.srcDirs = ['../../.local/android/gradle-assets']
         res.srcDirs = ['res']
     }
+    buildFeatures { aidl = true }
     packaging { jniLibs { useLegacyPackaging = false; keepDebugSymbols += '**/*.so' } }
 }
 layout.buildDirectory = file('../../.local/android/gradle-build')
-
-// Discord's Social SDK (proprietary, never in the public tree): CI decrypts the owner's
-// package into libs/ when its key is configured; without it the launcher builds and runs
-// the same, only without the on-phone Rich Presence transport.
-if (file('libs/discord_partner_sdk.aar').exists()) {
-    dependencies { implementation files('libs/discord_partner_sdk.aar') }
-}
