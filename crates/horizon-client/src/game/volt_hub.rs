@@ -121,6 +121,7 @@ impl Game<'_> {
     fn volt_recorder_stop(&mut self) {
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.video_sink = None;
+            renderer.video_scale = None;
         }
         if let Some(mut rec) = self.recorder.take() {
             self.volt_hub.status = rec.finish();
@@ -163,6 +164,11 @@ impl Game<'_> {
         renderer.video_layers = (s.hud, s.controls);
         renderer.video_interval =
             std::time::Duration::from_micros(1_000_000 / u64::from(s.fps.max(1)));
+        // The GPU scales each capture to the output size before readback:
+        // the worker then converts and encodes exactly the pixels it needs,
+        // whatever the panel's resolution (above it included).
+        let screen = [renderer.config.width.max(2), renderer.config.height.max(2)];
+        renderer.video_scale = Some([s.width_for(screen), s.height]);
         renderer.video_sink = Some(Box::new(sink));
         self.recorder = Some(rec);
         self.volt_hub.status = if s.clip {
@@ -314,17 +320,10 @@ impl Game<'_> {
                 }
             }
             Act::RecHeight => {
-                let screen = self.volt_screen_px();
                 self.volt_recorder_edit(|s| {
                     let heights = super::recorder::HEIGHTS;
                     let at = heights.iter().position(|&v| v == s.height).unwrap_or(0);
-                    for step in 1..=heights.len() {
-                        let next = heights[(at + step) % heights.len()];
-                        if super::recorder::Settings::height_supported(next, screen) {
-                            s.height = next;
-                            break;
-                        }
-                    }
+                    s.height = heights[(at + 1) % heights.len()];
                 });
             }
             Act::RecFps => self.volt_recorder_edit(|s| {
@@ -616,13 +615,12 @@ impl Game<'_> {
                             Some(Act::RecClip),
                         );
                     }
-                    let hs = super::recorder::Settings::height_supported(s.height, screen);
                     row(
                         &mut ui,
                         &mut targets,
                         &mut y,
                         "Resolution",
-                        &format!("{}p{}", s.height, if hs { "" } else { " (too big)" }),
+                        &format!("{}p", s.height),
                         Some(Act::RecHeight),
                     );
                     row(

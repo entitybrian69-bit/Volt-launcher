@@ -20,7 +20,7 @@ use crate::command::args::GameMode;
 
 /// The "Volt Launcher" application on Discord's developer portal (public: it names the game).
 /// Its Rich Presence assets: `volt`, the logo.
-pub const DISCORD_APP_ID: &str = "1569578048133533747";
+pub const DISCORD_APP_ID: &str = "1569933452453875823";
 /// The two buttons under the activity (Discord allows at most two).
 pub const WEBSITE: &str = "https://entitybrian69-bit.github.io/Volt-launcher/";
 pub const DISCORD_INVITE: &str = "https://discord.gg/WsBxGsKyhU";

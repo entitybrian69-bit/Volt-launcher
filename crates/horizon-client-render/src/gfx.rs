@@ -767,6 +767,13 @@ pub struct Renderer {
     video_free: Vec<wgpu::Buffer>,
     /// When the export last grabbed a frame, for the ~30 fps cap.
     video_last_capture: Option<Instant>,
+    /// Volt Recorder: GPU-scale captures to this size before readback
+    /// (`None`: the native frame size). Sampling the finished frame makes
+    /// any output size work — above the panel's resolution included — and
+    /// a smaller readback keeps the CPU encoder fed at high frame rates.
+    pub video_scale: Option<[u32; 2]>,
+    /// The capture scale pass and its target, rebuilt on a size change.
+    video_scale_pass: Option<(world_post::Post, wgpu::Texture)>,
     /// Brightness option (lightmap gamma), 0..1.
     pub gamma: f32,
     /// Optional full-light lightmap (Horizon Extras).
@@ -3466,6 +3473,8 @@ impl Renderer {
             video_pending: VecDeque::new(),
             video_free: Vec::new(),
             video_last_capture: None,
+            video_scale: None,
+            video_scale_pass: None,
             video_layers: (true, true),
             video_interval: std::time::Duration::from_millis(31),
             video_layer_tex: None,
@@ -7184,7 +7193,7 @@ impl Renderer {
         // put the pre-GUI frame aside and re-compose the kept layers on it.
         let video_due = self.video_sink.is_some()
             && self.config.format.block_copy_size(None) == Some(4)
-            && self.video_pending.len() < 3
+            && self.video_pending.len() < 4
             && self
                 .video_last_capture
                 .is_none_or(|at| at.elapsed() >= self.video_interval);
@@ -7319,10 +7328,15 @@ impl Renderer {
         // never blocks on the GPU and buffers are pooled, so recording no
         // longer drags the game down. Capture is capped near 30 fps (the
         // export's frame rate).
-        let mut video_frame: Option<wgpu::Buffer> = None;
+        let mut video_frame: Option<(wgpu::Buffer, [u32; 2])> = None;
         if video_due {
             self.video_last_capture = Some(Instant::now());
-            let size = [self.config.width, self.config.height];
+            let native = [self.config.width, self.config.height];
+            let scaled = self
+                .video_scale
+                .map(|[w, h]| [w.clamp(64, 4096) & !1, h.clamp(64, 4096) & !1])
+                .filter(|&s| s != native);
+            let size = scaled.unwrap_or(native);
             let required = u64::from(padded_row(size[0])) * u64::from(size[1]);
             let buffer = match self.video_free.pop() {
                 Some(b) if b.size() == required => b,
@@ -7339,9 +7353,50 @@ impl Renderer {
                     })
                 }
             };
+            if let Some(out) = scaled {
+                let format = self.config.format.remove_srgb_suffix();
+                if self.video_scale_pass.as_ref().is_none_or(|(_, t)| {
+                    t.width() != out[0] || t.height() != out[1] || t.format() != format
+                }) {
+                    let post = world_post::Post::new(&self.device, format);
+                    let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Volt recorder scale"),
+                        size: wgpu::Extent3d {
+                            width: out[0],
+                            height: out[1],
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    });
+                    self.video_scale_pass = Some((post, tex));
+                }
+            }
             let capture_src = match (video_layered, &self.video_layer_tex) {
                 (true, Some((tex, _))) => tex,
                 _ => &target_texture,
+            };
+            let capture_src = if scaled.is_some() {
+                let (post, tex) = self.video_scale_pass.as_ref().expect("video scale pass");
+                let src_view = capture_src.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.config.format.remove_srgb_suffix()),
+                    ..Default::default()
+                });
+                let group = post.bind(&self.device, &src_view);
+                post.finish_in_rect(
+                    &mut encoder,
+                    &tex.create_view(&Default::default()),
+                    &group,
+                    None,
+                );
+                tex
+            } else {
+                capture_src
             };
             encoder.copy_texture_to_buffer(
                 capture_src.as_image_copy(),
@@ -7359,7 +7414,7 @@ impl Renderer {
                     depth_or_array_layers: 1,
                 },
             );
-            video_frame = Some(buffer);
+            video_frame = Some((buffer, size));
         }
         self.uploads.finish(&encoder);
         if has_section_copies {
@@ -7445,7 +7500,7 @@ impl Renderer {
                     .map_err(|e| e.to_string()),
             );
         }
-        if let Some(buffer) = video_frame {
+        if let Some((buffer, size)) = video_frame {
             let bgra = matches!(
                 self.config.format.remove_srgb_suffix(),
                 wgpu::TextureFormat::Bgra8Unorm
@@ -7458,12 +7513,7 @@ impl Renderer {
                     std::sync::atomic::Ordering::Release,
                 );
             });
-            self.video_pending.push_back((
-                buffer,
-                flag,
-                [self.config.width, self.config.height],
-                bgra,
-            ));
+            self.video_pending.push_back((buffer, flag, size, bgra));
         }
         if self.video_sink.is_none() {
             // The export ended: let go of the in-flight and pooled buffers.
@@ -7476,6 +7526,10 @@ impl Renderer {
                 self.video_layer_tex = None;
                 self.video_layers = (true, true);
                 self.video_interval = std::time::Duration::from_millis(31);
+            }
+            if self.video_scale.is_some() || self.video_scale_pass.is_some() {
+                self.video_scale = None;
+                self.video_scale_pass = None;
             }
         } else if !self.video_pending.is_empty() {
             // Nudge the map callbacks along without waiting, then hand

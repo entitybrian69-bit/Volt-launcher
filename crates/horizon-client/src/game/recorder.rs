@@ -115,11 +115,11 @@ impl Settings {
         let bits = f64::from(self.bitrate(self.width_for(screen))) + 128_000.0;
         bits * 60.0 / 8.0 / 1_000_000.0
     }
-    /// Whether this resolution exceeds what the screen can supply (the
-    /// capture cannot upscale): such rows grey out.
-    pub fn height_supported(height: u32, screen: [u32; 2]) -> bool {
-        height <= screen[0].max(screen[1]).max(screen[1].min(screen[0]) * 16 / 9)
-            && height <= screen[0].min(screen[1]) + 120
+    /// Every ladder height records on every screen: the renderer scales
+    /// each capture on the GPU to the requested output size, upsampling
+    /// included, before it is read back.
+    pub fn height_supported(height: u32, _screen: [u32; 2]) -> bool {
+        HEIGHTS.contains(&height)
     }
 }
 
@@ -968,9 +968,10 @@ mod tests {
         // 1080p at the 16:9 default aspect.
         assert_eq!(s.width_for([2400, 1080]), 2400);
         assert!(s.mb_per_min([1920, 1080]) > 10.0);
-        // The ladder greys out what the screen cannot supply.
+        // Every ladder height is recordable: the GPU scales the capture.
         assert!(Settings::height_supported(720, [2400, 1080]));
-        assert!(!Settings::height_supported(1440, [1920, 1080]));
+        assert!(Settings::height_supported(1440, [1920, 1080]));
+        assert!(!Settings::height_supported(1000, [1920, 1080]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

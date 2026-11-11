@@ -609,6 +609,17 @@ fn run(
         .encode(),
     )
     .map_err(e)?;
+    // With the brand reading "vanilla", Horizon hosts learn what this client
+    // is from an explicit hello on the mod-message channel instead. Vanilla
+    // servers discard unknown custom payloads silently.
+    c.send(
+        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+            channel: horizon_protocol::mod_net::CHANNEL.into(),
+            data: Vec::new(),
+        })
+        .encode(),
+    )
+    .map_err(e)?;
     let (mut reader, writer) = c.split();
     *shared_writer.lock().unwrap() = Some(writer);
     let registries = configure(
@@ -1127,7 +1138,12 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
 /// The minecraft:brand payload: a string naming the client.
 fn brand() -> Vec<u8> {
     let mut w = horizon_protocol::buf::Writer::new();
-    w.string("horizon");
+    // Exactly vanilla's brand: anti-bot and anti-cheat plugins commonly
+    // treat an unknown `minecraft:brand` as a bot and refuse the join (or
+    // fail their captcha flow), and the engine's behaviour is vanilla
+    // parity anyway. Note a `horizon-clients-only` host turns this brand
+    // away by design; that server-side gate is off by default.
+    w.string("vanilla");
     w.data
 }
 
