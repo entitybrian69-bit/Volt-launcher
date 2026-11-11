@@ -222,12 +222,14 @@ impl Game<'_> {
     ) -> bool {
         use winit::event::TouchPhase;
         let owns = self.volt_hub.drag.as_ref().is_some_and(|d| d.id == id);
+        // The logo rides over every in-game screen (pause, settings,
+        // inventory, chat), so its gesture starts on any of them; only a
+        // hidden GUI or a watched replay leaves the touch alone.
         if !owns
             && (phase != TouchPhase::Started
                 || self.volt_hub.open
-                || self.title.is_some()
                 || self.ui.hide_gui
-                || self.screen != Screen::Playing)
+                || self.replay_control().is_some())
         {
             return false;
         }
@@ -279,7 +281,9 @@ impl Game<'_> {
     /// Handles a press at `cursor` (GUI coordinates). Returns whether the
     /// hub consumed it.
     pub(super) fn try_click_volt_hub_overlay(&mut self, cursor: (f32, f32)) -> bool {
-        if self.title.is_some() || self.ui.hide_gui || self.replay_control().is_some() {
+        // The hub stays usable over every in-game screen; only a hidden
+        // GUI or a watched replay drops it.
+        if self.ui.hide_gui || self.replay_control().is_some() {
             self.volt_hub.open = false;
             self.volt_hub.targets.clear();
             return false;

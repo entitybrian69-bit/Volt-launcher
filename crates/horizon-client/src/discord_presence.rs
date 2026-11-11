@@ -114,18 +114,29 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
 static STOPPED: Condvar = Condvar::new();
 static THREAD: OnceLock<Thread> = OnceLock::new();
 
-/// Starts the presence thread, once: when the game starts, never for a dedicated server.
+/// Starts the presence thread when the game starts, never for a dedicated server.
 /// `automated` runs (offscreen, benchmarks) only talk to a test's fake Discord.
+/// After a [`stop`] (Android's launcher stops presence when a game session ends but
+/// the process lives on) the parked thread is reused: calling `start` again resumes it.
 pub fn start(enabled: bool, automated: bool) {
     let fake_discord = std::env::var_os(IPC_DIR_ENV).is_some();
-    if THREAD.get().is_some()
-        || std::env::var_os("HORIZON_NO_DISCORD").is_some_and(|v| v != "0")
+    if std::env::var_os("HORIZON_NO_DISCORD").is_some_and(|v| v != "0")
         || (automated && !fake_discord)
     {
         return;
     }
-    if !enabled {
-        lock().wanted.status = Status::Off;
+    {
+        let mut s = lock();
+        s.stop = false;
+        s.stopped = false;
+        s.wanted = Wanted {
+            status: if enabled { Status::Menus } else { Status::Off },
+            since: None,
+        };
+    }
+    if let Some(thread) = THREAD.get() {
+        thread.unpark();
+        return;
     }
     match std::thread::Builder::new()
         .name("Discord presence".into())
@@ -186,9 +197,10 @@ fn run() {
             }
             sent = None;
             if stop {
+                // Flush acknowledged; park instead of exiting so a later
+                // `start` (the next game session on Android) resumes this thread.
                 lock().stopped = true;
                 STOPPED.notify_all();
-                return;
             }
             std::thread::park();
             continue;

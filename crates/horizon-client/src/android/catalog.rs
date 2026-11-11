@@ -954,8 +954,20 @@ impl Catalog {
                 }
                 entries.len()
             };
+            // Say what was installed and the real next step: a shader is not
+            // loaded by Play, it is picked in game under Video Settings.
+            let message = match project.kind {
+                Kind::Shader => format!(
+                    "{} installed. In game, turn it on under Video Settings > Shader Packs.",
+                    project.title
+                ),
+                _ => format!(
+                    "{} installed ({count} file(s)). Open Play to load this profile.",
+                    project.title
+                ),
+            };
             Ok(Reply::Done(
-                format!("Installed {count} item(s). Open Play to load this profile."),
+                message,
                 match project.kind {
                     Kind::Mod => horizon_client::content_files::Kind::Mods,
                     Kind::Shader => horizon_client::content_files::Kind::Shaders,

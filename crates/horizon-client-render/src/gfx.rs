@@ -5220,6 +5220,11 @@ impl Renderer {
             let physical = [f.texture.width(), f.texture.height()];
             frame.menu_blur.is_some()
                 || self.screenshot.is_some()
+                // The Volt recorder copies (and scales) the frame on the GPU:
+                // Android swapchain images are pure RENDER_ATTACHMENT, so a
+                // recording draws into FrameScale's COPY_SRC+TEXTURE_BINDING
+                // target instead of failing the capture copy.
+                || self.video_sink.is_some()
                 || physical != size
                 || winit::platform::android::native_content_rect(physical)
                     != [0, 0, physical[0], physical[1]]
@@ -7222,7 +7227,9 @@ impl Renderer {
                     format: target_texture.format(),
                     usage: wgpu::TextureUsages::COPY_DST
                         | wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT
+                        // The recorder's GPU scale pass samples this copy.
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[self.config.format.remove_srgb_suffix()],
                 });
                 let view = tex.create_view(&wgpu::TextureViewDescriptor {
@@ -7332,10 +7339,21 @@ impl Renderer {
         if video_due {
             self.video_last_capture = Some(Instant::now());
             let native = [self.config.width, self.config.height];
+            // The scale pass samples its source: a swapchain image without
+            // TEXTURE_BINDING (Android keeps them pure RENDER_ATTACHMENT)
+            // must fall back to the native-size copy instead of tripping a
+            // validation error that kills the device (a black screen).
+            let src_bindable = if video_layered && self.video_layer_tex.is_some() {
+                true
+            } else {
+                target_texture
+                    .usage()
+                    .contains(wgpu::TextureUsages::TEXTURE_BINDING)
+            };
             let scaled = self
                 .video_scale
                 .map(|[w, h]| [w.clamp(64, 4096) & !1, h.clamp(64, 4096) & !1])
-                .filter(|&s| s != native);
+                .filter(|&s| s != native && src_bindable);
             let size = scaled.unwrap_or(native);
             let required = u64::from(padded_row(size[0])) * u64::from(size[1]);
             let buffer = match self.video_free.pop() {

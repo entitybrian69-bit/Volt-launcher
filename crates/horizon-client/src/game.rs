@@ -7478,6 +7478,13 @@ impl Game<'_> {
         // Gui.extractRenderState: the debug overlay comes after the screen
         // and the toasts, so it is over everything, menus included.
         let margins = self.hud_safe_margins();
+        // The Volt Hub: the floating V logo (or the open hub window) rides
+        // over every in-game screen — pause, settings, inventory, chat and
+        // full-screen menus — so the dashboard is always one tap away.
+        // A hidden GUI, a watched replay and the touch-layout editor stay clean.
+        if !self.ui.hide_gui && self.replay_control().is_none() && !self.touch_editing() {
+            horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_volt_hub(b));
+        }
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| {
             let safe_size = [
                 (b.width * b.scale).round() as u32,
@@ -19893,6 +19900,15 @@ pub(crate) fn android_game(handoff: Option<(Arc<Window>, Renderer)>) -> Result<A
     }
     horizon_client::spans::enable(options.spikes.is_some());
     let settings = Settings::load(&std::env::current_dir()?.join("options.txt"));
+    // "Playing Horizon" on Discord, exactly like the desktop `run` path: Android
+    // starts games in-process from the launcher, which never goes through `run`,
+    // so the presence thread must start here (and restart on the next session
+    // after the launcher's `stop`). Automated runs only talk to a fake Discord.
+    let automated = options.benchmark.is_some()
+        || options.offscreen
+        || options.frames.is_some()
+        || options.world_frames.is_some();
+    horizon_client::discord_presence::start(settings.extras.discord_presence, automated);
     let root = options.resources.clone();
     horizon_threads::put_helpers_behind();
     Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));

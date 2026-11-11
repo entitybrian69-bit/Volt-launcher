@@ -798,8 +798,8 @@ impl Game<'_> {
         if self.settings.extras.volt_qol.replay_button {
             self.draw_replay_button(batch);
         }
-        // Volt Hub: the pill, or the whole overlay while open.
-        self.draw_volt_hub(batch);
+        // The Volt Hub V logo draws late in `Game::hud` instead, so it
+        // rides over every in-game screen, not only the live HUD.
         let now = self.started.elapsed().as_secs_f64();
         let (w, h) = (batch.width, batch.height);
         let my_name = self.options.player_name();
@@ -2748,7 +2748,8 @@ impl Game<'_> {
     /// Handles touch/mouse press on the Volt HUD (the hub pill or window).
     pub(super) fn try_click_volt_hud(&mut self, cursor: (f32, f32), pressed: bool) -> bool {
         self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
-        if !pressed || self.title.is_some() || self.ui.hide_gui {
+        // No title gate: the hub rides over every in-game screen.
+        if !pressed || self.ui.hide_gui {
             return false;
         }
         self.try_click_volt_hub_overlay(cursor)

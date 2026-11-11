@@ -472,13 +472,21 @@ impl Game<'_> {
         }
         // The floating Volt logo: its own gesture owns the touch from the
         // press to the release (tap opens the hub, drag moves the logo).
-        if (!self.pad_in_menu() || t.phase != TouchPhase::Started)
-            && self.volt_hub_logo_touch(t.id, (p[0], p[1]), t.phase)
-        {
+        // It rides over every in-game screen, so no pad_in_menu gate.
+        if self.volt_hub_logo_touch(t.id, (p[0], p[1]), t.phase) {
             if t.phase == TouchPhase::Started {
                 self.pad.touch.clear();
                 self.pad.touch.ignore(t.id);
             }
+            return Ok(true);
+        }
+        // The open hub window also rides over menus: it takes the tap
+        // (a tap outside its panel closes it) before the screen below.
+        if self.volt_hub.open
+            && self.pad_in_menu()
+            && t.phase == TouchPhase::Started
+            && self.try_click_volt_hud((p[0], p[1]), true)
+        {
             return Ok(true);
         }
         // The floating replay button: its own gesture owns the touch from
