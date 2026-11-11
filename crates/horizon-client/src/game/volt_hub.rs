@@ -485,8 +485,12 @@ impl Game<'_> {
     fn volt_apply_live_controls(&mut self) {
         let path = volt_controls_game_home().join("horizon-touch.json");
         self.settings.touch = horizon_client::touch::Settings::load_from(&path);
-        self.pad.touch.clear();
-        self.pad.touch.settings = self.settings.touch.clone();
+        // The live touch overlay only exists on Android builds.
+        #[cfg(target_os = "android")]
+        {
+            self.pad.touch.clear();
+            self.pad.touch.settings = self.settings.touch.clone();
+        }
     }
 
     /// Draws the floating logo (closed) or the hub window (open) and
