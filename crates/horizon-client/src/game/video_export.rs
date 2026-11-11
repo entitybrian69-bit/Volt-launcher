@@ -509,7 +509,7 @@ pub(super) mod media {
         std::thread::scope(|scope| {
             let y_rows = h.div_ceil(bands);
             for (band, chunk) in y_plane[..stride * h].chunks_mut(stride * y_rows).enumerate() {
-                let work = move || {
+                let mut work = move || {
                     for (r, dst) in chunk.chunks_mut(stride).enumerate() {
                         luma_row(band * y_rows + r, dst);
                     }
@@ -527,7 +527,7 @@ pub(super) mod media {
             if semi_planar {
                 for (band, chunk) in chroma[..stride * c_h].chunks_mut(stride * c_rows).enumerate()
                 {
-                    let work = move || {
+                    let mut work = move || {
                         for (r, dst) in chunk.chunks_mut(stride).enumerate() {
                             let row = band * c_rows + r;
                             for col in 0..w / 2 {
@@ -548,7 +548,7 @@ pub(super) mod media {
                 let u_chunks = u_plane[..cs * c_h].chunks_mut(cs * c_rows);
                 let v_chunks = v_plane[..cs * c_h].chunks_mut(cs * c_rows);
                 for (band, (uc, vc)) in u_chunks.zip(v_chunks).enumerate() {
-                    let work = move || {
+                    let mut work = move || {
                         for (r, (ud, vd)) in uc.chunks_mut(cs).zip(vc.chunks_mut(cs)).enumerate() {
                             let row = band * c_rows + r;
                             for col in 0..w / 2 {
