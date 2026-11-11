@@ -311,6 +311,10 @@ pub struct Catalog {
     pub scroll: f32,
     /// Ids of `bundled_native::BUNDLED` mods the profile turned off in-game.
     pub bundled_disabled: std::collections::BTreeSet<String>,
+    /// The Mods tab's live filter text.
+    pub mods_query: String,
+    /// The Mods tab's sort: 0 = default order, 1 = on first, 2 = off first.
+    pub mods_sort: u8,
     pub native_sources: std::collections::HashSet<String>,
     pub bundled_mods: std::collections::HashSet<String>,
     pub bundled_zoom_installed: bool,
@@ -379,6 +383,8 @@ impl Catalog {
             append_next: false,
             scroll: 0.0,
             bundled_disabled: std::collections::BTreeSet::new(),
+            mods_query: String::new(),
+            mods_sort: 0,
             native_sources: std::collections::HashSet::new(),
             bundled_mods: std::collections::HashSet::new(),
             bundled_zoom_installed: false,
@@ -1082,6 +1088,7 @@ impl Catalog {
             Some("ely_pass") => &mut self.ely_pass_input,
             Some("ely_totp") => &mut self.ely_totp_input,
             Some("skin_query") => &mut self.skin_query_input,
+            Some("mods_search") => &mut self.mods_query,
             _ => &mut self.query,
         };
         match out {

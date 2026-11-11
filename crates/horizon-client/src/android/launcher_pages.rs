@@ -179,6 +179,12 @@ pub(super) enum Action {
     /// Turn `bundled_native::WOVEN[i]` on or off for the active profile
     /// (`mod.<id>:false` in `horizon-mods.txt`; the code ships in the APK).
     ToggleWoven(usize),
+    /// Turn every toggleable mod on (Mods tab).
+    ModsAllOn,
+    /// Turn every toggleable mod off (Mods tab).
+    ModsAllOff,
+    /// Cycle the Mods tab sort: default order, on first, off first.
+    ModsSort,
     Studio(super::controls_studio::StudioAction),
 }
 
@@ -2538,105 +2544,159 @@ impl DrawCtx<'_> {
         );
     }
 
-    /// Official Horizon registry mods compiled into this APK: install or
-    /// remove each one per profile; they are turned on or off in-game under
-    /// Options > Mods.
+    /// The Mods tab: every mod in this APK as one searchable, sortable
+    /// list with master switches. The launcher is the source of truth: a
+    /// mod turned off here neither runs nor appears in-game.
     fn draw_mods_landing(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
         let _ = account_status;
         let [cx, cy, cw, ch] = area;
         ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), "Mods");
-        let hint = "Official Horizon registry mods compiled into Volt. Install or toggle per profile; configure in-game under Mods.";
-        let fitted = ui.fit_text(Face::LauncherRegular, 12.0, hint, (cw - 8.0).max(120.0));
-        ui.text(Face::LauncherRegular, 12.0, cx, cy + 24.0, theme::MUTED(), &fitted);
-        let status_y = cy + 42.0;
-        if !self.catalog.status.is_empty() {
-            let status = ui.fit_text(Face::LauncherRegular, 11.0, &self.catalog.status, cw - 8.0);
-            ui.text(Face::LauncherRegular, 11.0, cx, status_y, theme::DIM(), &status);
-        }
-        let top = status_y + 18.0;
+
+        // Toolbar: search field + All on / All off / Sort.
+        let bar_y = cy + 28.0;
+        let bar_h = 40.0;
+        let btn_w = 76.0;
+        let sort_w = 104.0;
+        let gap = 8.0;
+        let s_w = (cw - btn_w * 2.0 - sort_w - gap * 3.0).max(120.0);
+        let srect = [cx, bar_y + 3.0, s_w, 34.0];
+        ui.rounded(srect[0], srect[1], srect[2], srect[3], 8.0, theme::CARD_INNER());
+        ui.border(
+            srect[0],
+            srect[1],
+            srect[2],
+            srect[3],
+            8.0,
+            if self.catalog.editing == Some("mods_search") {
+                theme::CRIMSON()
+            } else {
+                theme::BORDER()
+            },
+        );
+        let searching = !self.catalog.mods_query.is_empty();
+        let placeholder = !searching && self.catalog.editing != Some("mods_search");
+        let shown = if placeholder {
+            "Search mods...".to_owned()
+        } else {
+            self.catalog.mods_query.clone()
+        };
+        let qfit = ui.fit_text(Face::LauncherRegular, 13.5, &shown, s_w - 24.0);
+        ui.text(
+            Face::LauncherRegular,
+            13.5,
+            srect[0] + 12.0,
+            text_vcenter(srect[1], srect[3], 13.5),
+            if placeholder { theme::DIM() } else { theme::TEXT() },
+            &qfit,
+        );
+        self.targets.push((srect, Action::Field("mods_search")));
+        let mut bx = cx + s_w + gap;
+        styled_button(
+            ui,
+            self.targets,
+            [bx, bar_y + 3.0, btn_w, 34.0],
+            "All on",
+            Action::ModsAllOn,
+            BtnStyle::Primary,
+            true,
+        );
+        bx += btn_w + gap;
+        styled_button(
+            ui,
+            self.targets,
+            [bx, bar_y + 3.0, btn_w, 34.0],
+            "All off",
+            Action::ModsAllOff,
+            BtnStyle::Secondary,
+            true,
+        );
+        bx += btn_w + gap;
+        let sort_label = match self.catalog.mods_sort {
+            1 => "Sort: On",
+            2 => "Sort: Off",
+            _ => "Sort: All",
+        };
+        styled_button(
+            ui,
+            self.targets,
+            [bx, bar_y + 3.0, sort_w, 34.0],
+            sort_label,
+            Action::ModsSort,
+            BtnStyle::CrimsonOutline,
+            true,
+        );
+
+        let top = bar_y + bar_h + 8.0;
         let bottom = cy + ch;
         let view_h = (bottom - top).max(0.0);
         if view_h < 1.0 {
             return;
         }
-        let row_h = 64.0;
-        let step = 70.0;
+
+        // One row model over the three kinds, filtered and sorted.
+        #[derive(Clone, Copy)]
+        enum Kind {
+            Replay,
+            Bundled(usize),
+            Woven(usize),
+        }
         let bundled = horizon_client::bundled_native::BUNDLED;
         let woven = horizon_client::bundled_native::WOVEN;
-        let total = (1 + bundled.len() + woven.len()) as f32 * step;
+        let query = self.catalog.mods_query.trim().to_lowercase();
+        let hit = |title: &str, blurb: &str| {
+            query.is_empty()
+                || title.to_lowercase().contains(&query)
+                || blurb.to_lowercase().contains(&query)
+        };
+        let mut rows: Vec<(Kind, bool, String)> = Vec::new();
+        if hit("Volt Replay", "Records your sessions replays timeline") {
+            rows.push((
+                Kind::Replay,
+                self.catalog.extras.volt_qol.replay_buffer,
+                "Volt Replay".to_owned(),
+            ));
+        }
+        for (i, &(id, _, _)) in bundled.iter().enumerate() {
+            let title = bundled_mod_title(id);
+            if hit(title, bundled_mod_blurb(id)) {
+                let installed = self.catalog.bundled_mods.contains(id);
+                let on = installed && !self.catalog.bundled_disabled.contains(id);
+                rows.push((Kind::Bundled(i), on, title.to_owned()));
+            }
+        }
+        for (i, &(id, _)) in woven.iter().enumerate() {
+            let title = bundled_mod_title(id);
+            if hit(title, bundled_mod_blurb(id)) {
+                let on = !self.catalog.bundled_disabled.contains(id);
+                rows.push((Kind::Woven(i), on, title.to_owned()));
+            }
+        }
+        match self.catalog.mods_sort {
+            1 => rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.2.cmp(&b.2))),
+            2 => rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(&b.2))),
+            _ => {}
+        }
+
+        let row_h = 64.0;
+        let step = 70.0;
+        let total = rows.len() as f32 * step;
         let max_scroll = (total - view_h).max(0.0);
         self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
         *self.list_view = Some([top, bottom, max_scroll]);
-        // Volt Replay leads the list: Volt's own session recorder, built
-        // into the engine rather than woven from the registry.
-        {
-            let ry = top - self.catalog.scroll;
-            if ry + row_h >= top && ry <= bottom {
-                let start = ui.batch_mut().vertices.len();
-                ui.rounded(cx, ry, cw, row_h, 10.0, theme::CARD());
-                ui.border(cx, ry, cw, row_h, 10.0, theme::BORDER());
-                let icon = [cx + 8.0, ry + 11.0, 42.0, 42.0];
-                ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_GLOW_SOFT());
-                ui.border(icon[0], icon[1], icon[2], icon[3], 8.0, theme::BORDER());
-                draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), "V");
-                let enabled = self.catalog.extras.volt_qol.replay_buffer;
-                let tx = cx + 58.0;
-                let text_w = (cw - 178.0).max(32.0);
-                let title = ui.fit_text(Face::LauncherMedium, 14.0, "Volt Replay 1.0.0", text_w);
-                ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
-                let state = if enabled { "Recording on" } else { "Recording off" };
-                let line = format!("Volt mod · Built into this APK · {state}");
-                let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
-                ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
-                let blurb = ui.fit_text(
-                    Face::LauncherRegular,
-                    11.0,
-                    "Records your sessions. Watch them from Home > Replays: timeline, speeds, free camera.",
-                    text_w,
-                );
-                ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
-                let button = [cx + cw - 108.0, ry + 7.0, 98.0, 24.0];
-                if !self.catalog.busy() {
-                    let first = self.targets.len();
-                    styled_button(
-                        ui,
-                        self.targets,
-                        button,
-                        if enabled { "Turn off" } else { "Turn on" },
-                        Action::ToggleVoltReplay,
-                        if enabled { BtnStyle::Secondary } else { BtnStyle::Primary },
-                        true,
-                    );
-                    if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
-                        self.targets[first].0 = clipped;
-                    } else {
-                        self.targets.truncate(first);
-                    }
-                    // The on-screen Start / Pause / End button toggle.
-                    let btn2 = [cx + cw - 108.0, ry + 35.0, 98.0, 22.0];
-                    let btn_on = self.catalog.extras.volt_qol.replay_button;
-                    let first = self.targets.len();
-                    styled_button(
-                        ui,
-                        self.targets,
-                        btn2,
-                        if btn_on { "Button: On" } else { "Button: Off" },
-                        Action::ToggleReplayButton,
-                        if btn_on { BtnStyle::Primary } else { BtnStyle::Secondary },
-                        true,
-                    );
-                    if let Some(clipped) = super::gesture::clip_target_y(btn2, top, bottom) {
-                        self.targets[first].0 = clipped;
-                    } else {
-                        self.targets.truncate(first);
-                    }
-                }
-                let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
-                ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
-            }
+        if rows.is_empty() {
+            ui.text(
+                Face::LauncherRegular,
+                13.0,
+                cx,
+                top + 10.0,
+                theme::DIM(),
+                "No mods match this search.",
+            );
+            return;
         }
-        for (i, &(id, version, _)) in bundled.iter().enumerate() {
-            let ry = top + (1 + i) as f32 * step - self.catalog.scroll;
+
+        for (slot, &(kind, enabled, _)) in rows.iter().enumerate() {
+            let ry = top + slot as f32 * step - self.catalog.scroll;
             if ry + row_h < top || ry > bottom {
                 continue;
             }
@@ -2646,91 +2706,131 @@ impl DrawCtx<'_> {
             let icon = [cx + 8.0, ry + 11.0, 42.0, 42.0];
             ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_GLOW_SOFT());
             ui.border(icon[0], icon[1], icon[2], icon[3], 8.0, theme::BORDER());
-            let initial: String = bundled_mod_title(id).chars().take(1).collect();
-            draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), &initial);
-            let installed = self.catalog.bundled_mods.contains(id);
-            let enabled = installed && !self.catalog.bundled_disabled.contains(id);
             let tx = cx + 58.0;
             let text_w = (cw - 178.0).max(32.0);
-            let title = format!("{} {version}", bundled_mod_title(id));
-            let title = ui.fit_text(Face::LauncherMedium, 14.0, &title, text_w);
-            ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
-            let state = if installed {
-                if enabled {
-                    "Installed · On in game"
-                } else {
-                    "Installed · Off in game"
+            // On/off dot on the icon's corner.
+            let dot = if enabled { theme::ONLINE() } else { theme::DIM() };
+            ui.rounded(icon[0] + icon[2] - 11.0, icon[1] + 3.0, 8.0, 8.0, 4.0, dot);
+            match kind {
+                Kind::Replay => {
+                    draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), "V");
+                    let title = ui.fit_text(Face::LauncherMedium, 14.0, "Volt Replay 1.0.0", text_w);
+                    ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
+                    let state = if enabled { "Recording on" } else { "Recording off" };
+                    let line = format!("Volt mod · Built into this APK · {state}");
+                    let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
+                    ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
+                    let blurb = ui.fit_text(
+                        Face::LauncherRegular,
+                        11.0,
+                        "Records your sessions. Watch them from Home > Replays: timeline, speeds, free camera.",
+                        text_w,
+                    );
+                    ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
+                    if !self.catalog.busy() {
+                        let button = [cx + cw - 108.0, ry + 7.0, 98.0, 24.0];
+                        let first = self.targets.len();
+                        styled_button(
+                            ui,
+                            self.targets,
+                            button,
+                            if enabled { "Turn off" } else { "Turn on" },
+                            Action::ToggleVoltReplay,
+                            if enabled { BtnStyle::Secondary } else { BtnStyle::Primary },
+                            true,
+                        );
+                        if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                            self.targets[first].0 = clipped;
+                        } else {
+                            self.targets.truncate(first);
+                        }
+                        let btn2 = [cx + cw - 108.0, ry + 35.0, 98.0, 22.0];
+                        let btn_on = self.catalog.extras.volt_qol.replay_button;
+                        let first = self.targets.len();
+                        styled_button(
+                            ui,
+                            self.targets,
+                            btn2,
+                            if btn_on { "Button: On" } else { "Button: Off" },
+                            Action::ToggleReplayButton,
+                            if btn_on { BtnStyle::Primary } else { BtnStyle::Secondary },
+                            true,
+                        );
+                        if let Some(clipped) = super::gesture::clip_target_y(btn2, top, bottom) {
+                            self.targets[first].0 = clipped;
+                        } else {
+                            self.targets.truncate(first);
+                        }
+                    }
                 }
-            } else {
-                "In this APK · not installed"
-            };
-            let line = format!("Official Horizon mod · {state}");
-            let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
-            ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
-            let blurb = ui.fit_text(Face::LauncherRegular, 11.0, bundled_mod_blurb(id), text_w);
-            ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
-            let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
-            if !self.catalog.busy() {
-                let first = self.targets.len();
-                styled_button(
-                    ui,
-                    self.targets,
-                    button,
-                    if installed { "Remove" } else { "Install" },
-                    Action::ToggleBundled(i),
-                    if installed { BtnStyle::Secondary } else { BtnStyle::Primary },
-                    true,
-                );
-                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
-                    self.targets[first].0 = clipped;
-                } else {
-                    self.targets.truncate(first);
+                Kind::Bundled(i) => {
+                    let (id, version, _) = bundled[i];
+                    let initial: String = bundled_mod_title(id).chars().take(1).collect();
+                    draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), &initial);
+                    let installed = self.catalog.bundled_mods.contains(id);
+                    let title = format!("{} {version}", bundled_mod_title(id));
+                    let title = ui.fit_text(Face::LauncherMedium, 14.0, &title, text_w);
+                    ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
+                    let state = if installed {
+                        if enabled { "Installed · On in game" } else { "Installed · Off in game" }
+                    } else {
+                        "In this APK · not installed"
+                    };
+                    let line = format!("Official Horizon mod · {state}");
+                    let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
+                    ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
+                    let blurb = ui.fit_text(Face::LauncherRegular, 11.0, bundled_mod_blurb(id), text_w);
+                    ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
+                    if !self.catalog.busy() {
+                        let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
+                        let first = self.targets.len();
+                        styled_button(
+                            ui,
+                            self.targets,
+                            button,
+                            if installed { "Remove" } else { "Install" },
+                            Action::ToggleBundled(i),
+                            if installed { BtnStyle::Secondary } else { BtnStyle::Primary },
+                            true,
+                        );
+                        if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                            self.targets[first].0 = clipped;
+                        } else {
+                            self.targets.truncate(first);
+                        }
+                    }
                 }
-            }
-            let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
-            ui.batch_mut().clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
-        }
-        for (i, &(id, version)) in woven.iter().enumerate() {
-            let ry = top + (1 + bundled.len() + i) as f32 * step - self.catalog.scroll;
-            if ry + row_h < top || ry > bottom {
-                continue;
-            }
-            let start = ui.batch_mut().vertices.len();
-            ui.rounded(cx, ry, cw, row_h, 10.0, theme::CARD());
-            ui.border(cx, ry, cw, row_h, 10.0, theme::BORDER());
-            let icon = [cx + 8.0, ry + 11.0, 42.0, 42.0];
-            ui.rounded(icon[0], icon[1], icon[2], icon[3], 8.0, theme::HERO_GLOW_SOFT());
-            ui.border(icon[0], icon[1], icon[2], icon[3], 8.0, theme::BORDER());
-            let initial: String = bundled_mod_title(id).chars().take(1).collect();
-            draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), &initial);
-            let enabled = !self.catalog.bundled_disabled.contains(id);
-            let tx = cx + 58.0;
-            let text_w = (cw - 178.0).max(32.0);
-            let title = format!("{} {version}", bundled_mod_title(id));
-            let title = ui.fit_text(Face::LauncherMedium, 14.0, &title, text_w);
-            ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
-            let state = if enabled { "On in game" } else { "Off in game" };
-            let line = format!("Official Horizon mod · Built into this APK · {state}");
-            let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
-            ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
-            let blurb = ui.fit_text(Face::LauncherRegular, 11.0, bundled_mod_blurb(id), text_w);
-            ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
-            let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
-            if !self.catalog.busy() {
-                let first = self.targets.len();
-                styled_button(
-                    ui,
-                    self.targets,
-                    button,
-                    if enabled { "Turn off" } else { "Turn on" },
-                    Action::ToggleWoven(i),
-                    if enabled { BtnStyle::Secondary } else { BtnStyle::Primary },
-                    true,
-                );
-                if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
-                    self.targets[first].0 = clipped;
-                } else {
-                    self.targets.truncate(first);
+                Kind::Woven(i) => {
+                    let (id, version) = woven[i];
+                    let initial: String = bundled_mod_title(id).chars().take(1).collect();
+                    draw_centered_text(ui, Face::LauncherMedium, 18.0, icon, theme::CRIMSON(), &initial);
+                    let title = format!("{} {version}", bundled_mod_title(id));
+                    let title = ui.fit_text(Face::LauncherMedium, 14.0, &title, text_w);
+                    ui.text(Face::LauncherMedium, 14.0, tx, ry + 10.0, theme::TEXT(), &title);
+                    let state = if enabled { "On in game" } else { "Off in game" };
+                    let line = format!("Official Horizon mod · Built into this APK · {state}");
+                    let line = ui.fit_text(Face::LauncherRegular, 11.0, &line, text_w);
+                    ui.text(Face::LauncherRegular, 11.0, tx, ry + 31.0, theme::DIM(), &line);
+                    let blurb = ui.fit_text(Face::LauncherRegular, 11.0, bundled_mod_blurb(id), text_w);
+                    ui.text(Face::LauncherRegular, 11.0, tx, ry + 46.0, theme::MUTED(), &blurb);
+                    if !self.catalog.busy() {
+                        let button = [cx + cw - 108.0, ry + 17.0, 98.0, 30.0];
+                        let first = self.targets.len();
+                        styled_button(
+                            ui,
+                            self.targets,
+                            button,
+                            if enabled { "Turn off" } else { "Turn on" },
+                            Action::ToggleWoven(i),
+                            if enabled { BtnStyle::Secondary } else { BtnStyle::Primary },
+                            true,
+                        );
+                        if let Some(clipped) = super::gesture::clip_target_y(button, top, bottom) {
+                            self.targets[first].0 = clipped;
+                        } else {
+                            self.targets.truncate(first);
+                        }
+                    }
                 }
             }
             let bounds = [ui.to_batch(cx), ui.to_batch(top), ui.to_batch(cx + cw), ui.to_batch(bottom)];
@@ -5347,6 +5447,7 @@ impl Launcher {
                 ),
                 "ely_totp" => (self.catalog.ely_totp_input.clone(), 14.5, 12.0),
                 "skin_query" => (self.catalog.skin_query_input.clone(), 14.5, 12.0),
+                "mods_search" => (self.catalog.mods_query.clone(), 13.5, 12.0),
                 _ => (self.catalog.query.clone(), 14.5, 14.0),
             };
             let face = if name == "search" {
@@ -6109,6 +6210,7 @@ impl Launcher {
                     "ely_pass" => &self.catalog.ely_pass_input,
                     "ely_totp" => &self.catalog.ely_totp_input,
                     "skin_query" => &self.catalog.skin_query_input,
+                    "mods_search" => &self.catalog.mods_query,
                     _ => &self.catalog.query,
                 };
                 crate::platform::show(initial);
@@ -6368,6 +6470,43 @@ impl Launcher {
                         )
                     };
                 }
+            }
+            Some(Action::ModsAllOn) | Some(Action::ModsAllOff) => {
+                let on = action == Some(Action::ModsAllOn);
+                let game_dir = self.catalog.config.game_home(&self.home);
+                let _ = std::fs::create_dir_all(&game_dir);
+                let mut list = horizon_client::mod_list::ModList::load(&game_dir);
+                let mut flip = |id: &str| {
+                    if on {
+                        list.disabled.remove(id);
+                        list.enabled.insert(id.to_owned());
+                    } else {
+                        list.enabled.remove(id);
+                        list.disabled.insert(id.to_owned());
+                    }
+                };
+                for &(id, _) in horizon_client::bundled_native::WOVEN {
+                    flip(id);
+                }
+                for &(id, _, _) in horizon_client::bundled_native::BUNDLED {
+                    if self.catalog.bundled_mods.contains(id) {
+                        flip(id);
+                    }
+                }
+                list.save(&game_dir);
+                self.catalog.bundled_disabled = list.disabled.clone();
+                self.catalog.bundled_zoom_enabled =
+                    self.catalog.bundled_zoom_installed && !list.disabled.contains("zoom");
+                self.catalog.extras.volt_qol.replay_buffer = on;
+                self.catalog.extras.save(&game_dir);
+                self.catalog.status = if on {
+                    "All mods are on for this profile.".into()
+                } else {
+                    "All mods are off for this profile; their settings are kept.".into()
+                };
+            }
+            Some(Action::ModsSort) => {
+                self.catalog.mods_sort = (self.catalog.mods_sort + 1) % 3;
             }
             Some(Action::Studio(sact)) => {
                 let profile_home = self.catalog.config.game_home(&self.home);
