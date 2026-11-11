@@ -86,6 +86,8 @@ pub(super) enum Action {
     ExportReplay(usize),
     DeleteReplay(usize),
     DeleteRecording(usize),
+    /// Browse the recordings folder in the system Files app.
+    OpenCaptures,
     ToggleVoltReplay,
     ToggleReplayButton,
     PatchNotes,
@@ -1672,6 +1674,15 @@ impl DrawCtx<'_> {
             }
             HomeTab::Screenshots => {
                 ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Captures");
+                styled_button(
+                    ui,
+                    self.targets,
+                    [x + w - 118.0, y + 4.0, 110.0, 30.0],
+                    "Open folder",
+                    Action::OpenCaptures,
+                    BtnStyle::CrimsonOutline,
+                    true,
+                );
                 let shots = &self.catalog.screenshots;
                 let clips = &self.catalog.recordings;
                 let summary = if clips.is_empty() && shots.is_empty() {
@@ -6150,6 +6161,15 @@ impl Launcher {
                     };
                     self.catalog.refresh_replays(&self.home);
                 }
+            }
+            Some(Action::OpenCaptures) => {
+                crate::platform::hide();
+                let id = crate::document_store::folder_id(self.catalog.config.profile, "recordings");
+                self.catalog.status = if crate::platform::open_documents(&id) {
+                    "Opened the recordings folder in Files. Tap an MP4 to play it.".into()
+                } else {
+                    "Open the system Files app and choose Volt Launcher > Recordings.".into()
+                };
             }
             Some(Action::DeleteRecording(index)) => {
                 if let Some((name, _)) = self.catalog.recordings.get(index) {
