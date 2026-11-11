@@ -414,12 +414,17 @@ impl Game<'_> {
                 }
             }
             Act::ShowControls => {
-                self.pad.touch.controls_hidden = !self.pad.touch.controls_hidden;
-                self.volt_hub.status = if self.pad.touch.controls_hidden {
-                    "Touch controls hidden - tap the GUI button to bring them back.".to_string()
-                } else {
-                    "Touch controls shown.".to_string()
-                };
+                // The live touch overlay only exists on Android builds.
+                #[cfg(target_os = "android")]
+                {
+                    self.pad.touch.controls_hidden = !self.pad.touch.controls_hidden;
+                    self.volt_hub.status = if self.pad.touch.controls_hidden {
+                        "Touch controls hidden - tap the GUI button to bring them back."
+                            .to_string()
+                    } else {
+                        "Touch controls shown.".to_string()
+                    };
+                }
             }
             Act::RecToggle => self.volt_recorder_toggle(),
             Act::RecClip => {
@@ -532,6 +537,19 @@ impl Game<'_> {
         {
             self.pad.touch.clear();
             self.pad.touch.settings = self.settings.touch.clone();
+        }
+    }
+
+    /// Whether the touch overlay is hidden (always "shown" off Android,
+    /// where no overlay exists to hide).
+    fn touch_controls_hidden(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.pad.touch.controls_hidden
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            false
         }
     }
 
@@ -856,7 +874,7 @@ impl Game<'_> {
                         &mut targets,
                         &mut y,
                         "Show touch controls",
-                        if self.pad.touch.controls_hidden { "OFF" } else { "ON" },
+                        if self.touch_controls_hidden() { "OFF" } else { "ON" },
                         Some(Act::ShowControls),
                     );
                     if self.volt_hub.presets.is_empty() {
