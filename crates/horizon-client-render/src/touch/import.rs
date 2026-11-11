@@ -2028,7 +2028,7 @@ mod tests {
                     "name": "SEC",
                     "keycodes": [-4, 0, 0, 0],
                     "dynamicX": "${right} - 80dp",
-                    "dynamicY": "${height} * 0.45",
+                    "dynamicY": "${screen_height} * 0.45",
                     "width": 60.0,
                     "height": 60.0,
                     "opacity": 0.7,
@@ -2050,7 +2050,7 @@ mod tests {
                 {
                     "name": "Hitbox",
                     "keycodes": [292, 66, 0, 0],
-                    "dynamicX": "${width} * 0.5 - 25dp",
+                    "dynamicX": "${screen_width} * 0.5 - 25dp",
                     "dynamicY": "${margin}",
                     "width": 50.0,
                     "height": 30.0,

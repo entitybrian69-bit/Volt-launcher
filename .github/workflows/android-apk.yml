@@ -292,11 +292,24 @@ jobs:
 
       - name: Build the client and horizon-ctl for the live run
         run: |
-          set -euo pipefail
+          set -u +e -o pipefail
           # Default features link ALSA and udev on Linux.
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends libasound2-dev libudev-dev
-          cargo build --locked --profile fast -p horizon-client --bins
+          cargo build --locked --profile fast -p horizon-client --bins 2>&1 | tee client-build.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("client-build.log", encoding="utf-8", errors="replace").read().splitlines()
+          errs = [i for i, l in enumerate(lines) if l.startswith("error")]
+          chosen = []
+          for i in errs[:6]:
+              chosen.extend(lines[i : i + 12])
+          msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+          print(f"::error title=client build failed::{msg or '(no error lines found)'}")
+          PY
+          fi
+          exit "$status"
 
       - name: Live client - /locate and /give in a running world
         run: |
