@@ -294,12 +294,18 @@ jobs:
         run: |
           set -u +e -o pipefail
           # Default features link ALSA and udev on Linux.
-          for i in 1 2 3; do
+          for i in 1 2 3 4; do
+            if [ "$i" -gt 1 ]; then
+              # The Azure apt mirror intermittently fails DNS on hosted
+              # runners; fall back to the canonical archive and retry.
+              sudo find /etc/apt -name 'apt-mirrors.txt' -o -name '*.list' -o -name '*.sources' 2>/dev/null \
+                | xargs -r sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' || true
+              sleep 15
+            fi
             sudo apt-get update 2>&1 | tail -n 2
-            sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev 2>&1 | tee apt-install.log | tail -n 3
+            sudo apt-get install -y --no-install-recommends --fix-missing pkg-config libasound2-dev libudev-dev 2>&1 | tee apt-install.log | tail -n 3
             pkg-config --exists alsa && break
-            echo "apt attempt $i did not deliver alsa.pc; retrying in 10s"
-            sleep 10
+            echo "apt attempt $i did not deliver alsa.pc"
           done
           if ! pkg-config --exists alsa; then
             tail=$(tail -c 1200 apt-install.log 2>/dev/null | tr '\n' ' ' | sed 's/%/%25/g')
