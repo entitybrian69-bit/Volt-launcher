@@ -2596,9 +2596,12 @@ impl Game<'_> {
         ));
     }
 
-    /// REC: starts or stops recording playback into an MP4 next to the
-    /// replay (`replays/exports/`). The playback clock stamps the frames,
-    /// so the video runs at the chosen speed regardless of render rate.
+    /// REC: starts or stops recording playback into an MP4 in the
+    /// profile's `recordings/` folder — the same place Volt Recorder
+    /// saves, so every video shows in the launcher's Captures panel and
+    /// the system Files app (Volt Launcher > Recordings). The playback
+    /// clock stamps the frames, so the video runs at the chosen speed
+    /// regardless of render rate.
     fn replay_toggle_export(&mut self) {
         use std::sync::atomic::Ordering::Relaxed;
         // A tap while recording stops and finalizes.
@@ -2624,13 +2627,11 @@ impl Game<'_> {
                     .file_stem()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "replay".to_string());
-                let dir = rp
-                    .path
-                    .parent()
-                    .map(|p| p.join("exports"))
-                    .unwrap_or_else(|| std::path::PathBuf::from("exports"));
+                // The game runs inside the profile's game folder, so this
+                // is `{game}/recordings/`, exactly where Volt Recorder
+                // saves (the Captures panel and Files app list it).
                 let t = ctl.time_ms.load(Relaxed);
-                dir.join(format!(
+                std::path::PathBuf::from("recordings").join(format!(
                     "{stem}-{}.mp4",
                     horizon_client::replay::format_time(t).replace(':', ".")
                 ))

@@ -6125,7 +6125,8 @@ impl Launcher {
             Some(Action::ExportReplay(index)) => {
                 if let Some(replay) = self.catalog.replays.get(index) {
                     // One tap: watch the replay with the MP4 export already
-                    // running; the file lands in replays/exports/.
+                    // running; the file lands in recordings/ with the other
+                    // captures (Captures panel / Files app).
                     self.catalog.config.replay = replay.path.to_string_lossy().into_owned();
                     self.catalog.config.replay_export = true;
                     self.catalog.config.save(&self.home)?;
