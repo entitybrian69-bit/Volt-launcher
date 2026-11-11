@@ -541,6 +541,12 @@ pub struct VoltPerfHudData<'a> {
     pub active_boosts: usize,
     pub samples_ms: &'a [f32; 48],
     pub sample_head: usize,
+    /// The active frame cap after every limiter stage.
+    pub cap: i32,
+    /// Which stage set it: "-" when only Max Framerate stands.
+    pub cap_reason: &'static str,
+    /// Seconds since the game last saw input, feeding the AFK limiters.
+    pub idle_s: u32,
 }
 
 pub fn draw_volt_perf_hud(
@@ -557,11 +563,14 @@ pub fn draw_volt_perf_hud(
         rgba(248, 113, 113, 255)
     };
     if !d.full {
-        let line = if d.ram_mib > 0 {
+        let mut line = if d.ram_mib > 0 {
             format!("VOLT {} FPS | 1% {} | {}M", d.fps, d.low_1pct, d.ram_mib)
         } else {
             format!("VOLT {} FPS | 1% {}", d.fps, d.low_1pct)
         };
+        if d.cap_reason != "-" {
+            line = format!("{line} | CAP {} {}", d.cap, d.cap_reason);
+        }
         let w = HudBatch::text_width(atlas, &line) + 8.0;
         let h = 14.0;
         let (x, y) = corners.place(d.corner, w, h);
@@ -583,13 +592,19 @@ pub fn draw_volt_perf_hud(
         "RAM {}M  RES {}%  {} ON",
         d.ram_mib, d.scale_pct, d.active_boosts
     );
-    let text_w = [&l1, &l2, &l3]
+    let l4 = format!(
+        "CAP {} ({})  IDLE {}s",
+        if d.cap >= 260 { "-".to_string() } else { d.cap.to_string() },
+        d.cap_reason,
+        d.idle_s
+    );
+    let text_w = [&l1, &l2, &l3, &l4]
         .into_iter()
         .map(|s| HudBatch::text_width(atlas, s))
         .fold(104.0f32, f32::max);
     let w = text_w + 10.0;
     let graph_h = 18.0;
-    let h = 34.0 + graph_h + 6.0;
+    let h = 44.0 + graph_h + 6.0;
     let (x, y) = corners.place(d.corner, w, h);
 
     batch.fill(atlas, x, y, w, h, rgba(220, 20, 60, 220));
@@ -597,9 +612,15 @@ pub fn draw_volt_perf_hud(
     batch.text(atlas, &l1, x + 5.0, y + 4.0, fps_col, true);
     batch.text(atlas, &l2, x + 5.0, y + 14.0, rgba(228, 228, 238, 255), true);
     batch.text(atlas, &l3, x + 5.0, y + 24.0, rgba(176, 176, 196, 255), true);
+    let cap_col = if d.cap_reason == "-" {
+        rgba(176, 176, 196, 255)
+    } else {
+        rgba(250, 204, 21, 255)
+    };
+    batch.text(atlas, &l4, x + 5.0, y + 34.0, cap_col, true);
 
     let gx = x + 5.0;
-    let gy = y + 35.0;
+    let gy = y + 45.0;
     let gw = w - 10.0;
     batch.fill(atlas, gx, gy, gw, graph_h, rgba(22, 22, 32, 240));
     // 16.67ms (60 FPS) horizontal reference line

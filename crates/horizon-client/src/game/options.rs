@@ -541,6 +541,13 @@ impl Game<'_> {
     /// `FramerateLimitTracker.getFramerateLimit`: the Max Framerate option,
     /// throttled when minimised, idle, or in a menu without a world.
     pub(super) fn framerate_limit(&self) -> i32 {
+        self.framerate_limit_reasoned().0
+    }
+    /// The frame cap and the stage that set it ("-" when only the player's
+    /// Max Framerate stands), so the Perf HUD makes a low cap diagnosable
+    /// on the device itself.
+    pub(super) fn framerate_limit_reasoned(&self) -> (i32, &'static str) {
+        use horizon_client::window::{ThrottleReason, throttle_reason};
         let context = FrameContext {
             inactivity: if self.settings.inactivity_fps_limit == "minimized" {
                 InactivityFpsLimit::Minimized
@@ -566,11 +573,27 @@ impl Game<'_> {
             has_screen: self.title.is_some() || self.screen != super::Screen::Playing,
             has_overlay: false,
         };
-        let limit = framerate_limit(self.settings.max_fps as i32, context);
-        let mut limit = self
+        let option = self.settings.max_fps as i32;
+        let limit = framerate_limit(option, context);
+        let mut reason = if limit < option {
+            match throttle_reason(context) {
+                ThrottleReason::WindowIconified => "MINIMIZED",
+                ThrottleReason::LongAfk => "AFK>10M",
+                ThrottleReason::ShortAfk => "AFK>1M",
+                ThrottleReason::OutOfLevelMenu => "MENU",
+                ThrottleReason::None => "-",
+            }
+        } else {
+            "-"
+        };
+        let battery = self
             .settings
             .horizon
             .battery_limit(limit, self.title.is_none(), self.focused);
+        if battery < limit {
+            reason = "BATTERY";
+        }
+        let mut limit = battery;
         if let Some(idle_cap) = self.settings.extras.dynamic_fps.cap_fps() {
             let cap = idle_cap as i32;
             let now_ms = self.started.elapsed().as_millis() as i64;
@@ -580,16 +603,25 @@ impl Game<'_> {
                 .as_millis() as i64;
             let idle_ms = now_ms.saturating_sub(latest_input_ms);
             if !self.focused {
+                if cap.min(15) < limit {
+                    reason = "UNFOCUSED";
+                }
                 limit = limit.min(cap.min(15));
             } else if self.title.is_some() || self.screen != super::Screen::Playing {
                 // Menus stay smooth while they are being used; the idle cap
                 // only applies after ten seconds without any input.
                 if idle_ms > 10_000 {
+                    if cap < limit {
+                        reason = "IDLE-MENU";
+                    }
                     limit = limit.min(cap);
                 }
             } else if idle_ms > 45_000 && self.replay_control().is_none() {
                 // AFK drop, except while a replay plays: watching is
                 // hands-off by nature.
+                if cap < limit {
+                    reason = "IDLE-AFK";
+                }
                 limit = limit.min(cap);
             }
         }
@@ -612,14 +644,20 @@ impl Game<'_> {
                 .saturating_duration_since(self.started)
                 .as_millis() as i64;
             if !self.focused {
+                if cap < limit {
+                    reason = "UNFOCUSED";
+                }
                 limit = limit.min(cap);
             } else if now_ms.saturating_sub(latest_input_ms) > 35_000
                 && self.replay_control().is_none()
             {
+                if cap.max(15) < limit {
+                    reason = "DYNFPS-MOD";
+                }
                 limit = limit.min(cap.max(15));
             }
         }
-        limit
+        (limit, reason)
     }
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the

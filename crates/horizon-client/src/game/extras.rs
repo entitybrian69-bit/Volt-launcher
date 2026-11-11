@@ -102,6 +102,13 @@ impl Game<'_> {
     }
     /// Once per frame: the frame's time, and keys let go behind screens.
     pub(super) fn extras_frame(&mut self, elapsed: Duration) {
+        // A held virtual joystick or camera drag is input even on frames
+        // without a new touch event: never let the AFK limiters engage
+        // under a resting finger.
+        #[cfg(target_os = "android")]
+        if self.pad.touch.any_finger_down() {
+            self.last_input = std::time::Instant::now();
+        }
         let focused = self.focused || self.control.is_some();
         let playing = self.screen == Screen::Playing && self.title.is_none() && focused;
         if !playing {
@@ -824,6 +831,7 @@ impl Game<'_> {
                 + self.dropped.len()
                 + self.armor_stands.len()
                 + self.orbs.len()) as u32;
+            let (cap, cap_reason) = self.framerate_limit_reasoned();
             let perf_data = extras_hud::VoltPerfHudData {
                 full: self.settings.extras.perf_hud
                     == horizon_client::volt_features::PerfHudMode::Full,
@@ -843,6 +851,9 @@ impl Game<'_> {
                 active_boosts: self.settings.extras.active_volt_optimizations(),
                 samples_ms: &self.extras.frame_ms_ring,
                 sample_head: self.extras.frame_ms_head,
+                cap,
+                cap_reason,
+                idle_s: self.last_input.elapsed().as_secs() as u32,
             };
             extras_hud::draw_volt_perf_hud(batch, &self.gui.atlas, &mut corners, &perf_data);
         }

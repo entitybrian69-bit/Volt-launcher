@@ -248,6 +248,12 @@ impl TouchControls {
     pub fn owns_pointer(&self, id: u64) -> bool {
         self.fingers.contains_key(&id) || self.custom_fingers.contains_key(&id)
     }
+    /// Whether any finger currently rests on the controls. The frame
+    /// limiter's idle detector counts a held joystick as activity, so a
+    /// player cruising on a stick is never "AFK".
+    pub fn any_finger_down(&self) -> bool {
+        !self.fingers.is_empty() || !self.custom_fingers.is_empty()
+    }
     pub fn ignore(&mut self, id: u64) {
         self.fingers.insert(id, (Role::Ignore, [0.0; 2]));
     }
