@@ -294,9 +294,20 @@ jobs:
         run: |
           set -u +e -o pipefail
           # Default features link ALSA and udev on Linux.
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libudev-dev
-          pkg-config --exists alsa && echo "alsa.pc found" || echo "::warning title=alsa.pc missing::pkg-config cannot locate alsa after apt install"
+          for i in 1 2 3; do
+            sudo apt-get update 2>&1 | tail -n 2
+            sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev 2>&1 | tee apt-install.log | tail -n 3
+            pkg-config --exists alsa && break
+            echo "apt attempt $i did not deliver alsa.pc; retrying in 10s"
+            sleep 10
+          done
+          if ! pkg-config --exists alsa; then
+            tail=$(tail -c 1200 apt-install.log 2>/dev/null | tr '\n' ' ' | sed 's/%/%25/g')
+            echo "::error title=ALSA dev install failed::${tail:-apt produced no log}"
+            dpkg -l | grep -i asound || true
+            apt-cache policy libasound2-dev pkg-config || true
+            exit 1
+          fi
           cargo build --locked --profile fast -p horizon-client --bins 2>&1 | tee client-build.log
           status=$?
           if [ "$status" -ne 0 ]; then
