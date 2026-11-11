@@ -250,6 +250,7 @@ mod respawn_anchor;
 mod saves_control;
 mod saving;
 mod scoreboard;
+mod skin_models;
 mod screens;
 mod sculk;
 mod sculk_fixture;
@@ -2376,6 +2377,12 @@ struct Game<'a> {
     /// Player skin downloads, and which skin each atlas skin slot holds
     /// (least recently shown first).
     skin_downloads: RefCell<horizon_client::skins::Downloader>,
+    /// The bundled "3D Skins" mod's extruded outer-layer models, one per
+    /// (skin, slim) pair (`skin_3d_model`).
+    skin_3d: RefCell<skin_models::SkinModels>,
+    /// Whether "3D Skins" answered on last frame, to rebuild the models
+    /// the moment the mod (or the Mod Lag Shield) is toggled.
+    skins_3d_last: Option<bool>,
     /// `ProfileResolver.Cached`: `Dynamic` profiles (name- or id-only heads
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
@@ -17440,6 +17447,8 @@ impl<'a> Game<'a> {
                     .unwrap_or_default()
                     .join("assets/skins"),
             )),
+            skin_3d: RefCell::new(Default::default()),
+            skins_3d_last: None,
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
             trim_slots: Vec::new(),

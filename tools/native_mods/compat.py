@@ -21,7 +21,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-ABIS = ("arm64-v8a", "armeabi-v7a")
+ABIS = ("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 ID = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 REV = re.compile(r"[0-9a-f]{40}\Z")
@@ -82,6 +82,7 @@ def inventory(registry: Path) -> dict:
                          "version": ver.get("version") if ver else None,
                          "sha256": ver.get("sha256") if ver else None,
                          "arm64-v8a": "not_checked", "armeabi-v7a": "not_checked",
+                         "x86_64": "not_checked", "x86": "not_checked",
                          "policy": "excluded" if mod_id in EXCLUDED else "revoked" if revoked else "review_required"})
     return {"schema": 1, "game": "26.3", "projects": projects}
 

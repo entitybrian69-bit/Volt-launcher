@@ -85,6 +85,15 @@ static STATE: Mutex<State> = Mutex::new(State {
     cursor: (0.0, 0.0),
 });
 static CANCEL: AtomicBool = AtomicBool::new(false);
+/// The launcher rewrote `horizon-mods.txt` (a mod was toggled): the running
+/// game reloads the list next frame, so toggles apply without a restart.
+static MODS_CHANGED: AtomicBool = AtomicBool::new(false);
+pub fn note_mods_changed() {
+    MODS_CHANGED.store(true, Ordering::Relaxed);
+}
+pub fn take_mods_changed() -> bool {
+    MODS_CHANGED.swap(false, Ordering::Relaxed)
+}
 pub fn busy() -> bool {
     let s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.request.is_some() || s.working || s.conflict.is_some()

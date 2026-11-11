@@ -49,6 +49,8 @@ enum Act {
     Panel,
     Close,
     Tab(HubTab),
+    /// Shows or hides the whole touch-control overlay in game.
+    ShowControls,
     RecToggle,
     RecClip,
     RecHeight,
@@ -410,6 +412,14 @@ impl Game<'_> {
                     self.volt_hub.presets =
                         horizon_client::touch::import::list_presets(&volt_controls_root());
                 }
+            }
+            Act::ShowControls => {
+                self.pad.touch.controls_hidden = !self.pad.touch.controls_hidden;
+                self.volt_hub.status = if self.pad.touch.controls_hidden {
+                    "Touch controls hidden - tap the GUI button to bring them back.".to_string()
+                } else {
+                    "Touch controls shown.".to_string()
+                };
             }
             Act::RecToggle => self.volt_recorder_toggle(),
             Act::RecClip => {
@@ -841,6 +851,14 @@ impl Game<'_> {
                         .map(|m| m.name.clone())
                         .unwrap_or_else(|| "Volt Default".to_string());
                     row(&mut ui, &mut targets, &mut y, "Active layout", &active, None);
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Show touch controls",
+                        if self.pad.touch.controls_hidden { "OFF" } else { "ON" },
+                        Some(Act::ShowControls),
+                    );
                     if self.volt_hub.presets.is_empty() {
                         note(&mut ui, &mut y, "No saved layouts yet.");
                         note(

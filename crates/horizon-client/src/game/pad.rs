@@ -138,6 +138,15 @@ impl Game<'_> {
     }
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &ActiveEventLoop) {
+        // "3D Skins" flipped (Options > Mods, the launcher's Mods tab, or
+        // the Mod Lag Shield): rebuild the extruded models right away.
+        let skins_3d_on = self.native_on("skins_3d");
+        if self.skins_3d_last != Some(skins_3d_on) {
+            if self.skins_3d_last.is_some() {
+                self.refresh_skin_3d_models();
+            }
+            self.skins_3d_last = Some(skins_3d_on);
+        }
         #[cfg(target_os = "android")]
         if !matches!(self.screen, Screen::Playing | Screen::Options)
             && self.pad.touch.editor.is_some()

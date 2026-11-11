@@ -139,6 +139,36 @@ fn keycode_entries() -> &'static [(String, &'static str)] {
             ("SPECIAL_SCROLL_UP".into(), "special:scroll_up"),
             ("SPECIAL_SCROLL_DOWN".into(), "special:scroll_down"),
             ("SPECIAL_MENU".into(), "special:menu"),
+            // Game actions: the button follows the player's real keybind
+            // (`action:<mapping>` tokens, the ones imports produce), so a
+            // layout built here still works after keys are rebound.
+            ("ATTACK".into(), "action:key.attack"),
+            ("USE_ITEM".into(), "action:key.use"),
+            ("PICK_BLOCK".into(), "action:key.pickItem"),
+            ("FORWARD".into(), "action:key.forward"),
+            ("BACK".into(), "action:key.back"),
+            ("STRAFE_LEFT".into(), "action:key.left"),
+            ("STRAFE_RIGHT".into(), "action:key.right"),
+            ("JUMP".into(), "action:key.jump"),
+            ("SNEAK".into(), "action:key.sneak"),
+            ("SPRINT".into(), "action:key.sprint"),
+            ("DROP".into(), "action:key.drop"),
+            ("INVENTORY".into(), "action:key.inventory"),
+            ("SWAP_HANDS".into(), "action:key.swapOffhand"),
+            ("CHAT".into(), "action:key.chat"),
+            ("COMMAND".into(), "action:key.command"),
+            ("PLAYER_LIST".into(), "action:key.playerlist"),
+            ("PERSPECTIVE".into(), "action:key.togglePerspective"),
+            ("SCREENSHOT".into(), "action:key.screenshot"),
+            ("HOTBAR_1".into(), "action:key.hotbar.1"),
+            ("HOTBAR_2".into(), "action:key.hotbar.2"),
+            ("HOTBAR_3".into(), "action:key.hotbar.3"),
+            ("HOTBAR_4".into(), "action:key.hotbar.4"),
+            ("HOTBAR_5".into(), "action:key.hotbar.5"),
+            ("HOTBAR_6".into(), "action:key.hotbar.6"),
+            ("HOTBAR_7".into(), "action:key.hotbar.7"),
+            ("HOTBAR_8".into(), "action:key.hotbar.8"),
+            ("HOTBAR_9".into(), "action:key.hotbar.9"),
         ];
         for &(token, _) in horizon_client::keybinds::available_keys() {
             if token == "key.keyboard.unknown" {

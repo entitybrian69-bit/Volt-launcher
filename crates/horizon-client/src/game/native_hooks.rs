@@ -2584,10 +2584,9 @@ impl Game<'_> {
         self.bundled_zoom_list(&mut mods);
         self.bundled_hud_list(&mut mods);
         self.volt_builtins_list(&mut mods);
-        // The launcher's Mods tab is the master switch: a mod turned off
-        // there neither runs (`native_on`) nor appears in this list; the
-        // launcher turns it back on.
-        mods.retain(|m| !self.settings.mods.disabled.contains(&m.id));
+        // A mod turned off (here or in the launcher's Mods tab) stops
+        // running (`native_on`) but STAYS in this list showing Off, so the
+        // player can turn it back on from either place.
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings

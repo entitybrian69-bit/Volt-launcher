@@ -70,6 +70,7 @@ pub mod render;
 pub mod riders;
 pub mod seen_grid;
 pub mod shulker;
+pub mod skin_layers;
 pub mod sniffer;
 pub mod spawn_rules;
 pub mod spawn_selection;

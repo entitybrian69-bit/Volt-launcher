@@ -951,6 +951,10 @@ pub fn device_supported_abis() -> Vec<String> {
     }
     vec![if cfg!(target_arch = "aarch64") {
         "arm64-v8a".into()
+    } else if cfg!(target_arch = "x86_64") {
+        "x86_64".into()
+    } else if cfg!(target_arch = "x86") {
+        "x86".into()
     } else {
         "armeabi-v7a".into()
     }]

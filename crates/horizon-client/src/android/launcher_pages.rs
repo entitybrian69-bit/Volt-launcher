@@ -167,7 +167,6 @@ pub(super) enum Action {
     ControlLayouts,
     ChooseControlLayout(usize),
     DeleteControlPreset(usize),
-    ToggleDashboardControls,
     ApplyControlsAllProfiles,
     ResetControls,
     ImportVulkanDriver,
@@ -551,102 +550,6 @@ fn draw_page_icon(ui: &mut Ui, page: Page, cx: f32, cy: f32, col: u32) {
     }
 }
 
-/// Paints the given touch control layout across `area` as a translucent,
-/// non-interactive preview (the "Controls on dashboard" option).
-fn draw_touch_layout_preview(ui: &mut Ui, area: [f32; 4], s: &horizon_client::touch::Settings) {
-    use horizon_client::touch::Control;
-    use horizon_client::ui_theme::color::hex;
-    let [ax, ay, aw, ah] = area;
-    if aw < 60.0 || ah < 60.0 {
-        return;
-    }
-    let aspect = (aw / ah.max(1.0)).max(0.5);
-    let mode = s.mode.index();
-    let dim = 0.62f32;
-
-    // Movement joystick.
-    if s.button_visibility[Control::Move as usize] != 2 {
-        let p = s.layouts[mode][Control::Move as usize];
-        let r = p.rect(aspect);
-        let (rx, ry, rw, rh) = (ax + r[0] * aw, ay + r[1] * ah, r[2] * aw, r[3] * ah);
-        let rad = (rw.min(rh) * 0.5).max(6.0);
-        let a = (p.opacity * dim * 255.0) as u8;
-        ui.rounded(rx, ry, rw, rh, rad, hex(0x181A24, a.min(120)));
-        ui.border(rx, ry, rw, rh, rad, hex(0xD8DCE8, (a / 2).max(40)));
-        let knob = (rw.min(rh) * 0.36).max(8.0);
-        ui.rounded(
-            rx + (rw - knob) * 0.5,
-            ry + (rh - knob) * 0.5,
-            knob,
-            knob,
-            knob * 0.5,
-            hex(0xDC143C, a.min(140)),
-        );
-    }
-
-    if s.custom_buttons.is_empty() {
-        for control in Control::ALL {
-            if control == Control::Move || s.button_visibility[control as usize] == 2 {
-                continue;
-            }
-            let p = s.layouts[mode][control as usize];
-            let r = p.rect(aspect);
-            let (rx, ry, rw, rh) = (ax + r[0] * aw, ay + r[1] * ah, r[2] * aw, r[3] * ah);
-            let a = (p.opacity * dim * 255.0) as u8;
-            ui.rounded(rx, ry, rw, rh, 6.0, hex(0x1E202C, a.min(130)));
-            ui.border(rx, ry, rw, rh, 6.0, hex(0xFFFFFF, (a / 2).max(40)));
-        }
-        return;
-    }
-    for b in &s.custom_buttons {
-        if b.drawer_parent.is_some() || !b.in_game {
-            continue;
-        }
-        let p = b.layouts[mode];
-        let bh = p.size;
-        let bw = (p.size * b.width_ratio.clamp(0.25, 6.0)) / aspect;
-        let (rx, ry, rw, rh) = (
-            ax + (p.center[0] - bw * 0.5) * aw,
-            ay + (p.center[1] - bh * 0.5) * ah,
-            (bw * aw).max(8.0),
-            (bh * ah).max(8.0),
-        );
-        let bg = b.bg_color.unwrap_or([22, 22, 30, 150]);
-        let alpha = ((f32::from(bg[3]) / 255.0) * p.opacity * dim * 255.0)
-            .round()
-            .clamp(26.0, 170.0) as u8;
-        let fill = hex(
-            (u32::from(bg[0]) << 16) | (u32::from(bg[1]) << 8) | u32::from(bg[2]),
-            alpha,
-        );
-        let rad = b.corner_radius.unwrap_or(3.0).min(rw * 0.48).min(rh * 0.48);
-        ui.rounded(rx, ry, rw, rh, rad, fill);
-        let sc = b.stroke_color.unwrap_or([255, 255, 255, 95]);
-        ui.border(
-            rx,
-            ry,
-            rw,
-            rh,
-            rad,
-            hex(
-                (u32::from(sc[0]) << 16) | (u32::from(sc[1]) << 8) | u32::from(sc[2]),
-                ((f32::from(sc[3].max(60)) * dim) as u8).max(36),
-            ),
-        );
-        let lbl = b.label();
-        let font_sz = (rh * 0.32).clamp(7.5, 12.0);
-        let fitted = ui.fit_text(Face::LauncherMedium, font_sz, &lbl, (rw - 5.0).max(5.0));
-        let tw = ui.measure(Face::LauncherMedium, font_sz, &fitted);
-        ui.text(
-            Face::LauncherMedium,
-            font_sz,
-            rx + ((rw - tw) * 0.5).max(1.0),
-            ry + (rh - font_sz * 1.4) * 0.5,
-            hex(0xF8F8FC, (190.0 * dim) as u8),
-            &fitted,
-        );
-    }
-}
 
 fn draw_discord_icon(ui: &mut Ui, cx: f32, cy: f32, col: u32, bg: u32) {
     // Crisp recognizable Discord Clyde controller silhouette
@@ -1457,12 +1360,6 @@ impl DrawCtx<'_> {
         let compact = w < 760.0;
         let m = if compact { 10.0 } else { 16.0 };
 
-        // ---- Optional "Controls on dashboard" preview, under everything ----
-        if self.catalog.config.dashboard_controls
-            && let Some(layout) = self.catalog.dashboard_layout.as_deref()
-        {
-            draw_touch_layout_preview(ui, area, layout);
-        }
 
         // ---- Brand, flush to the top-left corner ----
         ui.volt_logo(ax + 2.0, ay + m, 32.0, 32.0);
@@ -1557,8 +1454,9 @@ impl DrawCtx<'_> {
         // ---- Right rail: the quieter destinations as small chips, on a
         // glass rail that runs flush to the screen edge and joins the
         // top icon row with no gap, so the two bars read as one piece.
-        let chips: [(&str, u8, Action); 7] = [
+        let chips: [(&str, u8, Action); 8] = [
             ("Worlds", 0, Action::HomeTab(HomeTab::Worlds)),
+            ("Controls", 6, Action::Page(Page::Controls)),
             ("Servers", 1, Action::HomeTab(HomeTab::Multiplayer)),
             ("Replays", 2, Action::HomeTab(HomeTab::Replays)),
             ("Shots", 2, Action::HomeTab(HomeTab::Screenshots)),
@@ -1591,6 +1489,8 @@ impl DrawCtx<'_> {
             ui.border(rect[0], rect[1], rect[2], rect[3], chip_h * 0.5, theme::GLASS_BORDER());
             if glyph == 5 {
                 draw_page_icon(ui, Page::Packs, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
+            } else if glyph == 6 {
+                draw_page_icon(ui, Page::Controls, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
             } else {
                 draw_tile_icon(ui, glyph, rect[0] + 16.0, rect[1] + chip_h * 0.5, theme::MUTED());
             }
@@ -3374,27 +3274,17 @@ impl DrawCtx<'_> {
             self.list_targets.push((rect, action));
             styled_button(ui, self.targets, rect, label, action, style, true);
         }
-        let third_w = (cw - pad_x * 2.0 - 12.0) / 3.0;
-        let dash_label = if self.catalog.config.dashboard_controls {
-            "Dashboard: ON"
-        } else {
-            "Dashboard: OFF"
-        };
-        let hero_btns_bot: [([f32; 4], &str, Action); 3] = [
+        let half_w = (cw - pad_x * 2.0 - 6.0) / 2.0;
+        let hero_btns_bot: [([f32; 4], &str, Action); 2] = [
             (
-                [cx + pad_x, btn_y + 32.0, third_w, 24.0],
+                [cx + pad_x, btn_y + 32.0, half_w, 24.0],
                 "Apply to All Profiles",
                 Action::ApplyControlsAllProfiles,
             ),
             (
-                [cx + pad_x + third_w + 6.0, btn_y + 32.0, third_w, 24.0],
+                [cx + pad_x + half_w + 6.0, btn_y + 32.0, half_w, 24.0],
                 "Reset to Default",
                 Action::ResetControls,
-            ),
-            (
-                [cx + pad_x + (third_w + 6.0) * 2.0, btn_y + 32.0, third_w, 24.0],
-                dash_label,
-                Action::ToggleDashboardControls,
             ),
         ];
         for (rect, label, action) in hero_btns_bot {
@@ -4405,6 +4295,10 @@ impl DrawCtx<'_> {
             .unwrap_or(4);
         let abi = if cfg!(target_arch = "aarch64") {
             "arm64-v8a"
+        } else if cfg!(target_arch = "x86_64") {
+            "x86_64"
+        } else if cfg!(target_arch = "x86") {
+            "x86"
         } else {
             "armeabi-v7a"
         };
@@ -6102,17 +5996,6 @@ impl Launcher {
                     }
                 }
             }
-            Some(Action::ToggleDashboardControls) => {
-                let on = !self.catalog.config.dashboard_controls;
-                self.catalog.config.dashboard_controls = on;
-                let _ = self.catalog.config.save(&self.home);
-                self.catalog.refresh_controls(&self.home);
-                self.catalog.status = if on {
-                    "Controls on dashboard: the active touch layout now shows on the Home screen.".into()
-                } else {
-                    "Controls on dashboard off.".into()
-                };
-            }
             Some(Action::ToggleSection(i)) => {
                 self.catalog.sections[i] = !self.catalog.sections[i];
                 self.catalog.scroll = 0.0;
@@ -6465,6 +6348,7 @@ impl Launcher {
                 let game_dir = self.catalog.config.game_home(&self.home);
                 let _ = std::fs::create_dir_all(&game_dir);
                 self.catalog.extras.save(&game_dir);
+                crate::documents::note_mods_changed();
                 self.catalog.status = if on {
                     "Volt Replay on: sessions are recorded. Watch them from Home > Replays.".into()
                 } else {
@@ -6790,6 +6674,7 @@ impl Launcher {
                                 self.catalog.bundled_zoom_installed = install;
                                 self.catalog.bundled_zoom_enabled = install;
                             }
+                            crate::documents::note_mods_changed();
                             self.catalog.status = if install {
                                 format!(
                                     "{} {version} installed from the APK. Toggle and configure it in-game under Mods.",
@@ -6824,6 +6709,7 @@ impl Launcher {
                     }
                     on.save(&game_dir);
                     self.catalog.bundled_disabled = on.disabled.clone();
+                    crate::documents::note_mods_changed();
                     self.catalog.status = if enable {
                         format!(
                             "{} {version} is on for this profile. Configure it in-game under Mods.",
@@ -6861,6 +6747,7 @@ impl Launcher {
                 }
                 list.save(&game_dir);
                 self.catalog.bundled_disabled = list.disabled.clone();
+                crate::documents::note_mods_changed();
                 self.catalog.bundled_zoom_enabled =
                     self.catalog.bundled_zoom_installed && !list.disabled.contains("zoom");
                 self.catalog.extras.volt_qol.replay_buffer = on;

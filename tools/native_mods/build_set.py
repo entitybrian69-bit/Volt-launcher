@@ -18,7 +18,8 @@ from pathlib import Path
 
 import compat
 
-TARGETS = {"arm64-v8a": "aarch64-linux-android", "armeabi-v7a": "armv7-linux-androideabi"}
+TARGETS = {"arm64-v8a": "aarch64-linux-android", "armeabi-v7a": "armv7-linux-androideabi",
+           "x86_64": "x86_64-linux-android", "x86": "i686-linux-android"}
 # Volt already has handwritten integrations for these exact module names.
 # Applying them a second time can produce duplicate Rust modules/hooks.
 BUILTIN = {"zoom", "fps_overlay", "keystrokes", "minimap"}

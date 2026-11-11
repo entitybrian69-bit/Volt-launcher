@@ -673,6 +673,19 @@ impl Game<'_> {
     }
     pub(super) fn android_poll_keyboard(&mut self) {
         self.android_custom_events();
+        if crate::documents::take_mods_changed() {
+            // The launcher toggled a mod while this game runs: reload the
+            // on/off list (and the extras beside it) from the launched
+            // profile's CWD, so the switch applies without a restart.
+            let dir = std::env::current_dir().unwrap_or_else(|_| crate::backend::game_home());
+            let fresh = horizon_client::mod_list::ModList::load(&dir);
+            self.settings.mods.enabled = fresh.enabled;
+            self.settings.mods.disabled = fresh.disabled;
+            self.settings.mods.keys = fresh.keys;
+            self.settings.extras = horizon_client::extras::Extras::load(&dir);
+            // `poll_pads` notices the "3D Skins" flip and rebuilds models.
+            self.list_native_mods();
+        }
         if let Some(notice) = crate::documents::poll() {
             if notice.controls_changed {
                 // The launcher set our CWD to the active profile before launch;

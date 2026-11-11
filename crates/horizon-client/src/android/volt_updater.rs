@@ -114,18 +114,29 @@ pub fn mark_update_seen(home: &Path, tag: &str) {
 }
 
 pub fn select_device_abi(supported_abis: &[String]) -> (&'static str, &'static str) {
-    if supported_abis
-        .iter()
-        .any(|a| a.eq_ignore_ascii_case("arm64-v8a"))
-    {
+    // `Build.SUPPORTED_ABIS` is ordered by the device's preference, so the
+    // first one we ship wins: an x86_64 emulator with ARM translation still
+    // gets its native x86_64 APK, not the translated ARM one.
+    for abi in supported_abis {
+        if abi.eq_ignore_ascii_case("arm64-v8a") {
+            return ("arm64-v8a", "64-bit ARM64");
+        }
+        if abi.eq_ignore_ascii_case("armeabi-v7a") || abi.eq_ignore_ascii_case("armeabi") {
+            return ("armeabi-v7a", "32-bit ARMv7");
+        }
+        if abi.eq_ignore_ascii_case("x86_64") {
+            return ("x86_64", "64-bit x86");
+        }
+        if abi.eq_ignore_ascii_case("x86") {
+            return ("x86", "32-bit x86");
+        }
+    }
+    if cfg!(target_arch = "aarch64") {
         ("arm64-v8a", "64-bit ARM64")
-    } else if supported_abis
-        .iter()
-        .any(|a| a.eq_ignore_ascii_case("armeabi-v7a") || a.eq_ignore_ascii_case("armeabi"))
-    {
-        ("armeabi-v7a", "32-bit ARMv7")
-    } else if cfg!(target_arch = "aarch64") {
-        ("arm64-v8a", "64-bit ARM64")
+    } else if cfg!(target_arch = "x86_64") {
+        ("x86_64", "64-bit x86")
+    } else if cfg!(target_arch = "x86") {
+        ("x86", "32-bit x86")
     } else {
         ("armeabi-v7a", "32-bit ARMv7")
     }

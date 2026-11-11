@@ -4925,19 +4925,67 @@ impl Game<'_> {
     pub(super) fn face_skin(&mut self, uuid: u128, skin: &str) -> String {
         self.drawn_skin(uuid, (skin.to_owned(), false)).0
     }
-    /// The 3D skin layers model for a player: upstream builds `kind`'s outer
-    /// layer with one slab per painted texel (`threeDSkinLayers`). This fork
-    /// keeps the function as a native mod's hook point only — the built-in
-    /// builder is not ported, so without a mod the flat layer draws as
-    /// always and this costs nothing.
+    /// The 3D skin layers model for a player (the bundled "3D Skins" mod):
+    /// `kind`'s outer layer rebuilt with one slab per painted texel, cached
+    /// per (skin, slim). With the mod off this returns `None` and the flat
+    /// inflated layer draws as always, costing nothing.
     fn skin_3d_model(
         &self,
         kind: &std::sync::Arc<horizon_client::mobs::MobType>,
         skin: &str,
         slim: bool,
     ) -> Option<std::sync::Arc<horizon_client::mobs::Part>> {
-        let _ = (kind, skin, slim);
-        None
+        use horizon_client::mobs::skin_layers;
+        if !self.native_on("skins_3d") {
+            return None;
+        }
+        let key = (skin.to_owned(), slim);
+        if let Some(model) = self.skin_3d.borrow_mut().get(&key) {
+            return Some(model);
+        }
+        let model_key = if slim { "player_slim#main" } else { "main" };
+        let base = kind
+            .layer(model_key)
+            .cloned()
+            .unwrap_or_else(|| kind.model.clone());
+        let image = self.skin_downloads.borrow().image(skin)?.to_vec();
+        let model = std::sync::Arc::new(skin_layers::extrude(
+            &base,
+            &image,
+            skin_layers::SIZE,
+            skin_layers::DEPTH,
+        )?);
+        self.skin_3d.borrow_mut().insert(key, model.clone());
+        Some(model)
+    }
+    /// Rebuilds every player's 3D skin layer after the "3D Skins" mod was
+    /// toggled, so the switch shows immediately, no restart or rejoin.
+    pub(super) fn refresh_skin_3d_models(&mut self) {
+        self.skin_3d.borrow_mut().clear();
+        let rebuilt: Vec<(usize, Option<std::sync::Arc<horizon_client::mobs::Part>>)> = self
+            .mobs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.skin.is_some())
+            .map(|(i, m)| {
+                let skin = m.skin.clone().unwrap_or_default();
+                (i, self.skin_3d_model(&m.kind, &skin, m.slim))
+            })
+            .collect();
+        for (i, model) in rebuilt {
+            if let Some(mob) = self.mobs.get_mut(i) {
+                mob.skin_3d = model;
+            }
+        }
+        let own = self.player_model.as_ref().and_then(|m| {
+            let skin = m.skin.clone()?;
+            self.skin_3d_model(&m.kind, &skin, m.slim)
+        });
+        if let Some(mob) = self.player_model.as_mut() {
+            if mob.skin.is_some() {
+                mob.skin_3d = own;
+            }
+        }
     }
     /// ChatType decoration: `chat.translation_key` with sender/content parameters.
     /// ChatType.Bound.decorate: the chat type's translation, with the

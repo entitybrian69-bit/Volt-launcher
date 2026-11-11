@@ -88,7 +88,9 @@ jobs:
           elif event == "workflow_dispatch" and raw_abis:
               selected = [abi.strip() for abi in raw_abis.split(",") if abi.strip()]
           else:
-              selected = ["arm64-v8a", "armeabi-v7a"]
+              # Starling/Horizon-Android parity: ship all four ABIs so
+              # emulators, ChromeOS and x86 handhelds install natively.
+              selected = ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]
 
           unknown = [abi for abi in selected if abi not in targets]
           if unknown:
@@ -543,6 +545,10 @@ jobs:
             target: aarch64-linux-android
           - abi: armeabi-v7a
             target: armv7-linux-androideabi
+          - abi: x86_64
+            target: x86_64-linux-android
+          - abi: x86
+            target: i686-linux-android
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
