@@ -4073,13 +4073,18 @@ impl OptionsUi {
                 u32::MAX,
                 true,
             );
+            // The master Waypoints toggle wins here too, and no world
+            // context means NO waypoints — `is_none_or` used to spill
+            // every world's waypoints onto the map whenever the context
+            // was missing, and the map ignored the off toggle entirely.
             let wp_list: Vec<(String, [f64; 3], [u8; 3])> = s
                 .volt_waypoints
                 .entries
                 .iter()
                 .filter(|wp| {
-                    wp.enabled
-                        && self.waypoint_context.as_ref().is_none_or(|(sc, dm, _)| {
+                    s.extras.waypoints
+                        && wp.enabled
+                        && self.waypoint_context.as_ref().is_some_and(|(sc, dm, _)| {
                             wp.scope == *sc && wp.dimension == *dm
                         })
                 })

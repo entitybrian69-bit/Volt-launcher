@@ -255,11 +255,20 @@ impl Rpc {
 }
 
 /// `buttons` and `party` are optional per the service; some Discord builds reject them.
+/// The same conservative resend swaps the URL logo for the portal asset key, in case a
+/// build rejects external asset URLs.
 fn stripped(activity: &Value) -> Value {
     let mut activity = activity.clone();
     if let Some(map) = activity.as_object_mut() {
         map.remove("buttons");
         map.remove("party");
+        if let Some(large) = map
+            .get_mut("assets")
+            .and_then(|a| a.get_mut("large_image"))
+            && large.as_str().is_some_and(|s| s.starts_with("https://"))
+        {
+            *large = Value::String(discord_presence::LOGO_ASSET.into());
+        }
     }
     activity
 }

@@ -1178,8 +1178,12 @@ impl DrawCtx<'_> {
             self.targets.push((row, *action));
         }
         if !short {
+            // The short source commit identifies the exact installed build
+            // ("is the fix on this phone?") at a glance.
+            let commit = option_env!("HORIZON_ANDROID_BUILD_COMMIT").unwrap_or("unknown");
             ui.text(Face::LauncherRegular, 11.0, rx + 16.0, ry + rh - 26.0, theme::DIM(),
-                &format!("Volt Launcher {}", crate::backend::VERSION));
+                &format!("Volt Launcher {} (build {})", crate::backend::VERSION,
+                    commit.get(..7).unwrap_or(commit)));
         }
     }
 

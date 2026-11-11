@@ -143,7 +143,9 @@ impl Recording {
     /// renderer's `video_sink` with [`Recording::sender`] and sets
     /// `video_layers`/`video_interval` to match `settings`.
     pub fn start(dir: PathBuf, settings: Settings) -> Recording {
-        let (sender, frames) = std::sync::mpsc::sync_channel::<Frame>(3);
+        // Deep enough to ride out encoder hiccups without dropping frames
+        // at the renderer (pooled buffers keep the memory bounded).
+        let (sender, frames) = std::sync::mpsc::sync_channel::<Frame>(8);
         let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel(64);
         horizon_client::audio::tap::install(audio_tx);
         let stop = Arc::new(AtomicBool::new(false));
@@ -303,7 +305,7 @@ mod android {
         let mut pool = horizon_client::gfx::video_pixel_pool()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if pool.len() < 4 {
+        if pool.len() < 8 {
             pool.push(pixels);
         }
     }
@@ -942,10 +944,11 @@ mod android {
                     s.flush(&lib, &mut video, audio.as_mut());
                     s.close(&lib);
                     Ok(format!(
-                        "Saved {} ({} frames, {:.1} s).",
+                        "Saved {} ({} frames, {:.1} s, {:.0} fps avg).",
                         stream_path.display(),
                         frames_in,
-                        last_pts as f64 / 1_000_000.0
+                        last_pts as f64 / 1_000_000.0,
+                        frames_in as f64 / (last_pts as f64 / 1_000_000.0).max(0.001)
                     ))
                 }
                 Err(e) => Err(e),

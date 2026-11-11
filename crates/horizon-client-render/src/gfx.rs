@@ -765,7 +765,9 @@ pub struct Renderer {
     video_pending: VecDeque<(wgpu::Buffer, Arc<std::sync::atomic::AtomicU8>, [u32; 2], bool)>,
     /// Export buffers ready for reuse: no per-frame allocations.
     video_free: Vec<wgpu::Buffer>,
-    /// When the export last grabbed a frame, for the ~30 fps cap.
+    /// When the next export frame is due (scheduled cadence: advanced by
+    /// exactly `video_interval` per capture so the recorded rate matches
+    /// the setting). `None` arms an immediate first capture.
     video_last_capture: Option<Instant>,
     /// Volt Recorder: GPU-scale captures to this size before readback
     /// (`None`: the native frame size). Sampling the finished frame makes
@@ -7201,7 +7203,7 @@ impl Renderer {
             && self.video_pending.len() < 4
             && self
                 .video_last_capture
-                .is_none_or(|at| at.elapsed() >= self.video_interval);
+                .is_none_or(|due| Instant::now() >= due);
         let video_layered = video_due
             && self.video_layers != (true, true)
             && target_texture
@@ -7337,7 +7339,18 @@ impl Renderer {
         // export's frame rate).
         let mut video_frame: Option<(wgpu::Buffer, [u32; 2])> = None;
         if video_due {
-            self.video_last_capture = Some(Instant::now());
+            // Scheduled cadence, not "interval since the last grab": the
+            // old gate always slipped past the interval, so a 60 fps game
+            // recorded at 60 fps beat down to ~30 captured frames a second
+            // (choppy playback). Advancing a due-time by the exact interval
+            // keeps the captured rate at the setting; a long hitch resyncs
+            // instead of bursting.
+            let now = Instant::now();
+            let interval = self.video_interval;
+            self.video_last_capture = Some(match self.video_last_capture {
+                Some(due) if now.duration_since(due) < interval => due + interval,
+                _ => now + interval,
+            });
             let native = [self.config.width, self.config.height];
             // The scale pass samples its source: a swapchain image without
             // TEXTURE_BINDING (Android keeps them pure RENDER_ATTACHMENT)

@@ -7,6 +7,17 @@ thread_local! {static SESSION:std::cell::RefCell<Option<PathBuf>>=const{std::cel
 pub(crate) fn session_argument() -> Option<PathBuf> {
     SESSION.with(|s| s.borrow_mut().take())
 }
+/// The game's Rich Presence toggle (`discordPresence` in the profile's
+/// `options.txt`), read lightly so the launcher can show "In the launcher"
+/// without loading full game settings. Missing file or key = the default, on.
+fn presence_enabled(game_home: &std::path::Path) -> bool {
+    match std::fs::read_to_string(game_home.join("options.txt")) {
+        Ok(text) => !text
+            .lines()
+            .any(|l| l.trim() == "discordPresence:false"),
+        Err(_) => true,
+    }
+}
 #[path = "chooser.rs"]
 mod chooser;
 #[path = "controls_studio.rs"]
@@ -147,6 +158,15 @@ impl Launcher {
         horizon_client::android_runtime::configure_graphics_api(
             catalog.config.renderer.graphics_api(),
         );
+        // "In the launcher" on Discord from the moment the dashboard opens,
+        // not only once a game session starts. Honors the game's Rich
+        // Presence toggle (options.txt in the profile's game folder).
+        if presence_enabled(&catalog.config.game_home(&home)) {
+            horizon_client::discord_presence::start(true, false);
+            horizon_client::discord_presence::set(
+                horizon_client::discord_presence::Status::Launcher,
+            );
+        }
         let update_check_rx = Some(crate::volt_updater::spawn_startup_check(home.clone()));
         crate::configure_input_mode(catalog.config.input_host);
         crate::device_runtime::configure(catalog.config.device);
@@ -254,7 +274,15 @@ impl Launcher {
         crate::platform::hide();
         horizon_client::auth::clear_current();
         self.session_ready = false;
-        horizon_client::discord_presence::stop();
+        // Back in the launcher: keep "In the launcher" showing instead of
+        // dropping presence, unless the player turned the toggle off in game.
+        if presence_enabled(&self.catalog.config.game_home(&self.home)) {
+            horizon_client::discord_presence::set(
+                horizon_client::discord_presence::Status::Launcher,
+            );
+        } else {
+            horizon_client::discord_presence::stop();
+        }
         horizon_client::ui_theme::reset_atlas();
         self.cursor = (0.0, 0.0);
         self.drag = None;

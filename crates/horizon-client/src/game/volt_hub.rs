@@ -110,16 +110,20 @@ impl Game<'_> {
         false
     }
 
-    /// Stops the recorder when its session cannot continue (the player
-    /// left the world or started watching a replay).
+    /// Stops the recorder when its session cannot continue (a replay took
+    /// the frame capture, or the capture itself was torn down).
     pub(super) fn volt_recorder_tick(&mut self) {
-        // Stop only when the session truly cannot continue: the world is
-        // gone or a replay takes the renderer. An in-game menu (Options,
-        // pause) keeps recording — the hub opens over those screens now,
-        // so a recording started there must not die instantly.
+        // Recording runs anywhere the renderer draws — the home screen,
+        // menus, loading, in game — so a recording started from the
+        // dashboard never dies by itself. It stops only when a replay
+        // takes the capture over or the renderer dropped the sink (the
+        // file is finalized and saved either way).
         if self.recorder.is_some()
-            && ((self.title.is_some() && self.player.is_none())
-                || self.replay_control().is_some())
+            && (self.replay_control().is_some()
+                || self
+                    .renderer
+                    .as_ref()
+                    .is_none_or(|r| r.video_sink.is_none()))
         {
             self.volt_recorder_stop();
         }

@@ -66,6 +66,8 @@ pub enum Play {
 pub enum Status {
     /// The player turned Rich Presence off: the activity is cleared.
     Off,
+    /// Browsing the launcher, before a game session starts.
+    Launcher,
     Menus,
     World {
         play: Play,
@@ -301,11 +303,19 @@ impl Conn {
     }
 }
 
+/// The logo shown on the activity. Primary: the website's hosted PNG —
+/// Discord resolves external image URLs in activity assets, so the logo
+/// shows without portal uploads. Builds that reject URL assets fall back
+/// to the `volt` art asset key (uploaded on the developer portal).
+pub const LOGO_URL: &str = "https://entitybrian69-bit.github.io/Volt-launcher/assets/volt-logo.png";
+pub const LOGO_ASSET: &str = "volt";
+
 /// The activity Discord shows for `status`; `None` clears it.
 fn activity(status: Status, since: Option<u64>) -> Option<Value> {
-    let mut assets = json!({"large_image": "volt", "large_text": "Volt Launcher"});
+    let mut assets = json!({"large_image": LOGO_URL, "large_text": "Volt Launcher"});
     let (details, state, party) = match status {
         Status::Off => return None,
+        Status::Launcher => ("In the launcher", None, None),
         Status::Menus => ("In the menus", None, None),
         Status::World {
             play,
@@ -599,7 +609,11 @@ mod tests {
         let menus = activity(Status::Menus, None).unwrap();
         assert_eq!(menus["details"], "In the menus");
         assert!(menus.get("state").is_none() && menus.get("timestamps").is_none());
-        assert_eq!(menus["assets"]["large_image"], "volt");
+        assert_eq!(menus["assets"]["large_image"], LOGO_URL);
+
+        let launcher = activity(Status::Launcher, None).unwrap();
+        assert_eq!(launcher["details"], "In the launcher");
+        assert!(launcher.get("state").is_none() && launcher.get("timestamps").is_none());
         assert_eq!(menus["buttons"][0]["label"], "Website");
         assert_eq!(menus["buttons"][0]["url"], WEBSITE);
         assert_eq!(menus["buttons"][1]["label"], "Join the Discord");
