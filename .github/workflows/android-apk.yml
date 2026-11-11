@@ -194,7 +194,7 @@ jobs:
   runtime-proof:
     name: Runtime proof (real root, live client)
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
       HORIZON_TELEMETRY_URL: "off"
@@ -296,6 +296,7 @@ jobs:
           # Default features link ALSA and udev on Linux.
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libudev-dev
+          pkg-config --exists alsa && echo "alsa.pc found" || echo "::warning title=alsa.pc missing::pkg-config cannot locate alsa after apt install"
           cargo build --locked --profile fast -p horizon-client --bins 2>&1 | tee client-build.log
           status=$?
           if [ "$status" -ne 0 ]; then
