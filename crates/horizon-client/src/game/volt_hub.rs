@@ -11,6 +11,7 @@ pub(super) enum HubTab {
     #[default]
     Recorder,
     Replay,
+    Controls,
     Toggles,
     Performance,
     Screenshot,
@@ -18,9 +19,10 @@ pub(super) enum HubTab {
 }
 
 impl HubTab {
-    const ALL: [HubTab; 6] = [
+    const ALL: [HubTab; 7] = [
         HubTab::Recorder,
         HubTab::Replay,
+        HubTab::Controls,
         HubTab::Toggles,
         HubTab::Performance,
         HubTab::Screenshot,
@@ -30,6 +32,7 @@ impl HubTab {
         match self {
             HubTab::Recorder => "Recorder",
             HubTab::Replay => "Replay",
+            HubTab::Controls => "Controls",
             HubTab::Toggles => "Quick Toggles",
             HubTab::Performance => "Performance",
             HubTab::Screenshot => "Screenshot",
@@ -60,6 +63,10 @@ enum Act {
     Keystrokes,
     ReplayButton,
     TakeScreenshot,
+    /// Applies the saved control layout at this index live, no restart.
+    ApplyControlPreset(usize),
+    /// Restores the built-in Volt Default touch controls live.
+    ResetControlLayout,
 }
 
 /// A finger dragging the floating logo.
@@ -90,6 +97,34 @@ pub(super) struct Hub {
     anim_at: Option<std::time::Instant>,
     /// The target just tapped flashes briefly (GUI rect + when).
     flash: Option<([f32; 4], std::time::Instant)>,
+    /// The saved control layouts, loaded when the hub opens or the
+    /// Controls tab is tapped (never scanned per frame).
+    presets: Vec<horizon_client::touch::import::PresetEntry>,
+}
+
+/// The account root that holds `imported-controls/` (the saved layouts).
+/// Android: the app's internal data dir; desktop: the game home itself.
+fn volt_controls_root() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        crate::backend::data_dir()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        std::path::PathBuf::from(".")
+    }
+}
+
+/// The active profile's game home holding `horizon-touch.json`.
+fn volt_controls_game_home() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        crate::backend::game_home()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        std::path::PathBuf::from(".")
+    }
 }
 
 // Palette: the owner's crimson on near-black glass.
@@ -105,6 +140,10 @@ impl Game<'_> {
     pub(super) fn volt_hub_key(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::F10 && self.screen == Screen::Playing && self.title.is_none() {
             self.volt_hub.open = !self.volt_hub.open;
+            if self.volt_hub.open {
+                self.volt_hub.presets =
+                    horizon_client::touch::import::list_presets(&volt_controls_root());
+            }
             return true;
         }
         false
@@ -270,6 +309,8 @@ impl Game<'_> {
                     let d = self.volt_hub.drag.take().expect("owned drag");
                     if phase == TouchPhase::Ended && !d.moved {
                         self.volt_hub.open = true;
+                        self.volt_hub.presets =
+                            horizon_client::touch::import::list_presets(&volt_controls_root());
                         self.audio.play_button_click();
                     }
                     true
@@ -322,12 +363,22 @@ impl Game<'_> {
             self.volt_hub.flash = Some((rect, std::time::Instant::now()));
         }
         match act {
-            Act::OpenHub => self.volt_hub.open = true,
+            Act::OpenHub => {
+                self.volt_hub.open = true;
+                self.volt_hub.presets =
+                    horizon_client::touch::import::list_presets(&volt_controls_root());
+            }
             // The window body swallows its taps: only the X (or a tap on
             // the scrim outside the window, or F10) closes the hub.
             Act::Panel => {}
             Act::Close => self.volt_hub.open = false,
-            Act::Tab(tab) => self.volt_hub.tab = tab,
+            Act::Tab(tab) => {
+                self.volt_hub.tab = tab;
+                if tab == HubTab::Controls {
+                    self.volt_hub.presets =
+                        horizon_client::touch::import::list_presets(&volt_controls_root());
+                }
+            }
             Act::RecToggle => self.volt_recorder_toggle(),
             Act::RecClip => {
                 if let Some(rec) = &self.recorder {
@@ -393,8 +444,49 @@ impl Game<'_> {
                 self.volt_hub.open = false;
                 self.take_screenshot();
             }
+            Act::ApplyControlPreset(i) => {
+                if let Some(entry) = self.volt_hub.presets.get(i).cloned() {
+                    let root = volt_controls_root();
+                    match horizon_client::touch::import::load_preset(&root, &entry.slug)
+                        .and_then(|s| {
+                            horizon_client::touch::import::apply_to_profile(
+                                &volt_controls_game_home(),
+                                &s,
+                            )
+                        }) {
+                        Ok(()) => {
+                            self.volt_apply_live_controls();
+                            self.volt_hub.status = format!(
+                                "Controls switched to \"{}\" - live, no restart.",
+                                entry.meta.name
+                            );
+                        }
+                        Err(e) => self.volt_hub.status = e,
+                    }
+                }
+            }
+            Act::ResetControlLayout => {
+                match horizon_client::touch::import::reset_profile(&volt_controls_game_home()) {
+                    Ok(()) => {
+                        self.volt_apply_live_controls();
+                        self.volt_hub.status =
+                            "Volt Default touch controls restored - live, no restart.".to_string();
+                    }
+                    Err(e) => self.volt_hub.status = e,
+                }
+            }
         }
         true
+    }
+
+    /// Reloads `horizon-touch.json` into the running game so a control
+    /// switch from the hub takes effect immediately, exactly like the
+    /// launcher-import live-reload path in `android_poll_keyboard`.
+    fn volt_apply_live_controls(&mut self) {
+        let path = volt_controls_game_home().join("horizon-touch.json");
+        self.settings.touch = horizon_client::touch::Settings::load_from(&path);
+        self.pad.touch.clear();
+        self.pad.touch.settings = self.settings.touch.clone();
     }
 
     /// Draws the floating logo (closed) or the hub window (open) and
@@ -703,6 +795,50 @@ impl Game<'_> {
                         &mut y,
                         "Watch & export to MP4 from the launcher's Replays tab.",
                     );
+                }
+                HubTab::Controls => {
+                    let active = self
+                        .settings
+                        .touch
+                        .imported_from
+                        .as_ref()
+                        .map(|m| m.name.clone())
+                        .unwrap_or_else(|| "Volt Default".to_string());
+                    row(&mut ui, &mut targets, &mut y, "Active layout", &active, None);
+                    if self.volt_hub.presets.is_empty() {
+                        note(&mut ui, &mut y, "No saved layouts yet.");
+                        note(
+                            &mut ui,
+                            &mut y,
+                            "Import or build layouts in the launcher's Controls tab.",
+                        );
+                    } else {
+                        for (i, entry) in self.volt_hub.presets.iter().take(7).enumerate() {
+                            let is_active = entry.meta.name == active;
+                            let value = if is_active {
+                                "ACTIVE".to_string()
+                            } else {
+                                format!("{} btns - apply", entry.meta.buttons)
+                            };
+                            row(
+                                &mut ui,
+                                &mut targets,
+                                &mut y,
+                                &entry.meta.name,
+                                &value,
+                                (!is_active).then_some(Act::ApplyControlPreset(i)),
+                            );
+                        }
+                    }
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Reset to Volt Default",
+                        "now",
+                        Some(Act::ResetControlLayout),
+                    );
+                    note(&mut ui, &mut y, "Switches apply instantly - no restart needed.");
                 }
                 HubTab::Toggles => {
                     row(

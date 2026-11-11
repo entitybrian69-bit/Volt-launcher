@@ -107,6 +107,9 @@ pub struct Config {
     /// into `play_seconds` the next time the launcher loads this config.
     #[serde(default)]
     pub session_mark: u64,
+    /// Renders the active touch control layout over the launcher dashboard.
+    #[serde(default)]
+    pub dashboard_controls: bool,
     #[serde(default)]
     pub custom_vulkan_driver: Option<String>,
     #[serde(default)]
@@ -125,6 +128,7 @@ impl Default for Config {
             record_performance: false, device: Default::default(), shader_source: Default::default(),
             mod_source: Default::default(), pack_source: Default::default(),
             play_seconds: 0, last_played: 0, session_mark: 0,
+            dashboard_controls: false,
             custom_vulkan_driver: None, custom_vulkan_driver_name: None,
         }
     }
@@ -243,17 +247,19 @@ pub enum Page {
     Mods,
     Packs,
     Shaders,
+    Controls,
     Installed,
     VoltSettings,
     Settings,
 }
 impl Page {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Play,
         Self::Account,
         Self::Mods,
         Self::Packs,
         Self::Shaders,
+        Self::Controls,
         Self::Installed,
         Self::VoltSettings,
         Self::Settings,
@@ -265,6 +271,7 @@ impl Page {
             Self::Mods => "Mods",
             Self::Packs => "Packs",
             Self::Shaders => "Shaders",
+            Self::Controls => "Controls",
             Self::Installed => "Installed",
             Self::VoltSettings => "Volt Settings",
             Self::Settings => "Settings",
@@ -325,6 +332,8 @@ pub struct Catalog {
     pub config: Config,
     pub active_controls: Option<horizon_client::touch::layout::ImportedMeta>,
     pub control_presets: Vec<horizon_client::touch::import::PresetEntry>,
+    /// The active profile's touch layout, cached for the dashboard preview.
+    pub dashboard_layout: Option<Box<horizon_client::touch::Settings>>,
     pub editing: Option<&'static str>,
     pub render_scale_text: String,
     pub account_tab: crate::volt_accounts::AccountProvider,
@@ -395,6 +404,7 @@ impl Catalog {
             config,
             active_controls: None,
             control_presets: vec![],
+            dashboard_layout: None,
             editing: None,
             render_scale_text: String::new(),
             account_tab: crate::volt_accounts::AccountProvider::Offline,
@@ -539,6 +549,9 @@ impl Catalog {
         let game = self.config.game_home(home);
         self.active_controls = horizon_client::touch::import::active_meta(&game);
         self.control_presets = horizon_client::touch::import::list_presets(home);
+        self.dashboard_layout = Some(Box::new(horizon_client::touch::Settings::load_from(
+            &game.join("horizon-touch.json"),
+        )));
     }
     pub fn busy(&self) -> bool {
         self.worker.is_some()

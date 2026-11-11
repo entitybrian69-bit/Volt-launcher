@@ -10,7 +10,9 @@ use horizon_client::{
     osk::Output,
     touch::{
         BuiltInPreset, Control, CustomButton, Settings,
-        import::{ImportedControlLayout, apply_to_profile, save_preset_and_apply},
+        import::{
+            ImportedControlLayout, apply_to_profile, eval_position_formula, save_preset_and_apply,
+        },
         layout::{ImportedMeta, MAX_CUSTOM_BUTTONS, Placement},
         presets::STUDIO_BINDINGS,
     },
@@ -50,8 +52,63 @@ pub(crate) enum StudioAction {
     ToggleSwipeable,
     ToggleInGame,
     ToggleInMenu,
+    /// Switches the inspector between its Main and Style/Advanced pages.
+    InspectorPage(u8),
+    /// Selects one of the four Pojav-style keycode slots and opens the picker.
+    BindSlot(usize),
+    /// Clears the active extra-key slot (slots 2-4).
+    ClearSlot,
+    CycleBgColor(bool),
+    AdjustBgAlpha(i8),
+    CycleStrokeColor(bool),
+    AdjustStrokeAlpha(i8),
+    /// Adds a Pojav-style drawer (an expandable group of sub-buttons).
+    AddDrawer,
+    /// Adds a sub-button to the selected drawer.
+    AddDrawerSub,
+    /// Detaches the selected sub-button from its drawer.
+    DetachFromDrawer,
+    /// Joystick: W also sprints after a forward flick (Pojav forwardLock).
+    ToggleForwardLock,
+    /// Joystick: absolute D-pad style vs. free analog (Pojav `absolute`).
+    ToggleDpadStyle,
+    /// Type a Pojav dynamic-position formula for X / Y.
+    EditFormulaX,
+    EditFormulaY,
     SavePreset,
     ExportJson,
+}
+
+/// The Pojav editor's color choices, cycled through for fills and strokes.
+const STUDIO_PALETTE: [[u8; 3]; 12] = [
+    [0, 0, 0],
+    [34, 34, 48],
+    [255, 255, 255],
+    [220, 20, 60],
+    [255, 68, 96],
+    [46, 204, 113],
+    [52, 152, 219],
+    [241, 196, 15],
+    [230, 126, 34],
+    [155, 89, 182],
+    [26, 188, 156],
+    [120, 128, 140],
+];
+
+fn cycle_palette(current: Option<[u8; 4]>, back: bool, default_alpha: u8) -> [u8; 4] {
+    let (rgb, alpha) = match current {
+        Some(c) => ([c[0], c[1], c[2]], c[3]),
+        None => (STUDIO_PALETTE[0], default_alpha),
+    };
+    let at = STUDIO_PALETTE.iter().position(|p| *p == rgb).unwrap_or(0);
+    let len = STUDIO_PALETTE.len();
+    let next = if back { (at + len - 1) % len } else { (at + 1) % len };
+    [
+        STUDIO_PALETTE[next][0],
+        STUDIO_PALETTE[next][1],
+        STUDIO_PALETTE[next][2],
+        alpha,
+    ]
 }
 
 pub(crate) struct ControlsStudio {
@@ -62,6 +119,13 @@ pub(crate) struct ControlsStudio {
     pub bind_picker_open: bool,
     pub editing_label: bool,
     pub label_draft: String,
+    /// 0 = Main inspector page, 1 = Style / Advanced.
+    pub inspector_page: u8,
+    /// Which of the four Pojav keycode slots the picker writes (0..=3).
+    pub bind_slot: usize,
+    /// `Some(horizontal)` while a dynamic-position formula is being typed.
+    pub editing_formula: Option<bool>,
+    pub formula_draft: String,
     pub canvas_rect: [f32; 4],
     pub dragging: Option<(StudioTarget, [f32; 2])>,
     pub status_hint: String,
@@ -78,6 +142,10 @@ impl Default for ControlsStudio {
             bind_picker_open: false,
             editing_label: false,
             label_draft: String::new(),
+            inspector_page: 0,
+            bind_slot: 0,
+            editing_formula: None,
+            formula_draft: String::new(),
             canvas_rect: [0.0; 4],
             dragging: None,
             status_hint: String::new(),
@@ -92,6 +160,9 @@ impl ControlsStudio {
         self.open = true;
         self.bind_picker_open = false;
         self.editing_label = false;
+        self.inspector_page = 0;
+        self.bind_slot = 0;
+        self.editing_formula = None;
         self.dragging = None;
         self.select_default_target();
         self.status_hint =
@@ -130,9 +201,39 @@ impl ControlsStudio {
             name: custom_name,
             format: "Volt Controls Studio".into(),
             buttons: self.settings.custom_buttons.len(),
-            drawers: 0,
+            drawers: self.drawer_count(),
             has_joystick: self.joystick_visible(),
         });
+    }
+
+    /// Applying a layout with custom buttons makes the stock MCPE touch
+    /// controls vanish (visibility 2), exactly like an imported layout. The
+    /// pause button stays when no button binds Escape / menu, so the game
+    /// can always be paused.
+    fn hide_stock_when_custom(&mut self) {
+        if self.settings.custom_buttons.is_empty() {
+            return;
+        }
+        let move_idx = Control::Move as usize;
+        let move_vis = self.settings.button_visibility[move_idx];
+        self.settings.button_visibility = [2; 14];
+        self.settings.button_visibility[move_idx] = move_vis;
+        let has_menu = self.settings.custom_buttons.iter().any(|b| {
+            std::iter::once(&b.key)
+                .chain(b.extra_keys.iter())
+                .any(|tok| matches!(tok.as_str(), "key.keyboard.escape" | "special:menu"))
+        });
+        if !has_menu {
+            self.settings.button_visibility[Control::Pause as usize] = 1;
+        }
+    }
+
+    fn drawer_count(&self) -> usize {
+        self.settings
+            .custom_buttons
+            .iter()
+            .filter(|b| b.key.starts_with("special:drawer:"))
+            .count()
     }
 
     /// Returns normalized `[x, y, w, h]` within `0..1` for a target at `aspect`.
@@ -280,7 +381,31 @@ impl ControlsStudio {
     }
 
     pub fn handle_osk(&mut self, out: &Output) -> bool {
-        if !self.open || !self.editing_label {
+        if !self.open {
+            return false;
+        }
+        if let Some(horizontal) = self.editing_formula {
+            match out {
+                Output::Text(t) => {
+                    for ch in t.chars() {
+                        if !ch.is_control() && self.formula_draft.chars().count() < 64 {
+                            self.formula_draft.push(ch);
+                        }
+                    }
+                }
+                Output::Backspace => {
+                    self.formula_draft.pop();
+                }
+                Output::Enter => {
+                    self.apply_formula_draft(horizontal);
+                    self.editing_formula = None;
+                    crate::platform::hide();
+                }
+                _ => {}
+            }
+            return true;
+        }
+        if !self.editing_label {
             return false;
         }
         match out {
@@ -306,6 +431,45 @@ impl ControlsStudio {
         true
     }
 
+    /// Evaluates the typed Pojav formula in the 844x390 reference space and
+    /// moves the selected button there, exactly like an imported layout.
+    fn apply_formula_draft(&mut self, horizontal: bool) {
+        let expr = self.formula_draft.trim().to_owned();
+        if expr.is_empty() {
+            return;
+        }
+        let Some(StudioTarget::Custom(idx)) = self.selected else {
+            return;
+        };
+        let mode_idx = self.settings.mode.index();
+        let Some(btn) = self.settings.custom_buttons.get_mut(idx) else {
+            return;
+        };
+        let aspect = 16.0 / 9.0;
+        let h_norm = btn.layouts[mode_idx].size;
+        let w_norm = h_norm * btn.width_ratio.clamp(0.25, 6.0) / aspect;
+        match eval_position_formula(&expr, w_norm, h_norm, horizontal) {
+            Some(center) => {
+                for p in &mut btn.layouts {
+                    if horizontal {
+                        p.center[0] = center;
+                    } else {
+                        p.center[1] = center;
+                    }
+                }
+                self.mark_customized();
+                self.status_hint = format!(
+                    "Placed via formula: {} = {expr}",
+                    if horizontal { "X" } else { "Y" }
+                );
+            }
+            None => {
+                self.status_hint =
+                    "Formula not understood - try ${right} - ${margin} * 2 style.".into();
+            }
+        }
+    }
+
     fn commit_label_draft(&mut self) {
         if let Some(StudioTarget::Custom(idx)) = self.selected
             && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
@@ -328,6 +492,12 @@ impl ControlsStudio {
             self.editing_label = false;
             crate::platform::hide();
         }
+        if self.editing_formula.is_some()
+            && !matches!(act, StudioAction::EditFormulaX | StudioAction::EditFormulaY)
+        {
+            self.editing_formula = None;
+            crate::platform::hide();
+        }
         match act {
             StudioAction::Open => {
                 self.open_for_profile(profile_home);
@@ -340,6 +510,7 @@ impl ControlsStudio {
                 None
             }
             StudioAction::ApplyAndClose => {
+                self.hide_stock_when_custom();
                 self.settings.sanitize();
                 match apply_to_profile(profile_home, &self.settings) {
                     Ok(()) => {
@@ -378,6 +549,7 @@ impl ControlsStudio {
             StudioAction::Select(target) => {
                 self.selected = Some(target);
                 self.bind_picker_open = false;
+                self.bind_slot = 0;
                 None
             }
             StudioAction::ToggleSnap => {
@@ -458,7 +630,17 @@ impl ControlsStudio {
             StudioAction::DeleteSelected => {
                 match self.selected {
                     Some(StudioTarget::Custom(idx)) if idx < self.settings.custom_buttons.len() => {
-                        self.settings.custom_buttons.remove(idx);
+                        let removed = self.settings.custom_buttons.remove(idx);
+                        // A deleted drawer takes its sub-buttons with it (Pojav behavior).
+                        if let Some(id) = removed
+                            .key
+                            .strip_prefix("special:drawer:")
+                            .and_then(|v| v.parse::<u16>().ok())
+                        {
+                            self.settings
+                                .custom_buttons
+                                .retain(|b| b.drawer_parent != Some(id));
+                        }
                         if self.settings.custom_buttons.is_empty() {
                             self.select_default_target();
                         } else {
@@ -505,6 +687,38 @@ impl ControlsStudio {
             StudioAction::ToggleBindPicker => {
                 if matches!(self.selected, Some(StudioTarget::Custom(_))) {
                     self.bind_picker_open = !self.bind_picker_open;
+                    if self.bind_picker_open {
+                        self.bind_slot = 0;
+                    }
+                }
+                None
+            }
+            StudioAction::InspectorPage(pg) => {
+                self.inspector_page = pg.min(1);
+                self.bind_picker_open = false;
+                None
+            }
+            StudioAction::BindSlot(slot) => {
+                if matches!(self.selected, Some(StudioTarget::Custom(_))) {
+                    self.bind_slot = slot.min(3);
+                    self.bind_picker_open = true;
+                    self.status_hint = format!(
+                        "Pick the key for slot {} (all slots press together, like Pojav).",
+                        self.bind_slot + 1
+                    );
+                }
+                None
+            }
+            StudioAction::ClearSlot => {
+                if let Some(StudioTarget::Custom(idx)) = self.selected
+                    && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
+                    && self.bind_slot > 0
+                    && btn.extra_keys.len() >= self.bind_slot
+                {
+                    btn.extra_keys.remove(self.bind_slot - 1);
+                    self.bind_picker_open = false;
+                    self.mark_customized();
+                    self.status_hint = format!("Cleared key slot {}.", self.bind_slot + 1);
                 }
                 None
             }
@@ -513,14 +727,27 @@ impl ControlsStudio {
                     (self.selected, STUDIO_BINDINGS.get(b_idx))
                     && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
                 {
-                    let old_auto = CustomButton::token_label(&btn.key);
-                    if btn.label.as_deref().is_none_or(|l| l == old_auto || l == "BTN") {
-                        btn.label = Some(CustomButton::token_label(token));
+                    if self.bind_slot == 0 {
+                        let old_auto = CustomButton::token_label(&btn.key);
+                        if btn.label.as_deref().is_none_or(|l| l == old_auto || l == "BTN") {
+                            btn.label = Some(CustomButton::token_label(token));
+                        }
+                        btn.key = token.to_owned();
+                        self.status_hint = format!("Bound button to {desc}.");
+                    } else if btn.key != token && !btn.extra_keys.iter().any(|k| k == token) {
+                        let at = self.bind_slot - 1;
+                        if at < btn.extra_keys.len() {
+                            btn.extra_keys[at] = token.to_owned();
+                        } else if btn.extra_keys.len() < 3 {
+                            btn.extra_keys.push(token.to_owned());
+                        }
+                        self.status_hint =
+                            format!("Slot {} presses {desc} together.", self.bind_slot + 1);
+                    } else {
+                        self.status_hint = "That key is already on this button.".into();
                     }
-                    btn.key = token.to_owned();
                     self.bind_picker_open = false;
                     self.mark_customized();
-                    self.status_hint = format!("Bound button to {desc}.");
                 }
                 None
             }
@@ -654,7 +881,203 @@ impl ControlsStudio {
                 }
                 None
             }
+            StudioAction::CycleBgColor(back) => {
+                if let Some(StudioTarget::Custom(idx)) = self.selected
+                    && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
+                {
+                    btn.bg_color = Some(cycle_palette(btn.bg_color, back, 150));
+                    self.mark_customized();
+                }
+                None
+            }
+            StudioAction::AdjustBgAlpha(dir) => {
+                if let Some(StudioTarget::Custom(idx)) = self.selected
+                    && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
+                {
+                    let mut c = btn.bg_color.unwrap_or([22, 22, 30, 150]);
+                    c[3] = (i16::from(c[3]) + i16::from(dir) * 16).clamp(0, 255) as u8;
+                    btn.bg_color = Some(c);
+                    self.mark_customized();
+                }
+                None
+            }
+            StudioAction::CycleStrokeColor(back) => {
+                if let Some(StudioTarget::Custom(idx)) = self.selected
+                    && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
+                {
+                    btn.stroke_color = Some(cycle_palette(btn.stroke_color, back, 150));
+                    self.mark_customized();
+                }
+                None
+            }
+            StudioAction::AdjustStrokeAlpha(dir) => {
+                if let Some(StudioTarget::Custom(idx)) = self.selected
+                    && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
+                {
+                    let mut c = btn.stroke_color.unwrap_or([255, 255, 255, 150]);
+                    c[3] = (i16::from(c[3]) + i16::from(dir) * 16).clamp(0, 255) as u8;
+                    btn.stroke_color = Some(c);
+                    self.mark_customized();
+                }
+                None
+            }
+            StudioAction::AddDrawer => {
+                if self.settings.custom_buttons.len() >= MAX_CUSTOM_BUTTONS {
+                    self.status_hint = "Maximum custom button limit reached.".into();
+                    return None;
+                }
+                let id = self
+                    .settings
+                    .custom_buttons
+                    .iter()
+                    .filter_map(|b| {
+                        b.key
+                            .strip_prefix("special:drawer:")
+                            .and_then(|v| v.parse::<u16>().ok())
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                let p = Placement {
+                    center: [0.92, 0.26],
+                    size: 0.10,
+                    opacity: 0.8,
+                };
+                self.settings.custom_buttons.push(CustomButton {
+                    key: format!("special:drawer:{id}"),
+                    layouts: [p; 3],
+                    extra_keys: Vec::new(),
+                    label: Some("\u{2261}".into()),
+                    width_ratio: 1.0,
+                    toggle: false,
+                    swipeable: false,
+                    passthrough: false,
+                    in_game: true,
+                    in_menu: false,
+                    bg_color: Some([24, 18, 28, 165]),
+                    stroke_color: Some([225, 48, 82, 160]),
+                    corner_radius: Some(10.0),
+                    drawer_parent: None,
+                });
+                let idx = self.settings.custom_buttons.len() - 1;
+                self.selected = Some(StudioTarget::Custom(idx));
+                self.mark_customized();
+                self.status_hint =
+                    "Drawer added - tap + Sub-button to put keys inside it (Pojav drawers).".into();
+                None
+            }
+            StudioAction::AddDrawerSub => {
+                if self.settings.custom_buttons.len() >= MAX_CUSTOM_BUTTONS {
+                    self.status_hint = "Maximum custom button limit reached.".into();
+                    return None;
+                }
+                let Some(StudioTarget::Custom(idx)) = self.selected else {
+                    return None;
+                };
+                let Some(parent) = self.settings.custom_buttons.get(idx) else {
+                    return None;
+                };
+                let Some(id) = parent
+                    .key
+                    .strip_prefix("special:drawer:")
+                    .and_then(|v| v.parse::<u16>().ok())
+                else {
+                    return None;
+                };
+                let mode_idx = self.settings.mode.index();
+                let base = parent.layouts[mode_idx];
+                let siblings = self
+                    .settings
+                    .custom_buttons
+                    .iter()
+                    .filter(|b| b.drawer_parent == Some(id))
+                    .count();
+                let p = Placement {
+                    center: [
+                        base.center[0],
+                        (base.center[1] + 0.115 * (siblings + 1) as f32).clamp(0.06, 0.94),
+                    ],
+                    size: base.size,
+                    opacity: base.opacity,
+                };
+                self.settings.custom_buttons.push(CustomButton {
+                    key: "special:mouse_pri".into(),
+                    layouts: [p; 3],
+                    extra_keys: Vec::new(),
+                    label: Some("SUB".into()),
+                    width_ratio: 1.0,
+                    toggle: false,
+                    swipeable: false,
+                    passthrough: false,
+                    in_game: true,
+                    in_menu: false,
+                    bg_color: Some([24, 18, 28, 155]),
+                    stroke_color: Some([225, 48, 82, 150]),
+                    corner_radius: Some(8.0),
+                    drawer_parent: Some(id),
+                });
+                let new_idx = self.settings.custom_buttons.len() - 1;
+                self.selected = Some(StudioTarget::Custom(new_idx));
+                self.mark_customized();
+                self.status_hint =
+                    "Sub-button added - it shows when the drawer is tapped in game.".into();
+                None
+            }
+            StudioAction::DetachFromDrawer => {
+                if let Some(StudioTarget::Custom(idx)) = self.selected
+                    && let Some(btn) = self.settings.custom_buttons.get_mut(idx)
+                    && btn.drawer_parent.is_some()
+                {
+                    btn.drawer_parent = None;
+                    self.mark_customized();
+                    self.status_hint = "Button detached from its drawer.".into();
+                }
+                None
+            }
+            StudioAction::ToggleForwardLock => {
+                self.settings.sprint_with_joystick = !self.settings.sprint_with_joystick;
+                self.mark_customized();
+                self.status_hint = if self.settings.sprint_with_joystick {
+                    "Forward lock ON: flicking the stick forward sprints (Pojav forwardLock).".into()
+                } else {
+                    "Forward lock OFF.".into()
+                };
+                None
+            }
+            StudioAction::ToggleDpadStyle => {
+                use horizon_client::touch::Mode;
+                self.settings.mode = if self.settings.mode == Mode::Dpad {
+                    Mode::Crosshair
+                } else {
+                    Mode::Dpad
+                };
+                self.mark_customized();
+                self.status_hint = if self.settings.mode == Mode::Dpad {
+                    "D-pad style: 8-way absolute movement (Pojav absolute joystick).".into()
+                } else {
+                    "Analog stick: free 360\u{b0} movement.".into()
+                };
+                None
+            }
+            StudioAction::EditFormulaX | StudioAction::EditFormulaY => {
+                if matches!(self.selected, Some(StudioTarget::Custom(_))) {
+                    let horizontal = matches!(act, StudioAction::EditFormulaX);
+                    if self.editing_formula == Some(horizontal) {
+                        self.editing_formula = None;
+                        crate::platform::hide();
+                    } else {
+                        self.formula_draft.clear();
+                        self.editing_formula = Some(horizontal);
+                        crate::platform::show("");
+                        self.status_hint =
+                            "Type a Pojav formula - e.g. ${right} - ${margin} * 2 - then Enter."
+                                .into();
+                    }
+                }
+                None
+            }
             StudioAction::SavePreset => {
+                self.hide_stock_when_custom();
                 self.settings.sanitize();
                 let base = self
                     .settings
@@ -670,7 +1093,7 @@ impl ControlsStudio {
                     name: base.clone(),
                     format: "Volt Controls Studio".into(),
                     buttons: self.settings.custom_buttons.len(),
-                    drawers: 0,
+                    drawers: self.drawer_count(),
                     has_joystick: self.joystick_visible(),
                 };
                 self.settings.imported_from = Some(meta.clone());
@@ -1048,161 +1471,313 @@ impl ControlsStudio {
             Some(StudioTarget::Custom(idx)) if idx < self.settings.custom_buttons.len() => {
                 let b = &self.settings.custom_buttons[idx];
                 let p = b.layouts[self.settings.mode.index()];
+                let is_drawer = b.key.starts_with("special:drawer:");
                 let title = format!("Button #{}: {}", idx + 1, b.label());
                 let fit_t = ui.fit_text(Face::LauncherMedium, 12.5, &title, inner_w);
                 ui.text(Face::LauncherMedium, 12.5, ix + pad, y, theme::TEXT(), &fit_t);
-                y += 22.0;
+                y += 20.0;
 
-                // Binding selector row: [<] [Pick Keybind...] [>]
-                let bind_name = STUDIO_BINDINGS
-                    .iter()
-                    .find(|(k, _)| *k == b.key)
-                    .map(|(_, d)| *d)
-                    .unwrap_or(b.key.as_str());
-                studio_btn(
-                    ui,
-                    targets,
-                    [ix + pad, y, 26.0, 26.0],
-                    "<",
-                    Action::Studio(StudioAction::CycleBinding(true)),
-                    StudioBtn::Dark,
-                );
-                studio_btn(
-                    ui,
-                    targets,
-                    [ix + pad + 30.0, y, inner_w - 60.0, 26.0],
-                    bind_name,
-                    Action::Studio(StudioAction::ToggleBindPicker),
-                    StudioBtn::Outline,
-                );
-                studio_btn(
-                    ui,
-                    targets,
-                    [ix + pad + inner_w - 26.0, y, 26.0, 26.0],
-                    ">",
-                    Action::Studio(StudioAction::CycleBinding(false)),
-                    StudioBtn::Dark,
-                );
-                y += 31.0;
-
-                // Custom Label button
-                let lbl_caption = if self.editing_label {
-                    format!("Typing: {}_", self.label_draft)
-                } else {
-                    format!("Label: \"{}\"", b.label())
-                };
-                studio_btn(
-                    ui,
-                    targets,
-                    [ix + pad, y, inner_w, 25.0],
-                    &lbl_caption,
-                    Action::Studio(StudioAction::EditLabel),
-                    if self.editing_label {
-                        StudioBtn::Crimson
-                    } else {
-                        StudioBtn::Dark
-                    },
-                );
-                y += 30.0;
-
-                // 4 numeric steppers: Size, Width, Opacity, Radius
-                let steppers = [
-                    (
-                        format!("Size {}%", (p.size * 100.0).round() as i32),
-                        StudioAction::AdjustSize(-1),
-                        StudioAction::AdjustSize(1),
-                    ),
-                    (
-                        format!("Width {:.1}x", b.width_ratio),
-                        StudioAction::AdjustWidth(-1),
-                        StudioAction::AdjustWidth(1),
-                    ),
-                    (
-                        format!("Alpha {}%", (p.opacity * 100.0).round() as i32),
-                        StudioAction::AdjustOpacity(-1),
-                        StudioAction::AdjustOpacity(1),
-                    ),
-                    (
-                        format!("Corner {:.0}px", b.corner_radius.unwrap_or(0.0)),
-                        StudioAction::AdjustRadius(-1),
-                        StudioAction::AdjustRadius(1),
-                    ),
-                ];
-                for (caption, dec, inc) in steppers {
-                    if y + 25.0 > iy + ih - 58.0 {
-                        break;
-                    }
-                    draw_stepper_row(ui, targets, [ix + pad, y, inner_w, 23.0], &caption, dec, inc);
-                    y += 26.0;
-                }
-
-                // Compact toggle chips: Latch/Hold, Aim Pass, Swipe, Game/Menu
+                // Main | Style page chips (the Pojav editor's two columns).
                 let half = (inner_w - 6.0) * 0.5;
-                if y + 25.0 <= iy + ih - 30.0 {
+                for (pg, cap) in [(0u8, "Main"), (1u8, "Style & Pos")] {
+                    let rx = ix + pad + f32::from(pg) * (half + 6.0);
                     studio_btn(
                         ui,
                         targets,
-                        [ix + pad, y, half, 24.0],
-                        if b.toggle { "Mode: Toggle" } else { "Mode: Hold" },
-                        Action::Studio(StudioAction::ToggleHoldLatch),
-                        if b.toggle {
-                            StudioBtn::Outline
+                        [rx, y, half, 22.0],
+                        cap,
+                        Action::Studio(StudioAction::InspectorPage(pg)),
+                        if self.inspector_page == pg {
+                            StudioBtn::Crimson
                         } else {
                             StudioBtn::Dark
                         },
                     );
-                    studio_btn(
-                        ui,
-                        targets,
-                        [ix + pad + half + 6.0, y, half, 24.0],
-                        if b.passthrough { "Aim: Pass" } else { "Aim: Lock" },
-                        Action::Studio(StudioAction::TogglePassthrough),
-                        if b.passthrough {
-                            StudioBtn::Outline
-                        } else {
-                            StudioBtn::Dark
-                        },
-                    );
-                    y += 28.0;
                 }
-                if y + 24.0 <= iy + ih - 30.0 {
-                    let third = (inner_w - 8.0) / 3.0;
+                y += 27.0;
+
+                if self.inspector_page == 0 {
+                    // Binding selector row: [<] [Pick Keybind...] [>]
+                    let bind_name = STUDIO_BINDINGS
+                        .iter()
+                        .find(|(k, _)| *k == b.key)
+                        .map(|(_, d)| *d)
+                        .unwrap_or(b.key.as_str());
                     studio_btn(
                         ui,
                         targets,
-                        [ix + pad, y, third, 23.0],
-                        "Swipe",
-                        Action::Studio(StudioAction::ToggleSwipeable),
-                        if b.swipeable {
-                            StudioBtn::Outline
-                        } else {
-                            StudioBtn::Dark
-                        },
+                        [ix + pad, y, 26.0, 26.0],
+                        "<",
+                        Action::Studio(StudioAction::CycleBinding(true)),
+                        StudioBtn::Dark,
                     );
                     studio_btn(
                         ui,
                         targets,
-                        [ix + pad + third + 4.0, y, third, 23.0],
-                        "InGame",
-                        Action::Studio(StudioAction::ToggleInGame),
-                        if b.in_game {
-                            StudioBtn::Outline
-                        } else {
-                            StudioBtn::Dark
-                        },
+                        [ix + pad + 30.0, y, inner_w - 60.0, 26.0],
+                        bind_name,
+                        Action::Studio(StudioAction::ToggleBindPicker),
+                        StudioBtn::Outline,
                     );
                     studio_btn(
                         ui,
                         targets,
-                        [ix + pad + (third + 4.0) * 2.0, y, third, 23.0],
-                        "InMenu",
-                        Action::Studio(StudioAction::ToggleInMenu),
-                        if b.in_menu {
-                            StudioBtn::Outline
+                        [ix + pad + inner_w - 26.0, y, 26.0, 26.0],
+                        ">",
+                        Action::Studio(StudioAction::CycleBinding(false)),
+                        StudioBtn::Dark,
+                    );
+                    y += 30.0;
+
+                    // Pojav's 4 keycode slots: all press together.
+                    if !is_drawer {
+                        let quarter = (inner_w - 12.0) * 0.25;
+                        for slot in 0..4usize {
+                            let cap = if slot == 0 {
+                                CustomButton::token_label(&b.key)
+                            } else {
+                                b.extra_keys
+                                    .get(slot - 1)
+                                    .map(|k| CustomButton::token_label(k))
+                                    .unwrap_or_else(|| "+".into())
+                            };
+                            let rx = ix + pad + slot as f32 * (quarter + 4.0);
+                            studio_btn(
+                                ui,
+                                targets,
+                                [rx, y, quarter, 22.0],
+                                &cap,
+                                Action::Studio(StudioAction::BindSlot(slot)),
+                                if self.bind_picker_open && self.bind_slot == slot {
+                                    StudioBtn::Crimson
+                                } else if slot == 0 || b.extra_keys.len() >= slot {
+                                    StudioBtn::Outline
+                                } else {
+                                    StudioBtn::Dark
+                                },
+                            );
+                        }
+                        y += 26.0;
+                    }
+
+                    // Custom Label button
+                    let lbl_caption = if self.editing_label {
+                        format!("Typing: {}_", self.label_draft)
+                    } else {
+                        format!("Label: \"{}\"", b.label())
+                    };
+                    studio_btn(
+                        ui,
+                        targets,
+                        [ix + pad, y, inner_w, 25.0],
+                        &lbl_caption,
+                        Action::Studio(StudioAction::EditLabel),
+                        if self.editing_label {
+                            StudioBtn::Crimson
                         } else {
                             StudioBtn::Dark
                         },
                     );
+                    y += 30.0;
+
+                    for (caption, dec, inc) in [
+                        (
+                            format!("Size {}%", (p.size * 100.0).round() as i32),
+                            StudioAction::AdjustSize(-1),
+                            StudioAction::AdjustSize(1),
+                        ),
+                        (
+                            format!("Width {:.1}x", b.width_ratio),
+                            StudioAction::AdjustWidth(-1),
+                            StudioAction::AdjustWidth(1),
+                        ),
+                    ] {
+                        if y + 25.0 > iy + ih - 58.0 {
+                            break;
+                        }
+                        draw_stepper_row(ui, targets, [ix + pad, y, inner_w, 23.0], &caption, dec, inc);
+                        y += 26.0;
+                    }
+
+                    // Compact toggle chips: Latch/Hold, Aim Pass, Swipe, Game/Menu
+                    if y + 25.0 <= iy + ih - 30.0 {
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad, y, half, 24.0],
+                            if b.toggle { "Mode: Toggle" } else { "Mode: Hold" },
+                            Action::Studio(StudioAction::ToggleHoldLatch),
+                            if b.toggle {
+                                StudioBtn::Outline
+                            } else {
+                                StudioBtn::Dark
+                            },
+                        );
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad + half + 6.0, y, half, 24.0],
+                            if b.passthrough { "Aim: Pass" } else { "Aim: Lock" },
+                            Action::Studio(StudioAction::TogglePassthrough),
+                            if b.passthrough {
+                                StudioBtn::Outline
+                            } else {
+                                StudioBtn::Dark
+                            },
+                        );
+                        y += 28.0;
+                    }
+                    if y + 24.0 <= iy + ih - 30.0 {
+                        let third = (inner_w - 8.0) / 3.0;
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad, y, third, 23.0],
+                            "Swipe",
+                            Action::Studio(StudioAction::ToggleSwipeable),
+                            if b.swipeable {
+                                StudioBtn::Outline
+                            } else {
+                                StudioBtn::Dark
+                            },
+                        );
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad + third + 4.0, y, third, 23.0],
+                            "InGame",
+                            Action::Studio(StudioAction::ToggleInGame),
+                            if b.in_game {
+                                StudioBtn::Outline
+                            } else {
+                                StudioBtn::Dark
+                            },
+                        );
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad + (third + 4.0) * 2.0, y, third, 23.0],
+                            "InMenu",
+                            Action::Studio(StudioAction::ToggleInMenu),
+                            if b.in_menu {
+                                StudioBtn::Outline
+                            } else {
+                                StudioBtn::Dark
+                            },
+                        );
+                    }
+                } else {
+                    // ---- Style & Position page (Pojav bgColor / strokeColor /
+                    // cornerRadius / opacity / dynamic formulas / drawers) ----
+                    for (caption, dec, inc) in [
+                        (
+                            format!("Alpha {}%", (p.opacity * 100.0).round() as i32),
+                            StudioAction::AdjustOpacity(-1),
+                            StudioAction::AdjustOpacity(1),
+                        ),
+                        (
+                            format!("Corner {:.0}px", b.corner_radius.unwrap_or(0.0)),
+                            StudioAction::AdjustRadius(-1),
+                            StudioAction::AdjustRadius(1),
+                        ),
+                    ] {
+                        draw_stepper_row(ui, targets, [ix + pad, y, inner_w, 23.0], &caption, dec, inc);
+                        y += 26.0;
+                    }
+
+                    // Fill color swatch row + alpha.
+                    let bg = b.bg_color.unwrap_or([22, 22, 30, 150]);
+                    draw_color_row(
+                        ui,
+                        targets,
+                        [ix + pad, y, inner_w, 23.0],
+                        "Fill",
+                        bg,
+                        StudioAction::CycleBgColor(true),
+                        StudioAction::CycleBgColor(false),
+                    );
+                    y += 26.0;
+                    draw_stepper_row(
+                        ui,
+                        targets,
+                        [ix + pad, y, inner_w, 23.0],
+                        &format!("Fill alpha {}", bg[3]),
+                        StudioAction::AdjustBgAlpha(-1),
+                        StudioAction::AdjustBgAlpha(1),
+                    );
+                    y += 26.0;
+
+                    // Stroke color swatch row + alpha.
+                    let sc = b.stroke_color.unwrap_or([255, 255, 255, 95]);
+                    draw_color_row(
+                        ui,
+                        targets,
+                        [ix + pad, y, inner_w, 23.0],
+                        "Stroke",
+                        sc,
+                        StudioAction::CycleStrokeColor(true),
+                        StudioAction::CycleStrokeColor(false),
+                    );
+                    y += 26.0;
+                    draw_stepper_row(
+                        ui,
+                        targets,
+                        [ix + pad, y, inner_w, 23.0],
+                        &format!("Stroke alpha {}", sc[3]),
+                        StudioAction::AdjustStrokeAlpha(-1),
+                        StudioAction::AdjustStrokeAlpha(1),
+                    );
+                    y += 26.0;
+
+                    // Pojav dynamic-position formulas.
+                    for (horizontal, act) in
+                        [(true, StudioAction::EditFormulaX), (false, StudioAction::EditFormulaY)]
+                    {
+                        if y + 24.0 > iy + ih - 60.0 {
+                            break;
+                        }
+                        let editing = self.editing_formula == Some(horizontal);
+                        let cap = if editing {
+                            format!(
+                                "{}: {}_",
+                                if horizontal { "X" } else { "Y" },
+                                self.formula_draft
+                            )
+                        } else {
+                            format!(
+                                "{} formula (e.g. ${{right}} - ${{margin}})",
+                                if horizontal { "X" } else { "Y" }
+                            )
+                        };
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad, y, inner_w, 23.0],
+                            &cap,
+                            Action::Studio(act),
+                            if editing { StudioBtn::Crimson } else { StudioBtn::Dark },
+                        );
+                        y += 26.0;
+                    }
+
+                    // Drawer controls: parent -> add sub, child -> detach, else new drawer.
+                    if y + 24.0 <= iy + ih - 60.0 {
+                        let (cap, act) = if is_drawer {
+                            ("+ Sub-button in drawer", StudioAction::AddDrawerSub)
+                        } else if b.drawer_parent.is_some() {
+                            ("Detach from drawer", StudioAction::DetachFromDrawer)
+                        } else {
+                            ("+ New drawer group", StudioAction::AddDrawer)
+                        };
+                        studio_btn(
+                            ui,
+                            targets,
+                            [ix + pad, y, inner_w, 23.0],
+                            cap,
+                            Action::Studio(act),
+                            StudioBtn::Outline,
+                        );
+                    }
                 }
             }
             Some(StudioTarget::Joystick) => {
@@ -1233,7 +1808,41 @@ impl ControlsStudio {
                     StudioAction::AdjustOpacity(-1),
                     StudioAction::AdjustOpacity(1),
                 );
-                y += 34.0;
+                y += 30.0;
+                let half = (inner_w - 6.0) * 0.5;
+                studio_btn(
+                    ui,
+                    targets,
+                    [ix + pad, y, half, 24.0],
+                    if self.settings.sprint_with_joystick {
+                        "FwdLock ON"
+                    } else {
+                        "FwdLock OFF"
+                    },
+                    Action::Studio(StudioAction::ToggleForwardLock),
+                    if self.settings.sprint_with_joystick {
+                        StudioBtn::Outline
+                    } else {
+                        StudioBtn::Dark
+                    },
+                );
+                studio_btn(
+                    ui,
+                    targets,
+                    [ix + pad + half + 6.0, y, half, 24.0],
+                    if self.settings.mode == horizon_client::touch::Mode::Dpad {
+                        "D-pad 8-way"
+                    } else {
+                        "Analog 360"
+                    },
+                    Action::Studio(StudioAction::ToggleDpadStyle),
+                    if self.settings.mode == horizon_client::touch::Mode::Dpad {
+                        StudioBtn::Outline
+                    } else {
+                        StudioBtn::Dark
+                    },
+                );
+                y += 30.0;
                 ui.text(
                     Face::LauncherRegular,
                     11.5,
@@ -1317,14 +1926,29 @@ impl ControlsStudio {
         let [cx, cy, cw, ch] = canvas;
         ui.rounded(cx, cy, cw, ch, 10.0, hex(0x090A10, 242));
         ui.border(cx, cy, cw, ch, 10.0, theme::BORDER_CRIMSON());
+        let title = if self.bind_slot == 0 {
+            "Select Key / Mouse Binding".to_owned()
+        } else {
+            format!("Select Key for Slot {} (pressed together)", self.bind_slot + 1)
+        };
         ui.text(
             Face::LauncherMedium,
             13.0,
             cx + 12.0,
             cy + 8.0,
             theme::TEXT(),
-            "Select Key / Mouse Binding",
+            &title,
         );
+        if self.bind_slot > 0 {
+            studio_btn(
+                ui,
+                targets,
+                [cx + cw - 140.0, cy + 6.0, 62.0, 24.0],
+                "Clear",
+                Action::Studio(StudioAction::ClearSlot),
+                StudioBtn::Dark,
+            );
+        }
         studio_btn(
             ui,
             targets,
@@ -1349,7 +1973,16 @@ impl ControlsStudio {
                 .settings
                 .custom_buttons
                 .get(i)
-                .map(|b| b.key.as_str())
+                .map(|b| {
+                    if self.bind_slot == 0 {
+                        b.key.as_str()
+                    } else {
+                        b.extra_keys
+                            .get(self.bind_slot - 1)
+                            .map(String::as_str)
+                            .unwrap_or("")
+                    }
+                })
                 .unwrap_or(""),
             _ => "",
         };
@@ -1420,6 +2053,42 @@ fn studio_btn(
     ui.border(x, y, w, h, 7.0, border);
     draw_label_centered(ui, rect, 11.0, text_col, label);
     targets.push((rect, action));
+}
+
+/// A `[<] [label + color swatch] [>]` row for the Pojav-style color pickers.
+fn draw_color_row(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    label: &str,
+    color: [u8; 4],
+    dec: StudioAction,
+    inc: StudioAction,
+) {
+    let [x, y, w, h] = rect;
+    let btn_w = 26.0;
+    studio_btn(ui, targets, [x, y, btn_w, h], "<", Action::Studio(dec), StudioBtn::Dark);
+    let mid_r = [x + btn_w + 4.0, y, (w - btn_w * 2.0 - 8.0).max(24.0), h];
+    ui.rounded(mid_r[0], mid_r[1], mid_r[2], mid_r[3], 6.0, theme::BG());
+    let swatch = hex(
+        (u32::from(color[0]) << 16) | (u32::from(color[1]) << 8) | u32::from(color[2]),
+        255,
+    );
+    ui.rounded(mid_r[0] + 4.0, y + 4.0, h - 8.0, h - 8.0, 4.0, swatch);
+    ui.border(mid_r[0] + 4.0, y + 4.0, h - 8.0, h - 8.0, 4.0, hex(0xFFFFFF, 90));
+    let caption = format!(
+        "{label} #{:02X}{:02X}{:02X}",
+        color[0], color[1], color[2]
+    );
+    draw_label_centered(ui, [mid_r[0] + h, y, mid_r[2] - h, h], 10.5, theme::MUTED(), &caption);
+    studio_btn(
+        ui,
+        targets,
+        [x + w - btn_w, y, btn_w, h],
+        ">",
+        Action::Studio(inc),
+        StudioBtn::Dark,
+    );
 }
 
 fn draw_stepper_row(

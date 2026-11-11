@@ -166,6 +166,8 @@ pub(super) enum Action {
     ImportControl,
     ControlLayouts,
     ChooseControlLayout(usize),
+    DeleteControlPreset(usize),
+    ToggleDashboardControls,
     ApplyControlsAllProfiles,
     ResetControls,
     ImportVulkanDriver,
@@ -520,6 +522,14 @@ fn draw_page_icon(ui: &mut Ui, page: Page, cx: f32, cy: f32, col: u32) {
             ui.rounded(cx - 8.5, cy - 1.0, 2.0, 2.0, 1.0, col);
             ui.rounded(cx + 6.5, cy - 1.0, 2.0, 2.0, 1.0, col);
         }
+        Page::Controls => {
+            // Gamepad: rounded body, D-pad cross left, two action dots right
+            ui.border(cx - 8.5, cy - 5.5, 17.0, 11.0, 5.0, col);
+            ui.rounded(cx - 6.5, cy - 1.0, 5.5, 2.0, 1.0, col);
+            ui.rounded(cx - 4.75, cy - 2.75, 2.0, 5.5, 1.0, col);
+            ui.rounded(cx + 2.0, cy - 2.75, 2.2, 2.2, 1.1, col);
+            ui.rounded(cx + 4.5, cy + 0.55, 2.2, 2.2, 1.1, col);
+        }
         Page::Installed => {
             ui.rounded(cx - 1.0, cy - 7.5, 2.0, 9.0, 1.0, col);
             ui.rounded(cx - 4.0, cy - 1.0, 8.0, 2.0, 1.0, col);
@@ -538,6 +548,103 @@ fn draw_page_icon(ui: &mut Ui, page: Page, cx: f32, cy: f32, col: u32) {
             ui.rounded(cx - 7.5, cy + 3.5, 15.0, 2.0, 1.0, col);
             ui.rounded(cx + 0.5, cy + 2.0, 4.0, 5.0, 2.0, col);
         }
+    }
+}
+
+/// Paints the given touch control layout across `area` as a translucent,
+/// non-interactive preview (the "Controls on dashboard" option).
+fn draw_touch_layout_preview(ui: &mut Ui, area: [f32; 4], s: &horizon_client::touch::Settings) {
+    use horizon_client::touch::Control;
+    use horizon_client::ui_theme::color::hex;
+    let [ax, ay, aw, ah] = area;
+    if aw < 60.0 || ah < 60.0 {
+        return;
+    }
+    let aspect = (aw / ah.max(1.0)).max(0.5);
+    let mode = s.mode.index();
+    let dim = 0.62f32;
+
+    // Movement joystick.
+    if s.button_visibility[Control::Move as usize] != 2 {
+        let p = s.layouts[mode][Control::Move as usize];
+        let r = p.rect(aspect);
+        let (rx, ry, rw, rh) = (ax + r[0] * aw, ay + r[1] * ah, r[2] * aw, r[3] * ah);
+        let rad = (rw.min(rh) * 0.5).max(6.0);
+        let a = (p.opacity * dim * 255.0) as u8;
+        ui.rounded(rx, ry, rw, rh, rad, hex(0x181A24, a.min(120)));
+        ui.border(rx, ry, rw, rh, rad, hex(0xD8DCE8, (a / 2).max(40)));
+        let knob = (rw.min(rh) * 0.36).max(8.0);
+        ui.rounded(
+            rx + (rw - knob) * 0.5,
+            ry + (rh - knob) * 0.5,
+            knob,
+            knob,
+            knob * 0.5,
+            hex(0xDC143C, a.min(140)),
+        );
+    }
+
+    if s.custom_buttons.is_empty() {
+        for control in Control::ALL {
+            if control == Control::Move || s.button_visibility[control as usize] == 2 {
+                continue;
+            }
+            let p = s.layouts[mode][control as usize];
+            let r = p.rect(aspect);
+            let (rx, ry, rw, rh) = (ax + r[0] * aw, ay + r[1] * ah, r[2] * aw, r[3] * ah);
+            let a = (p.opacity * dim * 255.0) as u8;
+            ui.rounded(rx, ry, rw, rh, 6.0, hex(0x1E202C, a.min(130)));
+            ui.border(rx, ry, rw, rh, 6.0, hex(0xFFFFFF, (a / 2).max(40)));
+        }
+        return;
+    }
+    for b in &s.custom_buttons {
+        if b.drawer_parent.is_some() || !b.in_game {
+            continue;
+        }
+        let p = b.layouts[mode];
+        let bh = p.size;
+        let bw = (p.size * b.width_ratio.clamp(0.25, 6.0)) / aspect;
+        let (rx, ry, rw, rh) = (
+            ax + (p.center[0] - bw * 0.5) * aw,
+            ay + (p.center[1] - bh * 0.5) * ah,
+            (bw * aw).max(8.0),
+            (bh * ah).max(8.0),
+        );
+        let bg = b.bg_color.unwrap_or([22, 22, 30, 150]);
+        let alpha = ((f32::from(bg[3]) / 255.0) * p.opacity * dim * 255.0)
+            .round()
+            .clamp(26.0, 170.0) as u8;
+        let fill = hex(
+            (u32::from(bg[0]) << 16) | (u32::from(bg[1]) << 8) | u32::from(bg[2]),
+            alpha,
+        );
+        let rad = b.corner_radius.unwrap_or(3.0).min(rw * 0.48).min(rh * 0.48);
+        ui.rounded(rx, ry, rw, rh, rad, fill);
+        let sc = b.stroke_color.unwrap_or([255, 255, 255, 95]);
+        ui.border(
+            rx,
+            ry,
+            rw,
+            rh,
+            rad,
+            hex(
+                (u32::from(sc[0]) << 16) | (u32::from(sc[1]) << 8) | u32::from(sc[2]),
+                ((f32::from(sc[3].max(60)) * dim) as u8).max(36),
+            ),
+        );
+        let lbl = b.label();
+        let font_sz = (rh * 0.32).clamp(7.5, 12.0);
+        let fitted = ui.fit_text(Face::LauncherMedium, font_sz, &lbl, (rw - 5.0).max(5.0));
+        let tw = ui.measure(Face::LauncherMedium, font_sz, &fitted);
+        ui.text(
+            Face::LauncherMedium,
+            font_sz,
+            rx + ((rw - tw) * 0.5).max(1.0),
+            ry + (rh - font_sz * 1.4) * 0.5,
+            hex(0xF8F8FC, (190.0 * dim) as u8),
+            &fitted,
+        );
     }
 }
 
@@ -1005,8 +1112,8 @@ impl DrawCtx<'_> {
         let by = h - bar_h - 12.0;
         // Account chip, clamped so it can never run under the centred dock
         // (six items now: Packs and Shaders download pages joined it).
-        let dock_item = if w >= 1100.0 { 96.0 } else { 82.0 };
-        let dock_left = (w - (dock_item * 6.0 + 20.0)) * 0.5;
+        let dock_item = if w >= 1100.0 { 88.0 } else { 76.0 };
+        let dock_left = (w - (dock_item * 7.0 + 20.0)) * 0.5;
         let chip_w = 200.0_f32.min(w * 0.26).min(dock_left - 26.0).max(120.0);
         let chip = [6.0, by, chip_w, bar_h];
         ui.rounded(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS());
@@ -1028,16 +1135,17 @@ impl DrawCtx<'_> {
         self.targets.push((chip, Action::Page(Page::Account)));
         // Centred dock, now with direct Packs and Shaders download pages.
         let item_w = dock_item;
-        let dock_w = item_w * 6.0 + 20.0;
+        let dock_w = item_w * 7.0 + 20.0;
         let dock = [(w - dock_w) * 0.5, by, dock_w, bar_h];
         ui.rounded(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS());
         ui.border(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS_BORDER());
-        let items: [(&str, Page, Action); 6] = [
+        let items: [(&str, Page, Action); 7] = [
             ("Home", Page::Play, Action::Page(Page::Play)),
             ("Instances", Page::Installed, Action::Profile),
             ("Browse", Page::Mods, Action::Page(Page::Mods)),
             ("Packs", Page::Packs, Action::Page(Page::Packs)),
             ("Shaders", Page::Shaders, Action::Page(Page::Shaders)),
+            ("Controls", Page::Controls, Action::Page(Page::Controls)),
             ("Settings", Page::Settings, Action::Page(Page::Settings)),
         ];
         for (i, (label, icon, action)) in items.iter().enumerate() {
@@ -1048,6 +1156,7 @@ impl DrawCtx<'_> {
                 2 => matches!(self.catalog.page, Page::Mods | Page::Installed),
                 3 => self.catalog.page == Page::Packs,
                 4 => self.catalog.page == Page::Shaders,
+                5 => self.catalog.page == Page::Controls,
                 _ => matches!(self.catalog.page, Page::Settings | Page::VoltSettings),
             };
             if active {
@@ -1348,6 +1457,13 @@ impl DrawCtx<'_> {
         let compact = w < 760.0;
         let m = if compact { 10.0 } else { 16.0 };
 
+        // ---- Optional "Controls on dashboard" preview, under everything ----
+        if self.catalog.config.dashboard_controls
+            && let Some(layout) = self.catalog.dashboard_layout.as_deref()
+        {
+            draw_touch_layout_preview(ui, area, layout);
+        }
+
         // ---- Brand, flush to the top-left corner ----
         ui.volt_logo(ax + 2.0, ay + m, 32.0, 32.0);
         ui.text(Face::Display, 19.0, ax + 42.0, ay + m + 1.0, theme::TEXT(), "VOLT");
@@ -1356,7 +1472,8 @@ impl DrawCtx<'_> {
 
         // ---- Quiet icon squares, top-right ----
         let sq = if compact { 38.0 } else { 42.0 };
-        let squares: [(Page, Action); 4] = [
+        let squares: [(Page, Action); 5] = [
+            (Page::Controls, Action::Page(Page::Controls)),
             (Page::Installed, Action::Page(Page::Installed)),
             (Page::VoltSettings, Action::Page(Page::VoltSettings)),
             (Page::Account, Action::Page(Page::Account)),
@@ -3194,6 +3311,180 @@ impl DrawCtx<'_> {
                     );
                 }
             }
+        }
+    }
+
+    /// The dedicated Controls tab: import touch layouts, manage saved
+    /// presets by name, open the Pojav-parity visual editor and toggle the
+    /// dashboard preview. The whole page scrolls as one column.
+    fn draw_controls_page(&mut self, ui: &mut Ui, area: [f32; 4], compact: bool) {
+        let [cx, cy, cw, ch] = area;
+        let pad_x = if compact { 10.0 } else { 16.0 };
+        let hero_h = 148.0;
+        let row_h = 52.0;
+        let head_h = 30.0;
+        let presets = self.catalog.control_presets.clone();
+        let total_h = hero_h + 12.0 + head_h + presets.len().max(1) as f32 * row_h + 16.0;
+        let top = cy;
+        let bottom = cy + ch;
+        let max_scroll = (total_h - ch).max(0.0);
+        self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+        *self.list_view = Some([top, bottom, max_scroll]);
+        let mut y = top - self.catalog.scroll;
+
+        // ---- Hero card: active layout + the five primary actions ----
+        ui.rounded(cx, y, cw, hero_h, 14.0, theme::HERO_BG());
+        ui.rounded(cx + 8.0, y + 8.0, cw * 0.44, hero_h - 16.0, 12.0, theme::HERO_GLOW_SOFT());
+        ui.border(cx, y, cw, hero_h, 14.0, theme::BORDER_CRIMSON());
+        ui.text(Face::LauncherMedium, 19.0, cx + pad_x + 6.0, y + 12.0, theme::TEXT(), "Controls");
+        let active_line = match &self.catalog.active_controls {
+            Some(m) => format!("Active: {} ({}) - {} buttons", m.name, m.format, m.buttons),
+            None => "Active: Volt Default touch controls".to_owned(),
+        };
+        let fit_a = ui.fit_text(Face::LauncherMedium, 13.0, &active_line, cw - pad_x * 2.0 - 12.0);
+        ui.text(
+            Face::LauncherMedium,
+            13.0,
+            cx + pad_x + 6.0,
+            y + 40.0,
+            if self.catalog.active_controls.is_some() { theme::CRIMSON_BRIGHT() } else { theme::TEXT() },
+            &fit_a,
+        );
+        let sub = "Import Pojav, Zalith, FCL & Claw layouts 1:1, or build your own in the editor.";
+        let fit_s = ui.fit_text(Face::LauncherRegular, 12.0, sub, cw - pad_x * 2.0 - 12.0);
+        ui.text(Face::LauncherRegular, 12.0, cx + pad_x + 6.0, y + 61.0, theme::MUTED(), &fit_s);
+
+        let btn_y = y + hero_h - 62.0;
+        let half_w = (cw - pad_x * 2.0 - 8.0) * 0.5;
+        let hero_btns_top: [([f32; 4], &str, Action, BtnStyle); 2] = [
+            (
+                [cx + pad_x, btn_y, half_w, 26.0],
+                "Open Control Editor",
+                Action::Studio(super::controls_studio::StudioAction::Open),
+                BtnStyle::Primary,
+            ),
+            (
+                [cx + pad_x + half_w + 8.0, btn_y, half_w, 26.0],
+                "Import Layout File",
+                Action::ImportControl,
+                BtnStyle::CrimsonOutline,
+            ),
+        ];
+        for (rect, label, action, style) in hero_btns_top {
+            styled_button(ui, self.list_targets, rect, label, action, style, true);
+        }
+        let third_w = (cw - pad_x * 2.0 - 12.0) / 3.0;
+        let dash_label = if self.catalog.config.dashboard_controls {
+            "Dashboard: ON"
+        } else {
+            "Dashboard: OFF"
+        };
+        let hero_btns_bot: [([f32; 4], &str, Action); 3] = [
+            (
+                [cx + pad_x, btn_y + 32.0, third_w, 24.0],
+                "Apply to All Profiles",
+                Action::ApplyControlsAllProfiles,
+            ),
+            (
+                [cx + pad_x + third_w + 6.0, btn_y + 32.0, third_w, 24.0],
+                "Reset to Default",
+                Action::ResetControls,
+            ),
+            (
+                [cx + pad_x + (third_w + 6.0) * 2.0, btn_y + 32.0, third_w, 24.0],
+                dash_label,
+                Action::ToggleDashboardControls,
+            ),
+        ];
+        for (rect, label, action) in hero_btns_bot {
+            let style = if label.ends_with("ON") { BtnStyle::CrimsonOutline } else { BtnStyle::Secondary };
+            styled_button(ui, self.list_targets, rect, label, action, style, true);
+        }
+        y += hero_h + 12.0;
+
+        // ---- Saved layouts (named) ----
+        ui.text(
+            Face::LauncherMedium,
+            14.5,
+            cx + pad_x,
+            y + 4.0,
+            theme::TEXT(),
+            &format!("Saved layouts ({})", presets.len()),
+        );
+        y += head_h;
+        if presets.is_empty() {
+            ui.text(
+                Face::LauncherRegular,
+                12.5,
+                cx + pad_x,
+                y + 8.0,
+                theme::MUTED(),
+                "No saved layouts yet - import a file or save one from the editor.",
+            );
+            return;
+        }
+        let active_name = self.catalog.active_controls.as_ref().map(|m| m.name.clone());
+        for (i, preset) in presets.iter().enumerate() {
+            if y + row_h < top - 4.0 || y > bottom + 4.0 {
+                y += row_h;
+                continue;
+            }
+            let rr = [cx, y, cw, row_h - 8.0];
+            let is_active = active_name.as_deref() == Some(preset.meta.name.as_str());
+            ui.rounded(rr[0], rr[1], rr[2], rr[3], 10.0, theme::CARD());
+            ui.border(
+                rr[0],
+                rr[1],
+                rr[2],
+                rr[3],
+                10.0,
+                if is_active { theme::BORDER_CRIMSON() } else { theme::BORDER() },
+            );
+            let btns_w = 148.0;
+            let name_max = (cw - btns_w - pad_x * 2.0 - 12.0).max(80.0);
+            let fit_n = ui.fit_text(Face::LauncherMedium, 13.5, &preset.meta.name, name_max);
+            ui.text(
+                Face::LauncherMedium,
+                13.5,
+                rr[0] + pad_x,
+                rr[1] + 6.0,
+                if is_active { theme::CRIMSON_BRIGHT() } else { theme::TEXT() },
+                &fit_n,
+            );
+            let detail = format!(
+                "{} - {} buttons{}{}",
+                preset.meta.format,
+                preset.meta.buttons,
+                if preset.meta.drawers > 0 {
+                    format!(" - {} drawers", preset.meta.drawers)
+                } else {
+                    String::new()
+                },
+                if preset.meta.has_joystick { " - joystick" } else { "" },
+            );
+            let fit_d = ui.fit_text(Face::LauncherRegular, 11.0, &detail, name_max);
+            ui.text(Face::LauncherRegular, 11.0, rr[0] + pad_x, rr[1] + 24.0, theme::MUTED(), &fit_d);
+            let apply_r = [rr[0] + cw - btns_w, rr[1] + 8.0, 78.0, rr[3] - 16.0];
+            styled_button(
+                ui,
+                self.list_targets,
+                apply_r,
+                if is_active { "Active" } else { "Apply" },
+                Action::ChooseControlLayout(i),
+                if is_active { BtnStyle::Primary } else { BtnStyle::CrimsonOutline },
+                !is_active,
+            );
+            let del_r = [rr[0] + cw - btns_w + 84.0, rr[1] + 8.0, 54.0, rr[3] - 16.0];
+            styled_button(
+                ui,
+                self.list_targets,
+                del_r,
+                "Delete",
+                Action::DeleteControlPreset(i),
+                BtnStyle::Subtle,
+                true,
+            );
+            y += row_h;
         }
     }
 
@@ -5310,6 +5601,7 @@ impl Launcher {
                     ctx.draw_installed_page(&mut ui, content_area, compact, &account_status)
                 }
                 Page::VoltSettings => ctx.draw_volt_settings_page(&mut ui, content_area, compact),
+                Page::Controls => ctx.draw_controls_page(&mut ui, content_area, compact),
                 Page::Settings => {
                     ctx.draw_settings_page(&mut ui, content_area, compact, &account_status)
                 }
@@ -5793,6 +6085,30 @@ impl Launcher {
                     Err(e) => self.catalog.status = format!("Reset failed: {e}"),
                 }
             }
+            Some(Action::DeleteControlPreset(idx)) => {
+                self.chooser = None;
+                if let Some(preset) = self.catalog.control_presets.get(idx).cloned() {
+                    match horizon_client::touch::import::delete_preset(&self.home, &preset.slug) {
+                        Ok(()) => {
+                            self.catalog.refresh_controls(&self.home);
+                            self.catalog.status =
+                                format!("Deleted control layout \"{}\".", preset.meta.name);
+                        }
+                        Err(e) => self.catalog.status = e,
+                    }
+                }
+            }
+            Some(Action::ToggleDashboardControls) => {
+                let on = !self.catalog.config.dashboard_controls;
+                self.catalog.config.dashboard_controls = on;
+                let _ = self.catalog.config.save(&self.home);
+                self.catalog.refresh_controls(&self.home);
+                self.catalog.status = if on {
+                    "Controls on dashboard: the active touch layout now shows on the Home screen.".into()
+                } else {
+                    "Controls on dashboard off.".into()
+                };
+            }
             Some(Action::ToggleSection(i)) => {
                 self.catalog.sections[i] = !self.catalog.sections[i];
                 self.catalog.scroll = 0.0;
@@ -6079,6 +6395,9 @@ impl Launcher {
                 self.catalog.offset = 0;
                 if page == Page::Mods {
                     self.catalog.query.clear();
+                }
+                if page == Page::Controls {
+                    self.catalog.refresh_controls(&self.home);
                 }
                 self.catalog.browse(&self.home);
             }

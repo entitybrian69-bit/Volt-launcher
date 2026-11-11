@@ -1700,8 +1700,14 @@ impl ExprParser<'_> {
                 .trim();
             self.pos += 1;
             let val = match name.to_ascii_lowercase().as_str() {
-                "width" | "screen_width" => self.vars.screen_w,
-                "height" | "screen_height" => self.vars.screen_h,
+                // Pojav semantics (ControlData.insertDynamicPos): `${width}`
+                // and `${height}` are the BUTTON's size; the screen is
+                // `${screen_width}`/`${screen_height}`. Reading them as the
+                // screen flung every formula layout's buttons off an edge.
+                "width" | "btn_width" | "button_width" => self.vars.btn_w,
+                "height" | "btn_height" | "button_height" => self.vars.btn_h,
+                "screen_width" => self.vars.screen_w,
+                "screen_height" => self.vars.screen_h,
                 "half_width" => self.vars.screen_w * 0.5,
                 "half_height" => self.vars.screen_h * 0.5,
                 "right" => (self.vars.screen_w - self.vars.btn_w).max(0.0),
@@ -1709,8 +1715,6 @@ impl ExprParser<'_> {
                 "top" | "left" => 0.0,
                 "margin" => 2.0 * self.vars.dp_px,
                 "preferred_scale" | "scale" => self.vars.preferred_scale,
-                "btn_width" | "button_width" => self.vars.btn_w,
-                "btn_height" | "button_height" => self.vars.btn_h,
                 _ => return None,
             };
             return Some(self.apply_unit(val));
@@ -1885,6 +1889,52 @@ pub fn load_preset(root_home: &Path, slug: &str) -> Result<Settings, String> {
         serde_json::from_slice(&bytes).map_err(|e| format!("Corrupt preset: {e}"))?;
     settings.sanitize();
     Ok(settings)
+}
+
+pub fn delete_preset(root_home: &Path, slug: &str) -> Result<(), String> {
+    if slug.is_empty()
+        || !slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("Invalid control preset name".into());
+    }
+    let path = presets_dir(root_home).join(format!("{slug}.preset.json"));
+    if !path.is_file() {
+        return Err("Control preset file is no longer available".into());
+    }
+    std::fs::remove_file(&path).map_err(|e| format!("Could not delete preset: {e}"))
+}
+
+/// Evaluates one Pojav-dialect dynamic position formula (`${margin} * 2 +
+/// ${width}`) in the 844x390 dp reference space and returns the normalized
+/// `0..1` coordinate of the button's center on that axis. `btn_w_norm` /
+/// `btn_h_norm` describe the button's size as fractions of the reference
+/// screen. Used by the Controls editor's formula fields so typed formulas
+/// behave exactly like an imported Pojav layout.
+pub fn eval_position_formula(
+    expr: &str,
+    btn_w_norm: f32,
+    btn_h_norm: f32,
+    horizontal: bool,
+) -> Option<f32> {
+    let vars = ExprVars {
+        screen_w: REF_WIDTH_DP,
+        screen_h: REF_HEIGHT_DP,
+        btn_w: (btn_w_norm * REF_WIDTH_DP).max(1.0),
+        btn_h: (btn_h_norm * REF_HEIGHT_DP).max(1.0),
+        dp_px: 1.0,
+        px_scale: 1.0 / 2.75,
+        preferred_scale: 100.0,
+    };
+    let axis = if horizontal { REF_WIDTH_DP } else { REF_HEIGHT_DP };
+    let v = eval_dynamic_expr(expr, &vars, axis)?;
+    let center = if horizontal {
+        (v + vars.btn_w * 0.5) / REF_WIDTH_DP
+    } else {
+        (v + vars.btn_h * 0.5) / REF_HEIGHT_DP
+    };
+    Some(center.clamp(0.01, 0.99))
 }
 
 pub fn active_meta(profile_home: &Path) -> Option<ImportedMeta> {
@@ -2235,5 +2285,64 @@ mod tests {
             zip_res.settings.custom_buttons[1].key,
             "special:virtual_mouse"
         );
+    }
+
+    /// Pojav's stock `default.json` (v4). Every button is formula-positioned,
+    /// so this pins the exact `${width}`/`${height}` = BUTTON-size semantics
+    /// from Pojav's `ControlData.fillConversionMap` (dpToPx(width), margin =
+    /// dpToPx(2), right = screen - width). Before the fix these buttons all
+    /// clamped to screen edges.
+    #[test]
+    fn pojav_stock_default_layout_imports_one_to_one() {
+        let bytes = include_bytes!("fixtures/pojav-default.json");
+        let imported = import_bytes(bytes, "default.json").unwrap();
+        assert_eq!(imported.meta.format, "PojavLauncher");
+        assert_eq!(imported.settings.custom_buttons.len(), 16);
+
+        let center_of = |label: &str| -> [f32; 2] {
+            imported
+                .settings
+                .custom_buttons
+                .iter()
+                .find(|b| b.label.as_deref() == Some(label))
+                .unwrap_or_else(|| panic!("missing button {label}"))
+                .layouts[0]
+                .center
+        };
+        let close = |got: [f32; 2], want: [f32; 2]| {
+            assert!(
+                (got[0] - want[0]).abs() < 0.002 && (got[1] - want[1]).abs() < 0.002,
+                "center {got:?} != expected {want:?}"
+            );
+        };
+
+        // Reference space 844x390dp, margin = 2dp.
+        // Keyboard 80x30: x = 2*3 + 80*2 = 166, y = 2.
+        close(center_of("Keyboard"), [206.0 / 844.0, 17.0 / 390.0]);
+        // GUI 50x50: x = 2, y = bottom - margin = (390-50) - 2 = 338.
+        close(center_of("GUI"), [27.0 / 844.0, 363.0 / 390.0]);
+        // PRI 50x50: y = screen_height - margin*3 - height*3 = 234.
+        close(center_of("PRI"), [27.0 / 844.0, 259.0 / 390.0]);
+        // Jump 50x50: x = right - margin*2 - width = 794-4-50 = 740,
+        //             y = bottom - margin*2 - height = 340-4-50 = 286.
+        close(center_of("\u{2b1b}"), [765.0 / 844.0, 311.0 / 390.0]);
+        // Chat 80x30: x = margin*2 + width = 84, y = margin.
+        close(center_of("Chat"), [124.0 / 844.0, 17.0 / 390.0]);
+
+        // Special negative keycodes resolve to Volt tokens.
+        let key_of = |label: &str| -> String {
+            imported
+                .settings
+                .custom_buttons
+                .iter()
+                .find(|b| b.label.as_deref() == Some(label))
+                .unwrap()
+                .key
+                .clone()
+        };
+        assert_eq!(key_of("Keyboard"), "special:keyboard");
+        assert_eq!(key_of("PRI"), "action:key.attack");
+        assert_eq!(key_of("SEC"), "action:key.use");
+        assert_eq!(key_of("Mouse"), "special:virtual_mouse");
     }
 }
