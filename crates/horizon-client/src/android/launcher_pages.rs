@@ -3371,7 +3371,8 @@ impl DrawCtx<'_> {
             ),
         ];
         for (rect, label, action, style) in hero_btns_top {
-            styled_button(ui, self.list_targets, rect, label, action, style, true);
+            self.list_targets.push((rect, action));
+            styled_button(ui, self.targets, rect, label, action, style, true);
         }
         let third_w = (cw - pad_x * 2.0 - 12.0) / 3.0;
         let dash_label = if self.catalog.config.dashboard_controls {
@@ -3398,7 +3399,8 @@ impl DrawCtx<'_> {
         ];
         for (rect, label, action) in hero_btns_bot {
             let style = if label.ends_with("ON") { BtnStyle::CrimsonOutline } else { BtnStyle::Secondary };
-            styled_button(ui, self.list_targets, rect, label, action, style, true);
+            self.list_targets.push((rect, action));
+            styled_button(ui, self.targets, rect, label, action, style, true);
         }
         y += hero_h + 12.0;
 
@@ -3465,9 +3467,10 @@ impl DrawCtx<'_> {
             let fit_d = ui.fit_text(Face::LauncherRegular, 11.0, &detail, name_max);
             ui.text(Face::LauncherRegular, 11.0, rr[0] + pad_x, rr[1] + 24.0, theme::MUTED(), &fit_d);
             let apply_r = [rr[0] + cw - btns_w, rr[1] + 8.0, 78.0, rr[3] - 16.0];
+            self.list_targets.push((apply_r, Action::ChooseControlLayout(i)));
             styled_button(
                 ui,
-                self.list_targets,
+                self.targets,
                 apply_r,
                 if is_active { "Active" } else { "Apply" },
                 Action::ChooseControlLayout(i),
@@ -3475,9 +3478,10 @@ impl DrawCtx<'_> {
                 !is_active,
             );
             let del_r = [rr[0] + cw - btns_w + 84.0, rr[1] + 8.0, 54.0, rr[3] - 16.0];
+            self.list_targets.push((del_r, Action::DeleteControlPreset(i)));
             styled_button(
                 ui,
-                self.list_targets,
+                self.targets,
                 del_r,
                 "Delete",
                 Action::DeleteControlPreset(i),
@@ -7049,13 +7053,9 @@ impl Launcher {
             return;
         }
         if self.controls_studio.open {
-            if self.controls_studio.bind_picker_open {
-                self.controls_studio.bind_picker_open = false;
-            } else {
-                self.controls_studio.open = false;
-                self.controls_studio.dragging = None;
-                self.controls_studio.editing_label = false;
+            if !self.controls_studio.back() {
                 crate::platform::hide();
+                self.catalog.refresh_controls(&self.home);
             }
             return;
         }

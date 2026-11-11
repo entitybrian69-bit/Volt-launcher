@@ -32,6 +32,11 @@ enum Target {
         is_cape: bool,
         dest_path: PathBuf,
     },
+    /// A PNG picked for a custom touch button's background image; it is
+    /// re-encoded and copied into the profile's `button-images/` folder.
+    ButtonImage {
+        dest_dir: PathBuf,
+    },
     VulkanDriver {
         home: PathBuf,
     },
@@ -219,6 +224,26 @@ pub fn begin_controls(root_home: PathBuf, profile_home: PathBuf) -> std::result:
     );
     Ok(())
 }
+pub fn begin_button_image(dest_dir: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::ButtonImage { dest_dir },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice("Choose a PNG image for the button", false);
+    Ok(())
+}
 pub fn begin_cosmetic(is_cape: bool, dest_path: PathBuf) -> std::result::Result<(), String> {
     if busy() {
         return Err("Finish or cancel the current import first".into());
@@ -322,6 +347,7 @@ pub extern "system" fn document_result(
                     Target::Controls { .. } => "controls.json",
                     Target::Cosmetic { is_cape: true, .. } => "cape.png",
                     Target::Cosmetic { is_cape: false, .. } => "skin.png",
+                    Target::ButtonImage { .. } => "button.png",
                     Target::VulkanDriver { .. } => "driver.zip",
                 };
                 let opened =
@@ -368,6 +394,9 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     }
     if let Target::Cosmetic { is_cape, dest_path } = request.target {
         return stage_cosmetic(is_cape, &dest_path, input, &name);
+    }
+    if let Target::ButtonImage { dest_dir } = request.target {
+        return stage_button_image(&dest_dir, input, &name);
     }
     if let Target::VulkanDriver { home } = request.target {
         return stage_vulkan_driver(&request.cache, &home, input, &name);
@@ -769,6 +798,104 @@ pub fn handle_event(event: &winit::event::WindowEvent) -> bool {
         }
         _ => false,
     }
+}
+
+/// Decodes any picked image, caps it at 256x256 and writes it as a clean
+/// RGBA PNG into `dest_dir` under a sanitized name derived from the pick.
+fn stage_button_image(
+    dest_dir: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    input
+        .by_ref()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("Image file is too large (max 4 MB)".into());
+    }
+    let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes)
+        .or_else(|_| {
+            image::load_from_memory(&bytes)
+                .map(|img| {
+                    let rgba8 = img.to_rgba8();
+                    let (iw, ih) = rgba8.dimensions();
+                    (iw, ih, rgba8.into_raw())
+                })
+                .map_err(|_| ())
+        })
+        .map_err(|_| "Selected file is not a valid image")?;
+    if w == 0 || h == 0 {
+        return Err("Selected image is empty".into());
+    }
+    const MAX_SIDE: u32 = 256;
+    let (ow, oh) = if w <= MAX_SIDE && h <= MAX_SIDE {
+        (w, h)
+    } else {
+        let f = MAX_SIDE as f32 / w.max(h) as f32;
+        (
+            ((w as f32 * f).round() as u32).max(1),
+            ((h as f32 * f).round() as u32).max(1),
+        )
+    };
+    let mut out = vec![0u8; (ow as usize) * (oh as usize) * 4];
+    for oy in 0..oh {
+        for ox in 0..ow {
+            let sx = (u64::from(ox) * u64::from(w) / u64::from(ow)).min(u64::from(w) - 1) as u32;
+            let sy = (u64::from(oy) * u64::from(h) / u64::from(oh)).min(u64::from(h) - 1) as u32;
+            let si = ((sy * w + sx) * 4) as usize;
+            let di = ((oy * ow + ox) * 4) as usize;
+            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+        }
+    }
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, ow, oh);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG encode failed: {e}"))?;
+        writer
+            .write_image_data(&out)
+            .map_err(|e| format!("PNG write failed: {e}"))?;
+    }
+    // Sanitize the picked name into `[a-z0-9_-]{1,40}.png`.
+    let stem: String = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(".png")
+        .trim_end_matches(".PNG")
+        .chars()
+        .filter_map(|c| {
+            let c = c.to_ascii_lowercase();
+            (c.is_ascii_alphanumeric() || c == '-' || c == '_').then_some(c)
+        })
+        .take(40)
+        .collect();
+    let stem = if stem.is_empty() { "button".into() } else { stem };
+    std::fs::create_dir_all(dest_dir)?;
+    if std::fs::symlink_metadata(dest_dir)?.file_type().is_symlink() {
+        return Err("Refusing a redirected button-images folder".into());
+    }
+    let mut file_name = format!("{stem}.png");
+    let mut n = 2u32;
+    while dest_dir.join(&file_name).exists() && n < 100 {
+        file_name = format!("{stem}-{n}.png");
+        n += 1;
+    }
+    let dest = dest_dir.join(&file_name);
+    let tmp = dest.with_extension("png.tmp");
+    std::fs::write(&tmp, &png_bytes)?;
+    std::fs::rename(&tmp, &dest)?;
+    notice(
+        format!("Imported {file_name} - pick it under Background image."),
+        false,
+    );
+    Ok(())
 }
 
 fn stage_cosmetic(

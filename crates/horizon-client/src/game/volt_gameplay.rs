@@ -51,6 +51,10 @@ pub(super) struct VoltRuntime {
     pub replay_btn_menu: bool,
     /// A short caption under the button (saved, paused, adjust hints).
     pub replay_btn_note: Option<(String, std::time::Instant)>,
+    /// Decoded Pojav-style button background images, keyed by file name:
+    /// `Some((hash, w, h, rgba))` once decoded, `None` after a failed load
+    /// (so a broken file is not re-read every frame).
+    pub button_images: HashMap<String, Option<(u64, u32, u32, Vec<u8>)>>,
 }
 
 /// One finger on the on-screen replay button: a quick tap opens the
@@ -100,8 +104,56 @@ impl Default for VoltRuntime {
             replay_btn_touch: None,
             replay_btn_menu: false,
             replay_btn_note: None,
+            button_images: HashMap::new(),
         }
     }
+}
+
+/// Reads and decodes `button-images/<name>` from the game folder (the CWD
+/// the launcher pointed at the active profile), downsampling to at most
+/// 96x96 so a photo cannot flood the HUD atlas. `None` caches a failure.
+#[cfg(target_os = "android")]
+fn load_button_image(name: &str) -> Option<(u64, u32, u32, Vec<u8>)> {
+    // The name was sanitized on save (no separators, `.png` only).
+    if name.contains(['/', '\\']) || name.contains("..") {
+        return None;
+    }
+    let path = std::path::Path::new("button-images").join(name);
+    let bytes = std::fs::read(&path).ok()?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return None;
+    }
+    let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes).ok()?;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    const MAX: u32 = 96;
+    let (ow, oh) = if w <= MAX && h <= MAX {
+        (w, h)
+    } else {
+        let f = (MAX as f32 / w.max(h) as f32).min(1.0);
+        (
+            ((w as f32 * f).round() as u32).max(1),
+            ((h as f32 * f).round() as u32).max(1),
+        )
+    };
+    let mut out = vec![0u8; (ow * oh * 4) as usize];
+    for oy in 0..oh {
+        for ox in 0..ow {
+            // Nearest-neighbour: crisp for pixel art, fine for icons.
+            let sx = (ox as u64 * w as u64 / ow as u64).min(w as u64 - 1) as u32;
+            let sy = (oy as u64 * h as u64 / oh as u64).min(h as u64 - 1) as u32;
+            let si = ((sy * w + sx) * 4) as usize;
+            let di = ((oy * ow + ox) * 4) as usize;
+            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+        }
+    }
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for b in bytes.iter().step_by(64) {
+        hash = (hash ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3);
+    }
+    hash ^= u64::from(ow) << 32 | u64::from(oh);
+    Some((hash, ow, oh, out))
 }
 
 fn box_wireframe(lines: &mut Vec<Line>, min: [f64; 3], max: [f64; 3], color: u32, width: f32) {
@@ -2746,6 +2798,44 @@ impl Game<'_> {
         }
     }
 
+    /// Draws Pojav-style button background images under the touch overlay.
+    /// Called right before `pad.touch.draw`, so the stroke and the label of
+    /// each button land on top of its picture.
+    #[cfg(target_os = "android")]
+    pub(super) fn draw_touch_button_images(
+        &mut self,
+        hud: &mut horizon_client::hud::HudBatch,
+        buttons: &[([f32; 4], f32, String)],
+    ) {
+        let (gw, gh, scale) = (hud.width, hud.height, hud.scale);
+        let atlas = &self.gui.atlas;
+        let cache = &mut self.extras.volt.button_images;
+        let mut ui = horizon_client::ui_theme::Ui::new(atlas, hud, (0.0, 0.0));
+        let kd = scale / ui.density;
+        for (slot, (norm, opacity, name)) in buttons.iter().take(10).enumerate() {
+            let entry = cache
+                .entry(name.clone())
+                .or_insert_with(|| load_button_image(name));
+            let Some((hash, w, h, rgba)) = entry else {
+                continue;
+            };
+            let alpha = (opacity * 255.0).round().clamp(40.0, 255.0) as u8;
+            ui.draw_dynamic_rgba(
+                20 + slot,
+                *hash,
+                *w,
+                *h,
+                rgba,
+                norm[0] * gw * kd,
+                norm[1] * gh * kd,
+                norm[2] * gw * kd,
+                norm[3] * gh * kd,
+                alpha,
+            );
+        }
+        ui.finish();
+    }
+
     /// Handles touch/mouse press on the Volt HUD (the hub pill or window).
     pub(super) fn try_click_volt_hud(&mut self, cursor: (f32, f32), pressed: bool) -> bool {
         self.extras.volt.last_input_at = self.started.elapsed().as_secs_f64();
@@ -2753,6 +2843,9 @@ impl Game<'_> {
         if !pressed || self.ui.hide_gui {
             return false;
         }
+        // The hub is drawn inside the safe-area inset; shift the tap into
+        // that space so its targets line up with the visible geometry.
+        let cursor = self.volt_hub_inset_cursor(cursor);
         self.try_click_volt_hub_overlay(cursor)
     }
 

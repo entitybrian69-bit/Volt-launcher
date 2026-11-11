@@ -60,6 +60,13 @@ pub struct CustomButton {
     /// Optional rounded corner radius in logical pixels (`0.0..=24.0`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f32>,
+    /// Optional border thickness in logical pixels (Pojav `strokeWidth`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_width: Option<f32>,
+    /// Optional background image file (Pojav `bgImage`): a PNG under the
+    /// profile's `button-images/` folder, drawn under the stroke and label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_image: Option<String>,
     /// Parent drawer group ID when this button belongs to an expandable drawer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawer_parent: Option<u16>,
@@ -95,6 +102,8 @@ impl CustomButton {
             bg_color: None,
             stroke_color: None,
             corner_radius: None,
+            stroke_width: None,
+            background_image: None,
             drawer_parent: None,
         }
     }
@@ -130,9 +139,26 @@ impl CustomButton {
         };
         if let Some(r) = &mut self.corner_radius {
             if r.is_finite() && *r > 0.25 {
-                *r = r.clamp(0.5, 24.0);
+                *r = r.clamp(0.5, 60.0);
             } else {
                 self.corner_radius = None;
+            }
+        }
+        if let Some(sw) = &mut self.stroke_width {
+            if sw.is_finite() && *sw > 0.25 {
+                *sw = sw.clamp(0.5, 12.0);
+            } else {
+                self.stroke_width = None;
+            }
+        }
+        if let Some(img) = &self.background_image {
+            let ok = !img.is_empty()
+                && img.len() <= 96
+                && !img.contains(['/', '\\'])
+                && !img.contains("..")
+                && img.to_ascii_lowercase().ends_with(".png");
+            if !ok {
+                self.background_image = None;
             }
         }
         self.extra_keys.retain(|k| Self::valid_token(k) && k != "key.keyboard.unknown");
@@ -570,6 +596,7 @@ impl TouchControls {
             let text_color = if button.bg_color.is_some()
                 || button.stroke_color.is_some()
                 || button.corner_radius.is_some()
+                || button.background_image.is_some()
             {
                 let bg = button.bg_color.unwrap_or([18, 18, 24, 138]);
                 let fill_alpha = ((f32::from(bg[3]) / 255.0) * opacity * 255.0).round() as u8;
@@ -598,11 +625,33 @@ impl TouchControls {
                     .unwrap_or(0.0)
                     .min(rect[2] * 0.48)
                     .min(rect[3] * 0.48);
+                let sw = button
+                    .stroke_width
+                    .unwrap_or(1.0)
+                    .clamp(0.5, (rect[2].min(rect[3]) * 0.3).max(0.5));
+                // With a background image the game pre-draws the picture under
+                // this overlay pass; the flat fill would cover it.
+                let fill = if button.background_image.is_some() {
+                    0
+                } else {
+                    fill
+                };
                 if rad >= 2.0 {
                     draw_rounded_hud_box(b, a, rect, rad, fill, stroke);
+                    // Pojav strokeWidth: thicken the straight edges inwards.
+                    let mut inset = 1.0;
+                    while inset < sw {
+                        let span_w = (rect[2] - 2.0 * rad).max(1.0);
+                        let span_h = (rect[3] - 2.0 * rad).max(1.0);
+                        b.fill(a, rect[0] + rad, rect[1] + inset, span_w, 1.0, stroke);
+                        b.fill(a, rect[0] + rad, rect[1] + rect[3] - 1.0 - inset, span_w, 1.0, stroke);
+                        b.fill(a, rect[0] + inset, rect[1] + rad, 1.0, span_h, stroke);
+                        b.fill(a, rect[0] + rect[2] - 1.0 - inset, rect[1] + rad, 1.0, span_h, stroke);
+                        inset += 1.0;
+                    }
                 } else {
                     b.fill(a, rect[0], rect[1], rect[2], rect[3], fill);
-                    let t = 1.0;
+                    let t = sw;
                     b.fill(a, rect[0], rect[1], rect[2], t, stroke);
                     b.fill(a, rect[0], rect[1] + rect[3] - t, rect[2], t, stroke);
                     b.fill(a, rect[0], rect[1], t, rect[3], stroke);
@@ -633,7 +682,8 @@ impl TouchControls {
             let start = b.vertices.len();
             let shadow = button.bg_color.is_some()
                 || button.stroke_color.is_some()
-                || button.corner_radius.is_some();
+                || button.corner_radius.is_some()
+                || button.background_image.is_some();
             b.text(
                 a,
                 &label,

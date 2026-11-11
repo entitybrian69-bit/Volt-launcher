@@ -232,6 +232,21 @@ impl TouchControls {
     pub fn control_at_point(&self, point: [f32; 2]) -> bool {
         self.custom_at(point).is_some() || self.control_at(point).is_some()
     }
+    /// Visible custom buttons with a Pojav-style background image:
+    /// `(normalized rect, opacity, corner radius, file name)`. The game
+    /// pre-draws each picture under the touch overlay pass.
+    pub fn image_buttons(&self) -> Vec<([f32; 4], f32, String)> {
+        let mut out = Vec::new();
+        for (i, b) in self.settings.custom_buttons.iter().enumerate() {
+            if let Some(img) = &b.background_image
+                && self.custom_visible(i)
+            {
+                let p = b.layouts[self.settings.mode.index()];
+                out.push((self.custom_rect(i), p.opacity.clamp(0.0, 1.0), img.clone()));
+            }
+        }
+        out
+    }
     /// Inventory overlays retain custom key holds, but never apply world gestures.
     pub fn clear_world_gesture(&mut self) {
         self.fingers

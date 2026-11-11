@@ -675,7 +675,12 @@ impl Game<'_> {
         self.android_custom_events();
         if let Some(notice) = crate::documents::poll() {
             if notice.controls_changed {
-                let path = crate::backend::game_home().join("horizon-touch.json");
+                // The launcher set our CWD to the active profile before launch;
+                // that CWD copy of horizon-touch.json is the file the touch
+                // overlay loaded, so reload from there (not the root home).
+                let path = std::env::current_dir()
+                    .unwrap_or_else(|_| crate::backend::game_home())
+                    .join("horizon-touch.json");
                 self.settings.touch = horizon_client::touch::Settings::load_from(&path);
                 self.pad.touch.clear();
                 self.pad.touch.settings = self.settings.touch.clone();

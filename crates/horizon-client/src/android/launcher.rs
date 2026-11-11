@@ -751,13 +751,9 @@ impl ApplicationHandler for Launcher {
                     return;
                 }
                 if self.controls_studio.open {
-                    if self.controls_studio.bind_picker_open {
-                        self.controls_studio.bind_picker_open = false;
-                    } else {
-                        self.controls_studio.open = false;
-                        self.controls_studio.dragging = None;
-                        self.controls_studio.editing_label = false;
+                    if !self.controls_studio.back() {
                         crate::platform::hide();
+                        self.catalog.refresh_controls(&self.home);
                     }
                     return;
                 }

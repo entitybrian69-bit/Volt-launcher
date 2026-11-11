@@ -563,12 +563,19 @@ fn parse_pojav_button(
         .unwrap_or(false);
 
     let bg_color = parse_argb_color(obj.get("bgColor")).or(Some([0, 0, 0, 115]));
-    let stroke_width = json_f32(obj.get("strokeWidth")).unwrap_or(0.0);
-    let stroke_color = if stroke_width > 0.0 {
+    let stroke_width_pct = json_f32(obj.get("strokeWidth")).unwrap_or(0.0);
+    let stroke_color = if stroke_width_pct > 0.0 {
         parse_argb_color(obj.get("strokeColor"))
     } else {
         parse_argb_color(obj.get("strokeColor")).filter(|c| c[3] > 0)
     };
+    // Pojav strokeWidth / cornerRadius are percentages of the button size.
+    let min_side = bw.min(bh).max(1.0);
+    let stroke_width = (stroke_width_pct > 0.0)
+        .then(|| (stroke_width_pct / 100.0 * min_side * 0.5).clamp(0.5, 12.0));
+    let corner_radius = json_f32(obj.get("cornerRadius"))
+        .filter(|pct| *pct > 0.0)
+        .map(|pct| (pct / 100.0 * min_side * 0.5).clamp(0.5, 24.0));
 
     let primary = tokens.remove(0);
     let placement = Placement {
@@ -589,7 +596,9 @@ fn parse_pojav_button(
         in_menu,
         bg_color,
         stroke_color,
-        corner_radius: None,
+        corner_radius,
+        stroke_width,
+        background_image: None,
         drawer_parent: None,
     })
 }
@@ -837,6 +846,8 @@ fn parse_fcl_button(
         bg_color,
         stroke_color,
         corner_radius: None,
+        stroke_width: None,
+        background_image: None,
         drawer_parent: None,
     })
 }
@@ -1069,6 +1080,8 @@ fn parse_zalith_button(btn: &Value) -> Option<CustomButton> {
         bg_color: Some([0, 0, 0, 115]),
         stroke_color: None,
         corner_radius: Some(8.0),
+        stroke_width: None,
+        background_image: None,
         drawer_parent: None,
     })
 }

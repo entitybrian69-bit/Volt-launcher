@@ -1234,6 +1234,25 @@ impl Loading {
                 self.progress.fraction(),
                 self.settings.file.bool("darkMojangStudiosBackground"),
             );
+            // The Volt Hub chip shows from the very first loading frame, in
+            // the same default spot the in-world hub uses, so the V logo is
+            // on screen instantly instead of appearing only once the world
+            // renders. It becomes interactive the moment the game takes over.
+            {
+                let gw = batch.width;
+                let scale = batch.scale;
+                let mut ui = horizon_client::ui_theme::Ui::new(&gui.atlas, batch, (0.0, 0.0));
+                let kd = scale / ui.density;
+                const S: f32 = 26.0;
+                let (bx, by) = (((gw - S) / 2.0).floor(), 4.0_f32);
+                let (x, y, s) = (bx * kd, by * kd, S * kd);
+                ui.rounded(x, y, s, s, s * 0.28, 0xE618100E);
+                // Crimson outline, ABGR of #DC143C at 90% alpha.
+                ui.border(x, y, s, s, s * 0.28, 0xE53C14DC);
+                let pad = s * 0.12;
+                ui.volt_logo(x + pad, y + pad, s - pad * 2.0, s - pad * 2.0);
+                ui.finish();
+            }
         } else if let Some((win, frame)) = &mut self.menu.win {
             let now = Instant::now();
             // 20 ticks a second: the startup menu runs no tick rate.

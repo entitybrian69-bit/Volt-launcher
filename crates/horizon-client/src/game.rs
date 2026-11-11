@@ -14176,6 +14176,12 @@ impl Game<'_> {
             self.pad.touch.shield_available = self.touch_shield_available();
             self.pad.touch.sneaking = self.keys.contains(&KeyCode::ShiftLeft);
             self.pad.touch.break_progress = self.touch_mining_progress();
+            // Pojav-style button background images go under the overlay
+            // pass, so the stroke and label stay readable on top.
+            let image_buttons = self.pad.touch.image_buttons();
+            if !image_buttons.is_empty() {
+                self.draw_touch_button_images(&mut hud, &image_buttons);
+            }
             self.pad.touch.draw(&mut hud, &self.gui.atlas);
         }
         #[cfg(target_os = "android")]

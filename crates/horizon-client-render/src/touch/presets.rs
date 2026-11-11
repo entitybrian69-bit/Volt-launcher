@@ -169,6 +169,8 @@ fn btn(
         bg_color: Some(bg),
         stroke_color: Some(stroke),
         corner_radius: radius,
+        stroke_width: None,
+        background_image: None,
         drawer_parent: None,
     }
 }

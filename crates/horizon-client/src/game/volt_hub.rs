@@ -115,16 +115,21 @@ fn volt_controls_root() -> std::path::PathBuf {
     }
 }
 
-/// The active profile's game home holding `horizon-touch.json`.
+/// The active profile's game home holding `horizon-touch.json`. The
+/// launcher sets the process CWD to the selected profile right before
+/// launch, and the in-game touch overlay loads its settings relative to
+/// that CWD - so the CWD is the one path the running game actually reads.
 fn volt_controls_game_home() -> std::path::PathBuf {
-    #[cfg(target_os = "android")]
-    {
-        crate::backend::game_home()
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        std::path::PathBuf::from(".")
-    }
+    std::env::current_dir().unwrap_or_else(|_| {
+        #[cfg(target_os = "android")]
+        {
+            crate::backend::game_home()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            std::path::PathBuf::from(".")
+        }
+    })
 }
 
 // Palette: the owner's crimson on near-black glass.
@@ -272,6 +277,8 @@ impl Game<'_> {
         phase: winit::event::TouchPhase,
     ) -> bool {
         use winit::event::TouchPhase;
+        // The logo is drawn inside the same safe-area inset as the hub.
+        let p = self.volt_hub_inset_cursor(p);
         let owns = self.volt_hub.drag.as_ref().is_some_and(|d| d.id == id);
         // The logo rides over every in-game screen (pause, settings,
         // inventory, chat), so its gesture starts on any of them; only a
@@ -333,6 +340,31 @@ impl Game<'_> {
 
     /// Handles a press at `cursor` (GUI coordinates). Returns whether the
     /// hub consumed it.
+    /// The hub (and its floating logo) is drawn inside
+    /// `hud::inset_overlay(margins)`, which shifts the geometry right/down
+    /// by the safe-area padding. Taps arrive in full-window GUI pixels, so
+    /// they shift the opposite way before hitting the hub's targets, which
+    /// live in the inset coordinate space.
+    pub(super) fn volt_hub_inset_cursor(&self, cursor: (f32, f32)) -> (f32, f32) {
+        let margins = self.hud_safe_margins();
+        if margins[0] <= 0.0 && margins[1] <= 0.0 {
+            return cursor;
+        }
+        let Some(window) = self.window.as_ref() else {
+            return cursor;
+        };
+        let size = window.inner_size();
+        let b = HudBatch::new([size.width, size.height]);
+        let pad = |full: f32, m: f32| -> f32 {
+            let m = if m.is_finite() { m.clamp(0.0, 0.12) } else { 0.0 };
+            (full * b.scale * m).round() / b.scale
+        };
+        (
+            cursor.0 - pad(b.width, margins[0]),
+            cursor.1 - pad(b.height, margins[1]),
+        )
+    }
+
     pub(super) fn try_click_volt_hub_overlay(&mut self, cursor: (f32, f32)) -> bool {
         // The hub stays usable over every in-game screen; only a hidden
         // GUI or a watched replay drops it.
