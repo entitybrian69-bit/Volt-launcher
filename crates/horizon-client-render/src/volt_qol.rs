@@ -1,5 +1,5 @@
 //! Unified pure-Rust configurations, data structures, and HUD/screen engines for:
-//! - **Volt QoL** (`#2` Zoom & Freelook, `#3` World Inspector & Spawn-Light Overlay,
+//! - **Volt QoL** (`#2` Zoom & Freelook, `#3` World Inspector,
 //!   `#8` Volt Blueprint 3D Hologram, `#9` Volt Cam & Replay Ring, `#15` Sound
 //!   Physics Lite & Muffler, `#17` Interactive World Atlas, `#18` Volt JEI Recipe
 //!   Browser, `#25` First-Person Hand & Viewmodel Customizer)
@@ -132,9 +132,8 @@ pub struct VoltQolConfig {
     pub zoom_fov_pct: u16,
     pub zoom_smooth: bool,
     pub freelook_enabled: bool,
-    // #3 World Inspector & Mob-Spawn Light-0 Overlay
+    // #3 World Inspector
     pub world_inspector: bool,
-    pub spawn_light_overlay: bool,
     // #8 Volt Blueprint
     pub blueprint_enabled: bool,
     pub blueprint_preset: BlueprintPreset,
@@ -187,7 +186,6 @@ impl Default for VoltQolConfig {
             zoom_smooth: true,
             freelook_enabled: false,
             world_inspector: false,
-            spawn_light_overlay: false,
             blueprint_enabled: false,
             blueprint_preset: BlueprintPreset::StarterCabin,
             blueprint_layer: -1,

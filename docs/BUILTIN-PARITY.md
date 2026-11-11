@@ -149,5 +149,9 @@ have. A once-enabled overlay therefore came back on every launch as
 "random X crosses on the blocks". A read-level session-only fix shipped
 first; the owner then ordered the mod removed entirely, so the weave no
 longer includes it (34 mods) and the read interception is gone with it.
-Volt QoL's own "Mob-Spawn Light Crosses" gizmo (off by default, plainly
-labelled) remains the supported way to see spawnable blocks.
+Volt QoL's "Mob-Spawn Light Crosses" gizmo initially remained as the
+supported replacement, but it reproduced the same complaint — an X on
+every dark surface the moment night falls — and the owner's removal
+order covers the behaviour, not just the mod. The gizmo, its
+`voltQolSpawnLight` setting and its options row were removed too; no
+spawn-overlay drawing remains in the client.

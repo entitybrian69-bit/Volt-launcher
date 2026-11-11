@@ -35,7 +35,6 @@ pub enum VoltAct {
     QolZoomSmooth,
     QolFreelook,
     QolInspector,
-    QolSpawnLight,
     QolBlueprint,
     QolBlueprintPreset,
     QolBlueprintLayer,
@@ -157,7 +156,6 @@ impl VoltAct {
             Self::QolZoomSmooth => "Cinematic Smooth Zoom",
             Self::QolFreelook => "360\u{00b0} Freelook Orbit",
             Self::QolInspector => "World Inspector HUD",
-            Self::QolSpawnLight => "Spawn Light-0 Overlay",
             Self::QolBlueprint => "3D Blueprint Hologram",
             Self::QolBlueprintPreset => "Blueprint Template",
             Self::QolBlueprintLayer => "Blueprint Y-Slice",
@@ -245,7 +243,6 @@ impl VoltAct {
             Self::QolZoomSmooth => on_off(e.volt_qol.zoom_smooth).into(),
             Self::QolFreelook => on_off(e.volt_qol.freelook_enabled).into(),
             Self::QolInspector => on_off(e.volt_qol.world_inspector).into(),
-            Self::QolSpawnLight => on_off(e.volt_qol.spawn_light_overlay).into(),
             Self::QolBlueprint => on_off(e.volt_qol.blueprint_enabled).into(),
             Self::QolBlueprintPreset => e.volt_qol.blueprint_preset.label().into(),
             Self::QolBlueprintLayer => {
@@ -339,7 +336,6 @@ impl VoltAct {
             Self::QolZoomSmooth => "Smoothly interpolates FOV transitions instead of snapping instantly.",
             Self::QolFreelook => "Orbit camera 360 degrees around your player without changing movement heading.",
             Self::QolInspector => "Jade/WTHIT top-center HUD card showing looked-at block/entity info, crop growth & HP.",
-            Self::QolSpawnLight => "Highlights nearby blocks where hostile mobs can spawn (Amber = Night, Red = Always).",
             Self::QolBlueprint => "Projects a 3D translucent build hologram in front of your anchor position.",
             Self::QolBlueprintPreset => "Selects the active 3D blueprint structure template.",
             Self::QolBlueprintLayer => "View all Y layers at once or slice one horizontal build layer at a time.",
@@ -460,7 +456,6 @@ impl VoltAct {
             Self::QolZoomSmooth => e.volt_qol.zoom_smooth = !e.volt_qol.zoom_smooth,
             Self::QolFreelook => e.volt_qol.freelook_enabled = !e.volt_qol.freelook_enabled,
             Self::QolInspector => e.volt_qol.world_inspector = !e.volt_qol.world_inspector,
-            Self::QolSpawnLight => e.volt_qol.spawn_light_overlay = !e.volt_qol.spawn_light_overlay,
             Self::QolBlueprint => e.volt_qol.blueprint_enabled = !e.volt_qol.blueprint_enabled,
             Self::QolBlueprintPreset => {
                 e.volt_qol.blueprint_preset = e.volt_qol.blueprint_preset.cycle(back)
@@ -586,8 +581,8 @@ pub const QOL_SECTIONS: &[(&str, &[VoltAct])] = &[
         ],
     ),
     (
-        "World Inspector & Spawn-Light Overlay (#3)",
-        &[VoltAct::QolInspector, VoltAct::QolSpawnLight],
+        "World Inspector (#3)",
+        &[VoltAct::QolInspector],
     ),
     (
         "World Atlas & Chunk Mapper (#17)",

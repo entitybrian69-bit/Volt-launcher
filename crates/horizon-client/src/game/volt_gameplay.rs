@@ -586,7 +586,7 @@ impl Game<'_> {
         }
     }
 
-    /// Emits hardware depth-tested 3D gizmo lines for `#3` Spawn Light-0,
+    /// Emits hardware depth-tested 3D gizmo lines for
     /// `#8` Blueprint 3D Hologram, `TrajectoryArc`, and `HitboxPlus`.
     pub(super) fn append_volt_world_gizmos(&self, lines: &mut Vec<Line>) {
         if self.title.is_some() || self.ui.hide_gui {
@@ -636,62 +636,6 @@ impl Game<'_> {
         };
         let qol = &self.settings.extras.volt_qol;
         let mods = &self.settings.extras.volt_mods;
-
-        // A. #3 Mob-Spawn Light-0 3D Floor Crosses
-        if qol.spawn_light_overlay {
-            // Sky-lit ground only spawns hostiles after dusk: by day the
-            // amber "night-only" marks covered every grass block and read
-            // as a broken texture, so they only show while the sun is down.
-            let tod = self.world.day_time.rem_euclid(24000);
-            let night = (13000..23000).contains(&tod);
-            let px = p.position.x.floor() as i32;
-            let py = p.position.y.floor() as i32;
-            let pz = p.position.z.floor() as i32;
-            for dx in -9i32..=9 {
-                for dz in -9i32..=9 {
-                    if dx * dx + dz * dz > 85 {
-                        continue;
-                    }
-                    let wx = px + dx;
-                    let wz = pz + dz;
-                    for dy in -3i32..=3 {
-                        let wy = py + dy;
-                        let ground = self.world.block(wx, wy - 1, wz);
-                        let air = self.world.block(wx, wy, wz);
-                        if !self.res.facts().get(ground).solid_render
-                            || self.res.facts().get(air).solid_render
-                        {
-                            continue;
-                        }
-                        let light = self.world.light(wx, wy, wz);
-                        let block_l = light & 15;
-                        let sky_l = light >> 4;
-                        if block_l == 0 {
-                            let col = if sky_l == 0 {
-                                0xE0FF_2A3C // Always hostile-spawnable (Red)
-                            } else if night {
-                                0xD0FF_CC22 // Spawnable now: the sun is down (Amber)
-                            } else {
-                                continue; // Daylight keeps the surface clean.
-                            };
-                            let y = f64::from(wy) + 0.03;
-                            lines.push(Line {
-                                start: [f64::from(wx) + 0.2, y, f64::from(wz) + 0.2],
-                                end: [f64::from(wx) + 0.8, y, f64::from(wz) + 0.8],
-                                color: col,
-                                width: 2.0,
-                            });
-                            lines.push(Line {
-                                start: [f64::from(wx) + 0.8, y, f64::from(wz) + 0.2],
-                                end: [f64::from(wx) + 0.2, y, f64::from(wz) + 0.8],
-                                color: col,
-                                width: 2.0,
-                            });
-                        }
-                    }
-                }
-            }
-        }
 
         // B. #8 Volt Blueprint 3D Hologram
         if qol.blueprint_enabled

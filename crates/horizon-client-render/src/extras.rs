@@ -763,9 +763,6 @@ impl Extras {
                 "voltQolInspector" => {
                     e.volt_qol.world_inspector = flag(e.volt_qol.world_inspector)
                 }
-                "voltQolSpawnLight" => {
-                    e.volt_qol.spawn_light_overlay = flag(e.volt_qol.spawn_light_overlay)
-                }
                 "voltQolBlueprint" => {
                     e.volt_qol.blueprint_enabled = flag(e.volt_qol.blueprint_enabled)
                 }
@@ -1265,10 +1262,6 @@ impl Extras {
         push(
             "voltQolInspector",
             bool_text(self.volt_qol.world_inspector),
-        );
-        push(
-            "voltQolSpawnLight",
-            bool_text(self.volt_qol.spawn_light_overlay),
         );
         push(
             "voltQolBlueprint",
