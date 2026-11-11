@@ -1595,7 +1595,14 @@ impl Game<'_> {
     /// additionally rests cosmetic-only mods — their hooks answer "off" so
     /// their per-frame work stops — without touching the player's choices.
     pub(super) fn native_on(&self, mod_id: &str) -> bool {
-        if self.settings.extras.mod_lag_shield && COSMETIC_MODS.contains(&mod_id) {
+        // Hot path: woven hooks ask this from per-frame and per-entity call
+        // sites. With nothing disabled and no lag shield (the common case)
+        // answer from two flag reads, no string work at all.
+        if !self.settings.extras.mod_lag_shield {
+            if self.settings.mods.disabled.is_empty() {
+                return true;
+            }
+        } else if COSMETIC_MODS.contains(&mod_id) {
             return false;
         }
         !self.settings.mods.disabled.contains(mod_id)

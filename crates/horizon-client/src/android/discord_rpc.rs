@@ -78,17 +78,39 @@ pub fn initialize(vm: JavaVM, activity: &JObject) {
 }
 
 /// A short launcher-facing status for the About tab, so "presence is not
-/// showing" is diagnosable on the phone itself.
-pub fn status_text() -> &'static str {
+/// showing" is diagnosable on the phone itself. Carries the bridge's last
+/// concrete failure when it has one.
+pub fn status_text() -> String {
     if JAVA.get().is_none() {
-        return "Unavailable on this device";
+        return "Unavailable on this device".into();
     }
-    match bridge_state() {
+    let issue = last_issue();
+    let base = match bridge_state() {
         1 => "Connecting to the Discord app...",
-        2 | 3 => "Connected through the Discord app",
-        FAILED => "Not connected - Discord app missing or outdated",
+        2 => "Linked to the Discord app, finishing the handshake...",
+        3 => "Connected through the Discord app",
+        FAILED => "Not connected",
         _ => "Waiting for the Discord app...",
+    };
+    if issue.is_empty() {
+        if bridge_state() == FAILED {
+            return "Not connected - Discord app missing or outdated".into();
+        }
+        base.into()
+    } else {
+        format!("{base} - {issue}")
     }
+}
+
+/// The Java bridge's last concrete failure, or "".
+fn last_issue() -> String {
+    with_java(|env, class| {
+        let s = env
+            .call_static_method(class, "lastIssue", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string((&s).into())?.into())
+    })
+    .unwrap_or_default()
 }
 
 /// Runs `f` with the bridge class (as a `&GlobalRef` class descriptor) on an attached JNI env.

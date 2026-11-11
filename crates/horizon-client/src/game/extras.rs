@@ -831,7 +831,12 @@ impl Game<'_> {
                 + self.dropped.len()
                 + self.armor_stands.len()
                 + self.orbs.len()) as u32;
-            let (cap, cap_reason) = self.framerate_limit_reasoned();
+            let (cap, mut cap_reason) = self.framerate_limit_reasoned();
+            // VSync caps at the panel's refresh outside this chain entirely:
+            // name it whenever it is the strictest limiter in sight.
+            if self.settings.vsync && cap_reason == "-" {
+                cap_reason = "VSYNC";
+            }
             let perf_data = extras_hud::VoltPerfHudData {
                 full: self.settings.extras.perf_hud
                     == horizon_client::volt_features::PerfHudMode::Full,

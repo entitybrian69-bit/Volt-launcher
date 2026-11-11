@@ -241,7 +241,10 @@ impl Default for Settings {
             // Vanilla's default, as for an options.txt without the key: a
             // capped frame rate leaves the cores idle when VSync is off.
             max_fps: 120,
-            vsync: true,
+            // Phones present through SurfaceFlinger: Fifo there is a hard
+            // cap at the panel's refresh, so Android starts with VSync off
+            // (the Max Framerate option still paces the CPU side).
+            vsync: !cfg!(target_os = "android"),
             fullscreen: false,
             smooth_lighting: true,
             clouds: "true".into(),

@@ -41,6 +41,10 @@ public final class VoltDiscordRpc {
     private static boolean extendedRejected;
     private static long appId;
     private static String pending;
+    /** The last concrete failure, for the launcher's About row. */
+    private static String issue;
+    /** When the service connection reached CONNECTED, 0 before. */
+    private static long connectedAtMs;
 
     private static final ServiceConnection binding = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -64,6 +68,7 @@ public final class VoltDiscordRpc {
             synchronized (LOCK) {
                 if (frame.contains("\"READY\"")) {
                     if (state == CONNECTED) state = READY;
+                    issue = null; // A clean handshake clears stale failures.
                     if (pending != null && connection != null) {
                         try { connection.sendFrame(pending); } catch (Throwable ignored) {}
                         pending = null;
@@ -72,6 +77,8 @@ public final class VoltDiscordRpc {
                     // Some Discord builds reject optional fields (buttons, party); Rust
                     // notices this flag and resends the activity without them.
                     extendedRejected = true;
+                    issue = "Discord rejected an activity frame"
+                            + (frame.length() > 160 ? "" : (": " + frame));
                 }
             }
         }
@@ -80,6 +87,8 @@ public final class VoltDiscordRpc {
                 connection = null;
                 pending = null;
                 state = FAILED;
+                issue = "Discord closed the link (code " + code
+                        + (message == null || message.isEmpty() ? ")" : ": " + message + ")");
             }
         }
     };
@@ -104,6 +113,7 @@ public final class VoltDiscordRpc {
             }
             if (intent == null) {
                 state = FAILED; // No Discord app on this phone.
+                issue = "No Discord RPC service on this phone (app missing or too old)";
                 return state;
             }
             state = BINDING;
@@ -111,8 +121,12 @@ public final class VoltDiscordRpc {
                 bound = app.bindService(intent, binding, Context.BIND_AUTO_CREATE);
             } catch (Throwable t) {
                 bound = false;
+                issue = "Binding Discord's RPC service was denied: " + t;
             }
-            if (!bound) state = FAILED;
+            if (!bound) {
+                state = FAILED;
+                if (issue == null) issue = "Android refused to bind Discord's RPC service";
+            }
             return state;
         }
     }
@@ -122,9 +136,15 @@ public final class VoltDiscordRpc {
         try {
             connection = service.connect(appId, "1", callback);
             state = connection != null ? CONNECTED : FAILED;
+            if (connection == null) {
+                issue = "The Discord app refused the RPC handshake";
+            } else {
+                connectedAtMs = android.os.SystemClock.elapsedRealtime();
+            }
         } catch (Throwable t) {
             connection = null;
             state = FAILED;
+            issue = "Connecting to the Discord app failed: " + t;
         }
     }
 
@@ -134,6 +154,18 @@ public final class VoltDiscordRpc {
 
     public static boolean extendedRejected() {
         synchronized (LOCK) { return extendedRejected; }
+    }
+
+    /** The last concrete failure, or "" — and a stalled handshake if one is pending. */
+    public static String lastIssue() {
+        synchronized (LOCK) {
+            if (state == CONNECTED && connectedAtMs != 0
+                    && android.os.SystemClock.elapsedRealtime() - connectedAtMs > 20_000) {
+                return "Discord accepted the link but never finished the handshake"
+                        + " (try updating the Discord app)";
+            }
+            return issue == null ? "" : issue;
+        }
     }
 
     /** Sends when connected; before READY the newest frame waits and is flushed on READY. */
@@ -167,6 +199,7 @@ public final class VoltDiscordRpc {
             service = null;
             pending = null;
             state = IDLE;
+            connectedAtMs = 0;
         }
     }
 }

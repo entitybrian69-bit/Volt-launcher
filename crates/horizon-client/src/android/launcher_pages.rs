@@ -5847,18 +5847,20 @@ impl Launcher {
                 .into();
             }
             Some(Action::PresenceStatus) => {
-                self.catalog.status = match crate::discord_rpc::status_text() {
+                let status = crate::discord_rpc::status_text();
+                self.catalog.status = match status.as_str() {
                     s if s.starts_with("Connected") => {
-                        "Rich Presence is live through the Discord app on this phone."
+                        "Rich Presence is live through the Discord app on this phone.".into()
                     }
                     "Unavailable on this device" => {
-                        "This build has no Discord presence bridge."
+                        "This build has no Discord presence bridge.".into()
                     }
+                    // The bridge diagnosed a concrete failure: show it verbatim.
+                    s if s.contains(" - ") => status.clone(),
                     _ => {
-                        "Install or update the Discord app and stay signed in; presence retries every 15 seconds."
+                        "Install or update the Discord app and stay signed in; presence retries every 15 seconds.".into()
                     }
-                }
-                .into();
+                };
             }
             Some(Action::CheckUpdates) => {
                 if self.manual_check_rx.is_none() {
@@ -6386,6 +6388,22 @@ impl Launcher {
                 let game_dir = self.catalog.config.game_home(&self.home);
                 let _ = std::fs::create_dir_all(&game_dir);
                 self.catalog.extras.save(&game_dir);
+                // The FPS profiles also release vanilla's VSync (Fifo) and
+                // 120-FPS defaults in this instance's options.txt, which
+                // otherwise cap every phone at its panel's refresh rate.
+                if matches!(
+                    preset,
+                    horizon_client::volt_features::VoltBoostPreset::Competitive
+                        | horizon_client::volt_features::VoltBoostPreset::UltraFps
+                ) {
+                    let options = game_dir.join("options.txt");
+                    let mut vanilla = horizon_client::settings::Settings::load(&options);
+                    if vanilla.vsync || vanilla.max_fps < 260 {
+                        vanilla.vsync = false;
+                        vanilla.max_fps = vanilla.max_fps.max(260);
+                        vanilla.save(&options);
+                    }
+                }
                 let mut gfx = horizon_client::graphics::Graphics::load(&game_dir);
                 if gfx.lod_distance != 0 {
                     gfx.lod_distance = 0;

@@ -338,6 +338,18 @@ impl Game<'_> {
             Act::Preset => {
                 let next = self.settings.extras.volt_preset.next();
                 self.settings.extras.apply_volt_preset(next);
+                // The FPS profiles exist to raise the frame rate: they also
+                // release vanilla's VSync (Fifo) and 120-FPS defaults, which
+                // otherwise cap every phone at its panel's refresh rate.
+                if matches!(
+                    next,
+                    horizon_client::volt_features::VoltBoostPreset::Competitive
+                        | horizon_client::volt_features::VoltBoostPreset::UltraFps
+                ) {
+                    self.settings.vsync = false;
+                    self.settings.max_fps = self.settings.max_fps.max(260);
+                }
+                self.apply_ui_settings();
                 self.settings.save(&Self::options_path());
             }
             Act::PerfHud => {
