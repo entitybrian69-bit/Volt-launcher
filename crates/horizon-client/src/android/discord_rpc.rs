@@ -199,9 +199,18 @@ struct Rpc {
 impl Rpc {
     fn frame(&mut self, activity: Option<&Value>) -> String {
         self.nonce += 1;
-        let mut args = json!({ "pid": 1 });
+        let mut args = json!({ "pid": std::process::id() });
         if let Some(activity) = activity {
-            args["activity"] = activity.clone();
+            let mut activity = activity.clone();
+            if let Some(map) = activity.as_object_mut() {
+                // The app's RPC service parses activities strictly: `name`
+                // and `type` (0 = Playing) are required there, while the
+                // desktop IPC fills both in from the application id.
+                map.entry("name")
+                    .or_insert_with(|| Value::String("Volt Launcher".into()));
+                map.entry("type").or_insert(json!(0));
+            }
+            args["activity"] = activity;
         }
         json!({
             "cmd": "SET_ACTIVITY",
