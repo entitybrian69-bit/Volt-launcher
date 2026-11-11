@@ -7539,6 +7539,10 @@ impl Renderer {
                 self.video_pending.clear();
                 self.video_free.clear();
                 self.video_last_capture = None;
+                video_pixel_pool()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clear();
             }
             if self.video_layer_tex.is_some() {
                 self.video_layer_tex = None;
@@ -7565,7 +7569,15 @@ impl Renderer {
                             size[1] as usize,
                             padded_row(size[0]) as usize,
                         );
-                        let mut pixels = Vec::with_capacity(width * height);
+                        // Reuse a pooled vector: a fresh multi-megabyte
+                        // allocation per frame stalls the render thread.
+                        let mut pixels = video_pixel_pool()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .pop()
+                            .unwrap_or_default();
+                        pixels.clear();
+                        pixels.reserve(width * height);
                         if let Ok(data) = buffer.get_mapped_range(..) {
                             for y in 0..height {
                                 pixels.extend_from_slice(
@@ -7636,6 +7648,14 @@ impl Renderer {
 /// Bytes per row of a `width`-pixel frame read back at 4 bytes a pixel.
 fn padded_row(width: u32) -> u32 {
     (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+}
+/// Pooled pixel vectors for the video capture: the render thread pops one
+/// per captured frame (a fresh multi-megabyte allocation per frame caused
+/// page-fault stalls mid-game), and the recorder thread pushes consumed
+/// frames back. Cleared when a capture session ends.
+pub fn video_pixel_pool() -> &'static std::sync::Mutex<Vec<Vec<[u8; 4]>>> {
+    static POOL: std::sync::Mutex<Vec<Vec<[u8; 4]>>> = std::sync::Mutex::new(Vec::new());
+    &POOL
 }
 /// Encodes the copy of `texture`'s `size` pixels into a mappable buffer.
 pub(crate) fn copy_frame(

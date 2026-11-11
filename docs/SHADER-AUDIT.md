@@ -68,3 +68,10 @@ What changed:
 - **Water.** Deep azure Complementary palette, clearer body (lower
   alpha), reflections track the actual sky colour with full Fresnel
   weight at grazing angles, and the sun glint is tighter (pow 120).
+- **Classic ZIP intake (parity with OptiFine/Iris).** A downloaded or
+  imported classic pack may carry its `shaders/` folder inside exactly
+  one wrapping folder (`Pack-1.0/shaders/...`, the usual release-page
+  layout). `content_files::validate` and the `horizon-shaders` pack
+  loader both resolve that single wrapper; two wrapped candidates in one
+  archive stay refused, and every security check (path safety, size
+  caps, mandatory checksum, host allowlist) is unchanged.

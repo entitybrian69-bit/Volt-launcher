@@ -113,7 +113,14 @@ impl Game<'_> {
     /// Stops the recorder when its session cannot continue (the player
     /// left the world or started watching a replay).
     pub(super) fn volt_recorder_tick(&mut self) {
-        if self.recorder.is_some() && (self.title.is_some() || self.replay_control().is_some()) {
+        // Stop only when the session truly cannot continue: the world is
+        // gone or a replay takes the renderer. An in-game menu (Options,
+        // pause) keeps recording — the hub opens over those screens now,
+        // so a recording started there must not die instantly.
+        if self.recorder.is_some()
+            && ((self.title.is_some() && self.player.is_none())
+                || self.replay_control().is_some())
+        {
             self.volt_recorder_stop();
         }
     }
@@ -201,8 +208,9 @@ impl Game<'_> {
 
     /// The floating logo's rectangle in GUI coordinates, clamped on screen.
     pub(super) fn volt_hub_logo_rect(&self, w: f32, h: f32) -> [f32; 4] {
-        const S: f32 = 18.0;
-        let [x, y] = self.volt_hub.pos.unwrap_or([w - S - 4.0, 4.0]);
+        const S: f32 = 26.0;
+        // Default spot: top middle (the owner's call); a drag moves it anywhere.
+        let [x, y] = self.volt_hub.pos.unwrap_or([((w - S) / 2.0).floor(), 4.0]);
         [
             x.clamp(0.0, (w - S).max(0.0)),
             y.clamp(0.0, (h - S).max(0.0)),

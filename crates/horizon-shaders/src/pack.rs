@@ -92,13 +92,35 @@ impl Pack {
     fn zip_files(bytes: Vec<u8>) -> Result<Files, PackError> {
         let archive = ZipArchive::new(Cursor::new(Arc::from(bytes)))
             .map_err(|e| PackError::Zip(e.to_string()))?;
-        let entries: BTreeMap<String, usize> = (0..archive.len())
-            .filter_map(|i| {
-                let name = archive.name_for_index(i)?.replace('\\', "/");
-                let inner = name.strip_prefix(ROOT)?.strip_prefix('/')?;
-                (!inner.is_empty() && !inner.ends_with('/')).then(|| (inner.to_owned(), i))
-            })
-            .collect();
+        // `shaders` at the archive root, like the spec says; else, like
+        // OptiFine and Iris, inside exactly one wrapping folder (packs
+        // zipped as `Pack-1.0/shaders/...` are common on release pages).
+        let collect = |prefix: &str| -> BTreeMap<String, usize> {
+            (0..archive.len())
+                .filter_map(|i| {
+                    let name = archive.name_for_index(i)?.replace('\\', "/");
+                    let inner = name.strip_prefix(prefix)?.strip_prefix(ROOT)?.strip_prefix('/')?;
+                    (!inner.is_empty() && !inner.ends_with('/')).then(|| (inner.to_owned(), i))
+                })
+                .collect()
+        };
+        let mut entries = collect("");
+        if entries.is_empty() {
+            let mut wrappers: Vec<String> = (0..archive.len())
+                .filter_map(|i| {
+                    let name = archive.name_for_index(i)?.replace('\\', "/");
+                    let (top, rest) = name.split_once('/')?;
+                    (!top.is_empty() && rest.starts_with(&format!("{ROOT}/")))
+                        .then(|| format!("{top}/"))
+                })
+                .collect();
+            wrappers.sort();
+            wrappers.dedup();
+            // One wrapper only: two candidate packs in one archive stay refused.
+            if let [wrapper] = wrappers.as_slice() {
+                entries = collect(wrapper);
+            }
+        }
         if entries.is_empty() {
             return Err(PackError::NoShadersFolder);
         }
@@ -292,7 +314,14 @@ pub(crate) mod tests {
 
     #[test]
     fn archives_without_a_shaders_folder_are_not_packs() {
-        let bytes = zip(&[("Pack/shaders/final.fsh", ""), ("readme.txt", "")]);
+        // No shaders folder anywhere.
+        let bytes = zip(&[("textures/final.fsh", ""), ("readme.txt", "")]);
+        assert!(matches!(
+            Pack::from_zip_bytes("P.zip", bytes),
+            Err(PackError::NoShadersFolder)
+        ));
+        // Two wrapped candidates stay ambiguous, so refused.
+        let bytes = zip(&[("A/shaders/final.fsh", ""), ("B/shaders/final.fsh", "")]);
         assert!(matches!(
             Pack::from_zip_bytes("P.zip", bytes),
             Err(PackError::NoShadersFolder)
@@ -301,6 +330,25 @@ pub(crate) mod tests {
             Pack::from_zip_bytes("P.zip", b"not a zip".to_vec()),
             Err(PackError::Zip(_))
         ));
+    }
+
+    #[test]
+    fn one_wrapping_folder_is_tolerated_like_optifine_and_iris() {
+        let bytes = zip(&[
+            ("Pack-1.0/shaders/shaders.properties", "sun=false"),
+            ("Pack-1.0/shaders/final.fsh", ""),
+            ("Pack-1.0/readme.txt", ""),
+        ]);
+        let pack = Pack::from_zip_bytes("P.zip", bytes).unwrap();
+        assert_eq!(pack.read_text("shaders.properties").unwrap(), "sun=false");
+        assert!(pack.exists("final.fsh"));
+        // A root shaders folder wins over any wrapped one.
+        let bytes = zip(&[
+            ("shaders/final.fsh", "root"),
+            ("Pack/shaders/final.fsh", "wrapped"),
+        ]);
+        let pack = Pack::from_zip_bytes("P.zip", bytes).unwrap();
+        assert_eq!(pack.read_text("final.fsh").unwrap(), "root");
     }
 
     #[test]

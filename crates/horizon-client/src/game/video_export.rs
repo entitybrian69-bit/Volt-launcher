@@ -474,33 +474,98 @@ pub(super) mod media {
     ) {
         let src_w = frame.size[0] as usize;
         let (ri, bi) = if frame.bgra { (2usize, 0usize) } else { (0usize, 2usize) };
-        for row in 0..h {
-            let src = &frame.pixels[row * src_w..row * src_w + w];
-            let dst = &mut out[row * stride..row * stride + w];
-            for (d, px) in dst.iter_mut().zip(src) {
+        let pixels = &frame.pixels;
+        // One luma row from the packed source into `dst` (stride-wide).
+        let luma_row = |row: usize, dst: &mut [u8]| {
+            let src = &pixels[row * src_w..row * src_w + w];
+            for (d, px) in dst[..w].iter_mut().zip(src) {
                 let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
                 *d = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
             }
-        }
-        let chroma_at = stride * slice;
-        for row in 0..h / 2 {
-            for col in 0..w / 2 {
-                let px = frame.pixels[row * 2 * src_w + col * 2];
-                let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
-                let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-                if semi_planar {
-                    let at = chroma_at + row * stride + col * 2;
-                    out[at] = u;
-                    out[at + 1] = v;
+        };
+        // One chroma value pair for the subsampled pixel at (`row`, `col`).
+        let uv_at = |row: usize, col: usize| {
+            let px = pixels[row * 2 * src_w + col * 2];
+            let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
+            let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+            let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+            (u, v)
+        };
+        // The convert was the recorder thread's bottleneck above 720p (one
+        // scalar pass per pixel): band the disjoint luma and chroma rows
+        // across a few cores. Small frames stay single-threaded.
+        let bands = if h >= 540 {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+                .clamp(1, 4)
+        } else {
+            1
+        };
+        let (y_plane, chroma) = out.split_at_mut(stride * slice);
+        let c_h = h / 2;
+        let cs = stride / 2;
+        let plane = cs * slice.div_ceil(2);
+        std::thread::scope(|scope| {
+            let y_rows = h.div_ceil(bands);
+            for (band, chunk) in y_plane[..stride * h].chunks_mut(stride * y_rows).enumerate() {
+                let work = move || {
+                    for (r, dst) in chunk.chunks_mut(stride).enumerate() {
+                        luma_row(band * y_rows + r, dst);
+                    }
+                };
+                if bands > 1 {
+                    scope.spawn(work);
                 } else {
-                    let cs = stride / 2;
-                    let plane = cs * slice.div_ceil(2);
-                    out[chroma_at + row * cs + col] = u;
-                    out[chroma_at + plane + row * cs + col] = v;
+                    work();
                 }
             }
-        }
+            if c_h == 0 {
+                return;
+            }
+            let c_rows = c_h.div_ceil(bands);
+            if semi_planar {
+                for (band, chunk) in chroma[..stride * c_h].chunks_mut(stride * c_rows).enumerate()
+                {
+                    let work = move || {
+                        for (r, dst) in chunk.chunks_mut(stride).enumerate() {
+                            let row = band * c_rows + r;
+                            for col in 0..w / 2 {
+                                let (u, v) = uv_at(row, col);
+                                dst[col * 2] = u;
+                                dst[col * 2 + 1] = v;
+                            }
+                        }
+                    };
+                    if bands > 1 {
+                        scope.spawn(work);
+                    } else {
+                        work();
+                    }
+                }
+            } else {
+                let (u_plane, v_plane) = chroma.split_at_mut(plane);
+                let u_chunks = u_plane[..cs * c_h].chunks_mut(cs * c_rows);
+                let v_chunks = v_plane[..cs * c_h].chunks_mut(cs * c_rows);
+                for (band, (uc, vc)) in u_chunks.zip(v_chunks).enumerate() {
+                    let work = move || {
+                        for (r, (ud, vd)) in uc.chunks_mut(cs).zip(vc.chunks_mut(cs)).enumerate() {
+                            let row = band * c_rows + r;
+                            for col in 0..w / 2 {
+                                let (u, v) = uv_at(row, col);
+                                ud[col] = u;
+                                vd[col] = v;
+                            }
+                        }
+                    };
+                    if bands > 1 {
+                        scope.spawn(work);
+                    } else {
+                        work();
+                    }
+                }
+            }
+        });
     }
 
     pub(super) fn encode(

@@ -107,8 +107,14 @@ pub fn validate(
         }
         pack |= raw == "pack.mcmeta";
         native_shader |= raw == "horizon-shaders.toml";
+        // `shaders/` at the root, or — like OptiFine, Iris and the pack
+        // loader — inside one wrapping folder (`Pack-1.0/shaders/...`).
+        let in_shaders = raw.strip_prefix("shaders/").is_some()
+            || raw
+                .split_once('/')
+                .is_some_and(|(top, rest)| !top.is_empty() && rest.starts_with("shaders/"));
         shader |= native_shader
-            || raw.starts_with("shaders/")
+            || in_shaders
                 && !entry.is_dir()
                 && ["vsh", "fsh", "glsl", "csh", "gsh", "tcs", "tes"]
                     .iter()

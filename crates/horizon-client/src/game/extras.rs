@@ -276,9 +276,12 @@ impl Game<'_> {
                 .unwrap_or_else(|| "server".to_owned());
             Some(format!("mp:{addr}"))
         } else {
+            // NOT `save.root`: that points at the open dimension's folder
+            // (saves/<world>/dimensions/<namespace>/<path>), whose file name
+            // is "overworld" for EVERY world — which leaked waypoints across
+            // worlds. The world's own folder is the right scope.
             let folder = self
-                .save
-                .root
+                .world_root
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "world".to_owned());
@@ -627,7 +630,9 @@ impl Game<'_> {
 
     fn collect_minimap_pins(&self, view: &View, map_size: f32) -> Vec<MinimapPin> {
         let e = &self.settings.extras;
-        if !e.waypoint_on_minimap || (!e.waypoints && !e.minimap) {
+        // The master Waypoints toggle wins: off means no waypoint shows
+        // anywhere, the minimap included.
+        if !e.waypoints || !e.waypoint_on_minimap {
             return Vec::new();
         }
         let Some(scope) = self.current_world_scope() else {

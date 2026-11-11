@@ -293,6 +293,21 @@ mod android {
     /// `AMEDIACODEC_BUFFER_FLAG_KEY_FRAME` (a.k.a. sync sample).
     const FLAG_KEY: u32 = 1;
 
+    /// Hands a consumed frame's pixel vector back to the renderer's pool,
+    /// so the render thread never allocates multi-megabyte buffers
+    /// mid-game while recording.
+    fn recycle(pixels: Vec<[u8; 4]>) {
+        if pixels.capacity() == 0 {
+            return;
+        }
+        let mut pool = horizon_client::gfx::video_pixel_pool()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if pool.len() < 4 {
+            pool.push(pixels);
+        }
+    }
+
     /// One MediaCodec encoder plus its pending output packets and track
     /// bookkeeping.
     struct Track {
@@ -788,13 +803,14 @@ mod android {
             // Video.
             if let Some(frame) = next {
                 if frame.size != src || (frames_in > 0 && frame.pts_us <= last_pts) {
+                    recycle(frame.pixels);
                     continue;
                 }
                 let scaled = if out_w == src[0] && out_h == src[1] {
                     frame
                 } else {
                     let small = downscale(&frame, out_w, out_h);
-                    drop(frame);
+                    recycle(frame.pixels);
                     small
                 };
                 let idx = match video.input_slot(&lib) {
@@ -834,6 +850,7 @@ mod android {
                 }
                 last_pts = scaled.pts_us;
                 frames_in += 1;
+                recycle(scaled.pixels);
             }
             // Clip mode: trim the ring to the last 30 s, cutting at a sync
             // sample so the saved file always starts decodable.

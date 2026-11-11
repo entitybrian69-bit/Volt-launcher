@@ -593,7 +593,19 @@ impl Catalog {
             .name("volt-catalog-job".into())
             .stack_size(4 * 1024 * 1024)
             .spawn(move || {
-                let _ = tx.send(job());
+                // A panic inside a download/install must surface as a readable
+                // error, not as a dead worker ("Launcher worker stopped").
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                    .unwrap_or_else(|payload| {
+                        let why = payload
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .map(str::to_owned)
+                            .or_else(|| payload.downcast_ref::<String>().cloned())
+                            .unwrap_or_else(|| "unexpected internal error".into());
+                        Err(format!("The download failed internally: {why}"))
+                    });
+                let _ = tx.send(result);
             })
         {
             self.worker = None;
