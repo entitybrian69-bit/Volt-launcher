@@ -52,6 +52,11 @@ different minimum version and do not include the native `.hmod` runtime; see the
 The download badges count GitHub release assets across published builds,
 including prereleases, rather than unique players.
 
+## Developer tools and community mods
+
+- **[Volt Survival Suite](mods/community/volt-survival-suite/README.md):** a real sandboxed WebAssembly HMOD with a survival HUD, target-block inspector, saved HUD toggle, and gameplay commands. [Build workflow](.github/workflows/build-volt-survival-suite.yml).
+- **[HMOD Doctor](docs/hmod-doctor.md):** a CLI utility that inspects HMOD manifests, checks code/content package structure, validates content registries and detects duplicate IDs.
+
 ## What Volt includes
 
 - **Native Rust gameplay** targeting Minecraft Java 26.3, with Vulkan and
