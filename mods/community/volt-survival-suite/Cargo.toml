@@ -1,0 +1,15 @@
+[package]
+name = "volt-survival-suite"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "A practical Horizon client mod: survival HUD, saved toggle, coordinates, world clock and block inspector"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+horizon-mod-sdk = { path = "../../../crates/horizon-mod-sdk" }
