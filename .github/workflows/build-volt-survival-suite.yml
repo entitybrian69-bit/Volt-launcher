@@ -1,0 +1,56 @@
+name: Build Volt Survival Suite HMOD
+
+on:
+  push:
+    branches: [android]
+    paths:
+      - "mods/community/volt-survival-suite/**"
+      - ".github/workflows/build-volt-survival-suite.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test, componentize and package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Volt
+        uses: actions/checkout@v4
+
+      - name: Install Rust and WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Run unit tests
+        run: cargo test --manifest-path mods/community/volt-survival-suite/Cargo.toml
+
+      - name: Build the WebAssembly core module
+        run: cargo build --manifest-path mods/community/volt-survival-suite/Cargo.toml --target wasm32-unknown-unknown --release
+
+      - name: Install wasm-tools
+        run: cargo install wasm-tools --locked
+
+      - name: Componentize and package the HMOD
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          cp mods/community/volt-survival-suite/horizon-mod.toml package/horizon-mod.toml
+          wasm-tools component new \
+            mods/community/volt-survival-suite/target/wasm32-unknown-unknown/release/volt_survival_suite.wasm \
+            --output package/mod.wasm
+          wasm-tools validate package/mod.wasm
+          (cd package && zip -X -q "$GITHUB_WORKSPACE/volt_survival_suite-0.1.0.hmod" horizon-mod.toml mod.wasm)
+          unzip -t "$GITHUB_WORKSPACE/volt_survival_suite-0.1.0.hmod"
+          sha256sum "$GITHUB_WORKSPACE/volt_survival_suite-0.1.0.hmod"
+
+      - name: Upload installable HMOD
+        uses: actions/upload-artifact@v4
+        with:
+          name: volt-survival-suite-hmod
+          path: volt_survival_suite-0.1.0.hmod
+          if-no-files-found: error
+          retention-days: 30
