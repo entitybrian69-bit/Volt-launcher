@@ -150,6 +150,64 @@ impl Game<'_> {
             }),
         })
     }
+    /// Reloads the mod on/off switches (and the extras beside them) from
+    /// `dir`'s `horizon-mods.txt`, and says what changed, so a toggle that
+    /// reached the game is visible proof on screen and in the log.
+    pub(super) fn reload_mod_switches(&mut self, dir: &std::path::Path, announce: bool) {
+        let before = self.settings.mods.disabled.clone();
+        let fresh = horizon_client::mod_list::ModList::load(dir);
+        self.settings.mods.enabled = fresh.enabled;
+        self.settings.mods.disabled = fresh.disabled;
+        self.settings.mods.keys = fresh.keys;
+        self.settings.extras = horizon_client::extras::Extras::load(dir);
+        // `poll_pads` notices the "3D Skins" flip and rebuilds models.
+        self.list_native_mods();
+        if self.settings.mods.disabled == before {
+            return;
+        }
+        let off: Vec<&str> = self
+            .settings
+            .mods
+            .disabled
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let line = if off.is_empty() {
+            "Volt: all mods are on.".to_owned()
+        } else {
+            format!("Volt: {} mod(s) off: {}.", off.len(), off.join(", "))
+        };
+        log::info!("{line} (from {})", dir.display());
+        if announce {
+            self.system_message(horizon_client::text::Text::literal(line));
+        }
+    }
+    /// Once every two seconds: if `horizon-mods.txt` in the game home was
+    /// rewritten by anyone, apply it — independent of the launcher's note.
+    fn watch_mods_file(&mut self) {
+        let now = std::time::Instant::now();
+        if self
+            .mods_file_checked
+            .is_some_and(|t| now.duration_since(t).as_secs_f32() < 2.0)
+        {
+            return;
+        }
+        self.mods_file_checked = Some(now);
+        let dir = std::env::current_dir().unwrap_or_else(|_| crate::backend::game_home());
+        let stamp = std::fs::metadata(dir.join("horizon-mods.txt"))
+            .and_then(|m| m.modified())
+            .ok();
+        if self.mods_file_stamp == stamp {
+            return;
+        }
+        let first = self.mods_file_stamp.is_none() && stamp.is_some();
+        self.mods_file_stamp = stamp;
+        // The first sighting is the file the startup load already read:
+        // record it quietly; afterwards every change applies and is said.
+        if !first {
+            self.reload_mod_switches(&dir, true);
+        }
+    }
     pub(super) fn android_custom_events(&mut self) {
         for (name, down) in self.pad.touch.key_events() {
             match name.as_str() {
@@ -673,18 +731,17 @@ impl Game<'_> {
     }
     pub(super) fn android_poll_keyboard(&mut self) {
         self.android_custom_events();
-        if crate::documents::take_mods_changed() {
+        if let Some(dir) = crate::documents::take_mods_changed() {
             // The launcher toggled a mod while this game runs: reload the
-            // on/off list (and the extras beside it) from the launched
-            // profile's CWD, so the switch applies without a restart.
-            let dir = std::env::current_dir().unwrap_or_else(|_| crate::backend::game_home());
-            let fresh = horizon_client::mod_list::ModList::load(&dir);
-            self.settings.mods.enabled = fresh.enabled;
-            self.settings.mods.disabled = fresh.disabled;
-            self.settings.mods.keys = fresh.keys;
-            self.settings.extras = horizon_client::extras::Extras::load(&dir);
-            // `poll_pads` notices the "3D Skins" flip and rebuilds models.
-            self.list_native_mods();
+            // on/off list (and the extras beside it) from the directory the
+            // launcher says it wrote, so the switch applies without a
+            // restart and without any directory guessing.
+            self.reload_mod_switches(&dir, true);
+        } else {
+            // Belt and braces: watch the file itself, so any writer at all
+            // (another surface, an older launcher path) applies within
+            // seconds even if the in-process note never fired.
+            self.watch_mods_file();
         }
         if let Some(notice) = crate::documents::poll() {
             if notice.controls_changed {

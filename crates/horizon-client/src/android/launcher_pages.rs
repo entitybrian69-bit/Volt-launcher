@@ -6348,7 +6348,7 @@ impl Launcher {
                 let game_dir = self.catalog.config.game_home(&self.home);
                 let _ = std::fs::create_dir_all(&game_dir);
                 self.catalog.extras.save(&game_dir);
-                crate::documents::note_mods_changed();
+                crate::documents::note_mods_changed(&game_dir);
                 self.catalog.status = if on {
                     "Volt Replay on: sessions are recorded. Watch them from Home > Replays.".into()
                 } else {
@@ -6674,7 +6674,7 @@ impl Launcher {
                                 self.catalog.bundled_zoom_installed = install;
                                 self.catalog.bundled_zoom_enabled = install;
                             }
-                            crate::documents::note_mods_changed();
+                            crate::documents::note_mods_changed(&game_dir);
                             self.catalog.status = if install {
                                 format!(
                                     "{} {version} installed from the APK. Toggle and configure it in-game under Mods.",
@@ -6707,9 +6707,12 @@ impl Launcher {
                         on.enabled.remove(id);
                         on.disabled.insert(id.to_owned());
                     }
-                    on.save(&game_dir);
+                    if let Err(e) = on.try_save(&game_dir) {
+                        self.catalog.status = format!("Could not save the mod list: {e}");
+                        return Ok(());
+                    }
                     self.catalog.bundled_disabled = on.disabled.clone();
-                    crate::documents::note_mods_changed();
+                    crate::documents::note_mods_changed(&game_dir);
                     self.catalog.status = if enable {
                         format!(
                             "{} {version} is on for this profile. Configure it in-game under Mods.",
@@ -6745,9 +6748,12 @@ impl Launcher {
                         flip(id);
                     }
                 }
-                list.save(&game_dir);
+                if let Err(e) = list.try_save(&game_dir) {
+                    self.catalog.status = format!("Could not save the mod list: {e}");
+                    return Ok(());
+                }
                 self.catalog.bundled_disabled = list.disabled.clone();
-                crate::documents::note_mods_changed();
+                crate::documents::note_mods_changed(&game_dir);
                 self.catalog.bundled_zoom_enabled =
                     self.catalog.bundled_zoom_installed && !list.disabled.contains("zoom");
                 self.catalog.extras.volt_qol.replay_buffer = on;

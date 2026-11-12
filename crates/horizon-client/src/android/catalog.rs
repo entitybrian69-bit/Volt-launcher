@@ -1023,7 +1023,7 @@ impl Catalog {
                     on.enabled.insert(id);
                 }
                 on.save(&game);
-                crate::documents::note_mods_changed();
+                crate::documents::note_mods_changed(&game);
             }
             horizon_client::content_files::Kind::Packs => {
                 let id = format!("file/{}", item.file);

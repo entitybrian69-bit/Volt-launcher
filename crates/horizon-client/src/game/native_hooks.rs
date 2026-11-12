@@ -2579,6 +2579,18 @@ impl Game<'_> {
     }
     /// Options > Mods' rows for the native mods, after the others.
     pub(super) fn list_native_mods(&mut self) {
+        if self.settings.mods.disabled.is_empty() {
+            log::info!("Volt mods: nothing turned off");
+        } else {
+            let off: Vec<&str> = self
+                .settings
+                .mods
+                .disabled
+                .iter()
+                .map(String::as_str)
+                .collect();
+            log::info!("Volt mods: {} off: {}", off.len(), off.join(", "));
+        }
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
         self.bundled_zoom_list(&mut mods);

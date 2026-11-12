@@ -2383,6 +2383,12 @@ struct Game<'a> {
     /// Whether "3D Skins" answered on last frame, to rebuild the models
     /// the moment the mod (or the Mod Lag Shield) is toggled.
     skins_3d_last: Option<bool>,
+    /// The mods-file watch (`watch_mods_file`): when it last looked, and
+    /// the modified time it saw.
+    #[cfg(target_os = "android")]
+    mods_file_checked: Option<std::time::Instant>,
+    #[cfg(target_os = "android")]
+    mods_file_stamp: Option<std::time::SystemTime>,
     /// `ProfileResolver.Cached`: `Dynamic` profiles (name- or id-only heads
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
@@ -17449,6 +17455,10 @@ impl<'a> Game<'a> {
             )),
             skin_3d: RefCell::new(Default::default()),
             skins_3d_last: None,
+            #[cfg(target_os = "android")]
+            mods_file_checked: None,
+            #[cfg(target_os = "android")]
+            mods_file_stamp: None,
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
             trim_slots: Vec::new(),

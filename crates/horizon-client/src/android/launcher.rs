@@ -557,7 +557,11 @@ impl Launcher {
             }
             self.session_ready = false;
             std::fs::create_dir_all(&game_home)?;
-            std::env::set_current_dir(game_home)?;
+            // The game's first frames re-read the mod switches from this
+            // exact directory: belt and braces against any working-directory
+            // drift between the launcher's Mods tab and the game's startup.
+            crate::documents::note_mods_changed(&game_home);
+            std::env::set_current_dir(&game_home)?;
             self.error = None;
             let _ = std::fs::remove_file(self.home.join("android-error.txt"));
             if self.catalog.config.record_performance || self.catalog.config.device.gpu_profile {
