@@ -53,6 +53,7 @@ impl RendererMode {
 
 fn default_launcher_dark() -> bool { true }
 fn default_launcher_accent() -> u32 { 0x79e59c }
+fn default_launcher_liquid() -> bool { true }
 
 fn default_pack_source() -> crate::shader_catalog::Origin {
     crate::shader_catalog::Origin::Modrinth
@@ -66,6 +67,10 @@ pub struct Config {
     pub launcher_dark: bool,
     #[serde(default = "default_launcher_accent")]
     pub launcher_accent: u32,
+    /// The "Liquid Black / Embers" look: living night-camp scene with
+    /// clear-glass panels that react to the firelight. Default since 1.1.
+    #[serde(default = "default_launcher_liquid")]
+    pub launcher_liquid: bool,
     pub proxy: Option<String>,
     pub name: String,
     pub server: String,
@@ -117,6 +122,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             profile: 0, launcher_dark: default_launcher_dark(), launcher_accent: default_launcher_accent(),
+            launcher_liquid: default_launcher_liquid(),
             proxy: None, name: String::new(), server: String::new(), replay: String::new(), replay_export: false,
             discord_webhook: String::new(),
             microsoft_client_id: String::new(),
@@ -179,6 +185,7 @@ impl Config {
         let mut config: Self = serde_json::from_value(value.clone()).unwrap_or_default();
         if value.get("launcher_dark").is_none() { config.launcher_dark = true; }
         if value.get("launcher_accent").is_none() { config.launcher_accent = default_launcher_accent(); }
+        if value.get("launcher_liquid").is_none() { config.launcher_liquid = default_launcher_liquid(); }
         config.launcher_accent &= 0x00ff_ffff;
         // The launcher's stock look moved from violet to the reference blue;
         // carry installs that still sit on the old default across with it.

@@ -14,32 +14,41 @@ pub(crate) mod theme {
     use std::cell::Cell;
     use horizon_theme::glass::{Glass, ACCENT, BLUR, TINT};
     #[derive(Clone, Copy)]
-    struct Look { dark: bool, glass: Glass }
+    struct Look { dark: bool, liquid: bool, glass: Glass }
     thread_local! { static LOOK: Cell<Option<Look>> = const { Cell::new(None) }; }
-    pub fn set(dark: bool, accent: u32) {
+    thread_local! { static EMBER: Cell<f32> = const { Cell::new(0.5) }; }
+    pub fn set(dark: bool, liquid: bool, accent: u32) {
         let accent = accent & 0xffffff;
         LOOK.with(|cell| {
-            if cell.get().is_none_or(|look| look.dark != dark || look.glass.accent != accent) {
-                cell.set(Some(Look { dark, glass: Glass::new(accent, TINT, BLUR) }));
+            if cell.get().is_none_or(|look| look.dark != dark || look.liquid != liquid
+                || look.glass.accent != accent)
+            {
+                cell.set(Some(Look { dark, liquid, glass: Glass::new(accent, TINT, BLUR) }));
             }
         });
     }
     fn look() -> Look { LOOK.with(|cell| cell.get().unwrap_or_else(|| Look {
-        dark: true, glass: Glass::new(ACCENT, TINT, BLUR)
+        dark: true, liquid: true, glass: Glass::new(ACCENT, TINT, BLUR)
     })) }
-    pub fn dark() -> bool { look().dark }
+    /// Liquid Black always reads as a dark look, whatever the appearance toggle says.
+    pub fn dark() -> bool { let l = look(); l.dark || l.liquid }
+    pub fn liquid() -> bool { look().liquid }
+    /// Live firelight (0..1) published by the Embers scene each frame; the
+    /// glass layers read it so panels visibly react to the campfire.
+    pub fn set_ember(value: f32) { EMBER.with(|cell| cell.set(value.clamp(0.0, 1.0))); }
+    pub fn ember() -> f32 { EMBER.with(|cell| cell.get()) }
     fn accent() -> u32 { hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
-    pub fn BG() -> u32 { choose(hex(0x0c0e13,255), hex(0xedf1f0,255)) }
-    pub fn BACKDROP() -> u32 { hex(0x070a1a, 215) }
-    pub fn RAIL() -> u32 { choose(hex(0x15181f,205), hex(0xfcfdfd,225)) }
-    pub fn CARD() -> u32 { choose(hex(0x1a1d25,215), hex(0xfcfdfd,230)) }
-    pub fn CARD_INNER() -> u32 { choose(hex(0x272c36,225), hex(0xe7ecea,245)) }
-    pub fn HOVER() -> u32 { choose(hex(0x343a46,235), hex(0xd8e0dd,245)) }
+    pub fn BG() -> u32 { if liquid() { return hex(0x060709, 255); } choose(hex(0x0c0e13,255), hex(0xedf1f0,255)) }
+    pub fn BACKDROP() -> u32 { if liquid() { return hex(0x04060c, 225); } hex(0x070a1a, 215) }
+    pub fn RAIL() -> u32 { if liquid() { return hex(0x0c0e13, 172); } choose(hex(0x15181f,205), hex(0xfcfdfd,225)) }
+    pub fn CARD() -> u32 { if liquid() { return hex(0x11141b, 172); } choose(hex(0x1a1d25,215), hex(0xfcfdfd,230)) }
+    pub fn CARD_INNER() -> u32 { if liquid() { return hex(0x191d26, 188); } choose(hex(0x272c36,225), hex(0xe7ecea,245)) }
+    pub fn HOVER() -> u32 { if liquid() { return hex(0x272d3a, 212); } choose(hex(0x343a46,235), hex(0xd8e0dd,245)) }
     pub fn HERO_BG() -> u32 { CARD() }
     pub fn HERO_GLOW() -> u32 { lerp(CARD(), accent(), 0.22) }
     pub fn HERO_GLOW_SOFT() -> u32 { lerp(CARD(), accent(), 0.12) }
-    pub fn BORDER() -> u32 { choose(hex(0xffffff,30), hex(0x3c4a44,34)) }
+    pub fn BORDER() -> u32 { if liquid() { return hex(0xffffff, 34); } choose(hex(0xffffff,30), hex(0x3c4a44,34)) }
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
     pub fn CRIMSON_BRIGHT() -> u32 {
@@ -60,6 +69,13 @@ pub(crate) mod theme {
     pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
     pub fn STATUS_BAD() -> u32 { choose(hex(0xf87171,255), hex(0xb91c1c,255)) }
     pub fn GLASS() -> u32 {
+        if liquid() {
+            // Near-clear glass warmed by the campfire: the tint literally
+            // rolls with the flames.
+            let e = ember();
+            return lerp(
+                hex(0x0d1016, 148), hex(0x2a1a0d, 164), 0.45 * e);
+        }
         if !dark() { return hex(0xffffff, 214); }
         // Neutral smoked glass per the chosen reference, faintly tinted by
         // the upstream accent-derived plate so accents still colour panels.
@@ -68,8 +84,8 @@ pub(crate) mod theme {
             hex(glass.plate, 202)
         }, 0.18)
     }
-    pub fn GLASS_INNER() -> u32 { choose(hex(0xffffff,14), hex(0x101a14,12)) }
-    pub fn GLASS_BORDER() -> u32 { choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
+    pub fn GLASS_INNER() -> u32 { if liquid() { return hex(0xffffff, (13.0 + 9.0 * ember()) as u8); } choose(hex(0xffffff,14), hex(0x101a14,12)) }
+    pub fn GLASS_BORDER() -> u32 { if liquid() { let e = ember(); return lerp(hex(0xffffff, (40.0 + 26.0 * e) as u8), hex(0xffc37a, 70), 0.5 * e); } choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -79,6 +95,7 @@ pub(crate) enum HomeTab { Overview, Worlds, Multiplayer, Screenshots, Replays, C
 pub(crate) enum Action {
     HomeTab(HomeTab),
     ToggleAppearance,
+    ToggleLiquid,
     CycleAccent,
     ConnectServer(usize),
     SaveServer,
@@ -623,6 +640,9 @@ fn terra_noise(column: i32, seed: u32) -> f32 {
 /// cheap on mobile GPUs. `phase` is seconds since launch.
 fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
+    if theme::liquid() {
+        return draw_embers_scene(ui, w, h, phase);
+    }
     let dark = theme::dark();
     // Sky wash with a warm band near the horizon.
     let stops: &[(f32, u32)] = if dark {
@@ -716,6 +736,177 @@ fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     ui.rounded(0.0, 0.0, w, h, 0.0, if dark { hex(0x090b12, 128) } else { hex(0xffffff, 56) });
 }
 
+
+/// Smoothstep for the Embers loop choreography.
+fn sstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0).max(1e-4)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The Liquid Black "Embers" scene: an 18-second looping night-camp film in
+/// pure UI primitives — campfire, drifting sparks, a sleeping wolf, stars.
+/// Publishes the live firelight through `theme::set_ember` so every glass
+/// panel drawn above visibly breathes with the flames.
+fn draw_embers_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
+    use horizon_client::ui_theme::color::{hex, lerp};
+    let lt = phase % 18.0;
+    // Loop beats: calm -> feed the fire -> sparks -> settle -> dip -> breathe back.
+    let feed = sstep(4.0, 5.4, lt) * (1.0 - sstep(7.0, 8.4, lt));
+    let sparks = sstep(8.0, 8.7, lt) * (1.0 - sstep(11.3, 12.3, lt));
+    let dip = sstep(16.0, 17.1, lt) * (1.0 - sstep(17.4, 18.0, lt));
+    let flicker = 0.66
+        + 0.14 * (phase * 9.7).sin() * (phase * 3.1).cos()
+        + 0.11 * (phase * 23.3 + 1.7).sin().abs()
+        + 0.09 * (phase * 5.3).sin();
+    let fire =
+        (flicker * (1.0 + 0.5 * feed + 0.22 * sparks) * (1.0 - 0.55 * dip)).clamp(0.12, 1.5);
+    let ember = (fire / 1.25).clamp(0.0, 1.0);
+    theme::set_ember(ember);
+
+    // Night sky: deep, but never flat black.
+    let stops: [(f32, u32); 4] =
+        [(0.0, 0x05060a), (0.45, 0x080a10), (0.75, 0x0c0d13), (1.0, 0x100f14)];
+    let rows = 22;
+    for row in 0..rows {
+        let ty = row as f32 / (rows - 1) as f32;
+        let mut color = hex(stops[3].1, 255);
+        for pair in stops.windows(2) {
+            let ((t0, c0), (t1, c1)) = (pair[0], pair[1]);
+            if ty >= t0 && ty <= t1 {
+                color = lerp(hex(c0, 255), hex(c1, 255), (ty - t0) / (t1 - t0).max(0.001));
+                break;
+            }
+        }
+        ui.rounded(0.0, row as f32 * h / (rows - 1) as f32 - 1.0, w,
+            h / (rows - 1) as f32 + 2.0, 0.0, color);
+    }
+    // Stars on individual twinkle clocks.
+    for i in 0..56u32 {
+        let x = w * (((i * 73 + 19) % 101) as f32 / 101.0);
+        let y = h * 0.52 * (((i * 37 + 11) % 64) as f32 / 64.0);
+        let tw = 0.55 + 0.45 * (phase * (0.6 + (i % 7) as f32 * 0.23) + i as f32 * 1.37).sin();
+        let alpha = (if i % 3 == 0 { 150.0 } else { 90.0 }) * tw;
+        let size = if i % 9 == 0 { 2.2 } else { 1.3 };
+        ui.rounded(x, y, size, size, 0.0, hex(0xcfd6ef, alpha.max(0.0) as u8));
+    }
+    // Crescent moon.
+    let (mx, my, mr) = (w * 0.82, h * 0.14, h * 0.045);
+    ui.rounded(mx - mr, my - mr, mr * 2.0, mr * 2.0, mr, hex(0xd9ddea, 200));
+    ui.rounded(mx - mr + mr * 0.62, my - mr - mr * 0.18, mr * 2.0, mr * 2.0, mr,
+        hex(0x07080d, 255));
+    // Distant ridge silhouette.
+    let bs = (w / 52.0).max(7.0);
+    let scroll = phase * 1.1;
+    let first = (scroll / bs).floor() as i32;
+    let frac = scroll - first as f32 * bs;
+    for i in 0..((w / bs) as i32 + 2) {
+        let column = first + i;
+        let n = (terra_noise(column, 0xca3f_0007) + terra_noise(column + 1, 0xca3f_0007)) * 0.5;
+        let y_top = h * 0.66 - (n * 3.0).round() * bs * 0.6;
+        let x = i as f32 * bs - frac;
+        ui.rounded(x, y_top, bs + 0.5, (h * 0.80 - y_top).max(0.0), 0.0, hex(0x0a0c11, 255));
+    }
+    // Ground plane.
+    ui.rounded(0.0, h * 0.80, w, h * 0.20, 0.0, hex(0x0b0a0c, 255));
+    ui.rounded(0.0, h * 0.80, w, 2.5, 0.0, hex(0x1a150f, 255));
+
+    // ---- The campfire ----
+    let fx = w * 0.26;
+    let fy = h * 0.825;
+    // Firelight: a wide halo, a hot core halo, and a pool on the ground.
+    let g1 = h * (0.30 + 0.05 * fire);
+    ui.rounded(fx - g1, fy - g1 * 0.72, g1 * 2.0, g1 * 1.44, g1 * 0.72,
+        hex(0x7a3414, (20.0 + 26.0 * ember) as u8));
+    let g2 = h * 0.16;
+    ui.rounded(fx - g2, fy - g2 * 0.75, g2 * 2.0, g2 * 1.5, g2 * 0.75,
+        hex(0xa34f1b, (26.0 + 34.0 * ember) as u8));
+    ui.rounded(fx - g1 * 1.2, fy - 4.0, g1 * 2.4, 10.0, 5.0,
+        hex(0xb86a2a, (18.0 + 30.0 * ember) as u8));
+    // Stone ring.
+    for (dx, dy, s) in [(-27.0, 0.0, 9.0), (-15.0, 5.0, 8.0), (1.0, 6.0, 9.0),
+        (15.0, 4.0, 8.0), (25.0, -1.0, 9.0)]
+    {
+        ui.rounded(fx + dx, fy + dy - s * 0.5, s, s, 2.5, hex(0x2a2a30, 255));
+        ui.rounded(fx + dx, fy + dy - s * 0.5, s, s * 0.4, 2.0,
+            lerp(hex(0x3a3a42, 255), hex(0xb86a2a, 255), 0.25 * ember));
+    }
+    // Logs; a fresh one fades in while the character feeds the fire.
+    ui.rounded(fx - 21.0, fy - 9.0, 42.0, 7.0, 3.0, hex(0x2b1d12, 255));
+    ui.rounded(fx - 16.0, fy - 14.0, 34.0, 6.0, 3.0, hex(0x241810, 255));
+    if feed > 0.01 {
+        ui.rounded(fx - 12.0, fy - 18.0, 28.0, 6.0, 3.0,
+            hex(0x332314, (255.0 * feed) as u8));
+    }
+    // Blocky flame columns, stepped like animated voxel fire.
+    let tstep = (phase * 9.0).floor() as i32;
+    for c in 0..5i32 {
+        let n = terra_noise(tstep * 11 + c * 3, 0xf1a3_0011);
+        let colh = (9.0 + 15.0 * n) * (0.55 + 0.75 * fire.min(1.3));
+        let cw = 6.5;
+        let cx = fx - 16.0 + c as f32 * 7.0;
+        let base = fy - 10.0;
+        ui.rounded(cx, base - colh, cw, colh, 2.0, hex(0xff8a30, 215));
+        ui.rounded(cx + 1.0, base - colh * 0.62, cw - 2.0, colh * 0.62, 2.0, hex(0xffb347, 225));
+        ui.rounded(cx + 1.8, base - colh * 0.30, cw - 3.6, colh * 0.30, 1.5, hex(0xffe08a, 235));
+    }
+    // Rising embers; the spark beat throws a denser burst.
+    let count = 7 + (9.0 * sparks) as i32;
+    for i in 0..count {
+        let cycle = 2.0 + (i % 4) as f32 * 0.45;
+        let life = ((phase / cycle) + i as f32 * 0.381) % 1.0;
+        let rise = life
+            * h
+            * (0.16 + 0.10 * ((i * 29 % 17) as f32 / 17.0) + 0.12 * sparks);
+        let x = fx + ((i * 37 % 23) as f32 - 11.0) * 1.4
+            + (phase * 2.3 + i as f32).sin() * 7.0 * life;
+        let y = fy - 16.0 - rise;
+        let alpha = ((1.0 - life) * (120.0 + 80.0 * ember)).max(0.0);
+        let s = if i % 3 == 0 { 2.6 } else { 1.8 };
+        ui.rounded(x, y, s, s, s * 0.5,
+            hex(if i % 2 == 0 { 0xffb060 } else { 0xff7a2e }, alpha as u8));
+    }
+    // The camper: a blocky figure seated at the fire, leaning in to feed
+    // it mid-loop. Mostly silhouette, rim-lit by the flames — at night the
+    // firelight is all you would really see.
+    let px = fx - 58.0;
+    let py = fy - 2.0;
+    let lean = 6.0 * feed;
+    let body = hex(0x12151c, 255);
+    let rim = hex(0xd08a3e, (70.0 + 90.0 * ember) as u8);
+    ui.rounded(px - 14.0, py - 8.0, 34.0, 9.0, 4.0, hex(0x241a10, 255));
+    ui.rounded(px + 6.0, py - 14.0, 16.0, 6.0, 2.5, body);
+    ui.rounded(px + 18.0, py - 14.0, 6.0, 14.0, 2.5, body);
+    ui.rounded(px - 2.0 + lean * 0.5, py - 36.0, 12.0, 24.0, 4.0, body);
+    // One arm reaches toward the fire on the feed beat, holding the log.
+    ui.rounded(px + 8.0 + lean, py - 30.0 + feed * 4.0, 14.0 + lean, 5.0, 2.5, body);
+    if feed > 0.05 && feed < 0.9 {
+        ui.rounded(px + 22.0 + lean * 1.4, py - 32.0 + feed * 6.0, 10.0, 4.0, 2.0,
+            hex(0x332314, 255));
+    }
+    let bob = (phase * 1.1).sin() * 1.2;
+    ui.rounded(px - 1.0 + lean * 0.8, py - 48.0 + bob + feed * 3.0, 11.0, 11.0, 3.5, body);
+    // Fire-side rim light on torso and head.
+    ui.rounded(px + 9.0 + lean * 0.5, py - 36.0, 1.8, 24.0, 0.9, rim);
+    ui.rounded(px + 9.0 + lean * 0.8, py - 48.0 + bob + feed * 3.0, 1.8, 11.0, 0.9, rim);
+
+    // The sleeping wolf, breathing slowly; one ear flicks mid-loop.
+    let wx = fx + 92.0;
+    let wy = fy + 4.0;
+    let breathe = 1.0 + 0.03 * (phase * 1.4).sin();
+    let body_h = 20.0 * breathe;
+    ui.rounded(wx, wy - body_h, 56.0, body_h, 9.0, hex(0x17120d, 255));
+    ui.rounded(wx + 40.0, wy - body_h - 8.0, 20.0, 15.0, 6.0, hex(0x1a140e, 255));
+    let ear_flick = if (10.2..10.5).contains(&lt) { 2.0 } else { 0.0 };
+    ui.rounded(wx + 52.0 + ear_flick, wy - body_h - 14.0, 5.0, 7.0, 2.0, hex(0x1a140e, 255));
+    ui.rounded(wx + 44.0, wy - body_h - 14.0, 5.0, 7.0, 2.0, hex(0x14100b, 255));
+    ui.rounded(wx - 10.0, wy - 9.0, 16.0, 7.0, 3.5, hex(0x14100b, 255));
+    ui.rounded(wx, wy - body_h, 56.0, 2.0, 1.0,
+        hex(0xc77b35, (60.0 + 70.0 * ember) as u8));
+
+    // Warm breath over everything, then a quiet dim so panels stay readable.
+    ui.rounded(0.0, 0.0, w, h, 0.0, hex(0x381a08, (10.0 + 16.0 * ember) as u8));
+    ui.rounded(0.0, 0.0, w, h, 0.0, hex(0x04060a, 96));
+}
 
 /// The big fully-rounded Play control with a triangle icon and press
 /// feedback; its target is inserted at the front so it always wins the tap.
@@ -1392,7 +1583,8 @@ impl DrawCtx<'_> {
         // ---- The star of the show: the rotatable 3D character ----
         let char_w = (w * 0.34).clamp(170.0, 360.0);
         let char_top = ay + m + sq + 4.0;
-        let char_h = (bar_y - 10.0 - char_top).max(60.0);
+        let quick_h = if theme::liquid() { 42.0 } else { 0.0 };
+        let char_h = (bar_y - 10.0 - quick_h - char_top).max(60.0);
         let char_rect = [ax + (w - char_w) * 0.5, char_top, char_w, char_h];
         let default_uuid = self.volt_accounts.active().map(|a| a.uuid_u128()).unwrap_or(0);
         crate::skin_preview::draw_player_3d(
@@ -1436,16 +1628,30 @@ impl DrawCtx<'_> {
                 break;
             }
             let v_start = ui.batch_mut().vertices.len();
-            pixel_panel(ui, rect, *top, *bottom);
+            let liquid = theme::liquid();
+            if liquid {
+                // Embers: near-clear glass slabs with a thin colour identity
+                // strip, so the night scene stays visible through them.
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 14.0, theme::GLASS());
+                ui.border(rect[0], rect[1], rect[2], rect[3], 14.0, theme::GLASS_BORDER());
+                ui.rounded(rect[0] + 10.0, rect[1] + 10.0, 3.0, card_h - 20.0, 1.5, *top);
+            } else {
+                pixel_panel(ui, rect, *top, *bottom);
+            }
             let cy = rect[1] + card_h * 0.5;
-            draw_page_icon(ui, *page, rect[0] + 26.0, cy, hex(0xffffff, 235));
+            let (ink, sub_ink) = if liquid {
+                (theme::TEXT(), theme::MUTED())
+            } else {
+                (hex(0xffffff, 255), hex(0xffffff, 190))
+            };
+            draw_page_icon(ui, *page, rect[0] + 26.0, cy, if liquid { *top } else { hex(0xffffff, 235) });
             if card_h >= 56.0 {
-                ui.text(Face::Display, 15.0, rect[0] + 46.0, cy - 17.0, hex(0xffffff, 255), title);
+                ui.text(Face::Display, 15.0, rect[0] + 46.0, cy - 17.0, ink, title);
                 let sub = ui.fit_text(Face::LauncherRegular, 10.5, sub, card_w - 60.0);
-                ui.text(Face::LauncherRegular, 10.5, rect[0] + 46.0, cy + 2.0, hex(0xffffff, 190), &sub);
+                ui.text(Face::LauncherRegular, 10.5, rect[0] + 46.0, cy + 2.0, sub_ink, &sub);
             } else {
                 ui.text(Face::Display, 14.5, rect[0] + 46.0,
-                    text_vcenter(rect[1], card_h, 14.5), hex(0xffffff, 255), title);
+                    text_vcenter(rect[1], card_h, 14.5), ink, title);
             }
             press_scale(ui, v_start, rect, *action);
             self.targets.push((rect, *action));
@@ -1508,7 +1714,12 @@ impl DrawCtx<'_> {
         let px0 = ax + (w - play_w) * 0.5;
         if installing {
             let slab = [px0, bar_y, play_w, bar_h];
-            pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
+            if theme::liquid() {
+                ui.rounded(slab[0], slab[1], slab[2], slab[3], bar_h * 0.5, theme::CRIMSON());
+                ui.border(slab[0], slab[1], slab[2], slab[3], bar_h * 0.5, theme::GLASS_BORDER());
+            } else {
+                pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
+            }
             let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
             let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
             let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32)
@@ -1524,9 +1735,24 @@ impl DrawCtx<'_> {
         } else {
             let slab = [px0, bar_y, play_w, bar_h];
             let v_start = ui.batch_mut().vertices.len();
-            pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
+            let liquid = theme::liquid();
+            if liquid {
+                // The big PLAY pill: accent glass with a firelight halo that
+                // swells and dips with the campfire.
+                let e = theme::ember();
+                let halo = 5.0 + 5.0 * e;
+                ui.rounded(slab[0] - halo, slab[1] - halo, slab[2] + 2.0 * halo,
+                    slab[3] + 2.0 * halo, (bar_h + 2.0 * halo) * 0.5,
+                    horizon_client::ui_theme::color::with_alpha(theme::CRIMSON(),
+                        (26.0 + 30.0 * e) / 255.0));
+                ui.rounded(slab[0], slab[1], slab[2], slab[3], bar_h * 0.5, theme::CRIMSON());
+                ui.rounded(slab[0] + 3.0, slab[1] + 3.0, slab[2] - 6.0, (bar_h - 6.0) * 0.45,
+                    (bar_h - 6.0) * 0.28, hex(0xffffff, 40));
+            } else {
+                pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
+            }
             let label = if installed { "Play" } else if self.error.is_some() { "Retry" } else { "Download" };
-            let ink = hex(0xffffff, 255);
+            let ink = if liquid { theme::ON_CRIMSON() } else { hex(0xffffff, 255) };
             let font = 20.0;
             let text_w = ui.measure(Face::Display, font, label);
             let tri = font * 0.62;
@@ -1540,7 +1766,9 @@ impl DrawCtx<'_> {
                 else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
                 else { format!("{} h", secs / 3600) };
             draw_centered_text(ui, Face::LauncherMedium, 9.5,
-                [px0, bar_y + bar_h - 20.0, play_w, 12.0], hex(0xffd2da, 220), &time);
+                [px0, bar_y + bar_h - 20.0, play_w, 12.0],
+                if liquid { horizon_client::ui_theme::color::with_alpha(theme::ON_CRIMSON(), 0.78) }
+                else { hex(0xffd2da, 220) }, &time);
             press_scale(ui, v_start, slab, Action::Play);
             self.targets.insert(0, (slab, Action::Play));
         }
@@ -1551,6 +1779,53 @@ impl DrawCtx<'_> {
             let ew = ui.measure(Face::LauncherRegular, 11.5, &e);
             ui.text(Face::LauncherRegular, 11.5, ax + (w - ew) * 0.5, bar_y - 22.0,
                 theme::CRIMSON_BRIGHT(), &e);
+        }
+
+        // ---- Embers quick row: Continue world / Last server / What's new ----
+        if theme::liquid() {
+            let qh = 32.0;
+            let qy = bar_y - qh - 10.0;
+            let mut quick: Vec<(String, Action)> = vec![
+                ("Continue world".to_owned(), Action::HomeTab(HomeTab::Worlds)),
+            ];
+            let servers = &self.catalog.saved_servers;
+            if !servers.is_empty() {
+                let index = servers
+                    .iter()
+                    .position(|s| {
+                        !self.catalog.config.server.is_empty()
+                            && s.ip == self.catalog.config.server
+                    })
+                    .unwrap_or(servers.len() - 1);
+                let name = if servers[index].name.trim().is_empty() {
+                    servers[index].ip.clone()
+                } else {
+                    servers[index].name.clone()
+                };
+                let name = ui.fit_text(Face::LauncherMedium, 12.0, &name, w * 0.22);
+                quick.push((format!("Join {name}"), Action::ConnectServer(index)));
+            }
+            quick.push(("What's new".to_owned(), Action::PatchNotes));
+            let gap = 8.0;
+            let widths: Vec<f32> = quick
+                .iter()
+                .map(|(label, _)| ui.measure(Face::LauncherMedium, 12.0, label) + 26.0)
+                .collect();
+            let total: f32 =
+                widths.iter().sum::<f32>() + gap * (quick.len() as f32 - 1.0);
+            if total <= w - 2.0 * m {
+                let mut qx = ax + (w - total) * 0.5;
+                for ((label, action), qw) in quick.into_iter().zip(widths) {
+                    let rect = [qx, qy, qw, qh];
+                    ui.rounded(rect[0], rect[1], rect[2], rect[3], qh * 0.5, theme::GLASS());
+                    ui.border(rect[0], rect[1], rect[2], rect[3], qh * 0.5,
+                        theme::GLASS_BORDER());
+                    draw_centered_text(ui, Face::LauncherMedium, 12.0, rect,
+                        theme::TEXT(), &label);
+                    self.targets.push((rect, action));
+                    qx += qw + gap;
+                }
+            }
         }
 
         // ---- Bottom-left: account chip ----
@@ -3408,7 +3683,8 @@ impl DrawCtx<'_> {
             _ => "Built-in Supporter".to_owned(),
         };
 
-        let left_items: [(&str, String, Action, Option<bool>, bool); 11] = [
+        let left_items: [(&str, String, Action, Option<bool>, bool); 12] = [
+            ("Theme", if c.launcher_liquid { "Liquid Black" } else { "Classic" }.to_owned(), Action::ToggleLiquid, None, false),
             ("Appearance", if c.launcher_dark { "Dark" } else { "Light" }.to_owned(), Action::ToggleAppearance, None, false),
             ("Accent color", format!("#{:06X}", c.launcher_accent), Action::CycleAccent, None, false),
             (
@@ -5389,7 +5665,11 @@ impl Launcher {
 
     pub(super) fn draw_pages(&mut self) -> Result<()> {
         self.tick_animations();
-        theme::set(self.catalog.config.launcher_dark, self.catalog.config.launcher_accent);
+        theme::set(
+            self.catalog.config.launcher_dark,
+            self.catalog.config.launcher_liquid,
+            self.catalog.config.launcher_accent,
+        );
         ACTIVE_FEEDBACK.with(|fb| *fb.borrow_mut() = self.feedback);
         let (Some(r), Some(gui)) = (&mut self.renderer, &self.gui) else {
             return Ok(());
@@ -5807,6 +6087,10 @@ impl Launcher {
         match action {
             Some(Action::ToggleAppearance) => {
                 self.catalog.config.launcher_dark = !self.catalog.config.launcher_dark;
+                self.catalog.config.save(&self.home)?;
+            }
+            Some(Action::ToggleLiquid) => {
+                self.catalog.config.launcher_liquid = !self.catalog.config.launcher_liquid;
                 self.catalog.config.save(&self.home)?;
             }
             Some(Action::CycleAccent) => {
