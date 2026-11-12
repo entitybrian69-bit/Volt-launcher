@@ -1606,6 +1606,17 @@ jobs:
           gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
           version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
 
+          is_tag = os.environ["IS_TAG"].lower() == "true"
+          if not is_tag:
+              # Testing builds publish to the single rolling `debug` release:
+              # constant asset names, so nothing stale survives a version bump.
+              renamed = []
+              for p in apks:
+                  q = p.with_name(p.name.replace(f"Volt-Launcher-{version}-", "Volt-Launcher-debug-"))
+                  p.rename(q)
+                  renamed.append(q)
+              apks = renamed
+
           # The Biomes Unseen content mod ships beside the APKs: the same
           # .hmod the worldgen-test job verifies (docs/biomes_unseen/).
           hmod = Path("crates/horizon-client/testdata/biomes_unseen.hmod")
@@ -1619,14 +1630,19 @@ jobs:
           sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in summed)
           (collect / "SHA256SUMS.txt").write_text(sums, encoding="utf-8")
 
-          is_tag = os.environ["IS_TAG"].lower() == "true"
-          tag = os.environ["REF_NAME"] if is_tag else f"v{version}-build.{os.environ['SHA_SHORT'][:7]}"
-          title = f"Volt Launcher {tag}" if is_tag else f"Volt Launcher {version} ({os.environ['SHA_SHORT'][:7]})"
+          # Full releases come only from `v*` tags; everything else refreshes
+          # the single rolling `debug` release. No pre-releases, ever.
+          tag = os.environ["REF_NAME"] if is_tag else "debug"
+          title = (
+              f"Volt Launcher {tag}"
+              if is_tag
+              else f"Volt Launcher Debug Build ({version} @ {os.environ['SHA_SHORT'][:7]})"
+          )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"tag={tag}\n")
               out.write(f"title={title}\n")
-              out.write(f"prerelease={'false' if is_tag else 'true'}\n")
+              out.write(f"channel={'stable' if is_tag else 'debug'}\n")
           PY
 
       - name: Create or update GitHub Release
@@ -1634,16 +1650,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.bundle.outputs.tag }}
           TITLE: ${{ steps.bundle.outputs.title }}
-          PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
+          CHANNEL: ${{ steps.bundle.outputs.channel }}
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
-          if [ "$PRERELEASE" != "true" ] && [ -f "docs/RELEASE-NOTES-$TAG.md" ]; then
+          if [ "$CHANNEL" = "stable" ] && [ -f "docs/RELEASE-NOTES-$TAG.md" ]; then
             # Full tagged releases ship hand-written notes (also shown verbatim
             # by the in-app update popup's What's New list).
             cp "docs/RELEASE-NOTES-$TAG.md" "$NOTES_FILE"
           else
           cat > "$NOTES_FILE" <<'EOF'
-          ### Development build
+          ### Debug build — for testing only
+
+          Rolling testing build, replaced on every push. Not a release:
+          install the APK for your device to test the newest changes. Stable
+          downloads live on the latest `v*` release.
 
           This APK includes selected native Volt features inspired by third-party mods.
           The catalog does **not** implement all original mods, their complete settings
@@ -1660,8 +1680,25 @@ jobs:
           in Installed (or the game's Options > Mods) and create a new world.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
+          printf '\nBuilt from commit `%s`.\n' "${GITHUB_SHA::7}" >> "$NOTES_FILE"
           fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if [ "$CHANNEL" = "debug" ]; then
+            # One rolling debug release: delete and recreate so no stale
+            # assets or tag ever linger. Never marked pre-release, never
+            # marked Latest — the newest v* release keeps that spot.
+            gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+            sleep 5
+            gh release create "$TAG" \
+              .local/android/release-collect/Volt-Launcher-*.apk \
+              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/SHA256SUMS.txt \
+              .local/android/release-collect/LICENSE.txt \
+              .local/android/release-collect/THIRD_PARTY_NOTICES.md \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --target "$GITHUB_SHA" \
+              --latest=false
+          elif gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
               .local/android/release-collect/biomes_unseen.hmod \
@@ -1671,10 +1708,6 @@ jobs:
               --clobber
             gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
           else
-            EXTRA_FLAGS=()
-            if [ "$PRERELEASE" = "true" ]; then
-              EXTRA_FLAGS+=(--prerelease --target "$GITHUB_SHA")
-            fi
             gh release create "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
               .local/android/release-collect/biomes_unseen.hmod \
@@ -1682,6 +1715,5 @@ jobs:
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
               --title "$TITLE" \
-              --notes-file "$NOTES_FILE" \
-              "${EXTRA_FLAGS[@]}"
+              --notes-file "$NOTES_FILE"
           fi

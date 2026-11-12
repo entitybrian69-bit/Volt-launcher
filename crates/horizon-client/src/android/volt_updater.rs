@@ -210,12 +210,14 @@ pub fn spawn_manual_check(home: PathBuf) -> mpsc::Receiver<Option<UpdateInfo>> {
     rx
 }
 
-/// Whether `rel` is a full release: not a prerelease, and not a per-commit
-/// `-build.` tag. Only these may interrupt the player with the startup
-/// update popup.
+/// Whether `rel` is a full release: not a prerelease, not a per-commit
+/// `-build.` tag, and a real `vX.Y.Z` version — the rolling `debug` testing
+/// release never qualifies. Only full releases may interrupt the player with
+/// the startup update popup.
 fn is_full_release(rel: &serde_json::Value, tag: &str) -> bool {
     rel.get("prerelease").and_then(|v| v.as_bool()) != Some(true)
         && tag_commit_suffix(tag).is_none()
+        && parse_semver(tag).is_some()
 }
 
 fn check_once_blocking(home: &Path, manual: bool) -> Option<UpdateInfo> {

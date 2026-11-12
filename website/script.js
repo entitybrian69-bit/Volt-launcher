@@ -57,10 +57,10 @@ document.querySelectorAll("[data-count]").forEach((el) => counter.observe(el));
     if (!res.ok) return;
     const releases = await res.json();
     releases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const stable = (r) =>
+      !r.draft && !r.prerelease && /^v\d+(\.\d+)*$/.test(r.tag_name ?? "");
     const pick =
-      releases.find((r) => !r.draft && !r.prerelease) ??
-      releases.find((r) => !r.draft) ??
-      releases[0];
+      releases.find(stable) ?? releases.find((r) => !r.draft) ?? releases[0];
     const assets = pick?.assets ?? [];
     const find = (s) => assets.find((a) => a.name.includes(s));
     const a64 = find("arm64-v8a");
