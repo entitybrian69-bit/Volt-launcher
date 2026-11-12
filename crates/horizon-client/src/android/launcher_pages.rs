@@ -33,11 +33,13 @@ pub(crate) mod theme {
     /// Liquid Black always reads as a dark look, whatever the appearance toggle says.
     pub fn dark() -> bool { let l = look(); l.dark || l.liquid }
     pub fn liquid() -> bool { look().liquid }
-    /// Live firelight (0..1) published by the Embers scene each frame; the
-    /// glass layers read it so panels visibly react to the campfire.
+    /// Live silver shimmer (0..1) published by the moonlight scene each
+    /// frame; the glass layers read it so panels subtly breathe with it.
     pub fn set_ember(value: f32) { EMBER.with(|cell| cell.set(value.clamp(0.0, 1.0))); }
     pub fn ember() -> f32 { EMBER.with(|cell| cell.get()) }
-    fn accent() -> u32 { hex(look().glass.accent, 255) }
+    /// Liquid Glass is strictly monochrome: every accent collapses to
+    /// polished silver, whatever accent color Classic is set to.
+    fn accent() -> u32 { if liquid() { return hex(0xdfe4ec, 255); } hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
     pub fn BG() -> u32 { if liquid() { return hex(0x060709, 255); } choose(hex(0x0c0e13,255), hex(0xedf1f0,255)) }
     pub fn BACKDROP() -> u32 { if liquid() { return hex(0x04060c, 225); } hex(0x070a1a, 215) }
@@ -52,12 +54,15 @@ pub(crate) mod theme {
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
     pub fn CRIMSON_BRIGHT() -> u32 {
+        if liquid() { return hex(0xf1f4f9, 255); }
         let glass = look().glass;
         hex(if dark() { glass.accent_soft } else { glass.accent }, 255)
     }
     pub fn CRIMSON_SOFT() -> u32 { (accent() & 0x00ffffff) | (42u32 << 24) }
     pub fn CRIMSON_BADGE() -> u32 { choose(hex(0xffffff,22), hex(0x101a14,22)) }
     pub fn ON_CRIMSON() -> u32 {
+        // Ink on a silver fill must be near-black in Liquid Glass.
+        if liquid() { return hex(0x10141b, 255); }
         let a = look().glass.accent;
         let lum = 0.2126 * (a >> 16 & 255) as f32 + 0.7152 * (a >> 8 & 255) as f32
             + 0.0722 * (a & 255) as f32;
@@ -66,15 +71,14 @@ pub(crate) mod theme {
     pub fn TEXT() -> u32 { choose(hex(0xf2f5f3,255), hex(0x151c18,255)) }
     pub fn MUTED() -> u32 { choose(hex(0xc6ccc9,255), hex(0x4b5551,255)) }
     pub fn DIM() -> u32 { choose(hex(0x8f969b,255), hex(0x68726d,255)) }
-    pub fn ONLINE() -> u32 { choose(hex(0x4ade80,255), hex(0x15803d,255)) }
+    pub fn ONLINE() -> u32 { if liquid() { return hex(0xe6ebf3, 255); } choose(hex(0x4ade80,255), hex(0x15803d,255)) }
     pub fn STATUS_BAD() -> u32 { choose(hex(0xf87171,255), hex(0xb91c1c,255)) }
     pub fn GLASS() -> u32 {
         if liquid() {
-            // Near-clear glass warmed by the campfire: the tint literally
-            // rolls with the flames.
+            // Near-clear smoked crystal; a cool silver shimmer published by
+            // the moonlight scene rolls softly through every panel.
             let e = ember();
-            return lerp(
-                hex(0x0d1016, 148), hex(0x2a1a0d, 164), 0.45 * e);
+            return lerp(hex(0x0c0e13, 150), hex(0x1b1f28, 160), 0.5 * e);
         }
         if !dark() { return hex(0xffffff, 214); }
         // Neutral smoked glass per the chosen reference, faintly tinted by
@@ -85,7 +89,7 @@ pub(crate) mod theme {
         }, 0.18)
     }
     pub fn GLASS_INNER() -> u32 { if liquid() { return hex(0xffffff, (13.0 + 9.0 * ember()) as u8); } choose(hex(0xffffff,14), hex(0x101a14,12)) }
-    pub fn GLASS_BORDER() -> u32 { if liquid() { let e = ember(); return lerp(hex(0xffffff, (40.0 + 26.0 * e) as u8), hex(0xffc37a, 70), 0.5 * e); } choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
+    pub fn GLASS_BORDER() -> u32 { if liquid() { let e = ember(); return lerp(hex(0xffffff, (44.0 + 30.0 * e) as u8), hex(0xdfe6f2, 96), 0.45 * e); } choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -641,7 +645,7 @@ fn terra_noise(column: i32, seed: u32) -> f32 {
 fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
     if theme::liquid() {
-        return draw_embers_scene(ui, w, h, phase);
+        return draw_moonlight_scene(ui, w, h, phase);
     }
     let dark = theme::dark();
     // Sky wash with a warm band near the horizon.
@@ -737,36 +741,32 @@ fn draw_launcher_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
 }
 
 
-/// Smoothstep for the Embers loop choreography.
+/// Smoothstep for the scene loop choreography.
 fn sstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0).max(1e-4)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The Liquid Black "Embers" scene: an 18-second looping night-camp film in
-/// pure UI primitives — campfire, drifting sparks, a sleeping wolf, stars.
-/// Publishes the live firelight through `theme::set_ember` so every glass
-/// panel drawn above visibly breathes with the flames.
-fn draw_embers_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
+/// The Liquid Glass scene: a desaturated, moonlit voxel mountain night in
+/// pure monochrome — black depths, silver ridges, white stars. An ~18s loop:
+/// drifting cloud wisps, twinkling stars, a breathing moon halo and one
+/// shooting star per loop. Publishes a gentle silver shimmer through
+/// `theme::set_ember` so the glass panels above subtly breathe with it.
+fn draw_moonlight_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     use horizon_client::ui_theme::color::{hex, lerp};
     let lt = phase % 18.0;
-    // Loop beats: calm -> feed the fire -> sparks -> settle -> dip -> breathe back.
-    let feed = sstep(4.0, 5.4, lt) * (1.0 - sstep(7.0, 8.4, lt));
-    let sparks = sstep(8.0, 8.7, lt) * (1.0 - sstep(11.3, 12.3, lt));
-    let dip = sstep(16.0, 17.1, lt) * (1.0 - sstep(17.4, 18.0, lt));
-    let flicker = 0.66
-        + 0.14 * (phase * 9.7).sin() * (phase * 3.1).cos()
-        + 0.11 * (phase * 23.3 + 1.7).sin().abs()
-        + 0.09 * (phase * 5.3).sin();
-    let fire =
-        (flicker * (1.0 + 0.5 * feed + 0.22 * sparks) * (1.0 - 0.55 * dip)).clamp(0.12, 1.5);
-    let ember = (fire / 1.25).clamp(0.0, 1.0);
-    theme::set_ember(ember);
+    let shimmer = (0.5
+        + 0.28 * (phase * 0.37).sin()
+        + 0.14 * (phase * 1.31 + 0.8).sin()
+        + 0.08 * (phase * 3.7).sin())
+    .clamp(0.0, 1.0);
+    theme::set_ember(shimmer);
 
-    // Night sky: deep, but never flat black.
+    // Night sky: pure black up high, the faintest blue-grey toward the
+    // ridge line — dark with depth, never flat.
     let stops: [(f32, u32); 4] =
-        [(0.0, 0x05060a), (0.45, 0x080a10), (0.75, 0x0c0d13), (1.0, 0x100f14)];
-    let rows = 22;
+        [(0.0, 0x020304), (0.5, 0x050608), (0.8, 0x090a0e), (1.0, 0x0c0d11)];
+    let rows = 20;
     for row in 0..rows {
         let ty = row as f32 / (rows - 1) as f32;
         let mut color = hex(stops[3].1, 255);
@@ -780,132 +780,76 @@ fn draw_embers_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
         ui.rounded(0.0, row as f32 * h / (rows - 1) as f32 - 1.0, w,
             h / (rows - 1) as f32 + 2.0, 0.0, color);
     }
-    // Stars on individual twinkle clocks.
-    for i in 0..56u32 {
+    // Stars on individual twinkle clocks, cool white.
+    for i in 0..60u32 {
         let x = w * (((i * 73 + 19) % 101) as f32 / 101.0);
-        let y = h * 0.52 * (((i * 37 + 11) % 64) as f32 / 64.0);
-        let tw = 0.55 + 0.45 * (phase * (0.6 + (i % 7) as f32 * 0.23) + i as f32 * 1.37).sin();
-        let alpha = (if i % 3 == 0 { 150.0 } else { 90.0 }) * tw;
+        let y = h * 0.56 * (((i * 37 + 11) % 64) as f32 / 64.0);
+        let tw = 0.55 + 0.45 * (phase * (0.5 + (i % 7) as f32 * 0.21) + i as f32 * 1.37).sin();
+        let alpha = (if i % 3 == 0 { 165.0 } else { 95.0 }) * tw;
         let size = if i % 9 == 0 { 2.2 } else { 1.3 };
-        ui.rounded(x, y, size, size, 0.0, hex(0xcfd6ef, alpha.max(0.0) as u8));
+        ui.rounded(x, y, size, size, 0.0, hex(0xe8ecf4, alpha.max(0.0) as u8));
     }
-    // Crescent moon.
-    let (mx, my, mr) = (w * 0.82, h * 0.14, h * 0.045);
-    ui.rounded(mx - mr, my - mr, mr * 2.0, mr * 2.0, mr, hex(0xd9ddea, 200));
-    ui.rounded(mx - mr + mr * 0.62, my - mr - mr * 0.18, mr * 2.0, mr * 2.0, mr,
-        hex(0x07080d, 255));
-    // Distant ridge silhouette.
-    let bs = (w / 52.0).max(7.0);
-    let scroll = phase * 1.1;
-    let first = (scroll / bs).floor() as i32;
-    let frac = scroll - first as f32 * bs;
-    for i in 0..((w / bs) as i32 + 2) {
-        let column = first + i;
-        let n = (terra_noise(column, 0xca3f_0007) + terra_noise(column + 1, 0xca3f_0007)) * 0.5;
-        let y_top = h * 0.66 - (n * 3.0).round() * bs * 0.6;
-        let x = i as f32 * bs - frac;
-        ui.rounded(x, y_top, bs + 0.5, (h * 0.80 - y_top).max(0.0), 0.0, hex(0x0a0c11, 255));
+    // One shooting star per loop, streaking down-right at ~11s.
+    let shoot = sstep(11.0, 11.12, lt) * (1.0 - sstep(11.55, 11.85, lt));
+    if shoot > 0.01 {
+        let t01 = ((lt - 11.0) / 0.85).clamp(0.0, 1.0);
+        let (sx, sy) = (w * (0.12 + 0.30 * t01), h * (0.10 + 0.14 * t01));
+        for seg in 0..6 {
+            let back = seg as f32 * 0.035;
+            let (px, py) = (w * (0.12 + 0.30 * (t01 - back).max(0.0)),
+                h * (0.10 + 0.14 * (t01 - back).max(0.0)));
+            let a = (shoot * (150.0 - seg as f32 * 24.0)).max(0.0);
+            ui.rounded(px, py, 2.2, 2.2, 1.1, hex(0xf2f5fa, a as u8));
+        }
+        ui.rounded(sx, sy, 2.8, 2.8, 1.4, hex(0xffffff, (200.0 * shoot) as u8));
     }
-    // Ground plane.
-    ui.rounded(0.0, h * 0.80, w, h * 0.20, 0.0, hex(0x0b0a0c, 255));
-    ui.rounded(0.0, h * 0.80, w, 2.5, 0.0, hex(0x1a150f, 255));
-
-    // ---- The campfire ----
-    let fx = w * 0.26;
-    let fy = h * 0.825;
-    // Firelight: a wide halo, a hot core halo, and a pool on the ground.
-    let g1 = h * (0.30 + 0.05 * fire);
-    ui.rounded(fx - g1, fy - g1 * 0.72, g1 * 2.0, g1 * 1.44, g1 * 0.72,
-        hex(0x7a3414, (20.0 + 26.0 * ember) as u8));
-    let g2 = h * 0.16;
-    ui.rounded(fx - g2, fy - g2 * 0.75, g2 * 2.0, g2 * 1.5, g2 * 0.75,
-        hex(0xa34f1b, (26.0 + 34.0 * ember) as u8));
-    ui.rounded(fx - g1 * 1.2, fy - 4.0, g1 * 2.4, 10.0, 5.0,
-        hex(0xb86a2a, (18.0 + 30.0 * ember) as u8));
-    // Stone ring.
-    for (dx, dy, s) in [(-27.0, 0.0, 9.0), (-15.0, 5.0, 8.0), (1.0, 6.0, 9.0),
-        (15.0, 4.0, 8.0), (25.0, -1.0, 9.0)]
-    {
-        ui.rounded(fx + dx, fy + dy - s * 0.5, s, s, 2.5, hex(0x2a2a30, 255));
-        ui.rounded(fx + dx, fy + dy - s * 0.5, s, s * 0.4, 2.0,
-            lerp(hex(0x3a3a42, 255), hex(0xb86a2a, 255), 0.25 * ember));
+    // Crescent moon with a halo that slowly breathes.
+    let (mx, my, mr) = (w * 0.70, h * 0.19, h * 0.048);
+    let halo = mr * (2.3 + 0.45 * (phase * 0.5).sin());
+    ui.rounded(mx - halo, my - halo, halo * 2.0, halo * 2.0, halo,
+        hex(0xaeb6c6, (10.0 + 12.0 * shimmer) as u8));
+    ui.rounded(mx - mr, my - mr, mr * 2.0, mr * 2.0, mr, hex(0xe9edf5, 225));
+    ui.rounded(mx - mr + mr * 0.60, my - mr - mr * 0.20, mr * 2.0, mr * 2.0, mr,
+        hex(0x040507, 255));
+    // Thin silver cloud wisps drifting on their own slow clocks.
+    for i in 0..4u32 {
+        let speed = 2.2 + i as f32 * 1.1;
+        let span = w + 360.0;
+        let x = ((phase * speed + i as f32 * 420.0) % span) - 180.0;
+        let y = h * (0.16 + 0.11 * i as f32) + (phase * 0.2 + i as f32).sin() * 3.0;
+        let cw = 170.0 + 50.0 * i as f32;
+        let ch = 9.0 + 2.5 * i as f32;
+        ui.rounded(x, y, cw, ch, ch * 0.5, hex(0x9ba4b6, (9 + i * 2) as u8));
+        ui.rounded(x + cw * 0.2, y - ch * 0.45, cw * 0.55, ch * 0.8, ch * 0.4,
+            hex(0xaab2c2, 7));
     }
-    // Logs; a fresh one fades in while the character feeds the fire.
-    ui.rounded(fx - 21.0, fy - 9.0, 42.0, 7.0, 3.0, hex(0x2b1d12, 255));
-    ui.rounded(fx - 16.0, fy - 14.0, 34.0, 6.0, 3.0, hex(0x241810, 255));
-    if feed > 0.01 {
-        ui.rounded(fx - 12.0, fy - 18.0, 28.0, 6.0, 3.0,
-            hex(0x332314, (255.0 * feed) as u8));
+    // Three parallax ranges of blocky mountains, each ridge top kissed by
+    // a thin line of moonlight that brightens with the shimmer.
+    let layers: [(f32, f32, u32, u32, u8); 3] = [
+        (1.4, 0.58, 0xb7c3_0003, 0x0d0f14, 70),
+        (2.6, 0.68, 0xb7c3_0017, 0x08090d, 48),
+        (4.2, 0.78, 0xb7c3_0031, 0x040406, 30),
+    ];
+    for (speed, base, seed, color, rim_a) in layers {
+        let bs = (w / 46.0).max(8.0);
+        let scroll = phase * speed;
+        let first = (scroll / bs).floor() as i32;
+        let frac = scroll - first as f32 * bs;
+        for i in 0..((w / bs) as i32 + 2) {
+            let column = first + i;
+            let n = (terra_noise(column, seed) + terra_noise(column + 1, seed)) * 0.5;
+            let y_top = h * base - (n * 4.0).round() * bs * 0.55;
+            let x = i as f32 * bs - frac;
+            ui.rounded(x, y_top, bs + 0.5, (h - y_top).max(0.0), 0.0, hex(color, 255));
+            // Moonlit ridge line.
+            let rim = (rim_a as f32 * (0.6 + 0.4 * shimmer)) as u8;
+            ui.rounded(x, y_top, bs + 0.5, 1.6, 0.0, hex(0x6f7a8e, rim));
+        }
     }
-    // Blocky flame columns, stepped like animated voxel fire.
-    let tstep = (phase * 9.0).floor() as i32;
-    for c in 0..5i32 {
-        let n = terra_noise(tstep * 11 + c * 3, 0xf1a3_0011);
-        let colh = (9.0 + 15.0 * n) * (0.55 + 0.75 * fire.min(1.3));
-        let cw = 6.5;
-        let cx = fx - 16.0 + c as f32 * 7.0;
-        let base = fy - 10.0;
-        ui.rounded(cx, base - colh, cw, colh, 2.0, hex(0xff8a30, 215));
-        ui.rounded(cx + 1.0, base - colh * 0.62, cw - 2.0, colh * 0.62, 2.0, hex(0xffb347, 225));
-        ui.rounded(cx + 1.8, base - colh * 0.30, cw - 3.6, colh * 0.30, 1.5, hex(0xffe08a, 235));
-    }
-    // Rising embers; the spark beat throws a denser burst.
-    let count = 7 + (9.0 * sparks) as i32;
-    for i in 0..count {
-        let cycle = 2.0 + (i % 4) as f32 * 0.45;
-        let life = ((phase / cycle) + i as f32 * 0.381) % 1.0;
-        let rise = life
-            * h
-            * (0.16 + 0.10 * ((i * 29 % 17) as f32 / 17.0) + 0.12 * sparks);
-        let x = fx + ((i * 37 % 23) as f32 - 11.0) * 1.4
-            + (phase * 2.3 + i as f32).sin() * 7.0 * life;
-        let y = fy - 16.0 - rise;
-        let alpha = ((1.0 - life) * (120.0 + 80.0 * ember)).max(0.0);
-        let s = if i % 3 == 0 { 2.6 } else { 1.8 };
-        ui.rounded(x, y, s, s, s * 0.5,
-            hex(if i % 2 == 0 { 0xffb060 } else { 0xff7a2e }, alpha as u8));
-    }
-    // The camper: a blocky figure seated at the fire, leaning in to feed
-    // it mid-loop. Mostly silhouette, rim-lit by the flames — at night the
-    // firelight is all you would really see.
-    let px = fx - 58.0;
-    let py = fy - 2.0;
-    let lean = 6.0 * feed;
-    let body = hex(0x12151c, 255);
-    let rim = hex(0xd08a3e, (70.0 + 90.0 * ember) as u8);
-    ui.rounded(px - 14.0, py - 8.0, 34.0, 9.0, 4.0, hex(0x241a10, 255));
-    ui.rounded(px + 6.0, py - 14.0, 16.0, 6.0, 2.5, body);
-    ui.rounded(px + 18.0, py - 14.0, 6.0, 14.0, 2.5, body);
-    ui.rounded(px - 2.0 + lean * 0.5, py - 36.0, 12.0, 24.0, 4.0, body);
-    // One arm reaches toward the fire on the feed beat, holding the log.
-    ui.rounded(px + 8.0 + lean, py - 30.0 + feed * 4.0, 14.0 + lean, 5.0, 2.5, body);
-    if feed > 0.05 && feed < 0.9 {
-        ui.rounded(px + 22.0 + lean * 1.4, py - 32.0 + feed * 6.0, 10.0, 4.0, 2.0,
-            hex(0x332314, 255));
-    }
-    let bob = (phase * 1.1).sin() * 1.2;
-    ui.rounded(px - 1.0 + lean * 0.8, py - 48.0 + bob + feed * 3.0, 11.0, 11.0, 3.5, body);
-    // Fire-side rim light on torso and head.
-    ui.rounded(px + 9.0 + lean * 0.5, py - 36.0, 1.8, 24.0, 0.9, rim);
-    ui.rounded(px + 9.0 + lean * 0.8, py - 48.0 + bob + feed * 3.0, 1.8, 11.0, 0.9, rim);
-
-    // The sleeping wolf, breathing slowly; one ear flicks mid-loop.
-    let wx = fx + 92.0;
-    let wy = fy + 4.0;
-    let breathe = 1.0 + 0.03 * (phase * 1.4).sin();
-    let body_h = 20.0 * breathe;
-    ui.rounded(wx, wy - body_h, 56.0, body_h, 9.0, hex(0x17120d, 255));
-    ui.rounded(wx + 40.0, wy - body_h - 8.0, 20.0, 15.0, 6.0, hex(0x1a140e, 255));
-    let ear_flick = if (10.2..10.5).contains(&lt) { 2.0 } else { 0.0 };
-    ui.rounded(wx + 52.0 + ear_flick, wy - body_h - 14.0, 5.0, 7.0, 2.0, hex(0x1a140e, 255));
-    ui.rounded(wx + 44.0, wy - body_h - 14.0, 5.0, 7.0, 2.0, hex(0x14100b, 255));
-    ui.rounded(wx - 10.0, wy - 9.0, 16.0, 7.0, 3.5, hex(0x14100b, 255));
-    ui.rounded(wx, wy - body_h, 56.0, 2.0, 1.0,
-        hex(0xc77b35, (60.0 + 70.0 * ember) as u8));
-
-    // Warm breath over everything, then a quiet dim so panels stay readable.
-    ui.rounded(0.0, 0.0, w, h, 0.0, hex(0x381a08, (10.0 + 16.0 * ember) as u8));
-    ui.rounded(0.0, 0.0, w, h, 0.0, hex(0x04060a, 96));
+    // Deepen the foreground so the dock floats over true black.
+    ui.rounded(0.0, h * 0.82, w, h * 0.18, 0.0, hex(0x020203, 150));
+    // A final whisper of dim keeps text crisp over the brightest ridges.
+    ui.rounded(0.0, 0.0, w, h, 0.0, hex(0x020308, 64));
 }
 
 /// The big fully-rounded Play control with a triangle icon and press
@@ -1266,8 +1210,15 @@ impl DrawCtx<'_> {
         // Round Discord and Files buttons.
         let fab = bar_h - 6.0;
         let discord = [w - 6.0 - fab * 2.0 - 10.0, by + 3.0, fab, fab];
-        let discord_bg = horizon_client::ui_theme::color::hex(0x5865f2, 255);
+        // Liquid Glass stays strictly monochrome, so the Discord button is
+        // silver glass there instead of brand blue.
+        let discord_bg = if theme::liquid() { theme::GLASS() }
+            else { horizon_client::ui_theme::color::hex(0x5865f2, 255) };
         ui.rounded(discord[0], discord[1], discord[2], discord[3], fab * 0.5, discord_bg);
+        if theme::liquid() {
+            ui.border(discord[0], discord[1], discord[2], discord[3], fab * 0.5,
+                theme::GLASS_BORDER());
+        }
         draw_discord_icon(ui, discord[0] + fab * 0.5, discord[1] + fab * 0.5, theme::TEXT(), discord_bg);
         self.targets.push((discord, Action::Discord));
         let files = [w - 6.0 - fab, by + 3.0, fab, fab];
@@ -1536,12 +1487,223 @@ impl DrawCtx<'_> {
         self.draw_lobby_home(ui, area, account_status);
     }
 
+    /// The Liquid Glass home, built to the chosen silver mockup: moonlit
+    /// vista behind, chrome VOLT brand top-left, glass account chip
+    /// top-right over the Worlds / Servers cards, one enormous chrome-rimmed
+    /// PLAY pill in the centre, a floating icon dock below it, and quiet
+    /// utility chips bottom-left. Strictly monochrome.
+    fn draw_liquid_home(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
+        use horizon_client::official_install::InstallStage;
+        use horizon_client::ui_theme::color::hex;
+        let [ax, ay, w, h] = area;
+        let installed = horizon_client::official_install::ready(self.home);
+        let installing = self.worker.is_some();
+        let progress = *self.install.lock().unwrap();
+        let compact = w < 760.0;
+        let m = if compact { 12.0 } else { 18.0 };
+        let shimmer = theme::ember();
+
+        // ---- Brand, top-left: V logo + VOLT, playtime whispered under it ----
+        ui.volt_logo(ax + m, ay + m, 34.0, 34.0);
+        ui.text(Face::Display, 21.0, ax + m + 44.0, ay + m + 4.0, hex(0xf2f4f8, 255), "VOLT");
+        let secs = self.catalog.config.play_seconds;
+        let time = if secs == 0 { "0 h".to_owned() }
+            else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
+            else { format!("{} h", secs / 3600) };
+        ui.text(Face::LauncherRegular, 10.5, ax + m + 44.0, ay + m + 26.0, theme::DIM(),
+            &format!("26.3 · {time} played"));
+
+        // ---- Account chip, top-right ----
+        let (name, badge) = account_status.split_once(" • ")
+            .map(|(n, b)| (n.to_owned(), b.to_owned()))
+            .unwrap_or_else(|| (account_status.to_owned(), "Offline".to_owned()));
+        let chip_h = 44.0;
+        let chip_w = (ui.measure(Face::LauncherMedium, 13.5, &name) + chip_h + 26.0)
+            .min(w * 0.30)
+            .max(132.0);
+        let chip = [ax + w - m - chip_w, ay + m, chip_w, chip_h];
+        ui.rounded(chip[0], chip[1], chip[2], chip[3], chip_h * 0.5, theme::GLASS());
+        ui.border(chip[0], chip[1], chip[2], chip[3], chip_h * 0.5, theme::GLASS_BORDER());
+        ui.rounded(chip[0] + 6.0, chip[1] + 6.0, chip_h - 12.0, chip_h - 12.0,
+            (chip_h - 12.0) * 0.5, theme::GLASS_INNER());
+        let initial = name.chars().next().map(|c| c.to_ascii_uppercase()).unwrap_or('V');
+        draw_centered_text(ui, Face::LauncherMedium, 15.0,
+            [chip[0] + 6.0, chip[1] + 6.0, chip_h - 12.0, chip_h - 12.0],
+            hex(0xf2f4f8, 255), &initial.to_string());
+        let text_x = chip[0] + chip_h + 4.0;
+        let name_fit = ui.fit_text(Face::LauncherMedium, 13.5, &name, chip_w - chip_h - 16.0);
+        ui.text(Face::LauncherMedium, 13.5, text_x, chip[1] + 7.0, theme::TEXT(), &name_fit);
+        let badge_fit = ui.fit_text(Face::LauncherRegular, 10.5, &badge, chip_w - chip_h - 16.0);
+        ui.text(Face::LauncherRegular, 10.5, text_x, chip[1] + 25.0, theme::DIM(), &badge_fit);
+        self.targets.push((chip, Action::Page(Page::Account)));
+
+        // ---- Right column: Worlds / Servers glass cards ----
+        let card_w = (w * 0.28).clamp(196.0, 260.0);
+        let card_h = if compact { 50.0 } else { 58.0 };
+        let card_x = ax + w - m - card_w;
+        let cards: [(&str, &str, u8, Action); 2] = [
+            ("Worlds", "EXPLORE", 0, Action::HomeTab(HomeTab::Worlds)),
+            ("Servers", "JOIN", 1, Action::HomeTab(HomeTab::Multiplayer)),
+        ];
+        for (i, (title, sub, glyph, action)) in cards.iter().enumerate() {
+            let rect = [card_x, chip[1] + chip_h + 14.0 + i as f32 * (card_h + 10.0),
+                card_w, card_h];
+            let v_start = ui.batch_mut().vertices.len();
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], 16.0, theme::GLASS());
+            ui.border(rect[0], rect[1], rect[2], rect[3], 16.0, theme::GLASS_BORDER());
+            let icon = [rect[0] + 9.0, rect[1] + (card_h - 34.0) * 0.5, 34.0, 34.0];
+            ui.rounded(icon[0], icon[1], icon[2], icon[3], 10.0, theme::GLASS_INNER());
+            draw_tile_icon(ui, *glyph, icon[0] + 17.0, icon[1] + 17.0, hex(0xe8ecf4, 255));
+            ui.text(Face::LauncherMedium, 14.5, rect[0] + 52.0, rect[1] + 9.0,
+                theme::TEXT(), title);
+            ui.text(Face::LauncherRegular, 9.5, rect[0] + 52.0, rect[1] + 30.0,
+                theme::DIM(), sub);
+            press_scale(ui, v_start, rect, *action);
+            self.targets.push((rect, *action));
+        }
+
+        // ---- Floating icon dock, bottom centre ----
+        let bar_h = if compact { 54.0 } else { 60.0 };
+        let item_w = if compact { 58.0 } else { 68.0 };
+        let dock_items: [(Page, Action); 6] = [
+            (Page::Play, Action::Page(Page::Play)),
+            (Page::Mods, Action::Page(Page::Mods)),
+            (Page::Shaders, Action::Page(Page::Shaders)),
+            (Page::Controls, Action::Page(Page::Controls)),
+            (Page::Settings, Action::Page(Page::Settings)),
+            (Page::Account, Action::Page(Page::Account)),
+        ];
+        let dock_w = item_w * dock_items.len() as f32 + 20.0;
+        let dock = [ax + (w - dock_w) * 0.5, ay + h - m - bar_h, dock_w, bar_h];
+        ui.rounded(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS());
+        ui.border(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS_BORDER());
+        for (i, (page, action)) in dock_items.iter().enumerate() {
+            let rect = [dock[0] + 10.0 + i as f32 * item_w, dock[1] + 4.0,
+                item_w, bar_h - 8.0];
+            let active = i == 0;
+            let cx = rect[0] + rect[2] * 0.5;
+            let cy = rect[1] + rect[3] * 0.5 - 2.0;
+            if active {
+                // The active icon glows white, with the little dot beneath.
+                ui.rounded(cx - 17.0, cy - 17.0, 34.0, 34.0, 17.0,
+                    hex(0xffffff, (22.0 + 16.0 * shimmer) as u8));
+                ui.rounded(cx - 2.0, rect[1] + rect[3] - 7.0, 4.0, 4.0, 2.0,
+                    hex(0xf2f5fa, 235));
+            }
+            draw_page_icon(ui, *page, cx, cy,
+                if active { hex(0xffffff, 255) } else { hex(0xc9cfdb, 185) });
+            self.targets.push((rect, *action));
+        }
+
+        // ---- The hero: one enormous chrome-rimmed glass PLAY pill ----
+        let play_h = if compact { 68.0 } else { 82.0 };
+        let py0 = dock[1] - play_h - (if compact { 14.0 } else { 22.0 });
+        // On short screens the pill rises next to the Worlds/Servers cards;
+        // narrow it there so chrome never collides with glass.
+        let cards_bottom = chip[1] + chip_h + 14.0 + 2.0 * (card_h + 10.0);
+        let play_w = if compact || py0 < cards_bottom + 4.0 { 236.0 } else { 300.0 };
+        let px0 = ax + (w - play_w) * 0.5;
+        let slab = [px0, py0, play_w, play_h];
+        if installing {
+            ui.rounded(slab[0], slab[1], slab[2], slab[3], play_h * 0.5, theme::GLASS());
+            ui.border(slab[0], slab[1], slab[2], slab[3], play_h * 0.5,
+                hex(0xffffff, 150));
+            let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
+            let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
+            let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32)
+                .clamp(0.0, 1.0);
+            draw_centered_text(ui, Face::LauncherMedium, 10.0,
+                [slab[0], py0 + 10.0, play_w, 12.0], theme::DIM(), "INSTALLING");
+            draw_centered_text(ui, Face::Display, 20.0,
+                [slab[0], py0 + 24.0, play_w, 24.0], theme::TEXT(),
+                &format!("{:.0}%", fraction * 100.0));
+            let bar = [slab[0] + 22.0, py0 + play_h - 18.0, play_w - 44.0, 4.0];
+            ui.rounded(bar[0], bar[1], bar[2], bar[3], 2.0, hex(0xffffff, 40));
+            ui.rounded(bar[0], bar[1], (bar[2] * fraction).max(4.0), bar[3], 2.0,
+                hex(0xf2f5fa, 255));
+        } else {
+            let v_start = ui.batch_mut().vertices.len();
+            // Soft white aura breathing with the moon shimmer.
+            let halo = 6.0 + 5.0 * shimmer;
+            ui.rounded(slab[0] - halo, slab[1] - halo, slab[2] + 2.0 * halo,
+                slab[3] + 2.0 * halo, (play_h + 2.0 * halo) * 0.5,
+                hex(0xdfe6f2, (14.0 + 14.0 * shimmer) as u8));
+            // Clear glass body.
+            ui.rounded(slab[0], slab[1], slab[2], slab[3], play_h * 0.5, theme::GLASS());
+            // Chrome rim: a bright outer ring and a quieter inner one.
+            ui.border(slab[0], slab[1], slab[2], slab[3], play_h * 0.5,
+                hex(0xffffff, (150.0 + 70.0 * shimmer) as u8));
+            ui.border(slab[0] + 2.5, slab[1] + 2.5, slab[2] - 5.0, slab[3] - 5.0,
+                (play_h - 5.0) * 0.5, hex(0xffffff, 46));
+            // Glossy highlight sweeping the top of the capsule.
+            ui.rounded(slab[0] + play_h * 0.28, slab[1] + 5.0,
+                slab[2] - play_h * 0.56, play_h * 0.34, play_h * 0.17,
+                hex(0xffffff, 34));
+            let label = if installed { "PLAY" }
+                else if self.error.is_some() { "RETRY" } else { "DOWNLOAD" };
+            let font = if compact { 24.0 } else { 28.0 };
+            draw_centered_text(ui, Face::Display, font, slab, hex(0xffffff, 255), label);
+            press_scale(ui, v_start, slab, Action::Play);
+            self.targets.insert(0, (slab, Action::Play));
+        }
+
+        // Error line floating above the pill.
+        if !installing && let Some(error) = self.error.as_deref() {
+            let e = ui.fit_text(Face::LauncherRegular, 11.5, error, w - 2.0 * m - 40.0);
+            let ew = ui.measure(Face::LauncherRegular, 11.5, &e);
+            ui.text(Face::LauncherRegular, 11.5, ax + (w - ew) * 0.5, py0 - 20.0,
+                theme::STATUS_BAD(), &e);
+        }
+
+        // ---- Quiet utility chips, bottom-left, aligned with the dock ----
+        let chips: [(&str, Action); 5] = [
+            ("Replays", Action::HomeTab(HomeTab::Replays)),
+            ("Shots", Action::HomeTab(HomeTab::Screenshots)),
+            ("Logs", Action::HomeTab(HomeTab::Console)),
+            ("Files", Action::Page(Page::Installed)),
+            ("Packs", Action::Page(Page::Packs)),
+        ];
+        let chip_small_h = 26.0;
+        let avail = (dock[0] - ax - m - 10.0).max(0.0);
+        if avail >= 70.0 {
+            let mut cy = dock[1] + bar_h - chip_small_h;
+            for (label, action) in chips.iter().rev() {
+                let cw = (ui.measure(Face::LauncherMedium, 11.0, label) + 22.0).min(avail);
+                let rect = [ax + m, cy, cw, chip_small_h];
+                if rect[1] < chip[1] + chip_h + 60.0 { break; }
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], chip_small_h * 0.5,
+                    theme::GLASS());
+                ui.border(rect[0], rect[1], rect[2], rect[3], chip_small_h * 0.5,
+                    hex(0xffffff, 26));
+                draw_centered_text(ui, Face::LauncherMedium, 11.0, rect,
+                    hex(0xc9cfdb, 200), label);
+                self.targets.push((rect, *action));
+                cy -= chip_small_h + 6.0;
+            }
+        }
+
+        // Help lives on the Discord: a round glass button right of the dock.
+        let fab = bar_h - 10.0;
+        let help_x = dock[0] + dock_w + 12.0;
+        if help_x + fab <= ax + w - m {
+            let help = [help_x, dock[1] + 5.0, fab, fab];
+            ui.rounded(help[0], help[1], help[2], help[3], fab * 0.5, theme::GLASS());
+            ui.border(help[0], help[1], help[2], help[3], fab * 0.5, theme::GLASS_BORDER());
+            draw_headset_icon(ui, help[0] + fab * 0.5, help[1] + fab * 0.5,
+                hex(0xe8ecf4, 230));
+            self.targets.push((help, Action::Discord));
+        }
+    }
+
     /// The lobby home: the player's 3D character takes centre stage over
     /// the live world, chunky pixel-art destination slabs flush against the
     /// left edge, the icon squares and their connected chip rail flush
     /// against the right edge, and one big centred red Play slab (with
     /// playtime). The dock shell is intentionally absent here.
     fn draw_lobby_home(&mut self, ui: &mut Ui, area: [f32; 4], account_status: &str) {
+        if theme::liquid() {
+            return self.draw_liquid_home(ui, area, account_status);
+        }
         use horizon_client::official_install::InstallStage;
         use horizon_client::ui_theme::color::hex;
         let [ax, ay, w, h] = area;
@@ -1583,8 +1745,7 @@ impl DrawCtx<'_> {
         // ---- The star of the show: the rotatable 3D character ----
         let char_w = (w * 0.34).clamp(170.0, 360.0);
         let char_top = ay + m + sq + 4.0;
-        let quick_h = if theme::liquid() { 42.0 } else { 0.0 };
-        let char_h = (bar_y - 10.0 - quick_h - char_top).max(60.0);
+        let char_h = (bar_y - 10.0 - char_top).max(60.0);
         let char_rect = [ax + (w - char_w) * 0.5, char_top, char_w, char_h];
         let default_uuid = self.volt_accounts.active().map(|a| a.uuid_u128()).unwrap_or(0);
         crate::skin_preview::draw_player_3d(
@@ -1628,30 +1789,16 @@ impl DrawCtx<'_> {
                 break;
             }
             let v_start = ui.batch_mut().vertices.len();
-            let liquid = theme::liquid();
-            if liquid {
-                // Embers: near-clear glass slabs with a thin colour identity
-                // strip, so the night scene stays visible through them.
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], 14.0, theme::GLASS());
-                ui.border(rect[0], rect[1], rect[2], rect[3], 14.0, theme::GLASS_BORDER());
-                ui.rounded(rect[0] + 10.0, rect[1] + 10.0, 3.0, card_h - 20.0, 1.5, *top);
-            } else {
-                pixel_panel(ui, rect, *top, *bottom);
-            }
+            pixel_panel(ui, rect, *top, *bottom);
             let cy = rect[1] + card_h * 0.5;
-            let (ink, sub_ink) = if liquid {
-                (theme::TEXT(), theme::MUTED())
-            } else {
-                (hex(0xffffff, 255), hex(0xffffff, 190))
-            };
-            draw_page_icon(ui, *page, rect[0] + 26.0, cy, if liquid { *top } else { hex(0xffffff, 235) });
+            draw_page_icon(ui, *page, rect[0] + 26.0, cy, hex(0xffffff, 235));
             if card_h >= 56.0 {
-                ui.text(Face::Display, 15.0, rect[0] + 46.0, cy - 17.0, ink, title);
+                ui.text(Face::Display, 15.0, rect[0] + 46.0, cy - 17.0, hex(0xffffff, 255), title);
                 let sub = ui.fit_text(Face::LauncherRegular, 10.5, sub, card_w - 60.0);
-                ui.text(Face::LauncherRegular, 10.5, rect[0] + 46.0, cy + 2.0, sub_ink, &sub);
+                ui.text(Face::LauncherRegular, 10.5, rect[0] + 46.0, cy + 2.0, hex(0xffffff, 190), &sub);
             } else {
                 ui.text(Face::Display, 14.5, rect[0] + 46.0,
-                    text_vcenter(rect[1], card_h, 14.5), ink, title);
+                    text_vcenter(rect[1], card_h, 14.5), hex(0xffffff, 255), title);
             }
             press_scale(ui, v_start, rect, *action);
             self.targets.push((rect, *action));
@@ -1714,12 +1861,7 @@ impl DrawCtx<'_> {
         let px0 = ax + (w - play_w) * 0.5;
         if installing {
             let slab = [px0, bar_y, play_w, bar_h];
-            if theme::liquid() {
-                ui.rounded(slab[0], slab[1], slab[2], slab[3], bar_h * 0.5, theme::CRIMSON());
-                ui.border(slab[0], slab[1], slab[2], slab[3], bar_h * 0.5, theme::GLASS_BORDER());
-            } else {
-                pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
-            }
+            pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
             let index = InstallStage::ALL.iter().position(|s| *s == progress.stage).unwrap_or(0);
             let part = if progress.total > 0 { progress.done as f32 / progress.total as f32 } else { 0.0 };
             let fraction = ((index as f32 + part.clamp(0.0, 1.0)) / InstallStage::ALL.len() as f32)
@@ -1735,24 +1877,9 @@ impl DrawCtx<'_> {
         } else {
             let slab = [px0, bar_y, play_w, bar_h];
             let v_start = ui.batch_mut().vertices.len();
-            let liquid = theme::liquid();
-            if liquid {
-                // The big PLAY pill: accent glass with a firelight halo that
-                // swells and dips with the campfire.
-                let e = theme::ember();
-                let halo = 5.0 + 5.0 * e;
-                ui.rounded(slab[0] - halo, slab[1] - halo, slab[2] + 2.0 * halo,
-                    slab[3] + 2.0 * halo, (bar_h + 2.0 * halo) * 0.5,
-                    horizon_client::ui_theme::color::with_alpha(theme::CRIMSON(),
-                        (26.0 + 30.0 * e) / 255.0));
-                ui.rounded(slab[0], slab[1], slab[2], slab[3], bar_h * 0.5, theme::CRIMSON());
-                ui.rounded(slab[0] + 3.0, slab[1] + 3.0, slab[2] - 6.0, (bar_h - 6.0) * 0.45,
-                    (bar_h - 6.0) * 0.28, hex(0xffffff, 40));
-            } else {
-                pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
-            }
+            pixel_panel(ui, slab, hex(0xd8455f, 255), hex(0xa32a44, 255));
             let label = if installed { "Play" } else if self.error.is_some() { "Retry" } else { "Download" };
-            let ink = if liquid { theme::ON_CRIMSON() } else { hex(0xffffff, 255) };
+            let ink = hex(0xffffff, 255);
             let font = 20.0;
             let text_w = ui.measure(Face::Display, font, label);
             let tri = font * 0.62;
@@ -1766,9 +1893,7 @@ impl DrawCtx<'_> {
                 else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
                 else { format!("{} h", secs / 3600) };
             draw_centered_text(ui, Face::LauncherMedium, 9.5,
-                [px0, bar_y + bar_h - 20.0, play_w, 12.0],
-                if liquid { horizon_client::ui_theme::color::with_alpha(theme::ON_CRIMSON(), 0.78) }
-                else { hex(0xffd2da, 220) }, &time);
+                [px0, bar_y + bar_h - 20.0, play_w, 12.0], hex(0xffd2da, 220), &time);
             press_scale(ui, v_start, slab, Action::Play);
             self.targets.insert(0, (slab, Action::Play));
         }
@@ -1779,53 +1904,6 @@ impl DrawCtx<'_> {
             let ew = ui.measure(Face::LauncherRegular, 11.5, &e);
             ui.text(Face::LauncherRegular, 11.5, ax + (w - ew) * 0.5, bar_y - 22.0,
                 theme::CRIMSON_BRIGHT(), &e);
-        }
-
-        // ---- Embers quick row: Continue world / Last server / What's new ----
-        if theme::liquid() {
-            let qh = 32.0;
-            let qy = bar_y - qh - 10.0;
-            let mut quick: Vec<(String, Action)> = vec![
-                ("Continue world".to_owned(), Action::HomeTab(HomeTab::Worlds)),
-            ];
-            let servers = &self.catalog.saved_servers;
-            if !servers.is_empty() {
-                let index = servers
-                    .iter()
-                    .position(|s| {
-                        !self.catalog.config.server.is_empty()
-                            && s.ip == self.catalog.config.server
-                    })
-                    .unwrap_or(servers.len() - 1);
-                let name = if servers[index].name.trim().is_empty() {
-                    servers[index].ip.clone()
-                } else {
-                    servers[index].name.clone()
-                };
-                let name = ui.fit_text(Face::LauncherMedium, 12.0, &name, w * 0.22);
-                quick.push((format!("Join {name}"), Action::ConnectServer(index)));
-            }
-            quick.push(("What's new".to_owned(), Action::PatchNotes));
-            let gap = 8.0;
-            let widths: Vec<f32> = quick
-                .iter()
-                .map(|(label, _)| ui.measure(Face::LauncherMedium, 12.0, label) + 26.0)
-                .collect();
-            let total: f32 =
-                widths.iter().sum::<f32>() + gap * (quick.len() as f32 - 1.0);
-            if total <= w - 2.0 * m {
-                let mut qx = ax + (w - total) * 0.5;
-                for ((label, action), qw) in quick.into_iter().zip(widths) {
-                    let rect = [qx, qy, qw, qh];
-                    ui.rounded(rect[0], rect[1], rect[2], rect[3], qh * 0.5, theme::GLASS());
-                    ui.border(rect[0], rect[1], rect[2], rect[3], qh * 0.5,
-                        theme::GLASS_BORDER());
-                    draw_centered_text(ui, Face::LauncherMedium, 12.0, rect,
-                        theme::TEXT(), &label);
-                    self.targets.push((rect, action));
-                    qx += qw + gap;
-                }
-            }
         }
 
         // ---- Bottom-left: account chip ----
@@ -3684,7 +3762,7 @@ impl DrawCtx<'_> {
         };
 
         let left_items: [(&str, String, Action, Option<bool>, bool); 12] = [
-            ("Theme", if c.launcher_liquid { "Liquid Black" } else { "Classic" }.to_owned(), Action::ToggleLiquid, None, false),
+            ("Theme", if c.launcher_liquid { "Liquid Glass" } else { "Classic" }.to_owned(), Action::ToggleLiquid, None, false),
             ("Appearance", if c.launcher_dark { "Dark" } else { "Light" }.to_owned(), Action::ToggleAppearance, None, false),
             ("Accent color", format!("#{:06X}", c.launcher_accent), Action::CycleAccent, None, false),
             (
