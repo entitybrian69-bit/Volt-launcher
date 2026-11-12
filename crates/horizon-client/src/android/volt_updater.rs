@@ -1,13 +1,15 @@
-//! One-time ABI-matched Volt Launcher update reminder & PackageInstaller downloader.
+//! One-time ABI-matched Volt Launcher update reminder.
+//!
+//! Deliberately hands the actual APK download to the user's browser instead of
+//! downloading and installing in-app: Volt therefore never requests the
+//! `REQUEST_INSTALL_PACKAGES` permission or touches `PackageInstaller`, both of
+//! which make Google Play Protect flag sideloaded apps as potentially harmful
+//! at install time.
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::mpsc,
     time::Duration,
 };
 
@@ -16,28 +18,6 @@ const RELEASES_LIST_URL: &str =
 const RELEASES_LATEST_URL: &str =
     "https://api.github.com/repos/entitybrian69-bit/Volt-launcher/releases/latest";
 const SEEN_FILE: &str = "volt-seen-updates.json";
-const MAX_APK_BYTES: u64 = 256 * 1024 * 1024;
-
-static INSTALLER_STATUS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-
-pub fn note_installer_result(code: &str) {
-    let slot = INSTALLER_STATUS.get_or_init(|| Mutex::new(None));
-    let msg = if code == "OK" {
-        "Android package update prompt opened.".to_owned()
-    } else if code == "ALLOW_SOURCE" {
-        "Enable 'Allow from this source' — update will resume automatically.".to_owned()
-    } else if let Some(err) = code.strip_prefix("ERR:") {
-        format!("Could not start APK update: {err}")
-    } else {
-        code.to_owned()
-    };
-    *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(msg);
-}
-
-pub fn take_installer_status() -> Option<String> {
-    let slot = INSTALLER_STATUS.get()?;
-    slot.lock().unwrap_or_else(|e| e.into_inner()).take()
-}
 
 #[derive(Clone, Debug)]
 pub struct UpdateInfo {
@@ -51,25 +31,8 @@ pub struct UpdateInfo {
     pub whats_new: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct DownloadProgress {
-    pub downloaded: u64,
-    pub total: u64,
-}
-
-pub enum UpdateModalState {
-    Ready,
-    Downloading {
-        progress: Arc<Mutex<DownloadProgress>>,
-        cancel: Arc<AtomicBool>,
-        done_rx: mpsc::Receiver<Result<PathBuf, String>>,
-    },
-    Error(String),
-}
-
 pub struct UpdatePrompt {
     pub info: UpdateInfo,
-    pub state: UpdateModalState,
     pub scroll: f32,
 }
 
@@ -370,121 +333,4 @@ fn fetch_releases(agent: &ureq::Agent) -> Option<Vec<serde_json::Value>> {
         .ok()?;
     let val: serde_json::Value = serde_json::from_slice(&buf).ok()?;
     Some(vec![val])
-}
-
-pub fn begin_download(home: &Path, info: &UpdateInfo) -> UpdateModalState {
-    mark_update_seen(home, &info.tag_name);
-    let progress = Arc::new(Mutex::new(DownloadProgress {
-        downloaded: 0,
-        total: info.size_bytes,
-    }));
-    let cancel = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = mpsc::channel();
-    let dl_url = info.download_url.clone();
-    let abi = info.abi.clone();
-    let updates_dir = home.join("updates");
-    let prog_clone = Arc::clone(&progress);
-    let cancel_clone = Arc::clone(&cancel);
-
-    let spawned = std::thread::Builder::new()
-        .name("volt-apk-download".into())
-        .spawn(move || {
-            let res = download_apk_blocking(&updates_dir, &abi, &dl_url, &prog_clone, &cancel_clone);
-            let _ = tx.send(res);
-        });
-    if let Err(err) = spawned {
-        return UpdateModalState::Error(format!("Could not start download thread: {err}"));
-    }
-    UpdateModalState::Downloading {
-        progress,
-        cancel,
-        done_rx: rx,
-    }
-}
-
-fn download_apk_blocking(
-    updates_dir: &Path,
-    abi: &str,
-    url: &str,
-    progress: &Mutex<DownloadProgress>,
-    cancel: &AtomicBool,
-) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(updates_dir).map_err(|e| format!("Updates folder error: {e}"))?;
-    if let Ok(entries) = std::fs::read_dir(updates_dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                let _ = std::fs::remove_file(p);
-            }
-        }
-    }
-    let stage = updates_dir.join(format!("volt-update-{abi}.apk.part"));
-    let dest = updates_dir.join(format!("volt-update-{abi}.apk"));
-
-    let agent = ureq::AgentBuilder::new()
-        .https_only(true)
-        .user_agent(&format!(
-            "VoltLauncher/{} (Android; {abi})",
-            crate::backend::VERSION
-        ))
-        .timeout_connect(Duration::from_secs(15))
-        .timeout_read(Duration::from_secs(120))
-        .build();
-
-    let resp = agent
-        .get(url)
-        .call()
-        .map_err(|e| format!("Download request failed: {e}"))?;
-    if let Some(len) = resp
-        .header("Content-Length")
-        .and_then(|s| s.parse::<u64>().ok())
-        && len > 0
-    {
-        progress.lock().unwrap_or_else(|e| e.into_inner()).total = len;
-    }
-
-    let mut reader = resp.into_reader();
-    let mut out = std::fs::File::create(&stage).map_err(|e| format!("Write error: {e}"))?;
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut total_written = 0u64;
-    let mut magic = [0u8; 4];
-
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = std::fs::remove_file(&stage);
-            return Err("CANCELLED".into());
-        }
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| format!("Network read error: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        if total_written < 4 {
-            let start = total_written as usize;
-            let copy_len = (4 - start).min(n);
-            magic[start..start + copy_len].copy_from_slice(&buf[..copy_len]);
-        }
-        total_written += n as u64;
-        if total_written > MAX_APK_BYTES {
-            let _ = std::fs::remove_file(&stage);
-            return Err("Downloaded APK exceeds 256 MiB safety limit.".into());
-        }
-        out.write_all(&buf[..n])
-            .map_err(|e| format!("Disk write error: {e}"))?;
-        progress
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .downloaded = total_written;
-    }
-    out.sync_all()
-        .map_err(|e| format!("Disk sync error: {e}"))?;
-    drop(out);
-
-    if total_written < 1024 || magic != [b'P', b'K', 3, 4] {
-        let _ = std::fs::remove_file(&stage);
-        return Err("Downloaded file is not a valid Android APK archive.".into());
-    }
-    std::fs::rename(&stage, &dest).map_err(|e| format!("Finalize APK error: {e}"))?;
-    Ok(dest)
 }

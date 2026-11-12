@@ -742,11 +742,6 @@ impl ApplicationHandler for Launcher {
         let result = match event {
             WindowEvent::CloseRequested => {
                 if let Some(prompt) = self.update_prompt.take() {
-                    if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
-                        &prompt.state
-                    {
-                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
                     crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
                     return;
                 }
@@ -1030,11 +1025,8 @@ impl ApplicationHandler for Launcher {
                     self.manual_check_rx = None;
                     self.catalog.status = format!("Update available: {}", info.display_version);
                     if self.update_prompt.is_none() {
-                        self.update_prompt = Some(crate::volt_updater::UpdatePrompt {
-                            info,
-                            state: crate::volt_updater::UpdateModalState::Ready,
-                            scroll: 0.0,
-                        });
+                        self.update_prompt =
+                            Some(crate::volt_updater::UpdatePrompt { info, scroll: 0.0 });
                     }
                 }
                 Ok(None) => {
@@ -1052,11 +1044,8 @@ impl ApplicationHandler for Launcher {
                 Ok(info) => {
                     self.update_check_rx = None;
                     if self.update_prompt.is_none() {
-                        self.update_prompt = Some(crate::volt_updater::UpdatePrompt {
-                            info,
-                            state: crate::volt_updater::UpdateModalState::Ready,
-                            scroll: 0.0,
-                        });
+                        self.update_prompt =
+                            Some(crate::volt_updater::UpdatePrompt { info, scroll: 0.0 });
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -1064,38 +1053,6 @@ impl ApplicationHandler for Launcher {
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
-        }
-        if let Some(prompt) = &mut self.update_prompt {
-            let finished = match &prompt.state {
-                crate::volt_updater::UpdateModalState::Downloading { done_rx, .. } => {
-                    done_rx.try_recv().ok()
-                }
-                _ => None,
-            };
-            if let Some(res) = finished {
-                match res {
-                    Ok(apk_path) => {
-                        self.update_prompt = None;
-                        self.catalog.status = "Opening Android package installer...".into();
-                        if !crate::native_ime::install_update_apk(
-                            apk_path.to_string_lossy().into_owned(),
-                        ) {
-                            self.catalog.status =
-                                "Could not invoke Android package installer.".into();
-                        }
-                    }
-                    Err(err) if err == "CANCELLED" => {
-                        self.update_prompt = None;
-                        self.catalog.status = "Update cancelled.".into();
-                    }
-                    Err(err) => {
-                        prompt.state = crate::volt_updater::UpdateModalState::Error(err);
-                    }
-                }
-            }
-        }
-        if let Some(installer_msg) = crate::volt_updater::take_installer_status() {
-            self.catalog.status = installer_msg;
         }
         for result in crate::gallery::poll() {
             self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
@@ -1227,11 +1184,6 @@ impl Launcher {
                 crate::platform::hide();
                 self.catalog.editing = None;
                 if let Some(prompt) = self.update_prompt.take() {
-                    if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
-                        &prompt.state
-                    {
-                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
                     crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
                 } else if self.chooser.take().is_none() {
                     if self.login.visible {

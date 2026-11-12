@@ -1637,6 +1637,11 @@ jobs:
           PRERELEASE: ${{ steps.bundle.outputs.prerelease }}
         run: |
           NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          if [ "$PRERELEASE" != "true" ] && [ -f "docs/RELEASE-NOTES-$TAG.md" ]; then
+            # Full tagged releases ship hand-written notes (also shown verbatim
+            # by the in-app update popup's What's New list).
+            cp "docs/RELEASE-NOTES-$TAG.md" "$NOTES_FILE"
+          else
           cat > "$NOTES_FILE" <<'EOF'
           ### Development build
 
@@ -1655,6 +1660,7 @@ jobs:
           in Installed (or the game's Options > Mods) and create a new world.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \

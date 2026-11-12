@@ -204,7 +204,7 @@ pub struct Extras {
     pub volt_boost_plus: crate::volt_qol::VoltBoostPlusConfig,
     /// Built-in 24 pure-Rust native Volt Mods (all OFF by default).
     pub volt_mods: crate::volt_qol::VoltModsConfig,
-    /// Built-in 50 pure-Rust native Volt 0.9.9 Mod Catalog state (synced between Launcher & Mod Menu).
+    /// Built-in 50 pure-Rust native Volt 1.0.0 Mod Catalog state (synced between Launcher & Mod Menu).
     pub mod_catalog: crate::volt_mods::VoltModCatalogState,
 }
 

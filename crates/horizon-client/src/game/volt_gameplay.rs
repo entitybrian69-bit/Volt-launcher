@@ -1,4 +1,4 @@
-//! Live in-world & HUD runtime hooks for **Volt Settings 0.9.9**:
+//! Live in-world & HUD runtime hooks for **Volt Settings 1.0.0**:
 //! - **`Volt QoL` (`#2`, `#3`, `#8`, `#9`, `#15`, `#17`, `#18`, `#25`)**
 //! - **`Volt Chat` (`#21` Chat Suite)**
 //! - **`Volt Visuals` (`#19` Connected Glass, Better Grass, 3D Dropped Items)**

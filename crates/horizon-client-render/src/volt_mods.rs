@@ -1,4 +1,4 @@
-//! Volt 0.9.9 Built-in Pure-Rust 50-Mod Suite, Custom 8x8 Pixel-Art Logos,
+//! Volt 1.0.0 Built-in Pure-Rust 50-Mod Suite, Custom 8x8 Pixel-Art Logos,
 //! Persistent Two-Way Sync Store (`horizon-extras.txt`), and the In-Game
 //! Split-Pane `Mod Menu` UI (Image 2) with Smooth Frame-Rate-Independent Animations.
 
@@ -111,7 +111,7 @@ impl VoltModCategory {
     }
 }
 
-/// Every single one of the 49 built-in pure-Rust mods in Volt Launcher `0.9.9`.
+/// Every single one of the 49 built-in pure-Rust mods in Volt Launcher `1.0.0`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(usize)]
 pub enum VoltModId {

@@ -34,7 +34,6 @@ enum Command {
     Capture(bool),
     Bounds,
     ImportDocument,
-    InstallUpdateApk(String),
     Screen(bool, bool),
     KeepAwake(bool),
     ClickSound,
@@ -437,32 +436,6 @@ impl Ui {
                     let _ = env.exception_clear();
                     log::warn!("Document picker: {error}");
                     crate::documents::picker_failed("No Android document picker is available");
-                }
-            }
-            Command::InstallUpdateApk(path) => {
-                let result = (|| -> jni::errors::Result<String> {
-                    let arg = JObject::from(env.new_string(&path)?);
-                    let ret = env
-                        .call_method(
-                            &self.activity,
-                            "installUpdateApk",
-                            "(Ljava/lang/String;)Ljava/lang/String;",
-                            &[JValue::Object(&arg)],
-                        )?
-                        .l()?;
-                    if ret.is_null() {
-                        return Ok("ERR:Installer returned null".into());
-                    }
-                    let s: String = env.get_string(&JString::from(ret))?.into();
-                    Ok(s)
-                })();
-                match result {
-                    Ok(code) => crate::volt_updater::note_installer_result(&code),
-                    Err(error) => {
-                        let _ = env.exception_clear();
-                        log::warn!("PackageInstaller launch failed: {error}");
-                        crate::volt_updater::note_installer_result(&format!("ERR:{error}"));
-                    }
                 }
             }
             Command::Show(text) => {
@@ -907,14 +880,6 @@ pub fn pick_document() -> bool {
     true
 }
 
-pub fn install_update_apk(path: String) -> bool {
-    let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
-        return false;
-    };
-    ui.enqueue(Command::InstallUpdateApk(path));
-    true
-}
-
 pub fn device_supported_abis() -> Vec<String> {
     if let Some(ui) = current_ui()
         && let Ok(mut env) = ui.vm.attach_current_thread()
@@ -986,7 +951,7 @@ pub fn app_version_name() -> String {
         }
         let _ = env.exception_clear();
     }
-    "0.9.9".into()
+    "1.0.0".into()
 }
 
 pub fn play_click_sound() {

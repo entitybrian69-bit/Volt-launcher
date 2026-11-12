@@ -5303,15 +5303,7 @@ impl Launcher {
         if self.preview_target_yaw.is_some() || self.preview_vel_yaw.abs() > 0.4 {
             return true;
         }
-        if self.worker.is_some()
-            || self.catalog.animating_icons_or_cards()
-            || self.update_prompt.as_ref().is_some_and(|p| {
-                matches!(
-                    p.state,
-                    crate::volt_updater::UpdateModalState::Downloading { .. }
-                )
-            })
-        {
+        if self.worker.is_some() || self.catalog.animating_icons_or_cards() {
             return true;
         }
         has_active_toggle_anims()
@@ -6493,22 +6485,24 @@ impl Launcher {
                     "Switched back to Volt's built-in Vulkan Supporter driver.".into();
             }
             Some(Action::InstallUpdate) => {
-                if let Some(prompt) = &mut self.update_prompt
-                    && !matches!(
-                        prompt.state,
-                        crate::volt_updater::UpdateModalState::Downloading { .. }
-                    )
-                {
-                    prompt.state = crate::volt_updater::begin_download(&self.home, &prompt.info);
+                // The download runs in the user's browser on purpose: Volt never
+                // asks for REQUEST_INSTALL_PACKAGES or drives PackageInstaller,
+                // so Play Protect has no "can install other apps" signal to warn
+                // about when players sideload the launcher.
+                if let Some(prompt) = self.update_prompt.take() {
+                    crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                    self.catalog.status = if crate::platform::open_url(&prompt.info.download_url) {
+                        format!(
+                            "Downloading {} ({}) in your browser — open the APK when it finishes to update.",
+                            prompt.info.display_version, prompt.info.abi_label
+                        )
+                    } else {
+                        "Could not open a browser for the update download.".into()
+                    };
                 }
             }
             Some(Action::CancelUpdate) => {
                 if let Some(prompt) = self.update_prompt.take() {
-                    if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
-                        &prompt.state
-                    {
-                        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
                     crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
                 }
             }
@@ -6931,11 +6925,6 @@ impl Launcher {
 
     pub(super) fn handle_escape(&mut self) {
         if let Some(prompt) = self.update_prompt.take() {
-            if let crate::volt_updater::UpdateModalState::Downloading { cancel, .. } =
-                &prompt.state
-            {
-                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
             crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
             return;
         }
@@ -7142,99 +7131,37 @@ fn draw_update_prompt(
     }
 
     let footer_y = my + mh - 56.0;
-    match &prompt.state {
-        crate::volt_updater::UpdateModalState::Downloading { progress, .. } => {
-            let snap = progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let pct = if snap.total > 0 {
-                (snap.downloaded as f32 / snap.total as f32).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            let cancel_w = 112.0;
-            let bar_w = (mw - 40.0 - cancel_w - 14.0).max(120.0);
-            let bar_x = mx + 20.0;
-            let dl_mb = snap.downloaded as f64 / (1024.0 * 1024.0);
-            let tot_mb = snap.total as f64 / (1024.0 * 1024.0);
-            let label = if snap.total > 0 {
-                format!(
-                    "Downloading {} APK... {:.0}% ({:.1} / {:.1} MB)",
-                    prompt.info.abi_label,
-                    pct * 100.0,
-                    dl_mb,
-                    tot_mb
-                )
-            } else {
-                format!("Downloading {} APK... {:.1} MB", prompt.info.abi_label, dl_mb)
-            };
-            let fit_lbl = ui.fit_text(Face::LauncherMedium, 12.0, &label, bar_w);
-            ui.text(Face::LauncherMedium, 12.0, bar_x, footer_y + 2.0, theme::TEXT(), &fit_lbl);
-            ui.rounded(bar_x, footer_y + 24.0, bar_w, 12.0, 6.0, theme::CARD_INNER());
-            ui.border(bar_x, footer_y + 24.0, bar_w, 12.0, 6.0, theme::BORDER());
-            if pct > 0.01 {
-                ui.rounded(
-                    bar_x,
-                    footer_y + 24.0,
-                    (bar_w * pct).max(10.0),
-                    12.0,
-                    6.0,
-                    theme::CRIMSON(),
-                );
-            }
-            styled_button(
-                ui,
-                targets,
-                [mx + mw - 20.0 - cancel_w, footer_y + 4.0, cancel_w, 38.0],
-                "Cancel",
-                Action::CancelUpdate,
-                BtnStyle::Secondary,
-                true,
-            );
-        }
-        other => {
-            if let crate::volt_updater::UpdateModalState::Error(err) = other {
-                let max_err_w = (mw - 290.0).max(110.0);
-                let err_fit = ui.fit_text(Face::LauncherRegular, 11.5, err, max_err_w);
-                ui.text(
-                    Face::LauncherRegular,
-                    11.5,
-                    mx + 22.0,
-                    footer_y + 12.0,
-                    theme::CRIMSON_BRIGHT(),
-                    &err_fit,
-                );
-            } else {
-                ui.text(
-                    Face::LauncherRegular,
-                    11.5,
-                    mx + 22.0,
-                    footer_y + 12.0,
-                    theme::DIM(),
-                    "This reminder appears once.",
-                );
-            }
-            let btn_w = 116.0;
-            let install_x = mx + mw - 20.0 - btn_w;
-            let cancel_x = install_x - 10.0 - btn_w;
-            styled_button(
-                ui,
-                targets,
-                [cancel_x, footer_y + 4.0, btn_w, 38.0],
-                "Cancel",
-                Action::CancelUpdate,
-                BtnStyle::Secondary,
-                true,
-            );
-            styled_button(
-                ui,
-                targets,
-                [install_x, footer_y + 4.0, btn_w, 38.0],
-                "Install",
-                Action::InstallUpdate,
-                BtnStyle::Primary,
-                true,
-            );
-        }
-    }
+    let btn_w = 116.0;
+    let install_x = mx + mw - 20.0 - btn_w;
+    let cancel_x = install_x - 10.0 - btn_w;
+    let hint = "Downloads in your browser — open the APK to update.";
+    let hint_fit = ui.fit_text(Face::LauncherRegular, 11.5, hint, (cancel_x - mx - 32.0).max(90.0));
+    ui.text(
+        Face::LauncherRegular,
+        11.5,
+        mx + 22.0,
+        footer_y + 12.0,
+        theme::DIM(),
+        &hint_fit,
+    );
+    styled_button(
+        ui,
+        targets,
+        [cancel_x, footer_y + 4.0, btn_w, 38.0],
+        "Later",
+        Action::CancelUpdate,
+        BtnStyle::Secondary,
+        true,
+    );
+    styled_button(
+        ui,
+        targets,
+        [install_x, footer_y + 4.0, btn_w, 38.0],
+        "Download",
+        Action::InstallUpdate,
+        BtnStyle::Primary,
+        true,
+    );
 }
 
 fn draw_volt_boost_modal(

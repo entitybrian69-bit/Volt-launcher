@@ -1,4 +1,4 @@
-//! Volt 0.9.9 Split-Pane Frosted-Glass `Volt Settings` UI (`volt_settings_ui`)
+//! Volt 1.0.0 Split-Pane Frosted-Glass `Volt Settings` UI (`volt_settings_ui`)
 //! matching Image 1: left sidebar (`Volt / Volt Settings`, `Search options`,
 //! 8 smooth-gliding category tabs, warm amber `Undo` + violet `Done`), right
 //! frosted glass groups with checkboxes, sliders, `< value >` cyclers & action
