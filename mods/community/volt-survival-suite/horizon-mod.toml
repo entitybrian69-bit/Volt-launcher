@@ -1,0 +1,8 @@
+id = "volt_survival_suite"
+name = "Volt Survival Suite"
+version = "0.1.0"
+description = "A practical survival companion: live coordinates, facing, health, hunger, world time, dimension and target-block inspection. Toggle the HUD with /kit; use /where, /inspect and /time."
+authors = ["EntityBrian"]
+api = "0.1"
+side = "client"
+capabilities = ["game-read", "hud", "chat", "storage"]
