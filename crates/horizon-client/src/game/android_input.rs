@@ -502,6 +502,10 @@ impl Game<'_> {
         events: &ActiveEventLoop,
         id: WindowId,
     ) -> Result<bool> {
+        // The embedded Controls Studio owns the screen while it is open.
+        if self.android_studio_touch(t) {
+            return Ok(true);
+        }
         if t.phase == TouchPhase::Ended
             && let Some((right, last)) = self.pad.touch_ui.release_mouse(t.id)
         {
@@ -767,6 +771,9 @@ impl Game<'_> {
             ));
         }
         for out in crate::platform::poll() {
+            if self.volt_studio_osk(&out) {
+                continue;
+            }
             let next_sign_line = self.sign_edit.is_some() && matches!(out, Output::Enter);
             let done =
                 matches!(out, Output::Close) || (matches!(out, Output::Enter) && !next_sign_line);
@@ -779,7 +786,7 @@ impl Game<'_> {
         }
         // Title screens also use Playing: their focused text fields must keep
         // the IME until the user confirms or closes the editor.
-        if !self.pad_in_menu() && crate::platform::active() {
+        if !self.pad_in_menu() && !self.volt_studio_open() && crate::platform::active() {
             crate::platform::hide();
         }
     }

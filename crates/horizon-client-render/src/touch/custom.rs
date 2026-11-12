@@ -341,7 +341,7 @@ impl TouchControls {
         {
             return false;
         }
-        if self.inventory_mode {
+        if self.inventory_mode || self.menu_screen {
             button.in_menu
         } else {
             button.in_game

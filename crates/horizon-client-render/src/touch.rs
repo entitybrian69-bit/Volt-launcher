@@ -133,6 +133,10 @@ pub struct TouchControls {
     pub auxiliary_only: bool,
     /// Inventory utility buttons emit real modifier/mouse events, never movement.
     pub inventory_mode: bool,
+    /// The in-game title screen (a full menu) is showing: the stock overlay
+    /// hides and custom buttons follow their "In menus" visibility, so the
+    /// player's keybinds stay usable on the dashboard.
+    pub menu_screen: bool,
     pub editor: Option<editor::Editor>,
     fingers: BTreeMap<u64, (Role, [f32; 2])>,
     custom_fingers: BTreeMap<u64, custom::CustomFinger>,
@@ -277,6 +281,10 @@ impl TouchControls {
     }
     fn visible(&self, c: Control) -> bool {
         if self.controls_hidden && self.editor.is_none() {
+            return false;
+        }
+        // Menu screens (the title) never show the stock movement overlay.
+        if self.menu_screen && self.editor.is_none() {
             return false;
         }
         if c == Control::Shield && !self.shield_available && self.editor.is_none() {
@@ -1369,6 +1377,32 @@ mod tests {
         assert!(t.debug_requested);
         t.update(77, at, false, true);
         assert!(!t.owns_pointer(77));
+    }
+    #[test]
+    fn menu_screens_hide_stock_controls_and_use_in_menu_visibility() {
+        let mut t = TouchControls::default();
+        t.viewport(1920, 1080);
+        let mut button = CustomButton::new("key.keyboard.e".to_owned(), 0);
+        button.in_game = true;
+        button.in_menu = false;
+        t.settings.custom_buttons.push(button);
+        let mut in_menu = CustomButton::new("key.keyboard.t".to_owned(), 1);
+        in_menu.in_game = false;
+        in_menu.in_menu = true;
+        t.settings.custom_buttons.push(in_menu);
+        t.menu_screen = true;
+        assert!(!t.visible(Control::Move));
+        assert!(!t.visible(Control::Jump));
+        assert!(!t.visible(Control::Debug));
+        assert!(!t.custom_visible(0), "in_game-only button hides on the title");
+        assert!(t.custom_visible(1), "in_menu button shows on the title");
+        // The Volt Hub's "Show touch controls" switch still rules them all.
+        t.controls_hidden = true;
+        assert!(!t.custom_visible(1));
+        t.controls_hidden = false;
+        t.menu_screen = false;
+        assert!(t.custom_visible(0));
+        assert!(!t.custom_visible(1));
     }
     #[test]
     fn attack_gauge_survives_tap_modes_and_respects_off() {

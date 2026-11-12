@@ -686,7 +686,7 @@ impl HudAtlas {
             .iter_mut()
             .find(|i| i.0 == crate::title_edition::SPRITE)
             && let Some(pixels) =
-                crate::title_edition::rust_edition(edition.1, edition.2, &edition.3)
+                crate::title_edition::volt_edition(edition.1, edition.2, &edition.3)
         {
             edition.3 = pixels;
         }

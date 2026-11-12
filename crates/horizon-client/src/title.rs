@@ -91,6 +91,17 @@ fn recover_issues(dir: &Path) -> [Option<crate::save::DatIssue>; 2] {
 /// `LogoRenderer.extractRenderState`: the logo's top 44 of 64 rows, then the
 /// edition banner's top 14 of 16 rows overlapping its bottom by 7.
 fn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {
+    // The maker's credit over the logo, in the vanilla menu's small print.
+    let credit = "MADE BY ENTITYBRIAN";
+    let tw = HudBatch::text_width(atlas, credit);
+    batch.text(
+        atlas,
+        credit,
+        (w / 2.0).floor() - (tw.ceil() / 2.0).floor(),
+        18.0,
+        rgba(255, 255, 85, 255),
+        true,
+    );
     batch.sprite_region(
         atlas,
         "gui/title/minecraft",
@@ -105,6 +116,70 @@ fn draw_logo(atlas: &HudAtlas, batch: &mut HudBatch, w: f32) {
         128.0,
         16.0,
     );
+}
+
+/// Volt's own 15x15 icons for the title screen's new icon buttons, drawn as
+/// filled texels in the same white as vanilla's sprite icons so nothing has
+/// to ship in the atlas: the Discord mark and Volt's V.
+fn draw_volt_icon(atlas: &HudAtlas, batch: &mut HudBatch, kind: &str, x: f32, y: f32) {
+    let rows: [u16; 15] = if kind == "discord" {
+        [
+            0b000111000111000,
+            0b001111111111100,
+            0b011111111111110,
+            0b011111111111110,
+            0b111111111111111,
+            0b111100111001111,
+            0b111100111001111,
+            0b111111111111111,
+            0b111111111111111,
+            0b011111111111110,
+            0b001111111111100,
+            0b001111000111100,
+            0b011110000011110,
+            0b011100000001110,
+            0b000000000000000,
+        ]
+    } else {
+        [
+            0b110000000000011,
+            0b110000000000011,
+            0b111000000000111,
+            0b011000000000110,
+            0b011100000001110,
+            0b001100000001100,
+            0b001110000011100,
+            0b000110000011000,
+            0b000111000111000,
+            0b000011000110000,
+            0b000011101110000,
+            0b000001101100000,
+            0b000001111100000,
+            0b000000111000000,
+            0b000000010000000,
+        ]
+    };
+    for (row, bits) in rows.into_iter().enumerate() {
+        let mut col = 0usize;
+        while col < 15 {
+            if bits & (1 << (14 - col)) == 0 {
+                col += 1;
+                continue;
+            }
+            let start = col;
+            while col < 15 && bits & (1 << (14 - col)) != 0 {
+                col += 1;
+            }
+            batch.fill(
+                atlas,
+                x + start as f32,
+                y + row as f32,
+                (col - start) as f32,
+                1.0,
+                u32::MAX,
+            );
+        }
+    }
 }
 
 /// `OptimizeWorldScreen.DIMENSION_COLORS`.
@@ -1451,22 +1526,23 @@ impl Title {
                     ),
                 ];
                 // CommonButtons' icon buttons; Horizon's Join a Friend (an
-                // invite code) sits behind vanilla's Friends button.
-                for (i, (key, plain, id, icon)) in [
-                    ("gui.friends.open", "Friends", 5, "friends/friends"),
-                    ("options.language", "Language...", 6, "icon/language"),
+                // invite code) sits behind vanilla's Friends button. Volt
+                // adds its Discord on the left and its website on the right.
+                for (key, plain, id, icon, dx) in [
+                    ("volt.discord", "Join the Discord", 125, "volt/discord", -58.0),
+                    ("gui.friends.open", "Friends", 5, "friends/friends", -34.0),
+                    ("options.language", "Language...", 6, "icon/language", -10.0),
                     (
                         "options.accessibility",
                         "Accessibility Settings...",
                         7,
                         "icon/accessibility",
+                        14.0,
                     ),
-                ]
-                .into_iter()
-                .enumerate()
-                {
+                    ("volt.website", "Volt website", 126, "volt/v", 38.0),
+                ] {
                     let mut button = b(
-                        cx - 34.0 + i as f32 * 24.0,
+                        cx + dx,
                         y + 72.0,
                         20.0,
                         &lang::get_or(key, plain),
@@ -2525,11 +2601,17 @@ impl Title {
             if let Some((icon, size)) = b.icon {
                 // CenteredIcon divides the button and sprite sizes separately:
                 // a 15px icon in a 20px button starts at 10 - 7 = 3, not 2.
+                let ix = b.x + (b.w / 2.0).floor() - (size / 2.0).floor();
+                let iy = b.y + 10.0 - (size / 2.0).floor();
+                if let Some(kind) = icon.strip_prefix("volt/") {
+                    draw_volt_icon(atlas, batch, kind, ix, iy);
+                    continue;
+                }
                 batch.sprite_scaled(
                     atlas,
                     &format!("gui/sprites/{icon}"),
-                    b.x + (b.w / 2.0).floor() - (size / 2.0).floor(),
-                    b.y + 10.0 - (size / 2.0).floor(),
+                    ix,
+                    iy,
                     size,
                     size,
                     u32::MAX,
@@ -2758,6 +2840,12 @@ impl Title {
             (Mode::Onboarding(_), Some(onboarding::CONTINUE)) => {
                 self.onboarding_close();
                 Action::None
+            }
+            (Mode::Main, Some(125)) => {
+                Action::OpenUri("https://discord.gg/WsBxGsKyhU".to_owned())
+            }
+            (Mode::Main, Some(126)) => {
+                Action::OpenUri("https://entitybrian69-bit.github.io/Volt-launcher/".to_owned())
             }
             (Mode::Main, Some(3)) => Action::Options,
             (Mode::Main, Some(8)) => Action::VoltBoost,
@@ -3554,6 +3642,31 @@ mod classic_tests {
                     ));
                     title.mode = Mode::Main;
                 }
+            }
+            // Volt's Discord and website buttons flank the icon row.
+            for (id, x, icon, uri) in [
+                (
+                    125,
+                    cx - 58.0,
+                    "volt/discord",
+                    "https://discord.gg/WsBxGsKyhU",
+                ),
+                (
+                    126,
+                    cx + 38.0,
+                    "volt/v",
+                    "https://entitybrian69-bit.github.io/Volt-launcher/",
+                ),
+            ] {
+                let b = buttons.iter().find(|b| b.id == id).unwrap();
+                assert_eq!(
+                    (b.x, b.y, b.w, b.enabled, b.icon),
+                    (x, y + 72.0, 20.0, true, Some((icon, 15.0)))
+                );
+                assert_eq!(
+                    title.click(x + 10.0, y + 82.0, (w, h)),
+                    (Action::OpenUri(uri.to_owned()), true)
+                );
             }
             for id in [2, 3] {
                 assert_eq!(buttons.iter().find(|b| b.id == id).unwrap().y, y + 96.0);

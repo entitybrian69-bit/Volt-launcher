@@ -69,6 +69,8 @@ enum Act {
     ApplyControlPreset(usize),
     /// Restores the built-in Volt Default touch controls live.
     ResetControlLayout,
+    /// Opens the embedded Controls Studio (the launcher's editor, 1:1).
+    EditControls,
 }
 
 /// A finger dragging the floating logo.
@@ -102,6 +104,13 @@ pub(super) struct Hub {
     /// The saved control layouts, loaded when the hub opens or the
     /// Controls tab is tapped (never scanned per frame).
     presets: Vec<horizon_client::touch::import::PresetEntry>,
+    /// The embedded Controls Studio: the exact launcher editor, opened
+    /// from the Controls tab and drawn over the whole screen.
+    #[cfg(target_os = "android")]
+    pub studio: crate::launcher::controls_studio::ControlsStudio,
+    /// The Studio's click targets of the last drawn frame (launcher dp).
+    #[cfg(target_os = "android")]
+    studio_targets: Vec<([f32; 4], crate::launcher::pages::Action)>,
 }
 
 /// The account root that holds `imported-controls/` (the saved layouts).
@@ -522,8 +531,147 @@ impl Game<'_> {
                     Err(e) => self.volt_hub.status = e,
                 }
             }
+            Act::EditControls => {
+                #[cfg(target_os = "android")]
+                {
+                    // The hub makes way: the Studio is the whole screen,
+                    // exactly like the launcher's Controls tab editor.
+                    self.volt_hub.open = false;
+                    self.pad.touch.clear();
+                    self.volt_hub
+                        .studio
+                        .open_for_profile(&volt_controls_game_home());
+                    self.volt_hub.studio.status_hint =
+                        "Editing the live layout - Back saves and returns to the game.".into();
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    self.volt_hub.status =
+                        "The Controls Studio is part of the Android build.".to_string();
+                }
+            }
         }
         true
+    }
+
+    /// Whether the embedded Controls Studio is on screen.
+    pub(super) fn volt_studio_open(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.volt_hub.studio.open
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            false
+        }
+    }
+
+    /// Draws the embedded Controls Studio over the whole frame, in the
+    /// launcher's dp space, and rebuilds its click targets.
+    #[cfg(target_os = "android")]
+    pub(super) fn draw_volt_studio(&mut self, batch: &mut HudBatch) {
+        let mut targets = std::mem::take(&mut self.volt_hub.studio_targets);
+        targets.clear();
+        let mut ui = Ui::mobile(&self.gui.atlas, batch, (0.0, 0.0));
+        self.volt_hub.studio.draw(&mut ui, &mut targets);
+        ui.finish();
+        self.volt_hub.studio_targets = targets;
+    }
+
+    /// The launcher's dp density for the Studio's pointer coordinates.
+    #[cfg(target_os = "android")]
+    fn volt_studio_density(&self) -> f32 {
+        let mut b = HudBatch::new(self.volt_screen_px());
+        Ui::mobile(&self.gui.atlas, &mut b, (0.0, 0.0)).density
+    }
+
+    /// Routes a touch to the embedded Controls Studio. While it is open
+    /// it owns the screen, so every touch is consumed.
+    #[cfg(target_os = "android")]
+    pub(super) fn android_studio_touch(&mut self, t: &winit::event::Touch) -> bool {
+        use winit::event::TouchPhase;
+        if !self.volt_hub.studio.open {
+            return false;
+        }
+        let density = self.volt_studio_density();
+        let (x, y) = (
+            t.location.x as f32 / density,
+            t.location.y as f32 / density,
+        );
+        match t.phase {
+            TouchPhase::Started => {
+                let _ = self.volt_hub.studio.pointer_down(x, y);
+            }
+            TouchPhase::Moved => {
+                let _ = self.volt_hub.studio.pointer_move(x, y);
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                let dragged = self.volt_hub.studio.pointer_up();
+                if t.phase == TouchPhase::Ended && !dragged {
+                    let act = self
+                        .volt_hub
+                        .studio_targets
+                        .iter()
+                        .find(|([rx, ry, rw, rh], _)| {
+                            x >= *rx && x <= *rx + *rw && y >= *ry && y <= *ry + *rh
+                        })
+                        .map(|(_, a)| *a);
+                    if let Some(crate::launcher::pages::Action::Studio(sact)) = act {
+                        self.audio.play_button_click();
+                        self.volt_studio_action(sact);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Runs one Studio action exactly like the launcher does, then pulls
+    /// the result back into the running game when the editor closed.
+    #[cfg(target_os = "android")]
+    fn volt_studio_action(&mut self, sact: crate::launcher::controls_studio::StudioAction) {
+        let root = volt_controls_root();
+        let home = volt_controls_game_home();
+        if let Some(msg) = self.volt_hub.studio.handle_action(sact, &root, &home) {
+            self.volt_hub.status = msg;
+        }
+        if matches!(
+            sact,
+            crate::launcher::controls_studio::StudioAction::SavePreset
+        ) {
+            self.volt_hub.presets = horizon_client::touch::import::list_presets(&root);
+        }
+        if !self.volt_hub.studio.open {
+            self.volt_studio_closed();
+        }
+    }
+
+    /// The Studio saved and closed: the live overlay reloads instantly.
+    #[cfg(target_os = "android")]
+    fn volt_studio_closed(&mut self) {
+        self.volt_apply_live_controls();
+        self.volt_hub.presets =
+            horizon_client::touch::import::list_presets(&volt_controls_root());
+    }
+
+    /// The system Back inside the Studio: closes its open dialog first,
+    /// then saves and exits. Returns whether the press was consumed.
+    #[cfg(target_os = "android")]
+    pub(super) fn volt_studio_back(&mut self) -> bool {
+        if !self.volt_hub.studio.open {
+            return false;
+        }
+        if !self.volt_hub.studio.back() {
+            self.volt_studio_closed();
+            self.volt_hub.status = "Controls saved - live, no restart.".to_string();
+        }
+        true
+    }
+
+    /// Feeds the native keyboard's output to the Studio's Name/Size fields.
+    #[cfg(target_os = "android")]
+    pub(super) fn volt_studio_osk(&mut self, out: &horizon_client::osk::Output) -> bool {
+        self.volt_hub.studio.open && self.volt_hub.studio.handle_osk(out)
     }
 
     /// Reloads `horizon-touch.json` into the running game so a control
@@ -877,6 +1025,14 @@ impl Game<'_> {
                         if self.touch_controls_hidden() { "OFF" } else { "ON" },
                         Some(Act::ShowControls),
                     );
+                    row(
+                        &mut ui,
+                        &mut targets,
+                        &mut y,
+                        "Edit controls (Controls Studio)",
+                        "open",
+                        Some(Act::EditControls),
+                    );
                     if self.volt_hub.presets.is_empty() {
                         note(&mut ui, &mut y, "No saved layouts yet.");
                         note(
@@ -885,7 +1041,7 @@ impl Game<'_> {
                             "Import or build layouts in the launcher's Controls tab.",
                         );
                     } else {
-                        for (i, entry) in self.volt_hub.presets.iter().take(7).enumerate() {
+                        for (i, entry) in self.volt_hub.presets.iter().take(6).enumerate() {
                             let is_active = entry.meta.name == active;
                             let value = if is_active {
                                 "ACTIVE".to_string()

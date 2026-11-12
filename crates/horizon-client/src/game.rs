@@ -7495,7 +7495,11 @@ impl Game<'_> {
         // over every in-game screen — pause, settings, inventory, chat and
         // full-screen menus — so the dashboard is always one tap away.
         // A hidden GUI, a watched replay and the touch-layout editor stay clean.
-        if !self.ui.hide_gui && self.replay_control().is_none() && !self.touch_editing() {
+        if !self.ui.hide_gui
+            && self.replay_control().is_none()
+            && !self.touch_editing()
+            && !self.volt_studio_open()
+        {
             horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_volt_hub(b));
         }
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| {
@@ -14177,9 +14181,12 @@ impl Game<'_> {
                 self.settings.keypad.enabled && self.pad.touch.editor.is_none();
         }
         #[cfg(target_os = "android")]
-        if self.pad.touch.editor.is_some()
-            || ((crate::touch_visible() || self.settings.keypad.enabled)
-                && (!self.pad_in_menu() || self.android_inventory_controls()))
+        if !self.volt_studio_open()
+            && (self.pad.touch.editor.is_some()
+                || ((crate::touch_visible() || self.settings.keypad.enabled)
+                    && (!self.pad_in_menu()
+                        || self.android_inventory_controls()
+                        || self.android_title_controls())))
         {
             self.pad.touch.context_use =
                 self.pad.touch.settings.contextual_interact && self.touch_context_use();
@@ -14201,11 +14208,18 @@ impl Game<'_> {
         {
             if (crate::touch_visible() || self.settings.keypad.enabled)
                 && self.pad.touch.editor.is_none()
+                && !self.volt_studio_open()
             {
                 self.pad
                     .touch_ui
                     .draw(&mut hud, &self.gui.atlas, self.pad_in_menu());
             }
+        }
+        // The embedded Controls Studio: the whole screen, over everything,
+        // exactly like the launcher's editor.
+        #[cfg(target_os = "android")]
+        if self.volt_studio_open() {
+            self.draw_volt_studio(&mut hud);
         }
         self.flush_ime(&mut hud);
         // LevelLoadingScreen (Reason.OTHER) draws the title's panorama.
@@ -15376,6 +15390,9 @@ impl Game<'_> {
         #[cfg(target_os = "android")]
         if matches!(&event,WindowEvent::KeyboardInput {event,..} if event.state==ElementState::Pressed && event.logical_key==winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack))
         {
+            if self.volt_studio_back() {
+                return;
+            }
             if self.pad.touch.editor.is_some() {
                 self.pad.touch.cancel_editor();
                 self.settings.touch = self.pad.touch.settings.clone();
@@ -15451,7 +15468,8 @@ impl Game<'_> {
                 touch.location.x as f32 / size.width.max(1) as f32,
                 touch.location.y as f32 / size.height.max(1) as f32,
             ];
-            let inventory_control = self.android_inventory_controls()
+            let inventory_control = (self.android_inventory_controls()
+                || self.android_title_controls())
                 && (self.pad.touch.owns_pointer(touch.id)
                     || (touch.phase == TouchPhase::Started
                         && self.pad.touch.control_at_point(overlay_point)));
@@ -15561,7 +15579,7 @@ impl Game<'_> {
                     }
                 }
             } else {
-                if !self.android_inventory_controls() {
+                if !self.android_inventory_controls() && !self.android_title_controls() {
                     self.pad.touch.clear();
                 }
                 if !matches!(self.screen, Screen::Inventory | Screen::Creative) {

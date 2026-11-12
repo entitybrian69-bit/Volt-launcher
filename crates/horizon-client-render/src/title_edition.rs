@@ -1,9 +1,9 @@
-//! "RUST EDITION" under the classic title screen's logo.
+//! "VOLT EDITION" under the classic title screen's logo.
 //!
 //! Vanilla's `textures/gui/title/edition.png` reads "JAVA EDITION". Horizon
 //! never ships Mojang's art, so the banner is rebuilt at load time from the
 //! player's own texture: "EDITION" is kept column for column, the "T" is lifted
-//! out of it, and R, U and S are Horizon's own glyphs (MIT, the rectangles
+//! out of it, and V, O and L are Volt's own glyphs (MIT, the rectangles
 //! below), drawn the way the texture's letters are built (a face with darker
 //! sides and a light bottom edge, a dark extrusion under it, a black outline
 //! and a soft rim) in the shades sampled from the texture itself. Only
@@ -29,34 +29,33 @@ const EXTRUSION: usize = 8;
 const OUTLINE: usize = 3;
 /// The face-to-face spacing between letters.
 const LETTER_GAP: usize = 6;
-/// The new glyphs' face width: "RUST" then spans "JAVA"'s columns to within
+/// The new glyphs' face width: "VOLT" then spans "JAVA"'s columns to within
 /// a texel, so "EDITION" stays where it is and the banner stays centred.
 const GLYPH_WIDTH: usize = 42;
 /// The first face column, as "JAVA"'s.
 const FIRST_FACE: usize = 4;
 
-/// Horizon's R, U and S: face rectangles `[x0, y0, x1, y1)` in texels from the
-/// face's top-left, 42 wide and 39 tall, with 11-texel stems, 10-texel bars and
-/// 7-texel notches for the rounded corners.
-const R: &[[usize; 4]] = &[
-    [0, 0, 11, 39],
-    [0, 0, 35, 10],
-    [31, 7, 42, 19],
-    [0, 15, 35, 25],
-    [31, 25, 42, 39],
+/// Volt's V, O and L: face rectangles `[x0, y0, x1, y1)` in texels from the
+/// face's top-left, 42 wide and 39 tall, with 11-texel stems, 10-texel bars
+/// and stepped strokes where the "V" narrows.
+const V: &[[usize; 4]] = &[
+    [0, 0, 11, 20],
+    [31, 0, 42, 20],
+    [6, 17, 17, 30],
+    [25, 17, 36, 30],
+    [12, 27, 30, 39],
 ];
-const U: &[[usize; 4]] = &[[0, 0, 11, 32], [31, 0, 42, 32], [7, 29, 35, 39]];
-const S: &[[usize; 4]] = &[
-    [7, 0, 42, 10],
-    [0, 7, 11, 19],
-    [7, 15, 35, 25],
-    [31, 21, 42, 32],
-    [0, 29, 35, 39],
+const O: &[[usize; 4]] = &[
+    [7, 0, 35, 10],
+    [0, 7, 11, 32],
+    [31, 7, 42, 32],
+    [7, 29, 35, 39],
 ];
+const L: &[[usize; 4]] = &[[0, 0, 11, 39], [0, 29, 35, 39]];
 
-/// The banner rebuilt to read "RUST EDITION", or `None` when the texture is
+/// The banner rebuilt to read "VOLT EDITION", or `None` when the texture is
 /// not vanilla's (a resource pack's own).
-pub fn rust_edition(width: u32, height: u32, pixels: &[u8]) -> Option<Vec<u8>> {
+pub fn volt_edition(width: u32, height: u32, pixels: &[u8]) -> Option<Vec<u8>> {
     (fingerprint(width, height, pixels) == VANILLA).then(|| compose(pixels))
 }
 
@@ -129,7 +128,7 @@ impl Palette {
 /// Faces of the new glyphs, positioned in the texture.
 fn glyph_faces() -> Vec<bool> {
     let mut face = vec![false; WIDTH * HEIGHT];
-    for (i, glyph) in [R, U, S].into_iter().enumerate() {
+    for (i, glyph) in [V, O, L].into_iter().enumerate() {
         let left = FIRST_FACE + i * (GLYPH_WIDTH + LETTER_GAP);
         for &[x0, y0, x1, y1] in glyph {
             for y in FACE_TOP + y0..FACE_TOP + y1 {
@@ -142,7 +141,7 @@ fn glyph_faces() -> Vec<bool> {
     face
 }
 
-/// Where the "T" lifted from "EDITION" goes: one letter gap after the S.
+/// Where the "T" lifted from "EDITION" goes: one letter gap after the L.
 fn t_left() -> usize {
     FIRST_FACE + 3 * (GLYPH_WIDTH + LETTER_GAP)
 }
@@ -320,7 +319,7 @@ fn soften_edges(out: &mut [u8], soft: Rgba) {
     }
 }
 
-/// "RUST" in place of "JAVA"; `pixels` is a 512x64 RGBA banner laid out as
+/// "VOLT" in place of "JAVA"; `pixels` is a 512x64 RGBA banner laid out as
 /// vanilla's.
 fn compose(pixels: &[u8]) -> Vec<u8> {
     let palette = Palette::sample(pixels);
@@ -408,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn rust_replaces_java_and_edition_is_untouched() {
+    fn volt_replaces_java_and_edition_is_untouched() {
         let source = stand_in();
         let out = compose(&source);
         assert_eq!(out.len(), WIDTH * HEIGHT * 4);
@@ -417,7 +416,7 @@ mod tests {
             columns(&source, EDITION_START..WIDTH)
         );
         assert!(!out.as_chunks::<4>().0.contains(&[255, 0, 255, 255]));
-        // R, U and S: their strokes are faces, their notches and counters not.
+        // V, O and L: their strokes are faces, their notches and counters not.
         let lit = |x: usize, y: usize| lum(pixel(&out, x, y)) >= 100;
         let glyph = |i: usize, x: usize, y: usize| {
             lit(
@@ -425,17 +424,17 @@ mod tests {
                 FACE_TOP + y,
             )
         };
-        for (i, shape) in [R, U, S].into_iter().enumerate() {
+        for (i, shape) in [V, O, L].into_iter().enumerate() {
             for &[x0, y0, x1, y1] in shape {
                 assert!(glyph(i, (x0 + x1) / 2, (y0 + y1) / 2), "glyph {i}");
             }
         }
-        assert!(!glyph(0, 38, 21), "R's notch between bowl and leg");
-        assert!(!glyph(0, 20, 30), "R's open bottom");
-        assert!(!glyph(1, 20, 5), "U's open top");
-        assert!(!glyph(1, 2, 36), "U's rounded corner");
-        assert!(!glyph(2, 2, 22), "S's lower-left notch");
-        assert!(!glyph(2, 38, 17), "S's upper-right notch");
+        assert!(!glyph(0, 21, 5), "V's open top centre");
+        assert!(!glyph(0, 2, 35), "V's open bottom left");
+        assert!(!glyph(0, 39, 35), "V's open bottom right");
+        assert!(!glyph(1, 21, 19), "O's counter");
+        assert!(!glyph(1, 2, 2), "O's rounded top-left corner");
+        assert!(!glyph(2, 30, 10), "L's open top right");
         // The T is EDITION's, moved.
         let shift = T_BODY.0 - t_left();
         for y in 0..HEIGHT {
@@ -451,19 +450,19 @@ mod tests {
         assert!(out[WIDTH * 55 * 4..].iter().all(|&b| b == 0));
         let gap = columns(&out, 195..EDITION_START);
         assert!(gap.as_chunks::<4>().0.iter().all(|p| p[3] == 0));
-        // Centred: "RUST" spans "JAVA"'s columns to within a texel.
+        // Centred: "VOLT" spans "JAVA"'s columns to within a texel.
         let used = |x: usize| (0..HEIGHT).any(|y| pixel(&out, x, y)[3] > 0);
         let last = (0..EDITION_START).rev().find(|&x| used(x)).unwrap();
         assert!(
             used(0) && (193..=195).contains(&last),
-            "RUST ends at {last}"
+            "VOLT ends at {last}"
         );
     }
 
     #[test]
     fn only_vanilla_is_rebuilt() {
         let source = stand_in();
-        assert!(rust_edition(512, 64, &source).is_none());
+        assert!(volt_edition(512, 64, &source).is_none());
     }
 
     /// Against the prepared vanilla resources when they are present.
@@ -476,7 +475,7 @@ mod tests {
         let Ok((w, h, pixels)) = crate::hud::decode(&path) else {
             return;
         };
-        let out = rust_edition(w, h, &pixels).expect("vanilla's edition.png");
+        let out = volt_edition(w, h, &pixels).expect("vanilla's edition.png");
         assert_eq!(
             columns(&out, EDITION_START..WIDTH),
             columns(&pixels, EDITION_START..WIDTH)
@@ -485,6 +484,6 @@ mod tests {
         assert_soft_rim(&out);
         let mut edited = pixels.clone();
         edited[3] ^= 1;
-        assert!(rust_edition(w, h, &edited).is_none());
+        assert!(volt_edition(w, h, &edited).is_none());
     }
 }

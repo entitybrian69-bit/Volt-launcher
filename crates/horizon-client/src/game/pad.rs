@@ -136,6 +136,17 @@ impl Game<'_> {
         self.settings.touch.inventory_controls
             && matches!(self.screen, Screen::Inventory | Screen::Creative)
     }
+    /// The in-game title screen shows the custom "In menus" touch buttons,
+    /// so the player's keybinds stay usable on the dashboard. The Volt
+    /// Hub's "Show touch controls" switch governs them like everywhere
+    /// else; the open hub window and the editors keep the screen clean.
+    #[cfg(target_os = "android")]
+    pub(super) fn android_title_controls(&self) -> bool {
+        self.title.is_some()
+            && !self.touch_editing()
+            && !self.volt_hub.open
+            && !self.volt_studio_open()
+    }
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &ActiveEventLoop) {
         // "3D Skins" flipped (Options > Mods, the launcher's Mods tab, or
@@ -160,6 +171,7 @@ impl Game<'_> {
                 &crate::backend::game_home(),
             );
             self.pad.touch.inventory_mode = self.android_inventory_controls();
+            self.pad.touch.menu_screen = self.android_title_controls();
             self.android_virtual_mouse_clicks(event_loop);
             let active = horizon_client::android_runtime::active_input();
             if self.pad.last_input_mode.replace(active).is_some_and(|old| {

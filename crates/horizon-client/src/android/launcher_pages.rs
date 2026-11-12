@@ -73,10 +73,10 @@ pub(crate) mod theme {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum HomeTab { Overview, Worlds, Multiplayer, Screenshots, Replays, Console }
+pub(crate) enum HomeTab { Overview, Worlds, Multiplayer, Screenshots, Replays, Console }
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum Action {
+pub(crate) enum Action {
     HomeTab(HomeTab),
     ToggleAppearance,
     CycleAccent,
