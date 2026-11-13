@@ -17,7 +17,7 @@
         <package android:name="app.revenge" />
         <package android:name="cocobo1.pupu.app" />
     </queries>
-    <application android:label="Volt Launcher" android:appCategory="game" android:icon="@drawable/launcher_icon" android:banner="@drawable/tv_banner" android:extractNativeLibs="false" android:hasFragileUserData="true" android:usesCleartextTraffic="false">
+    <application android:label="${appLabel}" android:appCategory="game" android:icon="@drawable/launcher_icon" android:banner="@drawable/tv_banner" android:extractNativeLibs="false" android:hasFragileUserData="true" android:usesCleartextTraffic="false">
         <provider android:name="dev.horizon.android.HorizonDocumentsProvider" android:authorities="${applicationId}.documents" android:exported="true" android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
             <intent-filter>
                 <action android:name="android.content.action.DOCUMENTS_PROVIDER" />

@@ -5,6 +5,9 @@ android {
     compileSdk 35
     defaultConfig {
         applicationId providers.gradleProperty('appId').getOrElse('ae.net.Voltlauncher')
+        // The rolling debug channel is a separate app: its own icon label, so
+        // testers can keep it next to the stable launcher without confusion.
+        manifestPlaceholders = [appLabel: providers.gradleProperty('appId').getOrElse('ae.net.Voltlauncher') == 'ae.net.Voltlauncher.debug' ? 'Volt Debug' : 'Volt Launcher']
         minSdk providers.gradleProperty('minSdk').getOrElse('28').toInteger()
         targetSdk 35
         versionCode providers.gradleProperty('versionCode').orElse(providers.environmentVariable('VOLT_VERSION_CODE')).getOrElse('34').toInteger()

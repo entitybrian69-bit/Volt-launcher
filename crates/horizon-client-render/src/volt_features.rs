@@ -788,6 +788,10 @@ mod tests {
         for c in EntityCap::ALL {
             assert_eq!(EntityCap::parse(c.as_str()), Some(c));
         }
+        for c in FrameDistance::ALL {
+            assert_eq!(FrameDistance::parse(c.as_str()), Some(c));
+            assert_eq!(c.dist_sq(), c.blocks().map(|b| b * b));
+        }
         for b in ParticleBudget::ALL {
             assert_eq!(ParticleBudget::parse(b.as_str()), Some(b));
         }
@@ -1243,6 +1247,91 @@ impl BlockEntityCap {
             Self::Cap64 => "64 + Occlude",
             Self::Cap32 => "32 + Occlude",
             Self::Cap16 => "16 + Occlude",
+        }
+    }
+}
+
+/// "Frame items" per-category draw distance, in blocks from the camera.
+/// `Unlimited` keeps vanilla behavior exactly (zero cost by default).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameDistance {
+    #[default]
+    Unlimited,
+    D128,
+    D96,
+    D64,
+    D48,
+    D32,
+    D16,
+}
+
+impl FrameDistance {
+    pub const ALL: [Self; 7] = [
+        Self::Unlimited,
+        Self::D128,
+        Self::D96,
+        Self::D64,
+        Self::D48,
+        Self::D32,
+        Self::D16,
+    ];
+
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|&v| v == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    pub fn blocks(self) -> Option<f64> {
+        match self {
+            Self::Unlimited => None,
+            Self::D128 => Some(128.0),
+            Self::D96 => Some(96.0),
+            Self::D64 => Some(64.0),
+            Self::D48 => Some(48.0),
+            Self::D32 => Some(32.0),
+            Self::D16 => Some(16.0),
+        }
+    }
+
+    pub fn dist_sq(self) -> Option<f64> {
+        self.blocks().map(|b| b * b)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unlimited => "unlimited",
+            Self::D128 => "128",
+            Self::D96 => "96",
+            Self::D64 => "64",
+            Self::D48 => "48",
+            Self::D32 => "32",
+            Self::D16 => "16",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "unlimited" | "off" => Some(Self::Unlimited),
+            "128" => Some(Self::D128),
+            "96" => Some(Self::D96),
+            "64" => Some(Self::D64),
+            "48" => Some(Self::D48),
+            "32" => Some(Self::D32),
+            "16" => Some(Self::D16),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unlimited => "Unlimited",
+            Self::D128 => "128 blocks",
+            Self::D96 => "96 blocks",
+            Self::D64 => "64 blocks",
+            Self::D48 => "48 blocks",
+            Self::D32 => "32 blocks",
+            Self::D16 => "16 blocks",
         }
     }
 }

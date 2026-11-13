@@ -168,6 +168,10 @@ pub struct TouchControls {
     pub break_progress: f32,
     last_marker: Option<([f32; 2], Instant)>,
     last_sneak_tap: Option<Instant>,
+    /// When the on-screen sneak button was last pressed. The pad merge uses
+    /// it to force toggle behavior for touch-origin sneaks, even when the
+    /// controller's stick-click is configured as hold-to-sneak.
+    last_sneak_button: Option<Instant>,
     sprint_latched: bool,
 }
 impl TouchControls {
@@ -587,6 +591,13 @@ impl TouchControls {
             }
         }
     }
+    /// A touch sneak press in the last moment: the pad layer treats it as a
+    /// toggle (Bedrock parity) regardless of the controller's stick-click
+    /// hold/toggle preference.
+    pub fn recent_sneak_button(&self) -> bool {
+        self.last_sneak_button
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(600))
+    }
     pub fn shield_held(&self) -> bool {
         self.settings.shield_button
             && self.shield_available
@@ -640,6 +651,9 @@ impl TouchControls {
         }
         if started {
             let control = self.control_at(point);
+            if control == Some(Control::Sneak) {
+                self.last_sneak_button = Some(Instant::now());
+            }
             let role = match control {
                 Some(Control::Move)
                     if !self
@@ -689,7 +703,7 @@ impl TouchControls {
                     if self
                         .last_sneak_tap
                         .take()
-                        .is_some_and(|t| now.duration_since(t) < Duration::from_millis(300))
+                        .is_some_and(|t| now.duration_since(t) < Duration::from_millis(500))
                     {
                         Role::Button(Button::RightStick)
                     } else {
@@ -751,6 +765,7 @@ impl TouchControls {
         self.clear_custom();
         self.fingers.clear();
         self.last_sneak_tap = None;
+        self.last_sneak_button = None;
         self.sprint_latched = false;
         self.pending = PadState::default();
         self.aim = None;
@@ -1681,6 +1696,16 @@ mod tests {
         t.settings.left_handed = true;
         t.update(2, [0.87, 0.66], true, false);
         assert_eq!(t.state().left, [0.0, 1.0]);
+    }
+    #[test]
+    fn sneak_taps_mark_touch_origin_for_the_pad_toggle() {
+        let mut t = TouchControls::default();
+        t.settings.mode = Mode::Dpad;
+        assert!(!t.recent_sneak_button());
+        t.update(10, [0.13, 0.76], true, false);
+        assert!(t.recent_sneak_button());
+        t.clear();
+        assert!(!t.recent_sneak_button());
     }
     #[test]
     fn editing_owns_input_and_cancel_restores_layouts() {

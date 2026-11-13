@@ -5297,6 +5297,26 @@ impl Game<'_> {
             if hub_shield && is_player && d_sq > 18.0 * 18.0 {
                 continue;
             }
+            // Volt "Frame items" (Volt Settings > Frame items): per-category
+            // loading toggle + draw distance. Defaults (on + Unlimited) keep
+            // vanilla behavior exactly. The local player's own body renders
+            // through a separate path and is never filtered here.
+            {
+                let fx = &self.settings.extras;
+                let (on, dist) = if is_player {
+                    (fx.frame_players, fx.frame_players_distance)
+                } else {
+                    (fx.frame_mobs, fx.frame_mobs_distance)
+                };
+                if !on {
+                    continue;
+                }
+                if let Some(max) = dist.dist_sq()
+                    && d_sq > max
+                {
+                    continue;
+                }
+            }
             // Entity.shouldRenderAtSqrDistance: 64 times the bounding box's
             // mean edge, scaled by the view scale. RemotePlayer's box counts
             // ten times.

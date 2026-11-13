@@ -1140,6 +1140,7 @@ jobs:
           ABI: ${{ matrix.abi }}
           PROFILE: ${{ needs.plan.outputs.profile }}
           RUN_NUMBER: ${{ github.run_number }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           python3 - <<'PY'
           from collections import deque
@@ -1187,11 +1188,18 @@ jobs:
           )
           print(f"Building Volt Launcher with monotonic versionCode={version_code}", flush=True)
 
+          # Branch pushes feed the rolling `debug` release as a SEPARATE app
+          # (ae.net.Voltlauncher.debug): it installs beside the stable launcher
+          # and can never overwrite it. Only `v*` tags build the stable id.
+          is_tag = os.environ.get("IS_TAG", "false").lower() == "true"
+          app_id = "ae.net.Voltlauncher" if is_tag else "ae.net.Voltlauncher.debug"
+          print(f"Packaging applicationId={app_id} (tag build: {is_tag})", flush=True)
           cmd = [
               sys.executable, "tools/android_build.py",
               "--abi", os.environ["ABI"],
               "--public",
               "--profile", os.environ["PROFILE"],
+              "--app-id", app_id,
               "--sdk", os.environ["ANDROID_HOME"],
               "--java-home", os.environ["JAVA_HOME"],
               "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
@@ -1225,6 +1233,7 @@ jobs:
         env:
           ABI: ${{ matrix.abi }}
           RUN_NUMBER: ${{ github.run_number }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           python3 - <<'PY'
           import hashlib
@@ -1251,6 +1260,8 @@ jobs:
               run_num = int(os.environ.get("RUN_NUMBER", "1"))
               abi_offset = 1 if abi == "arm64-v8a" else 0
               expected_vc = 280000 + run_num * 2 + abi_offset
+              is_tag = os.environ.get("IS_TAG", "false").lower() == "true"
+              app_id = "ae.net.Voltlauncher" if is_tag else "ae.net.Voltlauncher.debug"
               min_sdk = 27 if abi in ("armeabi-v7a", "x86") else 28
 
               gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
@@ -1364,6 +1375,8 @@ jobs:
 
               badging = run_checked([str(aapt2), "dump", "badging", str(dst_apk)])
               pkg_line = badging.splitlines()[0] if badging.splitlines() else ""
+              if f"package: name='{app_id}'" not in pkg_line:
+                  raise RuntimeError(f"APK package mismatch: expected {app_id} ({pkg_line})")
               vc_match = re.search(r"versionCode='(\d+)'", pkg_line)
               vn_match = re.search(r"versionName='([^']+)'", pkg_line)
               actual_vc = int(vc_match.group(1)) if vc_match else -1
@@ -1373,7 +1386,7 @@ jobs:
               if actual_vn != version:
                   raise RuntimeError(f"APK versionName mismatch: expected {version}, got {actual_vn} ({pkg_line})")
 
-              run_checked([sys.executable, "tools/check_android_release.py", str(dst_apk), "--aapt2", str(aapt2), "--public"])
+              run_checked([sys.executable, "tools/check_android_release.py", str(dst_apk), "--aapt2", str(aapt2), "--public", "--app-id", app_id])
               with zipfile.ZipFile(dst_apk, "r") as zverify:
                   bad_entry = zverify.testzip()
                   if bad_entry is not None:
@@ -1402,8 +1415,8 @@ jobs:
                   out.write(f"size_mib={size_mib:.2f}\n")
 
               with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-                  summary.write(f"### Built `{apk_name}` (`ae.net.Voltlauncher`)\n\n")
-                  summary.write(f"- **Package ID:** `ae.net.Voltlauncher`\n")
+                  summary.write(f"### Built `{apk_name}` (`{app_id}`)\n\n")
+                  summary.write(f"- **Package ID:** `{app_id}`\n")
                   summary.write(f"- **ABI:** `{abi}`\n")
                   summary.write(f"- **Version:** `{version}` (`versionCode={actual_vc}`)\n")
                   summary.write(f"- **Signatures:** `v1 + v2` (`zipalign -P 16 4` verified, 16 KB page-ready)\n")
@@ -1423,6 +1436,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           APK_NAME: ${{ steps.stage.outputs.apk_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           python3 - <<'PY'
           import os
@@ -1439,17 +1453,23 @@ jobs:
           sdk = Path(os.environ["ANDROID_HOME"])
           adb = str(sdk / "platform-tools/adb")
           new_apk = Path(".local/android/dist/arm64-v8a") / os.environ["APK_NAME"]
+          # Debug-channel builds are a separate app (ae.net.Voltlauncher.debug):
+          # the in-place upgrade over the stable baseline only applies to tags.
+          is_tag = os.environ.get("IS_TAG", "false").lower() == "true"
+          app_id = "ae.net.Voltlauncher" if is_tag else "ae.net.Voltlauncher.debug"
           tmp = Path(tempfile.mkdtemp())
           emu = None
           elog = None
           try:
-              old_dir = tmp / "old"
-              old_dir.mkdir()
-              dl = subprocess.run(
-                  ["gh", "release", "download", "v0.7.6-build.939d02a", "-p", "*.apk", "-D", str(old_dir)],
-                  capture_output=True, text=True,
-              )
-              old_apk = next(old_dir.glob("*.apk"), None) if dl.returncode == 0 else None
+              old_apk = None
+              if is_tag:
+                  old_dir = tmp / "old"
+                  old_dir.mkdir()
+                  dl = subprocess.run(
+                      ["gh", "release", "download", "v0.7.6-build.939d02a", "-p", "*.apk", "-D", str(old_dir)],
+                      capture_output=True, text=True,
+                  )
+                  old_apk = next(old_dir.glob("*.apk"), None) if dl.returncode == 0 else None
 
               sdkmgr = str(sdk / "cmdline-tools/latest/bin/sdkmanager")
               if not Path(sdkmgr).is_file():
@@ -1505,12 +1525,12 @@ jobs:
 
               r_new = subprocess.run([adb, "install", "-r", str(new_apk)], capture_output=True, text=True)
               if r_new.returncode != 0:
-                  raise RuntimeError(f"In-place upgrade to {new_apk.name} failed: {r_new.stdout} {r_new.stderr}")
-              notes.append(f"upgrade_{new_apk.name}=Success")
+                  raise RuntimeError(f"Install of {new_apk.name} ({app_id}) failed: {r_new.stdout} {r_new.stderr}")
+              notes.append(f"{'upgrade' if is_tag else 'install'}_{new_apk.name}=Success")
 
               subprocess.run([adb, "logcat", "-c"], check=False)
               launch = subprocess.run(
-                  [adb, "shell", "am", "start", "-W", "-n", "ae.net.Voltlauncher/com.google.androidgamesdk.GameActivity"],
+                  [adb, "shell", "am", "start", "-W", "-n", f"{app_id}/com.google.androidgamesdk.GameActivity"],
                   capture_output=True, text=True,
               )
               time.sleep(2)
@@ -1664,6 +1684,11 @@ jobs:
           Rolling testing build, replaced on every push. Not a release:
           install the APK for your device to test the newest changes. Stable
           downloads live on the latest `v*` release.
+
+          This build is a **separate app** (`ae.net.Voltlauncher.debug`, shown
+          as "Volt Debug"): it installs next to the stable Volt Launcher and
+          never replaces it. Your stable install, worlds and settings are
+          untouched; the debug app keeps its own data.
 
           This APK includes selected native Volt features inspired by third-party mods.
           The catalog does **not** implement all original mods, their complete settings

@@ -9988,9 +9988,19 @@ impl Game<'_> {
                 .block_entity_cap
                 .limit_and_dist_sq()
                 .unwrap_or((usize::MAX, f64::INFINITY));
+            // Volt "Frame items": block-entity loading toggle + draw distance.
+            let frame_be_on = self.settings.extras.frame_block_entities;
+            let max_be_dist_sq = match self.settings.extras.frame_block_entities_distance.dist_sq()
+            {
+                Some(d) => max_be_dist_sq.min(d),
+                None => max_be_dist_sq,
+            };
             let mut visible_vec: Vec<&([i32; 3], u32)> = r
                 .visible_block_entities(self.settings.chunk_fade)
                 .filter(|(p, state)| {
+                    if !frame_be_on {
+                        return false;
+                    }
                     if !self.res.block_entity_render().renders(*state) {
                         return false;
                     }

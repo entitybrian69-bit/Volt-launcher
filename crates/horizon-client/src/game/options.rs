@@ -495,7 +495,20 @@ impl Game<'_> {
             );
         }
         self.particles.max_particles = s.extras.particle_budget.max_particles();
-        self.particles.max_render_distance_sq = s.extras.particle_budget.max_distance_sq();
+        // Volt "Frame items": the particle distance combines with the Volt
+        // Boost particle budget (the tighter limit wins); the toggle hides
+        // every particle.
+        self.particles.max_render_distance_sq = if !s.extras.frame_particles {
+            Some(0.0)
+        } else {
+            match (
+                s.extras.particle_budget.max_distance_sq(),
+                s.extras.frame_particles_distance.dist_sq(),
+            ) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            }
+        };
         self.particles.burst_shield = s.extras.chaos_particle_shield;
         self.particles.frustum_cull = s.extras.particle_frustum_cull;
         horizon_threads::set_thread_boost(s.extras.thread_boost);

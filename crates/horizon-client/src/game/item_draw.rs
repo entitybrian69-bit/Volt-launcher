@@ -418,6 +418,14 @@ impl Game<'_> {
             .item_render_cap
             .limit_and_dist_sq()
             .unwrap_or((usize::MAX, 64.0 * 64.0));
+        // Volt "Frame items": dropped-item loading toggle + draw distance.
+        if !self.settings.extras.frame_dropped {
+            return;
+        }
+        let max_dist_sq = match self.settings.extras.frame_dropped_distance.dist_sq() {
+            Some(d) => max_dist_sq.min(d),
+            None => max_dist_sq,
+        };
         let mut rendered = 0usize;
         for (item, at, partial) in
             self.dropped_item_candidates(camera, alpha, max_items, max_dist_sq)

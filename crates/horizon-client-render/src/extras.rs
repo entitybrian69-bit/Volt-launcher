@@ -4,8 +4,9 @@
 //! behind them. Every gameplay extra is off by default.
 use crate::volt_features::{
     AutoDrsMode, AudioVoiceCap, BlockEntityCap, ChunkUploadCap, DynamicIdleFps, EntityCap,
-    FastShadowMode, GlintTrimMode, ItemRenderCap, MenuBgMode, MinimapEntities, MinimapFrame,
-    MinimapTerrainMode, ParticleBudget, PerfHudMode, TickRange, VoltBoostPreset, WaypointColor,
+    FastShadowMode, FrameDistance, GlintTrimMode, ItemRenderCap, MenuBgMode, MinimapEntities,
+    MinimapFrame, MinimapTerrainMode, ParticleBudget, PerfHudMode, TickRange, VoltBoostPreset,
+    WaypointColor,
 };
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -159,6 +160,18 @@ pub struct Extras {
     pub entity_cap: EntityCap,
     pub item_render_cap: ItemRenderCap,
     pub block_entity_cap: BlockEntityCap,
+    /// "Frame items": per-category draw toggles and distances (Volt
+    /// Settings > Frame items). Everything on + Unlimited = exactly vanilla.
+    pub frame_mobs: bool,
+    pub frame_mobs_distance: FrameDistance,
+    pub frame_players: bool,
+    pub frame_players_distance: FrameDistance,
+    pub frame_dropped: bool,
+    pub frame_dropped_distance: FrameDistance,
+    pub frame_block_entities: bool,
+    pub frame_block_entities_distance: FrameDistance,
+    pub frame_particles: bool,
+    pub frame_particles_distance: FrameDistance,
     pub cull_sign_text: bool,
     pub fast_shadows: FastShadowMode,
     pub distant_mob_throttle: bool,
@@ -276,6 +289,16 @@ impl Default for Extras {
             entity_cap: EntityCap::Unlimited,
             item_render_cap: ItemRenderCap::Unlimited,
             block_entity_cap: BlockEntityCap::Unlimited,
+            frame_mobs: true,
+            frame_mobs_distance: FrameDistance::Unlimited,
+            frame_players: true,
+            frame_players_distance: FrameDistance::Unlimited,
+            frame_dropped: true,
+            frame_dropped_distance: FrameDistance::Unlimited,
+            frame_block_entities: true,
+            frame_block_entities_distance: FrameDistance::Unlimited,
+            frame_particles: true,
+            frame_particles_distance: FrameDistance::Unlimited,
             cull_sign_text: false,
             fast_shadows: FastShadowMode::Vanilla,
             distant_mob_throttle: false,
@@ -467,6 +490,36 @@ impl Extras {
                 "voltItemCap" => {
                     if let Some(v) = ItemRenderCap::parse(value) {
                         e.item_render_cap = v;
+                    }
+                }
+                "voltFrameMobs" => e.frame_mobs = flag(e.frame_mobs),
+                "voltFrameMobsDist" => {
+                    if let Some(v) = FrameDistance::parse(value) {
+                        e.frame_mobs_distance = v;
+                    }
+                }
+                "voltFramePlayers" => e.frame_players = flag(e.frame_players),
+                "voltFramePlayersDist" => {
+                    if let Some(v) = FrameDistance::parse(value) {
+                        e.frame_players_distance = v;
+                    }
+                }
+                "voltFrameDropped" => e.frame_dropped = flag(e.frame_dropped),
+                "voltFrameDroppedDist" => {
+                    if let Some(v) = FrameDistance::parse(value) {
+                        e.frame_dropped_distance = v;
+                    }
+                }
+                "voltFrameBlockEntities" => e.frame_block_entities = flag(e.frame_block_entities),
+                "voltFrameBlockEntitiesDist" => {
+                    if let Some(v) = FrameDistance::parse(value) {
+                        e.frame_block_entities_distance = v;
+                    }
+                }
+                "voltFrameParticles" => e.frame_particles = flag(e.frame_particles),
+                "voltFrameParticlesDist" => {
+                    if let Some(v) = FrameDistance::parse(value) {
+                        e.frame_particles_distance = v;
                     }
                 }
                 "voltBlockEntityCap" => {
@@ -1052,6 +1105,16 @@ impl Extras {
         push("voltEntityCap", self.entity_cap.as_str());
         push("voltItemCap", self.item_render_cap.as_str());
         push("voltBlockEntityCap", self.block_entity_cap.as_str());
+        push("voltFrameMobs", bool_text(self.frame_mobs));
+        push("voltFrameMobsDist", self.frame_mobs_distance.as_str());
+        push("voltFramePlayers", bool_text(self.frame_players));
+        push("voltFramePlayersDist", self.frame_players_distance.as_str());
+        push("voltFrameDropped", bool_text(self.frame_dropped));
+        push("voltFrameDroppedDist", self.frame_dropped_distance.as_str());
+        push("voltFrameBlockEntities", bool_text(self.frame_block_entities));
+        push("voltFrameBlockEntitiesDist", self.frame_block_entities_distance.as_str());
+        push("voltFrameParticles", bool_text(self.frame_particles));
+        push("voltFrameParticlesDist", self.frame_particles_distance.as_str());
         push("voltCullSignText", bool_text(self.cull_sign_text));
         push("voltFastShadows", self.fast_shadows.as_str());
         push(
@@ -1869,6 +1932,17 @@ pub enum Item {
     NoAi,
     AgentControl,
     DiscordPresence,
+    /// Volt Settings > Frame items (per-category loading toggle + distance):
+    FrameMobs,
+    FrameMobsDistance,
+    FramePlayers,
+    FramePlayersDistance,
+    FrameDropped,
+    FrameDroppedDistance,
+    FrameBlockEntities,
+    FrameBlockEntitiesDistance,
+    FrameParticles,
+    FrameParticlesDistance,
     /// Volt Waypoints page:
     Waypoints,
     WaypointKey,
@@ -2107,6 +2181,17 @@ pub fn volt_boost_rows() -> Vec<Result<Item, &'static str>> {
         Ok(VoltAudioCap),
         Ok(VoltMemorySaver),
         Ok(VoltKeepAwake),
+        Err("Frame Items - Per-Category Draw Toggles & Distances"),
+        Ok(FrameMobs),
+        Ok(FrameMobsDistance),
+        Ok(FramePlayers),
+        Ok(FramePlayersDistance),
+        Ok(FrameDropped),
+        Ok(FrameDroppedDistance),
+        Ok(FrameBlockEntities),
+        Ok(FrameBlockEntitiesDistance),
+        Ok(FrameParticles),
+        Ok(FrameParticlesDistance),
     ]
 }
 
@@ -2170,6 +2255,16 @@ impl Item {
             Item::VoltEntityCap => "Max Entities",
             Item::VoltItemCap => "Dropped Item Cap",
             Item::VoltBlockEntityCap => "Block-Entity Cap",
+            Item::FrameMobs => "Mobs",
+            Item::FrameMobsDistance => "Mob distance",
+            Item::FramePlayers => "Other players",
+            Item::FramePlayersDistance => "Player distance",
+            Item::FrameDropped => "Dropped items",
+            Item::FrameDroppedDistance => "Dropped item distance",
+            Item::FrameBlockEntities => "Block entities",
+            Item::FrameBlockEntitiesDistance => "Block-entity distance",
+            Item::FrameParticles => "Particles",
+            Item::FrameParticlesDistance => "Particle distance",
             Item::VoltCullSignText => "Sign Text Cull",
             Item::VoltFastShadows => "Entity Shadows",
             Item::VoltDistantMobThrottle => "Mob Pose Throttle",
@@ -2227,6 +2322,11 @@ impl Item {
         Some(match self {
             MouseTweaksWheel => MouseTweaks,
             SortKey => Sort,
+            FrameMobsDistance => FrameMobs,
+            FramePlayersDistance => FramePlayers,
+            FrameDroppedDistance => FrameDropped,
+            FrameBlockEntitiesDistance => FrameBlockEntities,
+            FrameParticlesDistance => FrameParticles,
             WaypointKey
             | WaypointAutoDeath
             | WaypointDimensionSync
@@ -2261,6 +2361,11 @@ impl Item {
             | NoAi
             | AgentControl
             | DiscordPresence
+            | FrameMobs
+            | FramePlayers
+            | FrameDropped
+            | FrameBlockEntities
+            | FrameParticles
             | Waypoints
             | WaypointOnMinimap
             | WaypointNewColor
@@ -2483,6 +2588,36 @@ impl Item {
             Item::VoltBlockEntityCap => {
                 "Occludes chests, signs, skulls, banners and shulkers behind solid walls and caps simultaneous block-entity draws."
             }
+            Item::FrameMobs => {
+                "Renders mobs and other creatures. Off hides every mob; they still exist and can still hurt you."
+            }
+            Item::FrameMobsDistance => {
+                "Farthest distance a mob still draws at. Unlimited keeps vanilla range."
+            }
+            Item::FramePlayers => {
+                "Renders other players. Off hides them visually only - they are still there."
+            }
+            Item::FramePlayersDistance => {
+                "Farthest distance another player still draws at. Unlimited keeps vanilla range."
+            }
+            Item::FrameDropped => {
+                "Renders dropped item stacks on the ground. Off hides them; you can still pick them up."
+            }
+            Item::FrameDroppedDistance => {
+                "Farthest distance a dropped item still draws at. Unlimited keeps vanilla range."
+            }
+            Item::FrameBlockEntities => {
+                "Renders chests, signs, banners, skulls, beds and other block entities. Off hides their models."
+            }
+            Item::FrameBlockEntitiesDistance => {
+                "Farthest distance a block entity still draws at. Unlimited keeps vanilla range."
+            }
+            Item::FrameParticles => {
+                "Renders particles (smoke, crits, potion swirls). Off hides all of them."
+            }
+            Item::FrameParticlesDistance => {
+                "Farthest distance a particle still draws at. Combines with the Volt Boost particle budget; the tighter limit wins."
+            }
             Item::VoltCullSignText => {
                 "Skips expensive glyph layout on signs and floating holograms beyond 16 blocks while keeping the sign model visible."
             }
@@ -2676,6 +2811,11 @@ impl Item {
             Item::MinimapBiome => e.minimap_biome,
             Item::MinimapTime => e.minimap_time,
             // Volt Boost switches:
+            Item::FrameMobs => e.frame_mobs,
+            Item::FramePlayers => e.frame_players,
+            Item::FrameDropped => e.frame_dropped,
+            Item::FrameBlockEntities => e.frame_block_entities,
+            Item::FrameParticles => e.frame_particles,
             Item::VoltCullLeaves => e.cull_leaves,
             Item::VoltFrustumMesh => e.frustum_priority_mesh,
             Item::VoltCaveSkyCull => e.cave_sky_cull,
@@ -2778,6 +2918,11 @@ impl Item {
             Item::VoltEntityCap => e.entity_cap.label().into(),
             Item::VoltItemCap => e.item_render_cap.label().into(),
             Item::VoltBlockEntityCap => e.block_entity_cap.label().into(),
+            Item::FrameMobsDistance => e.frame_mobs_distance.label().into(),
+            Item::FramePlayersDistance => e.frame_players_distance.label().into(),
+            Item::FrameDroppedDistance => e.frame_dropped_distance.label().into(),
+            Item::FrameBlockEntitiesDistance => e.frame_block_entities_distance.label().into(),
+            Item::FrameParticlesDistance => e.frame_particles_distance.label().into(),
             Item::VoltFastShadows => match e.fast_shadows {
                 FastShadowMode::Vanilla => "Vanilla".into(),
                 FastShadowMode::Nearby16 => "Nearby 16m".into(),
@@ -2897,6 +3042,28 @@ impl Item {
             }
             Item::VoltBlockEntityCap => {
                 e.block_entity_cap = step(&BlockEntityCap::ALL, e.block_entity_cap, back)
+            }
+            Item::FrameMobs => e.frame_mobs = !e.frame_mobs,
+            Item::FrameMobsDistance => {
+                e.frame_mobs_distance = step(&FrameDistance::ALL, e.frame_mobs_distance, back)
+            }
+            Item::FramePlayers => e.frame_players = !e.frame_players,
+            Item::FramePlayersDistance => {
+                e.frame_players_distance = step(&FrameDistance::ALL, e.frame_players_distance, back)
+            }
+            Item::FrameDropped => e.frame_dropped = !e.frame_dropped,
+            Item::FrameDroppedDistance => {
+                e.frame_dropped_distance = step(&FrameDistance::ALL, e.frame_dropped_distance, back)
+            }
+            Item::FrameBlockEntities => e.frame_block_entities = !e.frame_block_entities,
+            Item::FrameBlockEntitiesDistance => {
+                e.frame_block_entities_distance =
+                    step(&FrameDistance::ALL, e.frame_block_entities_distance, back)
+            }
+            Item::FrameParticles => e.frame_particles = !e.frame_particles,
+            Item::FrameParticlesDistance => {
+                e.frame_particles_distance =
+                    step(&FrameDistance::ALL, e.frame_particles_distance, back)
             }
             Item::VoltCullSignText => e.cull_sign_text = !e.cull_sign_text,
             Item::VoltFastShadows => {
@@ -3109,6 +3276,20 @@ mod tests {
         Item::WaypointMaxDistance.cycle(&mut e, false);
         assert!(e.set_key(WAYPOINT_KEY, "key.keyboard.n".into()));
         assert!(e.set_key(MINIMAP_ZOOM_KEY, "key.keyboard.m".into()));
+        // Frame items: everything renders at vanilla range by default.
+        assert!(d.frame_mobs && d.frame_players && d.frame_dropped);
+        assert!(d.frame_block_entities && d.frame_particles);
+        assert_eq!(d.frame_mobs_distance, FrameDistance::Unlimited);
+        Item::FrameMobs.cycle(&mut e, false);
+        assert_eq!(Item::FrameMobs.switch(&e), Some(false));
+        Item::FrameMobsDistance.cycle(&mut e, false);
+        Item::FramePlayersDistance.cycle(&mut e, false);
+        Item::FrameDropped.cycle(&mut e, false);
+        Item::FrameDroppedDistance.cycle(&mut e, false);
+        Item::FrameBlockEntitiesDistance.cycle(&mut e, false);
+        Item::FrameParticles.cycle(&mut e, false);
+        Item::FrameParticlesDistance.cycle(&mut e, false);
+        assert_eq!(e.frame_mobs_distance, FrameDistance::D128);
         assert_eq!(Extras::parse(&e.serialize()), e);
     }
 

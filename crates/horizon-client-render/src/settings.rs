@@ -850,6 +850,7 @@ pub enum Opt {
     AndroidInputMode,
     TouchSwapJumpSneak,
     TouchAutoSprint,
+    TouchJoystick,
     PadEnabled,
     PadVibration,
     PadAdaptiveTriggers,

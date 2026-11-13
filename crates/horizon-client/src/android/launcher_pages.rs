@@ -4599,6 +4599,83 @@ impl DrawCtx<'_> {
                 false,
             ),
             (
+                "## Frame items",
+                String::new(),
+                Action::VoltExtra(Item::FrameMobs),
+                None,
+                false,
+            ),
+            (
+                "Mobs",
+                String::new(),
+                Action::VoltExtra(Item::FrameMobs),
+                Some(ex.frame_mobs),
+                false,
+            ),
+            (
+                "Mob render distance",
+                Item::FrameMobsDistance.value(ex),
+                Action::VoltExtra(Item::FrameMobsDistance),
+                None,
+                false,
+            ),
+            (
+                "Other players",
+                String::new(),
+                Action::VoltExtra(Item::FramePlayers),
+                Some(ex.frame_players),
+                false,
+            ),
+            (
+                "Player render distance",
+                Item::FramePlayersDistance.value(ex),
+                Action::VoltExtra(Item::FramePlayersDistance),
+                None,
+                false,
+            ),
+            (
+                "Dropped items",
+                String::new(),
+                Action::VoltExtra(Item::FrameDropped),
+                Some(ex.frame_dropped),
+                false,
+            ),
+            (
+                "Dropped item distance",
+                Item::FrameDroppedDistance.value(ex),
+                Action::VoltExtra(Item::FrameDroppedDistance),
+                None,
+                false,
+            ),
+            (
+                "Block entities",
+                String::new(),
+                Action::VoltExtra(Item::FrameBlockEntities),
+                Some(ex.frame_block_entities),
+                false,
+            ),
+            (
+                "Block-entity distance",
+                Item::FrameBlockEntitiesDistance.value(ex),
+                Action::VoltExtra(Item::FrameBlockEntitiesDistance),
+                None,
+                false,
+            ),
+            (
+                "Particles",
+                String::new(),
+                Action::VoltExtra(Item::FrameParticles),
+                Some(ex.frame_particles),
+                false,
+            ),
+            (
+                "Particle render distance",
+                Item::FrameParticlesDistance.value(ex),
+                Action::VoltExtra(Item::FrameParticlesDistance),
+                None,
+                false,
+            ),
+            (
                 "Multiplayer hub lag shield",
                 String::new(),
                 Action::VoltExtra(Item::VoltHubLagShield),
@@ -4782,6 +4859,29 @@ impl DrawCtx<'_> {
                     let y = list_top + i as f32 * row_h - self.catalog.scroll;
                     let ctrl_w = (col_w * 0.46).clamp(124.0, 214.0);
                     let ctrl_rect = [base_x + col_w - ctrl_w - 16.0, y + 5.0, ctrl_w, 34.0];
+                    // "## " rows are section headers: no control, no tap target.
+                    if let Some(header) = label.strip_prefix("## ") {
+                        if y < list_top - 4.0 || y + row_h - 4.0 > list_bottom {
+                            continue;
+                        }
+                        ui.text(
+                            Face::LauncherMedium,
+                            15.0,
+                            base_x + 18.0,
+                            text_vcenter(y + 6.0, row_h - 4.0, 15.0),
+                            theme::TEXT(),
+                            header,
+                        );
+                        ui.rounded(
+                            base_x + 18.0,
+                            y + row_h - 2.0,
+                            col_w - 34.0,
+                            1.0,
+                            0.0,
+                            theme::BORDER(),
+                        );
+                        continue;
+                    }
                     self.list_targets.push((ctrl_rect, *act));
                     if y < list_top - 4.0 || y + row_h - 4.0 > list_bottom {
                         continue;
@@ -4883,6 +4983,21 @@ impl DrawCtx<'_> {
             for (i, (label, val, act, sw, dropdown)) in all_items.iter().enumerate() {
                 let y = top + hero_h + 12.0 + i as f32 * row_h - self.catalog.scroll;
                 let ctrl_rect = [cx, y + 24.0, cw, 36.0];
+                // "## " rows are section headers: no control, no tap target.
+                if let Some(header) = label.strip_prefix("## ") {
+                    if y < top || y + row_h - 4.0 > bottom {
+                        continue;
+                    }
+                    ui.text(
+                        Face::LauncherMedium,
+                        15.0,
+                        cx + 2.0,
+                        y + 20.0,
+                        theme::TEXT(),
+                        header,
+                    );
+                    continue;
+                }
                 self.list_targets.push((ctrl_rect, *act));
                 if y < top || y + row_h - 4.0 > bottom {
                     continue;

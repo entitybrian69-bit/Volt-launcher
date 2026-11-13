@@ -465,6 +465,19 @@ impl Game<'_> {
         })
     }
 
+    /// The on-screen sneak button always toggles (Bedrock parity), even when
+    /// a paired controller's stick-click is configured as hold-to-sneak.
+    fn android_touch_sneak(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.pad.touch.recent_sneak_button()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            false
+        }
+    }
+
     /// Touch fly/swim down is held even when ground sneaking is toggled.
     fn android_touch_descending(&self) -> bool {
         #[cfg(target_os = "android")]
@@ -504,7 +517,7 @@ impl Game<'_> {
                 Ok(())
             }
             "key.sneak"
-                if self.settings.controller.toggle_sneak
+                if (self.settings.controller.toggle_sneak || self.android_touch_sneak())
                     && !self.settings.toggle_crouch
                     && !self.android_touch_descending() =>
             {

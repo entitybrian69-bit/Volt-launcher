@@ -214,6 +214,7 @@ impl Opt {
             Opt::AndroidInputMode => "Input device",
             Opt::TouchSwapJumpSneak => "Swap jump / sneak",
             Opt::TouchAutoSprint => "Auto Sprint",
+            Opt::TouchJoystick => "Movement joystick",
             Opt::Fov => "options.fov",
             Opt::RenderDistance => "options.renderDistance",
             Opt::SimulationDistance => "options.simulationDistance",
@@ -585,6 +586,14 @@ impl Opt {
             Opt::TouchSwapJumpSneak => {
                 Some(if s.touch.swap_jump_sneak { "ON" } else { "OFF" }.into())
             }
+            Opt::TouchJoystick => Some(
+                if s.touch.button_visibility[crate::touch::Control::Move as usize] == 2 {
+                    "HIDDEN"
+                } else {
+                    "SHOWN"
+                }
+                .into(),
+            ),
             Opt::TouchAutoSprint => Some(
                 if s.touch.sprint_with_joystick {
                     "ON"
@@ -1233,6 +1242,10 @@ impl Opt {
             Opt::TouchAttackSide => s.touch.attack_indicator_left ^= true,
             Opt::TouchSwapJumpSneak => s.touch.swap_jump_sneak ^= true,
             Opt::TouchAutoSprint => s.touch.sprint_with_joystick ^= true,
+            Opt::TouchJoystick => {
+                let v = &mut s.touch.button_visibility[crate::touch::Control::Move as usize];
+                *v = if *v == 2 { 1 } else { 2 };
+            }
             Opt::GuiScale => {
                 let max = crate::window::calculate_scale(framebuffer, 0, s.force_unicode) as u32;
                 let value = s.gui_scale.min(max);
@@ -2982,6 +2995,7 @@ impl OptionsUi {
                     Opt::TouchAttackSide,
                     Opt::DebugGuiScale,
                     Opt::TouchAnalog,
+                    Opt::TouchJoystick,
                     Opt::TouchSprintButton,
                     Opt::TouchSprintToggle,
                     Opt::TouchInventoryControls,
@@ -7529,6 +7543,12 @@ mod tests {
         Opt::TouchSprintButton.cycle(&mut settings, false, [1280, 720]);
         assert!(settings.touch.analog_movement);
         assert!(!settings.touch.visible(crate::touch::Control::Sprint));
+        // The movement joystick can be removed and restored from settings.
+        assert!(settings.touch.visible(crate::touch::Control::Move));
+        Opt::TouchJoystick.cycle(&mut settings, false, [1280, 720]);
+        assert!(!settings.touch.visible(crate::touch::Control::Move));
+        Opt::TouchJoystick.cycle(&mut settings, false, [1280, 720]);
+        assert!(settings.touch.visible(crate::touch::Control::Move));
         Opt::TouchCircleSize.set_slider(&mut settings, 0.75);
         assert_eq!(settings.touch.circle_size, 52.0);
         Opt::TouchHorizontalMargin.set_slider(&mut settings, 0.5);
