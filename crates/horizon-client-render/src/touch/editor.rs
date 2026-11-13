@@ -182,7 +182,13 @@ impl TouchControls {
         let (w, h) = (b.width, b.height);
         let text = rgba(245, 245, 245, 255);
         if let Some(selected) = e.selected {
-            plate(b, a, [0.32, 0.88, 0.36, 0.07], "Remove button", false);
+            plate(
+                b,
+                a,
+                [0.32, 0.88, 0.36, 0.07],
+                if selected == Control::Move { "Remove joystick" } else { "Remove button" },
+                false,
+            );
             let p = self.placement(selected);
             plate(
                 b,
@@ -498,106 +504,3 @@ impl TouchControls {
             false
         }
     }
-    fn draw_custom_editor(&self, b: &mut HudBatch, a: &HudAtlas, e: &Editor) {
-        let (w, h) = (b.width, b.height);
-        if e.palette {
-            plate(b, a, [0.22, 0.84, 0.56, 0.07], "Create button...", false);
-        }
-        if let Some(i) = e.selected_custom
-            && !e.palette
-            && !e.key_picker
-        {
-            let p = self.settings.custom_buttons[i].layouts[self.settings.mode.index()];
-            plate(
-                b,
-                a,
-                [0.32, 0.54, 0.36, 0.07],
-                &format!("Action: {}", self.settings.custom_buttons[i].label()),
-                false,
-            );
-            plate(
-                b,
-                a,
-                [0.32, 0.79, 0.17, 0.07],
-                "Opacity",
-                e.option == Some(1),
-            );
-            plate(b, a, [0.51, 0.79, 0.17, 0.07], "Size", e.option == Some(0));
-            plate(b, a, [0.32, 0.88, 0.36, 0.07], "Remove button", false);
-            if let Some(option) = e.option {
-                let value = if option == 0 {
-                    (p.size - 0.045) / 0.405
-                } else {
-                    p.opacity
-                };
-                b.fill(
-                    a,
-                    w * 0.3,
-                    h * 0.66,
-                    w * 0.4,
-                    h * 0.11,
-                    rgba(15, 15, 15, 235),
-                );
-                let percent = if option == 0 {
-                    p.size * 100.0
-                } else {
-                    p.opacity * 100.0
-                };
-                b.text(
-                    a,
-                    &format!(
-                        "{} {:.0}%",
-                        if option == 0 { "Size" } else { "Opacity" },
-                        percent
-                    ),
-                    w * 0.325,
-                    h * 0.68,
-                    rgba(245, 245, 245, 255),
-                    true,
-                );
-                nine(
-                    b,
-                    a,
-                    "ui/slider_background",
-                    1.0,
-                    [w * 0.335, h * 0.72, w * 0.33, h * 0.025],
-                    rgba(255, 255, 255, 255),
-                );
-                nine(
-                    b,
-                    a,
-                    "ui/slider_button_default",
-                    2.0,
-                    [w * (0.335 + value * 0.33) - 3.0, h * 0.707, 6.0, h * 0.05],
-                    rgba(255, 255, 255, 255),
-                );
-            }
-        }
-        if e.key_picker {
-            b.fill(
-                a,
-                w * 0.12,
-                h * 0.14,
-                w * 0.76,
-                h * 0.81,
-                rgba(15, 15, 15, 250),
-            );
-            plate(b, a, [0.15, 0.16, 0.33, 0.06], "Game action", !e.raw_keys);
-            plate(b, a, [0.52, 0.16, 0.33, 0.06], "Keyboard key", e.raw_keys);
-            for (i, (_, label)) in super::custom::choices(e.raw_keys)
-                .iter()
-                .skip(e.key_page * 8)
-                .take(8)
-                .enumerate()
-            {
-                plate(b, a, key_rect(i), label, false);
-            }
-            plate(b, a, [0.2, 0.86, 0.18, 0.07], "Previous", false);
-            plate(b, a, [0.41, 0.86, 0.18, 0.07], "Back", false);
-            plate(b, a, [0.62, 0.86, 0.18, 0.07], "Next", false);
-        }
-    }
-}
-fn key_rect(i: usize) -> [f32; 4] {
-    [0.15, 0.25 + i as f32 * 0.072, 0.7, 0.06]
-}
