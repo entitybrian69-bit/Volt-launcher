@@ -243,6 +243,10 @@ impl Opt {
             Opt::GraphicsBackend => "options.graphicsApi",
             Opt::TextureFiltering => "options.textureFiltering",
             Opt::MaxAnisotropy => "options.maxAnisotropy",
+            Opt::ItemFramesEnabled => "Item frame models",
+            Opt::ItemFramesDistance => "Item frame render distance",
+            Opt::FrameContentsEnabled => "Displayed items in frames",
+            Opt::FrameContentsDistance => "Displayed item render distance",
             Opt::SmoothLighting => "options.ao",
             Opt::Clouds => "options.renderClouds",
             Opt::CloudRange => "options.renderCloudsDistance",
@@ -381,6 +385,8 @@ impl Opt {
             Opt::MaxFps => unit(s.max_fps as f32, 10.0, 260.0),
             Opt::CloudRange => unit(s.cloud_range as f32, 2.0, 128.0),
             Opt::EntityDistance => unit(s.entity_distance, 0.5, 5.0),
+            Opt::ItemFramesDistance => unit(s.horizon.item_frames_distance as f32, 1.0, 64.0),
+            Opt::FrameContentsDistance => unit(s.horizon.frame_contents_distance as f32, 1.0, 64.0),
             Opt::BiomeBlend => unit(s.biome_blend as f32, 0.0, 7.0),
             Opt::Preset => unit(preset_index(&s.graphics_preset) as f32, 0.0, 3.0),
             Opt::Mipmaps => unit(s.mipmap_levels as f32, 0.0, 4.0),
@@ -633,6 +639,8 @@ impl Opt {
             }
             Opt::CloudRange => generic(c, Text::tr("options.chunks", &[&s.cloud_range])),
             Opt::EntityDistance => percent(c, s.entity_distance),
+            Opt::ItemFramesDistance => generic(c, Text::literal(format!("{} chunks", s.horizon.item_frames_distance))),
+            Opt::FrameContentsDistance => generic(c, Text::literal(format!("{} chunks", s.horizon.frame_contents_distance))),
             Opt::BiomeBlend => generic(
                 c,
                 tr(&format!(
@@ -794,6 +802,8 @@ impl Opt {
                 "options.particles.minimal",
             ][usize::from(s.particles.min(2))]),
             Opt::EntityShadows => on_off(s.entity_shadows),
+            Opt::ItemFramesEnabled => on_off(s.horizon.item_frames_enabled),
+            Opt::FrameContentsEnabled => on_off(s.horizon.frame_contents_enabled),
             Opt::Vignette => on_off(s.vignette),
             Opt::Autosave => on_off(s.autosave_indicator),
             Opt::CutoutLeaves => on_off(s.cutout_leaves),
@@ -943,6 +953,8 @@ impl Opt {
             Opt::MaxFps => s.max_fps = (step(1.0, 26.0) as u32) * 10,
             Opt::CloudRange => s.cloud_range = step(2.0, 128.0) as i32,
             Opt::EntityDistance => s.entity_distance = step(2.0, 20.0) / 4.0,
+            Opt::ItemFramesDistance => s.horizon.item_frames_distance = step(1.0, 64.0) as u32,
+            Opt::FrameContentsDistance => s.horizon.frame_contents_distance = step(1.0, 64.0) as u32,
             Opt::BiomeBlend => s.biome_blend = step(0.0, 7.0) as i32,
             Opt::Preset => s.graphics_preset = PRESETS[step(0.0, 3.0) as usize].into(),
             Opt::Mipmaps => s.mipmap_levels = step(0.0, 4.0) as i32,
@@ -1053,6 +1065,8 @@ impl Opt {
             Opt::TouchAttackSide => s.touch.attack_indicator_left ^= true,
             Opt::TouchSwapJumpSneak => s.touch.swap_jump_sneak ^= true,
             Opt::TouchAutoSprint => s.touch.sprint_with_joystick ^= true,
+            Opt::ItemFramesEnabled => s.horizon.item_frames_enabled ^= true,
+            Opt::FrameContentsEnabled => s.horizon.frame_contents_enabled ^= true,
             Opt::GuiScale => {
                 let max = crate::window::calculate_scale(framebuffer, 0, s.force_unicode) as u32;
                 let value = s.gui_scale.min(max);
@@ -1374,6 +1388,8 @@ pub enum Page {
     Graphics,
     GraphicsAdvanced,
     GraphicsHdr,
+    /// Item-frame model and displayed-content culling.
+    FrameItems,
     /// Horizon's controller settings and button binds.
     Controller,
     Touch,
@@ -1834,6 +1850,7 @@ impl OptionsUi {
             Page::NativeMod(_) => "Mod Settings",
             Page::ShaderPacks => "horizon.pages.shader_packs",
             Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr => "options.videoTitle",
+            Page::FrameItems => "Frame Items",
             Page::Controller => "horizon.pages.controller",
             Page::PadBinds => "horizon.pages.controller_binds",
             Page::Extras => "horizon.pages.extras",
@@ -1996,6 +2013,10 @@ impl OptionsUi {
                         open("horizon.pages.open.extras", Page::Extras),
                         Some(open("horizon.pages.open.mods", Page::Mods)),
                     ),
+                    Row::Buttons(
+                        button(0.0, 0.0, 150.0, Text::literal("Frame Items"), Act::Push(Page::FrameItems)),
+                        Some(open("horizon.pages.open.shader_packs", Page::ShaderPacks)),
+                    ),
                     // No AI hides the AI Agent page and everything AI.
                     Row::Buttons(
                         self.extra_button(s, crate::extras::Item::DiscordPresence),
@@ -2014,6 +2035,12 @@ impl OptionsUi {
                 )
                 .collect()
             }
+            Page::FrameItems => vec![
+                Row::Big(Opt::ItemFramesEnabled),
+                Row::Big(Opt::ItemFramesDistance),
+                Row::Big(Opt::FrameContentsEnabled),
+                Row::Big(Opt::FrameContentsDistance),
+            ],
             Page::Agent => {
                 let mut rows = vec![Row::Buttons(
                     self.extra_button(s, crate::extras::Item::AgentControl),
