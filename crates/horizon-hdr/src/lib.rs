@@ -14,6 +14,9 @@ pub fn open_vulkan_device(
     adapter: &wgpu::Adapter,
     desc: &wgpu::DeviceDescriptor<'_>,
 ) -> Option<Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError>> {
+    if vulkan_supporter_mode() {
+        return None;
+    }
     use wgpu::hal::api::Vulkan;
     let open = {
         // Safety: only read and opened from here; dropped before wgpu takes it back.
@@ -97,3 +100,97 @@ pub fn set_metadata(
     #[cfg(target_os = "macos")]
     let _ = (device, surface, paper_white, peak, black);
 }
+
+/// Summary returned when validating an imported custom Vulkan `.so` driver.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomVulkanDriverInfo {
+    pub entry_kind: String,
+    pub has_android_surface: bool,
+    pub note: String,
+}
+
+/// Enables or disables the built-in Volt Vulkan Supporter compatibility bridge.
+pub fn set_vulkan_supporter_mode(enabled: bool) {
+    #[cfg(not(target_os = "macos"))]
+    wgpu::hal::vulkan::volt_supporter::set_supporter_mode(enabled);
+    #[cfg(target_os = "macos")]
+    let _ = enabled;
+}
+
+/// Returns whether the built-in Volt Vulkan Supporter compatibility bridge is active.
+pub fn vulkan_supporter_mode() -> bool {
+    #[cfg(not(target_os = "macos"))]
+    {
+        wgpu::hal::vulkan::volt_supporter::supporter_mode()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        false
+    }
+}
+
+/// Sets or clears an optional custom Vulkan `.so` driver library path.
+pub fn set_custom_vulkan_driver_path(path: Option<std::path::PathBuf>) {
+    #[cfg(not(target_os = "macos"))]
+    wgpu::hal::vulkan::volt_supporter::set_custom_driver_path(path);
+    #[cfg(target_os = "macos")]
+    let _ = path;
+}
+
+/// Returns the active custom Vulkan `.so` driver library path, if configured.
+pub fn custom_vulkan_driver_path() -> Option<std::path::PathBuf> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        wgpu::hal::vulkan::volt_supporter::custom_driver_path()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        None
+    }
+}
+
+/// Returns the human-readable status from the latest Vulkan loader initialization.
+pub fn last_vulkan_driver_status() -> Option<String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        wgpu::hal::vulkan::volt_supporter::last_driver_status()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        None
+    }
+}
+
+/// Checks ELF header magic and target CPU architecture before loading a custom `.so`.
+pub fn verify_custom_vulkan_driver_elf(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        wgpu::hal::vulkan::volt_supporter::verify_elf_architecture(path)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = path;
+        Err("Custom Vulkan drivers are not supported on macOS".to_owned())
+    }
+}
+
+/// Probes a custom `.so` library for Vulkan ICD / HAL entry points.
+pub fn inspect_custom_vulkan_driver(
+    path: &std::path::Path,
+) -> Result<CustomVulkanDriverInfo, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let info = wgpu::hal::vulkan::volt_supporter::inspect_driver_library(path)?;
+        Ok(CustomVulkanDriverInfo {
+            entry_kind: info.entry_kind,
+            has_android_surface: info.has_android_surface,
+            note: info.note,
+        })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = path;
+        Err("Custom Vulkan drivers are not supported on macOS".to_owned())
+    }
+}
+

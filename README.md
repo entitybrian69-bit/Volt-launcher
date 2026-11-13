@@ -1,147 +1,88 @@
-<p align="center">
-  <img src="docs/media/volt/logo.webp" width="360" alt="Volt Launcher logo: a dimensional white V on a black background">
-</p>
+# Horizon Android
 
-<h1 align="center">Volt Launcher</h1>
+A native Android port of [Horizon](https://github.com/ludovic111/horizon), the
+Rust engine for Minecraft Java 26.3. Unofficial and in active development.
 
-<p align="center">
-  <strong>A native Rust launcher for Minecraft: Java Edition 26.3 on Android.</strong>
-</p>
+**Android 9+ · Vulkan · Four touch schemes · Sandboxed `.hmod` mods**
 
-<p align="center">
-  <a href="docs/android.md#install-and-play"><img src="https://img.shields.io/badge/PLATFORM-ANDROID%209%2B-dc2626?style=for-the-badge&amp;logo=android&amp;logoColor=white&amp;labelColor=7f1d1d" alt="Platform: Android 9+ for modern builds"></a>
-  <a href="https://github.com/entitybrian69-bit"><img src="https://img.shields.io/badge/MAINTAINED%20BY-ENTITYBRIAN-dc2626?style=for-the-badge&amp;logo=github&amp;logoColor=white&amp;labelColor=7f1d1d" alt="Maintained by Entitybrian"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-dc2626?style=for-the-badge&amp;labelColor=7f1d1d" alt="License: MIT"></a>
-  <br>
-  <a href="https://discord.gg/ED2bhF77"><img src="https://img.shields.io/badge/DISCORD-COMMUNITY%20%26%20SUGGESTIONS-dc2626?style=for-the-badge&amp;logo=discord&amp;logoColor=white&amp;labelColor=7f1d1d" alt="Discord: community and suggestions"></a>
-  <a href="https://youtube.com/@team-aerix"><img src="https://img.shields.io/badge/YOUTUBE-TEAM%20AERIX-dc2626?style=for-the-badge&amp;logo=youtube&amp;logoColor=white&amp;labelColor=7f1d1d" alt="YouTube: Team Aerix"></a>
-  <a href="https://entitybrian69-bit.github.io/Aerix-launcher/"><img src="https://img.shields.io/badge/AERIX%20LAUNCHER-JAVA%20LAUNCHER-dc2626?style=for-the-badge&amp;logo=githubpages&amp;logoColor=white&amp;labelColor=7f1d1d" alt="Aerix Launcher: Java launcher website"></a>
-  <br>
-  <a href="https://github.com/entitybrian69-bit/Volt-launcher/releases"><img src="https://img.shields.io/github/downloads/entitybrian69-bit/Volt-launcher/total?style=for-the-badge&amp;logo=github&amp;logoColor=white&amp;label=TOTAL%20DOWNLOADS&amp;labelColor=7f1d1d&amp;color=dc2626" alt="Total GitHub release-asset downloads"></a>
-  <a href="https://github.com/entitybrian69-bit/Volt-launcher/releases"><img src="https://img.shields.io/github/downloads-pre/entitybrian69-bit/Volt-launcher/latest/total?sort=date&amp;style=for-the-badge&amp;logo=android&amp;logoColor=white&amp;label=THIS%20RELEASE&amp;labelColor=7f1d1d&amp;color=dc2626" alt="Downloads for the latest published release, including prereleases"></a>
-  <a href="https://github.com/entitybrian69-bit/Volt-launcher/releases"><img src="https://img.shields.io/github/v/release/entitybrian69-bit/Volt-launcher?include_prereleases=&amp;sort=date&amp;style=for-the-badge&amp;logo=github&amp;logoColor=white&amp;label=LATEST%20BUILD&amp;labelColor=7f1d1d&amp;color=dc2626" alt="Latest published Volt Launcher build, including prereleases"></a>
-</p>
+[Download APK](https://github.com/Vasysik/horizon-android/releases) · [Build & play](docs/android.md) · [Contribute](CONTRIBUTING_ANDROID.md) ·
+[Report an Android bug](https://github.com/Vasysik/horizon-android/issues/new?template=android-bug.yml)
 
-<p align="center">
-  <a href="https://github.com/entitybrian69-bit/Volt-launcher/releases"><strong>Download APK</strong></a> ·
-  <a href="#screenshots">Screenshots</a> ·
-  <a href="#owner-and-maintainer">Owner</a> ·
-  <a href="#community-and-related-projects">Community</a> ·
-  <a href="#build-from-source">Build guide</a>
-</p>
+## What works
 
-Volt Launcher is an unofficial, touch-first Android launcher and native Rust
-client for **Minecraft: Java Edition 26.3**, built on
-[Horizon](https://github.com/ludovic111/horizon) and Horizon Android. Manage
-profiles, install verified game resources and play without a Java runtime or
-PC resource preparation on your phone.
+- Four touch schemes: joystick or D-pad, each with tap or crosshair aiming.
+- Editable button positions, sizes and opacity; handedness, circle size, optional
+  360-degree movement, Auto Sprint and Sprint-button visibility.
+- Java multiplayer, including the Hypixel Arcade lobby shown below.
+- Native launcher, verified resource downloads, resource packs and `.hmod` import.
+- Vulkan rendering modes and resolution scaling; Android keyboard, clipboard,
+  AAudio sound and phone vibration through the existing game settings.
+- Account status and Android Keystore storage; the current sign-in configuration
+  is still for development. [Feature support and remaining work](docs/android-features.md).
 
-> Volt is under active development. Check the release notes before installing;
-> graphics-driver, account and server compatibility can vary by device and build.
+The engine targets Minecraft Java **26.3**. Sandboxed `.hmod`
+code mods run on 64-bit APKs. Source-only `.hnmod` mods require a separately
+compiled client and are not supported on Android yet. Fabric/Forge Java code
+does not run in this client. Server and anticheat
+compatibility requires testing on the actual server.
 
-## Download and play
+## On Android
 
-1. Open [**Volt Launcher releases**](https://github.com/entitybrian69-bit/Volt-launcher/releases)
-   and choose the APK for your device architecture.
-2. Install the APK, open Volt and download the Minecraft 26.3 resources.
-3. Wait for verification to finish, choose your profile and press **Play**.
+POCO M8 Pro · 16 chunks · Fancy graphics
 
-Modern 64-bit builds target **Android 9+**. Experimental 32-bit builds have a
-different minimum version and do not include the native `.hmod` runtime; see the
-[architecture and compatibility table](docs/android.md#install-and-play).
-The download badges count GitHub release assets across published builds,
-including prereleases, rather than unique players.
-
-## Developer tools and community mods
-
-- **[Volt Survival Suite](mods/community/volt-survival-suite/README.md):** a real sandboxed WebAssembly HMOD with a survival HUD, target-block inspector, saved HUD toggle, and gameplay commands. [Build workflow](.github/workflows/build-volt-survival-suite.yml).
-- **[HMOD Doctor](docs/hmod-doctor.md):** a CLI utility that inspects HMOD manifests, checks code/content package structure, validates content registries and detects duplicate IDs.
-
-## What Volt includes
-
-- **Native Rust gameplay** targeting Minecraft Java 26.3, with Vulkan and
-  compatibility rendering paths.
-- **Touch controls:** joystick or D-pad movement, tap or crosshair aiming,
-  editable button layouts and custom key buttons.
-- **Profiles and worlds:** separate settings and saves, with verified resource
-  downloads reused after an interrupted installation.
-- **Java multiplayer:** connect to matching-version servers; compatibility
-  depends on the server and account configuration.
-- **Add-ons:** resource packs and sandboxed `.hmod` mods on 64-bit builds.
-  Fabric, Forge and other Java mod JARs do not run in this client.
-- **Device integration:** resolution scaling, Android keyboard and clipboard,
-  sound, vibration and accessibility settings.
-
-See [Android feature support](docs/android-features.md) for implementation
-status and remaining platform work.
-
-## Owner and maintainer
-
-<p align="center">
-  <a href="https://github.com/entitybrian69-bit"><img src="docs/media/volt/owner.jpg" width="220" alt="Owner portrait supplied for Entitybrian"></a>
-  <br>
-  <strong>Entitybrian</strong>
-  <br>
-  Writes, tests and publishes Volt Launcher.
-  <br>
-  <a href="https://github.com/entitybrian69-bit">GitHub profile</a>
-</p>
-
-## Screenshots
-
-*Screenshots supplied by the project owner. The interface and available options
-can vary between builds.*
-
-| **Home and profiles** | **Mods** |
+| **Joystick and crosshair** | **D-pad and touch aiming** |
 | --- | --- |
-| [![Volt Launcher home screen with a selected profile, Play button and launcher shortcuts](docs/media/volt/home.jpg)](docs/media/volt/home.jpg) | [![Volt Launcher mods list with install, remove and enable controls](docs/media/volt/mods.jpg)](docs/media/volt/mods.jpg) |
+| ![Fox in a forest with joystick controls](docs/media/android/joystick-fox.png) | ![River and forest with D-pad controls](docs/media/android/dpad-river.png) |
 
-| **Resource packs** | **Shader packs** |
+| **Snowy biome** | **Hypixel Arcade · Java multiplayer** |
 | --- | --- |
-| [![Resource-pack browser with search, source filters and import controls](docs/media/volt/resource-packs.jpg)](docs/media/volt/resource-packs.jpg) | [![Shader-pack browser showing pack cards and compatibility information](docs/media/volt/shader-packs.jpg)](docs/media/volt/shader-packs.jpg) |
+| ![Snowy landscape on Android](docs/media/android/snow-landscape.png) | ![Hypixel Arcade lobby on Android](docs/media/android/hypixel-arcade.png) |
 
-| **Performance settings** | **Accounts and skin wardrobe** |
+| **Third-person view** | **Desert terrain** |
 | --- | --- |
-| [![Performance presets, rendering controls and in-world optimization settings](docs/media/volt/performance.jpg)](docs/media/volt/performance.jpg) | [![Account controls and custom skin and cape wardrobe](docs/media/volt/accounts-skins.jpg)](docs/media/volt/accounts-skins.jpg) |
+| ![Steve on Android with third-person camera, touch controls and FPS overlay](docs/media/android/third-person-desert.png) | ![Desert terrain on Android with touch controls and FPS overlay](docs/media/android/desert-panorama.png) |
 
-**Controls Studio and settings**
+### Hypixel Arcade gameplay
 
-[![Controls Studio with layout import, appearance, graphics, input profile and diagnostic settings](docs/media/volt/controls-settings.jpg)](docs/media/volt/controls-settings.jpg)
+https://youtu.be/gWK01tGlyFI
 
-## Community and related projects
+*Disasters gameplay recorded on Poco M8 Pro. FPS readings in the footage are not a controlled benchmark.*
 
-- [**Discord — community and suggestions**](https://discord.gg/ED2bhF77)
-- [**YouTube — Team Aerix**](https://youtube.com/@team-aerix)
-- [**Aerix Launcher — Java launcher**](https://entitybrian69-bit.github.io/Aerix-launcher/)
-- [**Volt Launcher on GitHub**](https://github.com/entitybrian69-bit/Volt-launcher)
+### On a flip phone
 
-Looking for a Java launcher? **Aerix Launcher** is the separate Java-launcher
-project. Volt is the native Rust Android launcher in this repository.
+Fujitsu F-03L · Portrait mode
 
-## Build from source
+| **Main menu** | **In-game** |
+| --- | --- |
+| <img src="docs/media/android/fujitsu-f03l-menu.png" alt="Horizon main menu on a Fujitsu F-03L flip phone in portrait mode" width="220"> | <img src="docs/media/android/fujitsu-f03l-gameplay.png" alt="Minecraft world running on a Fujitsu F-03L flip phone in portrait mode" width="220"> |
 
-The [Android build guide](docs/android.md#build-developers-only) covers the
-SDK/NDK setup, resource preparation and APK build. Public builds download
-original Minecraft resources and sounds from Mojang on the phone; game files,
-prepared resources, accounts and signing keys stay outside Git.
+## Help build it
 
-For a focused contribution or a reproducible Android bug report, start with
-[CONTRIBUTING_ANDROID.md](CONTRIBUTING_ANDROID.md) and the
-[issue tracker](https://github.com/entitybrian69-bit/Volt-launcher/issues).
-Include your phone, Android version, renderer, resolution scale and build
-version with graphics or performance reports.
+Try a developer build, send a reproducible bug report, or contribute a focused
+pull request against `android`. Touch input, accessibility, hardware controllers,
+Android lifecycle and real-phone profiling are useful areas to help.
+[Start here](CONTRIBUTING_ANDROID.md).
 
-## Credits and license
+If the port is useful to you, **star the repository** so other players and
+contributors can find it.
 
-Volt Launcher builds on Horizon Android and Horizon while preserving upstream
-authorship and history. See the [upstream integration record](docs/android-upstream.json),
-the original [MIT license](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
-The logo, owner portrait and app screenshots above were supplied by the project
-owner for this README.
+## Builds and source
 
-Minecraft code and assets belong to Mojang and Microsoft and are not covered by
-the repository's MIT license. This project is not affiliated with or endorsed
-by Mojang or Microsoft.
+[Build instructions](docs/android.md#build-developers-only) explain the SDK/NDK
+setup and preparation for building the engine. The Android distribution APK
+contains generated Horizon tables; it downloads original Minecraft resources and
+sound from Mojang and the touch textures from Mojang's official sample repository.
+No PC resource preparation is needed to install and play on the phone.
+[Publication notes](docs/android-publication.md).
+
+This branch preserves upstream authorship and history. [Upstream integration](docs/android-upstream.json)
+records reviewed merges. Original deployment workflows remain disabled in this fork.
+
+Original copyright and third-party notices are retained in [LICENSE](LICENSE)
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Mojang textures are not
+licensed under Horizon's MIT license. Game files, prepared resources, accounts,
+APKs and signing keys stay outside Git. This project is not affiliated with or
+endorsed by Mojang or Microsoft.
 
 <details>
 <summary>Upstream Horizon documentation (desktop)</summary>
@@ -263,7 +204,7 @@ What is in progress, what comes next and where to help: [ROADMAP.md](ROADMAP.md)
 
 ## Contributing
 
-Issues and pull requests are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) (vanilla first, small pull requests). Questions: [Discord](https://discord.gg/WsBxGsKyhU). Before a pull request, run the self-check and paste its output:
+Issues and pull requests are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) (vanilla first, small pull requests). Questions: [Discord](https://discord.gg/HcTeMZxe5E). Before a pull request, run the self-check and paste its output:
 
 ```sh
 git config core.hooksPath .githooks

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Volt Launcher — Fast. Modded. Yours.</title>
+  <meta name="description" content="Volt Launcher — a blazing-fast independent Android launcher with built-in mods, shaders, replays and more.">
+  <link rel="icon" type="image/png" href="assets/volt-logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="particles"></canvas>
+  <div class="glow-orb orb-a"></div>
+  <div class="glow-orb orb-b"></div>
+
+  <nav>
+    <a class="nav-brand" href="index.html">
+      <img src="assets/volt-logo.png" alt="Volt logo">
+      <span>VOLT</span>
+    </a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="https://discord.gg/WsBxGsKyhU" target="_blank" rel="noopener">Discord</a>
+      <a href="owner.html">Owner</a>
+    </div>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <img class="hero-logo" src="assets/volt-logo.png" alt="Volt Launcher logo">
+      <h1>VOLT <span class="red">LAUNCHER</span></h1>
+      <p class="tag">The independent Android launcher built for speed — mods, shaders, replays and total control, all in one place.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#download">⬇&nbsp; Download now</a>
+        <a class="btn btn-ghost" href="https://discord.gg/WsBxGsKyhU" target="_blank" rel="noopener">💬&nbsp; Join the Discord</a>
+      </div>
+      <p class="cta-note">Free · Android 8.0+ · arm64 &amp; arm32</p>
+      <div class="scroll-hint"></div>
+    </header>
+
+    <section id="features">
+      <div class="sec-head reveal">
+        <h2>Everything you want. <em>Built in.</em></h2>
+        <p>No add-on hunting, no setup headaches — Volt ships loaded.</p>
+      </div>
+      <div class="grid">
+        <div class="card reveal"><div class="ico">🧩</div><h3>Mods, ready to go</h3><p>A curated set of native mods woven straight into the engine — physics, minimaps, waypoints, quality-of-life and more. Zero installs.</p></div>
+        <div class="card reveal"><div class="ico">✨</div><h3>Volt Shaders</h3><p>Beautiful lighting presets from Potato to Ultra, tuned to stay smooth on real phones — plus moving vegetation.</p></div>
+        <div class="card reveal"><div class="ico">🎬</div><h3>Volt Replay</h3><p>Record your sessions and re-watch them from any camera angle, right inside the game.</p></div>
+        <div class="card reveal"><div class="ico">⚡</div><h3>Performance first</h3><p>Volt Boost, resolution scaler and a Vulkan renderer tuned for mobile chips. Built to hit high FPS on mid-range devices.</p></div>
+        <div class="card reveal"><div class="ico">🎮</div><h3>Controls Studio</h3><p>Reshape your touch controls completely — presets, custom layouts, import and export.</p></div>
+        <div class="card reveal"><div class="ico">👤</div><h3>Your identity</h3><p>Multiple account options with server-wide skins and capes, plus a full 3D character preview.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="stats">
+        <div class="stat reveal"><div class="num" data-count="30">0</div><div class="lbl">built-in &amp; woven mods</div></div>
+        <div class="stat reveal"><div class="num" data-count="5">0</div><div class="lbl">shader quality tiers</div></div>
+        <div class="stat reveal"><div class="num" data-count="2">0</div><div class="lbl">CPU architectures</div></div>
+        <div class="stat reveal"><div class="num" data-count="100">0</div><div class="lbl">% free, forever</div></div>
+      </div>
+    </section>
+
+    <section id="download">
+      <div class="sec-head reveal">
+        <h2>Get <em>Volt</em></h2>
+        <p>Grab the latest build straight from GitHub. Not sure which? Most phones from 2017 onward are arm64.</p>
+      </div>
+      <div class="dl-wrap">
+        <div class="dl-card reveal">
+          <h3>arm64-v8a</h3>
+          <p>For modern 64-bit phones — the right pick for almost everyone.</p>
+          <a class="btn btn-primary" id="dl-arm64" href="https://github.com/entitybrian69-bit/Volt-launcher/releases">⬇&nbsp; Download APK</a>
+        </div>
+        <div class="dl-card reveal">
+          <h3>armeabi-v7a</h3>
+          <p>For older 32-bit devices still going strong.</p>
+          <a class="btn btn-ghost" id="dl-v7a" href="https://github.com/entitybrian69-bit/Volt-launcher/releases">⬇&nbsp; Download APK</a>
+        </div>
+      </div>
+      <p class="cta-note reveal" style="text-align:center; margin-top:22px;">
+        All builds &amp; checksums on the <a href="https://github.com/entitybrian69-bit/Volt-launcher/releases" target="_blank" rel="noopener" style="color:var(--crimson-soft);">releases page</a>.
+      </p>
+    </section>
+
+    <section>
+      <div class="band reveal">
+        <h2>Join the Volt community</h2>
+        <p>Updates, support, sneak peeks and a place to show off your builds.</p>
+        <a class="btn btn-primary" href="https://discord.gg/WsBxGsKyhU" target="_blank" rel="noopener">💬&nbsp; discord.gg/WsBxGsKyhU</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div>
+      <a href="index.html">Home</a> ·
+      <a href="owner.html">Owner</a> ·
+      <a href="https://github.com/entitybrian69-bit/Volt-launcher" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://discord.gg/WsBxGsKyhU" target="_blank" rel="noopener">Discord</a>
+    </div>
+    <div class="fine">© <span id="year"></span> Volt Launcher · An independent community project — not affiliated with, endorsed by or associated with Mojang or Microsoft.</div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

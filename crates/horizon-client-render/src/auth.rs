@@ -17,11 +17,12 @@ pub const DEFAULT_DISCOVERY: &str = "https://discovery.minecraftservices.com/min
 /// A session file older than this is refused: it can't be replayed later.
 const MAX_SESSION_FILE_AGE: Duration = Duration::from_secs(120);
 
-/// A signed-in account (vanilla's User with type msa).
+/// A signed-in account (vanilla's User with type msa, or Ely.by Yggdrasil).
 pub struct AuthSession {
     pub name: String,
     pub uuid: u128,
     pub xuid: Option<String>,
+    pub join_url: Option<String>,
     access_token: String,
 }
 impl std::fmt::Debug for AuthSession {
@@ -49,10 +50,11 @@ impl AuthSession {
             name: name.to_owned(),
             uuid,
             xuid: None,
+            join_url: None,
             access_token: access_token.to_owned(),
         }
     }
-    /// The session file's JSON: {"name", "uuid", "access_token", "user_type": "msa", "xuid"}.
+    /// The session file's JSON: {"name", "uuid", "access_token", "user_type": "msa"|"ely", "xuid", "join_url"}.
     pub fn parse(text: &str) -> Result<Self, String> {
         let v: serde_json::Value =
             serde_json::from_str(text).map_err(|_| "the session is not valid JSON")?;
@@ -67,13 +69,18 @@ impl AuthSession {
         let access_token = field("access_token")
             .filter(|t| !t.is_empty())
             .ok_or("the session has no access token")?;
-        if field("user_type").is_some_and(|t| t != "msa") {
-            return Err("the session is not a Microsoft account session".into());
+        let user_type = field("user_type");
+        if user_type.is_some_and(|t| t != "msa" && t != "ely") {
+            return Err("the session is not a supported account session".into());
         }
+        let join_url = field("join_url")
+            .map(str::to_owned)
+            .or_else(|| (user_type == Some("ely")).then(|| "https://authserver.ely.by/session/join".into()));
         Ok(Self {
             name: name.to_owned(),
             uuid,
             xuid: field("xuid").map(str::to_owned),
+            join_url,
             access_token: access_token.to_owned(),
         })
     }
@@ -234,6 +241,9 @@ pub fn endpoint(doc: &serde_json::Value, service: &str, name: &str) -> Option<St
 /// to no actions, as vanilla does. Blocks: call it off the main thread.
 pub fn fetch_account_status(session: &AuthSession) -> crate::ban_notice::AccountStatus {
     use crate::ban_notice::{AccountStatus, parse_profile_actions, parse_properties};
+    if session.join_url.is_some() {
+        return AccountStatus::default();
+    }
     let Ok(doc) = discovery() else {
         return AccountStatus::default();
     };
@@ -280,8 +290,12 @@ pub fn join_request(session: &AuthSession, server_hash: &str) -> String {
 /// MinecraftServicesSessionService.joinServer: tell the session service this
 /// account is joining the server whose hash is `server_hash`.
 pub fn join_server(session: &AuthSession, server_hash: &str) -> Result<(), JoinError> {
-    let doc = discovery()?;
-    let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;
+    let url = if let Some(custom_url) = &session.join_url {
+        custom_url.clone()
+    } else {
+        let doc = discovery()?;
+        endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?
+    };
     match agent()
         .post(&url)
         .set("Content-Type", "application/json; charset=utf-8")

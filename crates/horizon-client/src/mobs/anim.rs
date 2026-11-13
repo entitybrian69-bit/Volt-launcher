@@ -662,6 +662,20 @@ pub fn setup(
     p: &mut Poses,
     w_anims: &HashMap<String, super::keyframes::Animation>,
 ) {
+    setup_vanilla(m, s, p, w_anims);
+    // Built-in animation mods post-process the finished pose (Options >
+    // Mods): Not Enough Animations and the gesture layer for humanoids.
+    if matches!(m.kind.anim, Anim::Humanoid { .. }) {
+        super::nea::apply(m, s, p);
+        super::player_gestures::apply(m, s, p);
+    }
+}
+fn setup_vanilla(
+    m: &Mob,
+    s: &State,
+    p: &mut Poses,
+    w_anims: &HashMap<String, super::keyframes::Animation>,
+) {
     if super::body_anim::anim(m, s, p, w_anims) {
         return;
     }

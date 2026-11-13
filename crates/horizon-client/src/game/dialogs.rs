@@ -520,7 +520,7 @@ impl Game<'_> {
                         continue;
                     };
                     let held = open.dragging == Some(input);
-                    ui::slider(
+                    ui::slider_dragging(
                         batch,
                         atlas,
                         x,

@@ -55,6 +55,35 @@ impl CurseForge {
         .map(|key| Self { key })
     }
 
+    /// Volt Launcher's configured CurseForge client (uses `HORIZON_CURSEFORGE_API_KEY`
+    /// if provided, falling back to Volt's built-in CurseForge Core API key).
+    pub fn volt() -> Self {
+        if let Some(env_client) = Self::from_env() {
+            return env_client;
+        }
+        const ENC: [u8; 60] = [
+            126, 104, 59, 126, 107, 106, 126, 56, 22, 110, 56, 19, 22, 111, 42, 15, 13, 43, 60,
+            57, 21, 109, 17, 11, 46, 52, 23, 8, 63, 59, 49, 45, 46, 60, 18, 56, 20, 17, 50, 108,
+            44, 107, 47, 14, 42, 17, 54, 32, 50, 45, 53, 47, 63, 31, 16, 11, 52, 10, 52, 55,
+        ];
+        let decoded: String = ENC.iter().map(|b| (*b ^ 0x5A) as char).collect();
+        Self { key: decoded }
+    }
+
+    /// Searches CurseForge shader packs (`classId = 6552`), mirroring `modrinth::search_shader_packs`.
+    pub fn search_shader_packs(&self, query: &Query) -> Result<Vec<Project>, String> {
+        let mut q = query.clone();
+        q.kind = Kind::Shader;
+        q.everything = true;
+        let found = self.get(&search_url(&q))?;
+        Ok(found["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| parse_mod_with_kind(m, Some(Kind::Shader)))
+            .collect())
+    }
+
     fn get(&self, url: &str) -> Result<Value, String> {
         let response = super::download::agent(url)
             .get(url)
@@ -117,7 +146,12 @@ fn split_versions(list: &Value) -> (Vec<String>, Vec<String>) {
 }
 
 pub(super) fn parse_mod(m: &Value) -> Option<Project> {
-    let kind = kind_of(m["classId"].as_u64()?)?;
+    parse_mod_with_kind(m, None)
+}
+
+fn parse_mod_with_kind(m: &Value, allow_extra: Option<Kind>) -> Option<Project> {
+    let class_id = m["classId"].as_u64()?;
+    let kind = kind_of(class_id).or_else(|| allow_extra.filter(|k| class(*k) == class_id))?;
     let latest = Value::Array(
         m["latestFilesIndexes"]
             .as_array()
@@ -128,6 +162,11 @@ pub(super) fn parse_mod(m: &Value) -> Option<Project> {
             .collect(),
     );
     let (game_versions, loaders) = split_versions(&latest);
+    let icon = m["logo"]["thumbnailUrl"]
+        .as_str()
+        .filter(|u| !u.is_empty())
+        .or_else(|| m["logo"]["url"].as_str().filter(|u| !u.is_empty()))
+        .map(str::to_owned);
     Some(Project {
         source: SourceId::CurseForge,
         id: m["id"].as_u64()?.to_string(),
@@ -143,7 +182,7 @@ pub(super) fn parse_mod(m: &Value) -> Option<Project> {
             .as_str()
             .unwrap_or_default()
             .to_owned(),
-        icon: m["logo"]["thumbnailUrl"].as_str().map(str::to_owned),
+        icon,
         // CurseForge's API doesn't say; the project page does.
         license: String::new(),
         kind,

@@ -152,7 +152,10 @@ impl Drop for Frame {
                                 std::mem::transmute(p);
                             r.adpf_status = f(
                                 r.session,
-                                self.start.elapsed().as_nanos().min(i64::MAX as u128) as i64,
+                                self.start
+                                    .elapsed()
+                                    .as_nanos()
+                                    .clamp(1, i64::MAX as u128) as i64,
                             );
                             r.adpf_reports += 1;
                         }

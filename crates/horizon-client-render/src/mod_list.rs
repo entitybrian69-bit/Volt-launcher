@@ -111,15 +111,20 @@ impl ModList {
         })
     }
     pub fn save(&self, dir: &Path) {
+        let _ = self.try_save(dir);
+    }
+    /// Like [`Self::save`], but reports a failed write, so a toggle that
+    /// could not persist is said out loud instead of silently undone.
+    pub fn try_save(&self, dir: &Path) -> std::io::Result<()> {
         let path = dir.join(FILE);
         if self.enabled.is_empty()
             && self.disabled.is_empty()
             && self.keys.is_empty()
             && !path.exists()
         {
-            return;
+            return Ok(());
         }
-        let _ = fs::write(path, self.serialize());
+        fs::write(path, self.serialize())
     }
     pub fn is_on(&self, i: usize) -> bool {
         self.installed.get(i).is_some_and(|m| {

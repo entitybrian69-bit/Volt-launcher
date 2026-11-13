@@ -67,6 +67,7 @@ impl Queue {
         let (finished, done) = channel();
         std::thread::Builder::new()
             .name("download-queue".into())
+            .stack_size(4 * 1024 * 1024)
             .spawn(move || {
                 for (requests, headers, progress) in todo {
                     if finished

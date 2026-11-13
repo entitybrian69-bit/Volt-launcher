@@ -244,7 +244,7 @@ impl Game<'_> {
     pub(super) fn camera_view(&mut self, partial: f32) -> Option<(glam::DVec3, f32, f32)> {
         // Minecraft.cameraEntity: a server's spectator camera on a mob or
         // another player.
-        let (entity, descending) = match self.camera_mob() {
+        let (mut entity, descending) = match self.camera_mob() {
             Some(m) => (super::remote_camera::mob_camera_entity(m), false),
             None => (
                 self.player_camera_entity()?,
@@ -252,10 +252,18 @@ impl Game<'_> {
             ),
         };
         let mut view = self.view;
-        let kind = match self.camera_type {
-            CameraType::FirstPerson => horizon_client::camera::CameraType::FirstPerson,
-            CameraType::ThirdPersonBack => horizon_client::camera::CameraType::ThirdPersonBack,
-            CameraType::ThirdPersonFront => horizon_client::camera::CameraType::ThirdPersonFront,
+        let kind = if self.freelook_active() {
+            entity.y_rot = self.extras.volt.freelook_yaw;
+            entity.y_rot_o = self.extras.volt.freelook_yaw;
+            entity.x_rot = self.extras.volt.freelook_pitch;
+            entity.x_rot_o = self.extras.volt.freelook_pitch;
+            horizon_client::camera::CameraType::ThirdPersonBack
+        } else {
+            match self.camera_type {
+                CameraType::FirstPerson => horizon_client::camera::CameraType::FirstPerson,
+                CameraType::ThirdPersonBack => horizon_client::camera::CameraType::ThirdPersonBack,
+                CameraType::ThirdPersonFront => horizon_client::camera::CameraType::ThirdPersonFront,
+            }
         };
         let context = CollisionContext::for_entity(
             CollisionEntity {
@@ -385,6 +393,7 @@ impl Game<'_> {
             };
             let mut m = Mob::new(0, kind, p.position, self.yaw);
             m.head_pitch = self.pitch;
+            m.own = true;
             self.player_model = Some(m);
         }
         let pose = p.pose;
@@ -505,6 +514,9 @@ impl Game<'_> {
         };
         m.extra.main_hand_left = self.settings.main_hand_left;
         m.extra.hidden_model_parts = !self.settings.file.model_customisation() & 0x7F;
+        if horizon_client::skins::current_offline_cape().is_some() {
+            m.extra.hidden_model_parts &= !1;
+        }
         m.extra.spectator = spectator;
         m.extra.using_item = using;
         m.extra.using_off_hand = using_off_hand;
@@ -523,6 +535,37 @@ impl Game<'_> {
         m.extra.swing_right_arm = swing_right_arm;
         m.extra.swing_stab = self.swing.current.is_some_and(|c| c.animation.kind == 2);
         m.hurt_time = hurt;
+        if self.remote.is_none() {
+            let custom_skin = horizon_client::skins::current_offline_skin();
+            let custom_cape = horizon_client::skins::current_offline_cape();
+            if let Some((rgba, _, _)) = &custom_skin
+                && !self.skin_slots.contains("horizon/offline_skin")
+            {
+                self.store_skin("horizon/offline_skin".into(), rgba.clone());
+            }
+            if let Some((rgba, _)) = &custom_cape
+                && !self.skin_slots.contains("capes/offline")
+            {
+                self.store_skin("capes/offline".into(), rgba.clone());
+            }
+            let skin_ready = custom_skin
+                .as_ref()
+                .filter(|_| self.again_skin("horizon/offline_skin"))
+                .map(|(_, is_slim, _)| *is_slim);
+            let cape_ready = custom_cape
+                .is_some()
+                .then_some("capes/offline")
+                .filter(|c| self.again_skin(c));
+            if let Some(mob) = self.player_model.as_mut() {
+                if let Some(is_slim) = skin_ready {
+                    mob.skin = Some("horizon/offline_skin".into());
+                    mob.slim = is_slim;
+                }
+                if let Some(cape) = cape_ready {
+                    mob.cape = Some(cape.into());
+                }
+            }
+        }
     }
     /// `Entity.turn` for the player, by the mouse, a pad, the arrow keys or an
     /// agent's `turn`.
@@ -530,13 +573,10 @@ impl Game<'_> {
     /// with `xRot` (`turn_rotation`).
     pub(super) fn turn_player(&mut self, xo: f64, yo: f64) {
         let pitch_o = self.player_model.as_ref().map(|m| m.previous_head_pitch);
+        let before = self.yaw;
         let rotation = turn_rotation(self.yaw, self.pitch, pitch_o, xo, yo);
         self.yaw = rotation.y_rot;
         self.pitch = rotation.x_rot;
-        if let Some(m) = self.player_model.as_mut() {
-            m.previous_head_pitch = rotation.x_rot_o;
-            m.head_pitch = rotation.x_rot;
-        }
         // Entity.turn ends in AbstractBoat.onPassengerTurned: clampRotation
         // keeps the view within 105 degrees of the boat at every turn, not
         // only at the tick, so it never swings past and back.
@@ -546,6 +586,18 @@ impl Game<'_> {
         {
             let delta = (self.yaw - b.yaw + 180.0).rem_euclid(360.0) - 180.0;
             self.yaw += delta.clamp(-105.0, 105.0) - delta;
+        }
+        if let Some(m) = self.player_model.as_mut() {
+            m.previous_head_pitch = rotation.x_rot_o;
+            m.head_pitch = rotation.x_rot;
+            // Entity.turn moves the old rotation with the new (`yRotO`
+            // follows `yRot`): the model's head tracks the view between
+            // ticks too, instead of easing in a tick late. Without this the
+            // head (and the body chasing it) visibly drags behind every
+            // camera swing in third person.
+            let moved = self.yaw - before;
+            m.head_yaw += moved;
+            m.previous_head_yaw += moved;
         }
     }
     /// `Entity.setOldRot` after a server sets the player's rotation
@@ -561,7 +613,7 @@ impl Game<'_> {
     /// `LevelExtractor`'s skip of the camera entity: the player's own body
     /// is drawn unless the camera is in first person, or while it sleeps.
     pub(super) fn own_body_in_view(&self) -> bool {
-        !self.camera_type.first_person() || self.sleeping.is_some()
+        !self.camera_type.first_person() || self.sleeping.is_some() || self.freelook_active()
     }
     /// Whether the player's own model shows in the world view (its body or,
     /// while invisible, only its armour and held items).

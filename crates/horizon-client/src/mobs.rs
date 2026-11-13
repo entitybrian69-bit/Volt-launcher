@@ -53,6 +53,8 @@ pub mod living;
 pub mod llama;
 pub mod monster_brain;
 pub mod nautilus;
+pub mod nea;
+pub mod player_gestures;
 pub mod nav;
 pub mod nether;
 pub mod panda;
@@ -68,6 +70,7 @@ pub mod render;
 pub mod riders;
 pub mod seen_grid;
 pub mod shulker;
+pub mod skin_layers;
 pub mod sniffer;
 pub mod spawn_rules;
 pub mod spawn_selection;
@@ -1057,6 +1060,10 @@ pub struct Mob {
     /// `Entity.needsSync`: knocked back, pushed or jumped since its server
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
+    /// The local player's own third-person model (`tick_player_model`),
+    /// never a server entity: built-in animation mods read the local
+    /// climbing and riding state for it (`mobs::nea`).
+    pub own: bool,
     pub health: f32,
     pub hurt_time: i32,
     pub invulnerable: i32,
@@ -1127,6 +1134,10 @@ pub struct Mob {
     pub skin: Option<String>,
     /// `PlayerSkin.model` is `SLIM`: the player model with 3-pixel arms.
     pub slim: bool,
+    /// The 3D skin layers feature's model for this player: its outer layer
+    /// with every painted texel extruded (off by default; a native mod's
+    /// hook fills it).
+    pub skin_3d: Option<Arc<Part>>,
     /// `PlayerSkin.cape`: a player's cape texture, once every download of
     /// its skin is ready.
     pub cape: Option<String>,
@@ -2252,6 +2263,7 @@ impl Mob {
             horizontal_collision: false,
             vertical_collision_below: false,
             needs_sync: false,
+            own: false,
             hurt_time: 0,
             invulnerable: 0,
             death_time: 0,
@@ -2296,6 +2308,7 @@ impl Mob {
             outbox: Vec::new(),
             skin: None,
             slim: false,
+            skin_3d: None,
             cape: None,
             profile: None,
             attrs: Attrs {

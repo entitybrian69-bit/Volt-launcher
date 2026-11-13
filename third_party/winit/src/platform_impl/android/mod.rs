@@ -245,6 +245,12 @@ impl Default for PlatformSpecificEventLoopAttributes {
     }
 }
 
+impl<T: 'static> Drop for EventLoop<T> {
+    fn drop(&mut self) {
+        crate::event_loop::EventLoopBuilder::<()>::allow_event_loop_recreation();
+    }
+}
+
 impl<T: 'static> EventLoop<T> {
     pub(crate) fn new(
         attributes: &PlatformSpecificEventLoopAttributes,
@@ -377,9 +383,9 @@ impl<T: 'static> EventLoop<T> {
                     warn!("TODO: forward onStop notification to application");
                 }
                 MainEvent::Destroy => {
-                    // XXX: maybe exit mainloop to drop things before being
-                    // killed by the OS?
-                    warn!("TODO: forward onDestroy notification to application");
+                    debug!("Android Activity onDestroy - exiting event loop cleanly");
+                    self.running = false;
+                    self.window_target().exit();
                 }
                 MainEvent::InsetsChanged { .. } => {
                     // XXX: how to forward this state to applications?
@@ -596,9 +602,17 @@ impl<T: 'static> EventLoop<T> {
                     let pointers: Box<dyn Iterator<Item = android_activity::input::Pointer<'_>>> =
                         match phase {
                             event::TouchPhase::Started | event::TouchPhase::Ended => {
-                                Box::new(std::iter::once(
-                                    motion_event.pointer_at_index(motion_event.pointer_index()),
-                                ))
+                                let idx = motion_event.pointer_index();
+                                if idx >= motion_event.pointer_count() {
+                                    warn!(
+                                        "Dropping Android MotionEvent with out-of-bounds pointer_index={} (count={})",
+                                        idx,
+                                        motion_event.pointer_count()
+                                    );
+                                    Box::new(std::iter::empty())
+                                } else {
+                                    Box::new(std::iter::once(motion_event.pointer_at_index(idx)))
+                                }
                             }
                             event::TouchPhase::Moved | event::TouchPhase::Cancelled => {
                                 Box::new(motion_event.pointers())

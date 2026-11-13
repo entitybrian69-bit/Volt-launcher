@@ -56,13 +56,14 @@ def download_game(version, directory):
     pins = json.loads((ROOT / 'research-lock.json').read_text())['minecraft']
     if version != pins['version']:
         raise ValueError(f"This engine implements {pins['version']}; {version} is unsupported")
-    # Use the exact version manifest pinned by the engine. Mojang can republish
-    # the version catalog with a different asset index; downloading its current
-    # entry would then fail the engine's strict manifest validation.
+    entry = next((v for v in fetch_json(MANIFEST)['versions'] if v['id'] == version), None)
+    if entry is None:
+        raise ValueError(f"Mojang does not list Minecraft {version}")
+    # Mojang metadata may be republished: lab.download checks the catalog SHA-1,
+    # and client/server jar hashes are checked against the engine pins below.
     versions = directory / 'versions' / version
     manifest_path = versions / f'{version}.json'
-    manifest_url = f"https://piston-meta.mojang.com/v1/packages/{pins['manifest_sha1']}/{version}.json"
-    lab.download(manifest_url, manifest_path, pins['manifest_sha1'])
+    lab.download(entry['url'], manifest_path, entry['sha1'])
     manifest = json.loads(manifest_path.read_text())
     files = []
     for side in ['client', 'server']:

@@ -390,25 +390,28 @@ pub fn install_with_progress(home: &Path, progress: impl Fn(InstallProgress) + S
     let done = AtomicU64::new(0);
     let error = Mutex::new(None);
     std::thread::scope(|scope| {
-        for _ in 0..8 {
-            scope.spawn(|| {
-                loop {
-                    if error.lock().unwrap().is_some() {
-                        break;
+        for idx in 0..8 {
+            let _ = std::thread::Builder::new()
+                .name(format!("volt-dl-{idx}"))
+                .stack_size(4 * 1024 * 1024)
+                .spawn_scoped(scope, || {
+                    loop {
+                        if error.lock().unwrap().is_some() {
+                            break;
+                        }
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(file) = files.get(i) else { break };
+                        if let Err(e) = file.get() {
+                            *error.lock().unwrap() = Some(e.to_string());
+                            break;
+                        }
+                        report(
+                            InstallStage::Download,
+                            done.fetch_add(file.size, Ordering::Relaxed) + file.size,
+                            total,
+                        );
                     }
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(file) = files.get(i) else { break };
-                    if let Err(e) = file.get() {
-                        *error.lock().unwrap() = Some(e.to_string());
-                        break;
-                    }
-                    report(
-                        InstallStage::Download,
-                        done.fetch_add(file.size, Ordering::Relaxed) + file.size,
-                        total,
-                    );
-                }
-            });
+                });
         }
     });
     if let Some(error) = error.into_inner().unwrap() {
@@ -487,6 +490,14 @@ pub fn install_with_progress(home: &Path, progress: impl Fn(InstallProgress) + S
     })();
     if stage.exists() {
         let _ = fs::remove_dir_all(stage);
+    }
+    if result.is_ok() {
+        drop(index);
+        drop(files);
+        horizon_threads::release_free_memory();
+        // `load_core` builds `behaviours-v2.bin` via `BlockFacts::load_streaming` on first
+        // launch without materializing the 400 MB `serde_json::Value` DOM in RAM.
+        horizon_world::level::Behaviours::set_cache_dir(home.join(".horizon-cache"));
     }
     // `install_with_progress` holds INSTALLATION for the entire transaction,
     // so use the inner helper here rather than reacquiring the non-reentrant

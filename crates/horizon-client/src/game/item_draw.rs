@@ -317,10 +317,17 @@ impl Game<'_> {
     /// The glint clock, options and sprite for this frame: read once per
     /// frame, not per item (`GameRenderer.extractOptions`).
     pub(super) fn capture_glint_frame(&self) -> item_render::GlintFrame {
+        let alpha = if self.settings.extras.glint_mode
+            == horizon_client::volt_features::GlintTrimMode::Off
+        {
+            0.0
+        } else {
+            self.settings.file.double("glintStrength") as f32
+        };
         item_render::GlintFrame {
             millis: self.started.elapsed().as_secs_f32() * 1000.0,
             speed: self.settings.file.double("glintSpeed") as f32,
-            alpha: self.settings.file.double("glintStrength") as f32,
+            alpha,
             sprite: self
                 .gui
                 .atlas
@@ -354,11 +361,19 @@ impl Game<'_> {
         lights: (glam::Vec3, glam::Vec3),
         out: &mut Vec<Vertex>,
     ) {
+        let glint = if self.settings.extras.glint_mode
+            == horizon_client::volt_features::GlintTrimMode::NearbyOnly
+            && pose.w_axis.truncate().length_squared() > 144.0
+        {
+            None
+        } else {
+            self.glint()
+        };
         let mut sink = WorldSink {
             out,
             light,
             lights: Some(lights),
-            glint: self.glint(),
+            glint,
         };
         state.submit(
             &self.pack.item_renderer,
@@ -397,27 +412,38 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
-        let live = self.dropped.iter().map(|item| {
-            let (p, q) = (item.previous, item.position);
-            let at = [
-                p.x + (q.x - p.x) * alpha,
-                p.y + (q.y - p.y) * alpha,
-                p.z + (q.z - p.z) * alpha,
-            ];
-            (item, at, alpha as f32)
-        });
-        // ItemPickupParticle: the render state extracted at partial tick 1.
-        let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
-            super::pickups::Taken::Item(item) => {
-                Some((&**item, super::pickups::position(p, alpha), 1.0))
+        let (max_items, max_dist_sq) = self
+            .settings
+            .extras
+            .item_render_cap
+            .limit_and_dist_sq()
+            .unwrap_or((usize::MAX, 64.0 * 64.0));
+        // Volt "Frame items": dropped-item loading toggle + draw distance.
+        if !self.settings.extras.frame_dropped {
+            return;
+        }
+        let max_dist_sq = match self.settings.extras.frame_dropped_distance.dist_sq() {
+            Some(d) => max_dist_sq.min(d),
+            None => max_dist_sq,
+        };
+        let mut rendered = 0usize;
+        for (item, at, partial) in
+            self.dropped_item_candidates(camera, alpha, max_items, max_dist_sq)
+        {
+            if rendered >= max_items {
+                break;
             }
-            _ => None,
-        });
-        for (item, at, partial) in live.chain(taken) {
             let entity_start = out.len();
             let q = item.position;
             let pos = glam::DVec3::from_array(at) - camera;
-            if pos.length_squared() > 64.0 * 64.0 {
+            let dist_sq = pos.length_squared();
+            if dist_sq > max_dist_sq {
+                continue;
+            }
+            if self.is_aabb_occluded(
+                [at[0] - 0.2, at[1], at[2] - 0.2],
+                [at[0] + 0.2, at[1] + 0.45, at[2] + 0.2],
+            ) {
                 continue;
             }
             // `extractItemGroupRenderState`: GROUND, seeded by the entity id.
@@ -431,14 +457,48 @@ impl Game<'_> {
             if state.is_empty() {
                 continue;
             }
+            rendered += 1;
             let age = item.age as f32 + partial;
             let (lo, _) = state.bounding_box();
             let min_offset_y = -lo.y + 0.0625;
-            let bob = (age / 10.0 + item.bob_offset).sin() * 0.1 + 0.1;
-            let spin = item_render::item_spin(age, item.bob_offset);
-            let pose = glam::Mat4::from_translation(pos.as_vec3())
-                * glam::Mat4::from_translation(glam::Vec3::new(0.0, bob + min_offset_y, 0.0))
-                * glam::Mat4::from_rotation_y(spin);
+            let far_static = max_items < usize::MAX && dist_sq > 144.0;
+            let bob = if far_static {
+                0.05
+            } else {
+                (age / 10.0 + item.bob_offset).sin() * 0.1 + 0.1
+            };
+            let spin = if far_static {
+                item.bob_offset
+            } else {
+                item_render::item_spin(age, item.bob_offset)
+            };
+            let pose = if self.settings.extras.volt_visuals.dropped_items_3d {
+                let (_, hi) = state.bounding_box();
+                let airborne = (item.position.y - item.previous.y).abs() > 0.006
+                    || (item.position.x - item.previous.x).abs()
+                        + (item.position.z - item.previous.z).abs()
+                        > 0.012;
+                if airborne {
+                    glam::Mat4::from_translation(pos.as_vec3())
+                        * glam::Mat4::from_translation(glam::Vec3::new(0.0, min_offset_y + 0.08, 0.0))
+                        * glam::Mat4::from_rotation_y(spin * 1.6)
+                        * glam::Mat4::from_rotation_x(age * 0.32)
+                        * glam::Mat4::from_rotation_z(age * 0.19)
+                } else if (hi.z - lo.z) < 0.24 {
+                    glam::Mat4::from_translation(pos.as_vec3())
+                        * glam::Mat4::from_translation(glam::Vec3::new(0.0, 0.032, 0.0))
+                        * glam::Mat4::from_rotation_y(item.bob_offset * 3.7)
+                        * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
+                } else {
+                    glam::Mat4::from_translation(pos.as_vec3())
+                        * glam::Mat4::from_translation(glam::Vec3::new(0.0, min_offset_y * 0.65, 0.0))
+                        * glam::Mat4::from_rotation_y(item.bob_offset * 2.9)
+                }
+            } else {
+                glam::Mat4::from_translation(pos.as_vec3())
+                    * glam::Mat4::from_translation(glam::Vec3::new(0.0, bob + min_offset_y, 0.0))
+                    * glam::Mat4::from_rotation_y(spin)
+            };
             let packed = self.world.light(
                 q.x.floor() as i32,
                 (q.y + 0.1).floor() as i32,
@@ -461,6 +521,57 @@ impl Game<'_> {
                 self.cull_entity_vertices(out, entity_start);
             }
         }
+    }
+    /// The dropped items and pickup particles to draw, with interpolated
+    /// positions and partial ticks (`ItemPickupParticle`: the render state
+    /// extracted at partial tick 1). Kept apart so `dropped_item_geometry`'s
+    /// body stays free of closures: the native mod weave's common mixin
+    /// compiler binds the `state` and `pose` locals there (fast_items).
+    fn dropped_item_candidates(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        max_items: usize,
+        max_dist_sq: f64,
+    ) -> Vec<(&horizon_client::entities::ItemEntity, [f64; 3], f32)> {
+        let live_indices: Vec<usize> = if max_items < usize::MAX && self.dropped.len() > max_items {
+            let mut ordered: Vec<(usize, f64)> = Vec::with_capacity(self.dropped.len());
+            for (idx, item) in self.dropped.iter().enumerate() {
+                let (p, q) = (item.previous, item.position);
+                let at = [
+                    p.x + (q.x - p.x) * alpha,
+                    p.y + (q.y - p.y) * alpha,
+                    p.z + (q.z - p.z) * alpha,
+                ];
+                let d_sq = (glam::DVec3::from_array(at) - camera).length_squared();
+                if d_sq <= max_dist_sq {
+                    ordered.push((idx, d_sq));
+                }
+            }
+            ordered.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            ordered.truncate(max_items);
+            ordered.into_iter().map(|(idx, _)| idx).collect()
+        } else {
+            (0..self.dropped.len()).collect()
+        };
+        let live = live_indices.into_iter().map(|idx| {
+            let item = &self.dropped[idx];
+            let (p, q) = (item.previous, item.position);
+            let at = [
+                p.x + (q.x - p.x) * alpha,
+                p.y + (q.y - p.y) * alpha,
+                p.z + (q.z - p.z) * alpha,
+            ];
+            (item, at, alpha as f32)
+        });
+        // ItemPickupParticle: the render state extracted at partial tick 1.
+        let taken = self.pickups.live.iter().filter_map(|p| match &p.taken {
+            super::pickups::Taken::Item(item) => {
+                Some((&**item, super::pickups::position(p, alpha), 1.0))
+            }
+            _ => None,
+        });
+        live.chain(taken).collect()
     }
 }
 

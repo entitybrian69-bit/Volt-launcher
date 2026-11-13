@@ -81,6 +81,16 @@ fn reads_the_shown_servers_with_their_pictures() {
 }
 
 #[test]
+fn editing_a_corrupt_server_file_fails_without_overwriting_it() {
+    let home = scratch("corrupt-edit");
+    let bad = b"not valid nbt";
+    fs::write(home.join(FILE), bad).unwrap();
+    assert!(List::try_load(&home).is_err());
+    assert_eq!(fs::read(home.join(FILE)).unwrap(), bad);
+    assert!(List::try_load(&home.join("missing")).is_ok());
+}
+
+#[test]
 fn adding_and_removing_keeps_every_other_field_and_the_hidden_servers() {
     let home = scratch("keeps");
     let original = vanilla_file(home.as_path());

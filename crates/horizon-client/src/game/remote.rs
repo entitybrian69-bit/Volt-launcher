@@ -261,6 +261,88 @@ enum Received {
     Chunk(Arc<ChunkFormat>),
 }
 
+/// Volt Replay playback state: the control shared with the feeder thread,
+/// the recorder's recent recorded path, and whether the free-camera body
+/// entity currently exists.
+pub(super) struct ReplayUi {
+    pub(super) control: Arc<horizon_client::replay::Control>,
+    /// (milliseconds into the recording, position, yaw, pitch).
+    pub(super) poses: horizon_client::replay::PoseBuffer,
+    /// The synthetic body entity is spawned (free camera shows the
+    /// recorder as its own player).
+    pub(super) body: bool,
+    /// The mode `replay_frame` last saw, to notice POV <-> free camera flips.
+    pub(super) was_pov: bool,
+    /// The `.vrpl` being watched; markers and camera keyframes persist in
+    /// its `.vmeta` sidecar.
+    pub(super) path: std::path::PathBuf,
+    /// Timeline markers (ms), sorted.
+    pub(super) markers: Vec<u32>,
+    /// Free-camera keyframes, sorted by time.
+    pub(super) cam_keys: Vec<horizon_client::replay::CamKey>,
+    /// The free camera rides the keyframe path instead of the sticks.
+    pub(super) cam_path: bool,
+    /// When the running camera-path flight took off: the path rides its
+    /// own wall clock (one keyframe every few seconds), independent of
+    /// the replay clock, so pause and speed cannot strand it.
+    pub(super) path_started: Option<std::time::Instant>,
+    /// MUS: the soundtrack plays continuously while the replay runs.
+    pub(super) music: bool,
+    /// LP: playback starts over when it reaches the end.
+    pub(super) loop_play: bool,
+    /// An MP4 export in progress.
+    pub(super) export: Option<super::video_export::Exporter>,
+    /// A short status line drawn above the playback bar.
+    pub(super) note: Option<(String, std::time::Instant)>,
+    /// When the playback bar was last touched; while exporting it hides
+    /// itself a few seconds later so it is not burned into the video.
+    pub(super) hud_touch: std::time::Instant,
+    /// SHADER: the picker list is open above the dock.
+    pub(super) shader_menu: bool,
+    /// The player's own shader settings (picked pack, Volt Shaders flag)
+    /// before the studio overrode them; restored when the viewer leaves,
+    /// so a studio pick never leaks into normal play.
+    pub(super) shader_saved: Option<(String, bool)>,
+    /// The studio's active shader pick, for the button and picker UI:
+    /// None = untouched, Some("") = forced clean, Some(name) = a pack.
+    pub(super) shader_pick: Option<String>,
+}
+
+impl ReplayUi {
+    fn new(control: Arc<horizon_client::replay::Control>, path: std::path::PathBuf) -> Self {
+        let (markers, mut cam_keys) = horizon_client::replay::load_sidecar(&path);
+        // The camera path rides its own clock: keyframes sit a fixed few
+        // seconds of flight apart. Older sidecars stored replay-clock
+        // stamps; re-spacing them keeps those paths flyable.
+        for (i, k) in cam_keys.iter_mut().enumerate() {
+            k.ms = i as u32 * 5_000;
+        }
+        Self {
+            control,
+            poses: Default::default(),
+            body: false,
+            was_pov: true,
+            path,
+            markers,
+            cam_keys,
+            cam_path: false,
+            path_started: None,
+            music: false,
+            loop_play: false,
+            export: None,
+            note: None,
+            hud_touch: std::time::Instant::now(),
+            shader_menu: false,
+            shader_saved: None,
+            shader_pick: None,
+        }
+    }
+}
+
+/// The free-camera body's entity id: far above anything a server assigns
+/// before an i32 overflow, and stable for removal.
+pub(super) const REPLAY_BODY_ID: i32 = i32::MAX - 100;
+
 pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
@@ -374,7 +456,7 @@ pub(super) struct Remote {
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     online_mode: bool,
     /// Player entities in the level: entity id to profile UUID.
-    level_players: HashMap<i32, u128>,
+    pub(super) level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
     /// player-list entry, which servers remove to hide their NPCs from the list.
     level_player_names: HashMap<i32, String>,
@@ -421,6 +503,11 @@ pub(super) struct Remote {
     /// Inventory, off hand and armour as last synchronised, for creative-mode
     /// slot updates (`creative_sync_stacks`).
     synced: Vec<Option<ItemStack>>,
+    /// Volt Replay: this session is a recorded one being watched.
+    pub(super) replay: Option<ReplayUi>,
+    /// Volt Replay's live recorder, when this session is being captured;
+    /// the on-screen replay button drives its Start / Pause / End.
+    pub(super) recorder: Option<Arc<horizon_client::replay::Recorder>>,
     decode_errors: u32,
     clock: Option<i32>,
     /// `ClientClockManager.ClientClockInstance`'s rate and partial tick for
@@ -444,6 +531,10 @@ pub(super) struct Remote {
     /// `ClientPacketListener.getDebugQueryHandler`: the F3+I query waiting
     /// for the server's data.
     pub(super) debug_query: super::debug_keys::DebugQuery,
+    pub(super) offline_skin_gen: u64,
+    pub(super) offline_cape_gen: u64,
+    pub(super) skin_synced: bool,
+    pub(super) volt_peer_skins: HashMap<u128, (Option<bool>, bool)>,
 }
 
 /// The time a frame spends on chunk packets before it leaves the rest of
@@ -530,7 +621,7 @@ impl Game<'_> {
             return Ok(());
         }
         self.join_world_rest()?;
-        if let Err(error) = self.join_server(address, name, None, cookies) {
+        if let Err(error) = self.join_server(address, name, None, cookies, None) {
             log::warn!("Horizon: could not join server: {error}");
             if self.title.is_none() {
                 self.title = Some(
@@ -556,7 +647,35 @@ impl Game<'_> {
         pipe: horizon_protocol::connection::Pipe,
         name: &str,
     ) -> Result<()> {
-        self.join_server("local", name, Some(pipe), None)
+        self.join_server("local", name, Some(pipe), None, None)
+    }
+    /// Volt Replay: watch a recorded session. The world loads from the
+    /// recorded packet stream instead of a connection.
+    pub(super) fn connect_replay(&mut self, path: std::path::PathBuf) -> Result<()> {
+        // World resources must be ready first, exactly like a server join;
+        // at startup this waits for the loaders and resumes.
+        if self.defer_world_entry(super::PendingWorldEntry::Replay { path: path.clone() })? {
+            return Ok(());
+        }
+        self.join_world_rest()?;
+        let name = self.options.player_name();
+        if let Err(error) = self.join_server("replay", &name, None, None, Some(path)) {
+            log::warn!("Horizon: could not open replay: {error}");
+            if self.title.is_none() {
+                self.title = Some(
+                    horizon_client::title::Title::new(
+                        std::env::current_dir()?.join("saves"),
+                        &self.options.resources,
+                    )
+                    .with_user(|| self.options.player_name()),
+                );
+            }
+            if let Some(title) = &mut self.title {
+                title.failed(error);
+            }
+            self.capture(false);
+        }
+        Ok(())
     }
     fn join_server(
         &mut self,
@@ -564,6 +683,7 @@ impl Game<'_> {
         name: &str,
         local: Option<horizon_protocol::connection::Pipe>,
         cookies: Option<horizon_client::net::Cookies>,
+        replay: Option<std::path::PathBuf>,
     ) -> Result<()> {
         self.reset_tutorial();
         self.perf.world_opening();
@@ -595,31 +715,69 @@ impl Game<'_> {
             },
             |a| (a.name.clone(), a.uuid),
         );
-        self.server_packs_connect(local.is_none().then_some(address), user);
-        let session = match local {
-            Some(pipe) => {
-                Session::connect_local(pipe, name, info.clone(), lang.clone(), root.clone())
-            }
-            None => {
-                self.extras_connecting(address, name);
-                match cookies {
-                    Some(cookies) => Session::connect_transferred(
-                        address,
-                        name,
-                        auth.clone(),
-                        info.clone(),
-                        lang.clone(),
-                        cookies,
-                        root.clone(),
-                    ),
-                    None => Session::connect(
-                        address,
-                        name,
-                        auth.clone(),
-                        info.clone(),
-                        lang.clone(),
-                        root.clone(),
-                    ),
+        let uuid = user.1;
+        // Replays behave like a local world: no server pack prompts.
+        let packs_address = (local.is_none() && replay.is_none()).then_some(address);
+        self.server_packs_connect(packs_address, user);
+        // Volt Replay: record the session when the setting is on; a replay
+        // being watched is never itself recorded. With only the on-screen
+        // button enabled the recorder opens frozen at 0:00 — capture must
+        // begin at connect (the world state rides the packet stream), and
+        // the button's Start simply lets the clock run.
+        let auto_record = self.settings.extras.volt_qol.replay_buffer;
+        let replay_button = self.settings.extras.volt_qol.replay_button;
+        let recorder = if replay.is_none() && (auto_record || replay_button) {
+            horizon_client::replay::Recorder::create(
+                std::path::Path::new("replays"),
+                address,
+                name,
+                uuid,
+                auto_record,
+            )
+        } else {
+            None
+        };
+        let recorder_handle = recorder.clone();
+        let mut replay_control = None;
+        let replay_path = replay.clone().unwrap_or_default();
+        let session = if let Some(path) = replay {
+            let (session, control) =
+                Session::replay(&path).ok_or("This file is not a Volt replay.")?;
+            replay_control = Some(control);
+            session
+        } else {
+            match local {
+                Some(pipe) => Session::connect_local(
+                    pipe,
+                    name,
+                    info.clone(),
+                    lang.clone(),
+                    root.clone(),
+                    recorder,
+                ),
+                None => {
+                    self.extras_connecting(address, name);
+                    match cookies {
+                        Some(cookies) => Session::connect_transferred(
+                            address,
+                            name,
+                            auth.clone(),
+                            info.clone(),
+                            lang.clone(),
+                            cookies,
+                            root.clone(),
+                            recorder,
+                        ),
+                        None => Session::connect(
+                            address,
+                            name,
+                            auth.clone(),
+                            info.clone(),
+                            lang.clone(),
+                            root.clone(),
+                            recorder,
+                        ),
+                    }
                 }
             }
         };
@@ -773,6 +931,8 @@ impl Game<'_> {
             show_death_screen: true,
             player_type,
             synced: vec![None; CREATIVE_SYNCED],
+            replay: replay_control.map(|control| ReplayUi::new(control, replay_path)),
+            recorder: recorder_handle,
             decode_errors: 0,
             clock: None,
             clock_rate: 1.0,
@@ -783,6 +943,10 @@ impl Game<'_> {
             backlog_since: None,
             server_links: Vec::new(),
             debug_query: Default::default(),
+            offline_skin_gen: 0,
+            offline_cape_gen: 0,
+            skin_synced: false,
+            volt_peer_skins: HashMap::new(),
             transfer: None,
         });
         // The level's TickRateManager follows the server's ticking packets.
@@ -797,6 +961,26 @@ impl Game<'_> {
     pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
         if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
             return self.begin_closing_save(false);
+        }
+        // Volt Replay: stop capturing before the session (and with it the
+        // MP4 exporter, which finalizes its file on drop) goes away.
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.video_sink = None;
+        }
+        // The floating replay button's menu and gesture die with the
+        // session they controlled.
+        self.extras.volt.replay_btn_menu = false;
+        self.extras.volt.replay_btn_touch = None;
+        // Replay Studio's shader pick was playback-only: hand the player's
+        // own shader settings back before the session goes away.
+        if let Some((pack, volt)) = self
+            .remote
+            .as_mut()
+            .and_then(|r| r.replay.as_mut())
+            .and_then(|rp| rp.shader_saved.take())
+        {
+            self.settings.horizon.shader_pack = pack;
+            self.settings.extras.volt_shaders.enabled = volt;
         }
         self.finish_perf();
         if reason.is_none() {
@@ -1334,6 +1518,8 @@ impl Game<'_> {
     /// A chunk packet still decoding holds
     /// back what follows it.
     pub(super) fn poll_remote(&mut self) -> Result<()> {
+        self.replay_frame();
+        self.replay_export_tick();
         let Some(r) = self.remote.as_mut() else {
             return Ok(());
         };
@@ -1351,18 +1537,65 @@ impl Game<'_> {
                 event => Received::Event(event),
             });
         }
-        let overdue = r
+        let backlog_age = r
             .backlog_since
-            .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
+            .map_or(Duration::ZERO, |since| since.elapsed());
+        let overdue = backlog_age >= BACKLOG_LIMIT;
         // A mobile frame must not drain an arbitrarily large overdue burst:
         // a decoder that needed >50 ms otherwise turns its whole queue into
         // one long main-thread stall. Boost progress without changing order.
         let bounded = cfg!(target_os = "android") || !overdue;
         let chunk_budget = if cfg!(target_os = "android") && overdue {
-            Duration::from_millis(4)
+            // The budget escalates with the backlog's age. A teleport or a
+            // world join floods the queue with chunk columns, and every
+            // event behind them (command feedback, the teleport itself,
+            // entity moves) waits in order; the keepalive answers on the
+            // network thread, so the ping looks fine while the game feels
+            // seconds behind. A flat 4 ms never caught up on slower phones:
+            // draining faster the longer the queue has existed clears the
+            // burst within a few frames while still bounding each frame.
+            if backlog_age >= Duration::from_millis(600) {
+                Duration::from_millis(10)
+            } else if backlog_age >= Duration::from_millis(250) {
+                Duration::from_millis(7)
+            } else {
+                Duration::from_millis(4)
+            }
         } else {
             CHUNK_PACKETS_PER_FRAME
         };
+        // Command feedback and other unsigned system lines are display-only
+        // and independent of the chunk stream: with columns queued ahead,
+        // handle them now (in their own order) so a command never looks
+        // seconds slow behind a chunk burst. Signed player chat keeps its
+        // place: its signature chain and sender info must stay in order.
+        if events
+            .iter()
+            .any(|item| matches!(item, Received::Chunk(_)))
+        {
+            let mut fast = Vec::new();
+            let mut i = 0;
+            while i < events.len() {
+                let is_fast = matches!(
+                    &events[i],
+                    Received::Event(Event::Packet(p))
+                        if matches!(&**p, C::SystemChat(_) | C::DisguisedChat(_))
+                );
+                if is_fast {
+                    if let Some(Received::Event(Event::Packet(p))) = events.remove(i) {
+                        fast.push(p);
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            for packet in fast {
+                self.handle_packet(*packet)?;
+                if self.remote.is_none() {
+                    return Ok(());
+                }
+            }
+        }
         let mut chunks = Duration::ZERO;
         while let Some(item) = events.pop_front() {
             let chunk = matches!(item, Received::Chunk(_));
@@ -1403,6 +1636,39 @@ impl Game<'_> {
                         r.status = s;
                     }
                 }
+                Event::ReplayPose {
+                    at,
+                    position,
+                    yaw,
+                    pitch,
+                } => {
+                    let mut body = false;
+                    if let Some(r) = self.remote.as_mut()
+                        && let Some(rp) = r.replay.as_mut()
+                    {
+                        rp.poses.push_back((at, position, yaw, pitch));
+                        if rp.poses.len() > 400 {
+                            rp.poses.pop_front();
+                        }
+                        body = rp.body;
+                    }
+                    // The free camera's body walks like any remote player:
+                    // each recorded pose feeds the same stepped interpolation
+                    // that live MoveEntityPosRot and RotateHead packets drive,
+                    // so the motion stays tick-smooth and the legs swing.
+                    if body {
+                        self.move_entity(
+                            REPLAY_BODY_ID,
+                            Some(Path::Linear(position)),
+                            Some((yaw, pitch)),
+                            true,
+                            false,
+                        );
+                        if let Some(r) = self.remote.as_mut() {
+                            r.head_lerps.insert(REPLAY_BODY_ID, (yaw, 3));
+                        }
+                    }
+                }
                 Event::Joined {
                     registries,
                     name,
@@ -1440,6 +1706,22 @@ impl Game<'_> {
                     }
                 }
                 Event::Reconfiguring => {
+                    // Volt Replay: a seek restarts the stream and rebuilds the
+                    // world. Back to the recorded view first, or the replayed
+                    // login teleport is dropped by the free-camera guard and
+                    // the player never spawns ("Loading terrain..." forever).
+                    // The body and pose buffer are stale too: the world they
+                    // belonged to is going away.
+                    if let Some(r) = self.remote.as_mut()
+                        && let Some(rp) = r.replay.as_mut()
+                    {
+                        // The chosen camera survives the stream restart;
+                        // was_pov = true re-runs the free-camera switch
+                        // (spectator mode, body, framing) after the rejoin.
+                        rp.was_pov = true;
+                        rp.body = false;
+                        rp.poses.clear();
+                    }
                     // handleConfigurationStart: the held-back chat shows, then
                     // clearClientLevel opens ServerReconfigScreen over no level.
                     self.flush_chat_queue();
@@ -1513,6 +1795,16 @@ impl Game<'_> {
                     if let Some((address, name, cookies)) = transfer {
                         self.leave_server(None)?;
                         self.connect_server_with_cookies(&address, &name, Some(cookies))?;
+                        return Ok(());
+                    }
+                    // Volt Replay: the X button or the file's end is not a
+                    // lost connection. Straight back to the title screen —
+                    // no disconnect screen, no auto-reconnect offer.
+                    if self.remote.as_ref().is_some_and(|r| r.replay.is_some()) {
+                        self.leave_server(None)?;
+                        if let Some(title) = self.title.as_mut() {
+                            title.mode = horizon_client::title::Mode::Main;
+                        }
                         return Ok(());
                     }
                     let retry = self.reconnect_after(&reason, from_server);
@@ -2477,6 +2769,25 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
             }
+            C::CustomPayload(p) if p.channel == horizon_client::skins::VOLT_SKIN_CHANNEL => {
+                if let Some((uuid, skin, cape)) =
+                    horizon_client::skins::parse_volt_skin_packet(&p.data)
+                {
+                    let slim_opt = skin.map(|(rgba, is_slim)| {
+                        self.store_skin(format!("volt/skin/{uuid:032x}"), rgba);
+                        is_slim
+                    });
+                    let has_cape = if let Some(rgba) = cape {
+                        self.store_skin(format!("capes/volt_{uuid:032x}"), rgba);
+                        true
+                    } else {
+                        false
+                    };
+                    if let Some(r) = self.remote.as_mut() {
+                        r.volt_peer_skins.insert(uuid, (slim_opt, has_cape));
+                    }
+                }
+            }
             // PingDebugMonitor.onPongReceived.
             C::PongResponse(p) => {
                 let delay = self.debug_millis() - p.time;
@@ -2520,8 +2831,19 @@ impl Game<'_> {
                     .client_information(client_view_distance(self.settings.render_distance));
                 if let Some(r) = self.remote.as_mut() {
                     r.sent_info = info.clone();
+                    r.skin_synced = false;
                 }
                 self.send(S::ClientInformation(info));
+                if let Some(local_uuid) = self.remote.as_ref().map(|r| r.profile)
+                    && let Some(data) = horizon_client::skins::build_volt_skin_packet(local_uuid)
+                {
+                    self.send(S::CustomPayload(
+                        horizon_protocol::packets::configuration::CustomPayload {
+                            channel: horizon_client::skins::VOLT_SKIN_CHANNEL.into(),
+                            data,
+                        },
+                    ));
+                }
             }
             C::Respawn(p) => {
                 // A new player, without effects (the server sends them
@@ -3454,6 +3776,9 @@ impl Game<'_> {
                 // The death screen opens (or the respawn is asked for) with the
                 // death packet when the rule hides it.
                 let shown = self.remote.as_ref().is_none_or(|r| r.show_death_screen);
+                if p.health <= 0.0 && self.screen != Screen::Dead && self.player.is_some() {
+                    self.record_death_waypoint();
+                }
                 if p.health <= 0.0 && shown && self.screen != Screen::Dead && self.player.is_some()
                 {
                     self.screen = Screen::Dead;
@@ -3475,6 +3800,7 @@ impl Game<'_> {
                 // screen, whatever health was last sent, or `respawn()` at
                 // once when it is hidden.
                 if me && self.screen != Screen::Dead && self.player.is_some() {
+                    self.record_death_waypoint();
                     if self.remote.as_ref().is_none_or(|r| r.show_death_screen) {
                         self.screen = Screen::Dead;
                         self.ui.death_time = 0;
@@ -3567,7 +3893,18 @@ impl Game<'_> {
                 }
                 3 => {
                     let mode = p.param as i32;
-                    self.set_mode_id(mode);
+                    // Volt Replay's free camera stays in spectator; the
+                    // recorded mode is remembered for the recorded view.
+                    let freecam = self
+                        .remote
+                        .as_ref()
+                        .and_then(|r| r.replay.as_ref())
+                        .is_some_and(|rp| {
+                            !rp.control.pov.load(std::sync::atomic::Ordering::Relaxed)
+                        });
+                    if !freecam {
+                        self.set_mode_id(mode);
+                    }
                     if let Some(r) = self.remote.as_mut() {
                         r.game_mode = mode;
                     }
@@ -3741,6 +4078,33 @@ impl Game<'_> {
                     r.chat_tree = chat_tree;
                 }
                 self.merge_remote_tree();
+                if self.integrated.is_none()
+                    && self.lan.is_none()
+                    && self
+                        .remote
+                        .as_ref()
+                        .is_some_and(|r| !r.online_mode && !r.skin_synced)
+                {
+                    let has_skin_cmd = usize::try_from(p.root)
+                        .ok()
+                        .and_then(|root| p.nodes.get(root))
+                        .is_some_and(|root| {
+                            root.children.iter().any(|&c| {
+                                usize::try_from(c)
+                                    .ok()
+                                    .and_then(|i| p.nodes.get(i))
+                                    .is_some_and(|n| n.kind == 1 && n.name == "skin")
+                            })
+                        });
+                    if has_skin_cmd
+                        && let Some(cmd) = horizon_client::skins::current_server_sync_cmd()
+                    {
+                        if let Some(r) = self.remote.as_mut() {
+                            r.skin_synced = true;
+                        }
+                        self.send(S::ChatCommand(play::ChatCommand { command: cmd }));
+                    }
+                }
             }
             C::Cooldown(p) => {
                 // ClientPacketListener.handleItemCooldown: the server starts
@@ -4225,7 +4589,7 @@ impl Game<'_> {
     /// `PlayerInfo.getSkin` for every player entity, including NPCs that are
     /// never in the tab list: resolve each profile's textures and give the
     /// level's player models their skin.
-    fn update_remote_skins(&mut self) {
+    pub(super) fn update_remote_skins(&mut self) {
         let Some(r) = self.remote.as_mut() else {
             return;
         };
@@ -4236,6 +4600,36 @@ impl Game<'_> {
         );
         let r = &*r;
         let local = r.profile;
+        let online_mode = r.online_mode;
+        // Built-in CustomSkinLoader fallback for players without server-supplied textures on offline servers.
+        if !online_mode {
+            for (entity_id, &uuid) in &r.level_players {
+                if uuid == local || entries.iter().any(|(u, t)| *u == uuid && t.skin.is_some()) {
+                    continue;
+                }
+                let name = r
+                    .players
+                    .get(&uuid)
+                    .or_else(|| r.level_player_names.get(entity_id));
+                if let Some(name) = name
+                    && let horizon_client::skins::Resolve::Done(Some(profile)) = self
+                        .skin_profiles
+                        .borrow_mut()
+                        .state(&horizon_client::skins::NameOrId::Name(name.clone()))
+                    && let Some((value, signature)) = profile.textures()
+                {
+                    let tex = horizon_client::skins::unpack(
+                        &value,
+                        signature,
+                        &horizon_client::skins::TEXTURE_URIS,
+                    );
+                    if tex.skin.is_some() {
+                        entries.retain(|(u, _)| *u != uuid);
+                        entries.push((uuid, tex));
+                    }
+                }
+            }
+        }
         // Minecraft.profileFuture: the signed-in account's own profile, fetched from the
         // services, gives the local player its skin where the server sends none (single
         // player's offline-mode server).
@@ -4251,11 +4645,11 @@ impl Game<'_> {
         // PlayerSkin.cape of each resolved skin.
         let mut capes: HashMap<u128, String> = HashMap::new();
         for (uuid, textures) in entries {
-            // PlayerInfo.createSkinLookup: only the local player's own skin
-            // may be unsigned.
+            // PlayerInfo.createSkinLookup: on online-mode servers other players' skins must be signed;
+            // on offline-mode servers CustomSkinLoader / Ely.by unsigned lookups are also permitted.
             let skin = {
                 let mut downloads = self.skin_downloads.borrow_mut();
-                horizon_client::skins::lookup(&textures, uuid != local, |kind, url| {
+                horizon_client::skins::lookup(&textures, online_mode && uuid != local, |kind, url| {
                     downloads.state(kind, url)
                 })
             };
@@ -4269,27 +4663,68 @@ impl Game<'_> {
                 resolved.push((uuid, skin));
             }
         }
-        // An offline name's skin from the launcher, where neither the server
-        // nor an account gives the local player one.
-        if !resolved.iter().any(|(u, _)| *u == local)
-            && let Some((rgba, is_slim)) = horizon_client::skins::offline_skin()
+        // Peer-to-peer Volt skin/cape packets from LAN / multiplayer peers.
+        let peer_skins: Vec<(u128, Option<bool>, bool)> = self
+            .remote
+            .as_ref()
+            .map(|r| {
+                r.volt_peer_skins
+                    .iter()
+                    .map(|(&u, &(s, c))| (u, s, c))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (uuid, peer_slim, peer_cape) in peer_skins {
+            if let Some(is_slim) = peer_slim {
+                let slot = format!("volt/skin/{uuid:032x}");
+                if self.skin_slots.contains(&slot) {
+                    resolved.retain(|(u, _)| *u != uuid);
+                    if is_slim {
+                        slim.insert(uuid);
+                    } else {
+                        slim.remove(&uuid);
+                    }
+                    resolved.push((uuid, slot));
+                }
+            }
+            if peer_cape {
+                let slot = format!("capes/volt_{uuid:032x}");
+                if self.skin_slots.contains(&slot) {
+                    capes.insert(uuid, slot);
+                }
+            }
+        }
+        // Equipped custom skin from Volt Launcher always takes priority for the local player
+        // when playing offline / with a custom skin equipped.
+        let has_custom_cape = horizon_client::skins::current_offline_cape().is_some();
+        if let Some((rgba, is_slim, generation)) = horizon_client::skins::current_offline_skin()
+            && horizon_client::auth::current().is_none_or(|s| s.join_url.is_some())
         {
             const OFFLINE: &str = "horizon/offline_skin";
-            if !self.skin_slots.contains(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.clone());
+            let prev_gen = self.remote.as_ref().map_or(0, |r| r.offline_skin_gen);
+            if prev_gen != generation || !self.skin_slots.contains(OFFLINE) {
+                self.store_skin(OFFLINE.into(), rgba);
+                if let Some(r) = self.remote.as_mut() {
+                    r.offline_skin_gen = generation;
+                }
             }
-            if *is_slim {
+            resolved.retain(|(u, _)| *u != local);
+            if is_slim {
                 slim.insert(local);
+            } else {
+                slim.remove(&local);
             }
             resolved.push((local, OFFLINE.into()));
         }
-        // An offline name's cape from the launcher, where the profile has none.
-        if !capes.contains_key(&local)
-            && let Some(rgba) = horizon_client::skins::offline_cape()
-        {
+        // Equipped custom cape from Volt Launcher.
+        if let Some((rgba, generation)) = horizon_client::skins::current_offline_cape() {
             const OFFLINE: &str = "capes/offline";
-            if !self.skin_slots.contains(OFFLINE) {
-                self.store_skin(OFFLINE.into(), rgba.to_vec());
+            let prev_gen = self.remote.as_ref().map_or(0, |r| r.offline_cape_gen);
+            if prev_gen != generation || !self.skin_slots.contains(OFFLINE) {
+                self.store_skin(OFFLINE.into(), rgba);
+                if let Some(r) = self.remote.as_mut() {
+                    r.offline_cape_gen = generation;
+                }
             }
             capes.insert(local, OFFLINE.into());
         }
@@ -4326,23 +4761,31 @@ impl Game<'_> {
                 continue;
             };
             let (skin, is_slim) = self.drawn_skin(uuid, skin_of(&skins, uuid));
+            let kind = self.mobs[i].kind.clone();
+            let skin_3d = self.skin_3d_model(&kind, &skin, is_slim);
             let cape = capes.get(&uuid).filter(|c| self.again_skin(c)).cloned();
             let mob = &mut self.mobs[i];
             mob.skin = Some(skin);
             mob.slim = is_slim;
+            mob.skin_3d = skin_3d;
             mob.cape = cape;
         }
         if self.player_model.is_some() {
             let (skin, is_slim) = self.drawn_skin(own, skin_of(&skins, own));
-            // Avatar.isModelPartShown(CAPE): the Skin Customization option.
+            // Avatar.isModelPartShown(CAPE): the Skin Customization option, or an explicitly equipped Volt cape.
             let cape = capes
                 .get(&own)
-                .filter(|_| self.settings.file.bool("modelPart_cape"))
+                .filter(|_| self.settings.file.bool("modelPart_cape") || has_custom_cape)
                 .filter(|c| self.again_skin(c))
                 .cloned();
+            let kind = self.player_model.as_ref().map(|m| m.kind.clone());
+            let skin_3d = kind
+                .as_ref()
+                .and_then(|kind| self.skin_3d_model(kind, &skin, is_slim));
             if let Some(mob) = self.player_model.as_mut() {
                 mob.skin = Some(skin);
                 mob.slim = is_slim;
+                mob.skin_3d = skin_3d;
                 mob.cape = cape;
             }
         }
@@ -4452,7 +4895,7 @@ impl Game<'_> {
     /// Whether a downloaded skin or cape is in the atlas to draw, marking it
     /// drawn; if not (new, or its slot taken), its image is queued for upload
     /// again and it is drawn from the next frame.
-    fn again_skin(&mut self, location: &str) -> bool {
+    pub(super) fn again_skin(&mut self, location: &str) -> bool {
         let mut downloads = self.skin_downloads.borrow_mut();
         // A slot without its sprite (the atlas was rebuilt, or the upload
         // never happened) counts as missing, so the skin is stored again.
@@ -4481,6 +4924,68 @@ impl Game<'_> {
     /// `drawn_skin` for a face in the player list or spectator menu.
     pub(super) fn face_skin(&mut self, uuid: u128, skin: &str) -> String {
         self.drawn_skin(uuid, (skin.to_owned(), false)).0
+    }
+    /// The 3D skin layers model for a player (the bundled "3D Skins" mod):
+    /// `kind`'s outer layer rebuilt with one slab per painted texel, cached
+    /// per (skin, slim). With the mod off this returns `None` and the flat
+    /// inflated layer draws as always, costing nothing.
+    fn skin_3d_model(
+        &self,
+        kind: &std::sync::Arc<horizon_client::mobs::MobType>,
+        skin: &str,
+        slim: bool,
+    ) -> Option<std::sync::Arc<horizon_client::mobs::Part>> {
+        use horizon_client::mobs::skin_layers;
+        if !self.native_on("skins_3d") {
+            return None;
+        }
+        let key = (skin.to_owned(), slim);
+        if let Some(model) = self.skin_3d.borrow_mut().get(&key) {
+            return Some(model);
+        }
+        let model_key = if slim { "player_slim#main" } else { "main" };
+        let base = kind
+            .layer(model_key)
+            .cloned()
+            .unwrap_or_else(|| kind.model.clone());
+        let image = self.skin_downloads.borrow().image(skin)?.to_vec();
+        let model = std::sync::Arc::new(skin_layers::extrude(
+            &base,
+            &image,
+            skin_layers::SIZE,
+            skin_layers::DEPTH,
+        )?);
+        self.skin_3d.borrow_mut().insert(key, model.clone());
+        Some(model)
+    }
+    /// Rebuilds every player's 3D skin layer after the "3D Skins" mod was
+    /// toggled, so the switch shows immediately, no restart or rejoin.
+    pub(super) fn refresh_skin_3d_models(&mut self) {
+        self.skin_3d.borrow_mut().clear();
+        let rebuilt: Vec<(usize, Option<std::sync::Arc<horizon_client::mobs::Part>>)> = self
+            .mobs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.skin.is_some())
+            .map(|(i, m)| {
+                let skin = m.skin.clone().unwrap_or_default();
+                (i, self.skin_3d_model(&m.kind, &skin, m.slim))
+            })
+            .collect();
+        for (i, model) in rebuilt {
+            if let Some(mob) = self.mobs.get_mut(i) {
+                mob.skin_3d = model;
+            }
+        }
+        let own = self.player_model.as_ref().and_then(|m| {
+            let skin = m.skin.clone()?;
+            self.skin_3d_model(&m.kind, &skin, m.slim)
+        });
+        if let Some(mob) = self.player_model.as_mut() {
+            if mob.skin.is_some() {
+                mob.skin_3d = own;
+            }
+        }
     }
     /// ChatType decoration: `chat.translation_key` with sender/content parameters.
     /// ChatType.Bound.decorate: the chat type's translation, with the
@@ -4672,9 +5177,187 @@ impl Game<'_> {
             .unwrap_or(p.target);
         (self.yaw, self.pitch) = look_at_rotation(from, to);
     }
+    /// Volt Replay: drive the recorded view (or the free camera's body)
+    /// each frame, interpolating between the recorded movement packets at
+    /// the playback clock.
+    pub(super) fn replay_frame(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        // Before the login teleport makes the player there is nothing to
+        // drive, and the POV <-> free flip must not be consumed yet (the
+        // spectator switch would be overwritten by the login's mode).
+        if self.player.is_none() {
+            return;
+        }
+        let Some(r) = self.remote.as_mut() else { return };
+        let Some(rp) = r.replay.as_mut() else { return };
+        let control = rp.control.clone();
+        let t = control.time_ms.load(Relaxed);
+        let pov = control.pov.load(Relaxed);
+        let switched = rp.was_pov != pov;
+        rp.was_pov = pov;
+        while rp.poses.len() > 2 && rp.poses[1].0.saturating_add(1500) < t {
+            rp.poses.pop_front();
+        }
+        let pose = {
+            let poses = &rp.poses;
+            match poses.iter().position(|(at, ..)| *at >= t) {
+                Some(0) => poses.front().map(|&(_, p, yaw, pitch)| (p, yaw, pitch)),
+                Some(i) => {
+                    let (t0, p0, y0, pi0) = poses[i - 1];
+                    let (t1, p1, y1, pi1) = poses[i];
+                    let f = if t1 > t0 {
+                        (f64::from(t.saturating_sub(t0)) / f64::from(t1 - t0)).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let lerp = |a: f64, b: f64| a + (b - a) * f;
+                    let fa = f as f32;
+                    let angle = |a: f32, b: f32| {
+                        let mut d = (b - a) % 360.0;
+                        if d > 180.0 {
+                            d -= 360.0;
+                        }
+                        if d < -180.0 {
+                            d += 360.0;
+                        }
+                        a + d * fa
+                    };
+                    Some((
+                        [lerp(p0[0], p1[0]), lerp(p0[1], p1[1]), lerp(p0[2], p1[2])],
+                        angle(y0, y1),
+                        pi0 + (pi1 - pi0) * fa,
+                    ))
+                }
+                None => poses.back().map(|&(_, p, yaw, pitch)| (p, yaw, pitch)),
+            }
+        };
+        // Camera path playback: the free camera glides through the user's
+        // keyframes on the flight's own wall clock (the replay clock only
+        // drives the world, so pause or timelapse underneath and the
+        // camera still flies smoothly).
+        let path_cam = if !pov && rp.cam_path {
+            let elapsed = rp
+                .path_started
+                .map(|s| s.elapsed().as_millis().min(u128::from(u32::MAX)) as u32)
+                .unwrap_or(0);
+            let end = rp.cam_keys.last().map(|k| k.ms).unwrap_or(0);
+            if elapsed >= end {
+                // The flight is over: park at the last keyframe and hand
+                // the camera back to free flight.
+                rp.cam_path = false;
+                rp.path_started = None;
+                control.flying.store(false, Relaxed);
+                rp.note = Some((
+                    "Camera path finished.".to_string(),
+                    std::time::Instant::now(),
+                ));
+                horizon_client::replay::sample_cam_path(&rp.cam_keys, end)
+            } else {
+                horizon_client::replay::sample_cam_path(&rp.cam_keys, elapsed)
+            }
+        } else {
+            None
+        };
+        let body = rp.body;
+        let profile = (r.profile, r.profile_name.clone());
+        let recorded_mode = r.game_mode;
+        if pov {
+            if switched {
+                // Free camera ends: back to the recorded view and mode.
+                self.set_mode_id(recorded_mode);
+                if body {
+                    self.remove_entity(REPLAY_BODY_ID);
+                    if let Some(r) = self.remote.as_mut() {
+                        r.level_players.remove(&REPLAY_BODY_ID);
+                        r.level_player_names.remove(&REPLAY_BODY_ID);
+                        r.level_player_textures.remove(&REPLAY_BODY_ID);
+                        if let Some(rp) = r.replay.as_mut() {
+                            rp.body = false;
+                        }
+                    }
+                }
+            }
+            if let Some((p, yaw, pitch)) = pose {
+                if let Some(player) = self.player.as_mut() {
+                    player.position = Vec3::new(p[0], p[1], p[2]);
+                    player.velocity = Vec3::ZERO;
+                }
+                self.yaw = yaw;
+                self.pitch = pitch;
+            }
+        } else {
+            if switched {
+                // Free camera: spectator flight, through walls, unseen.
+                self.set_mode_id(3);
+            }
+            // The keyframe path drives the camera even while the pose
+            // buffer is still refilling (right after a seek).
+            if let Some((p, yaw, pitch)) = path_cam {
+                if let Some(player) = self.player.as_mut() {
+                    player.position = Vec3::new(p[0], p[1], p[2]);
+                    player.velocity = Vec3::ZERO;
+                }
+                self.yaw = yaw;
+                self.pitch = pitch;
+            }
+            let Some((p, yaw, pitch)) = pose else { return };
+            if !body {
+                // The recorder appears as its own player, with its skin
+                // from the recorded player list.
+                if let Some(r) = self.remote.as_mut() {
+                    r.level_players.insert(REPLAY_BODY_ID, profile.0);
+                    r.level_player_names.insert(REPLAY_BODY_ID, profile.1.clone());
+                }
+                self.spawn_entity(REPLAY_BODY_ID, "minecraft:player", p, [yaw, pitch, yaw]);
+                if let Some(r) = self.remote.as_mut()
+                    && let Some(rp) = r.replay.as_mut()
+                {
+                    rp.body = true;
+                }
+                // Director's view: step the camera back along the recorded
+                // sight line so the body is in frame from the first moment
+                // instead of the camera sitting inside the model.
+                let yr = f64::from(yaw.to_radians());
+                let pr = f64::from(pitch.to_radians());
+                if let Some(player) = self.player.as_mut() {
+                    player.position = Vec3::new(
+                        p[0] + yr.sin() * pr.cos() * 4.0,
+                        p[1] + pr.sin() * 4.0 + 1.6,
+                        p[2] - yr.cos() * pr.cos() * 4.0,
+                    );
+                    player.velocity = Vec3::ZERO;
+                }
+                // Aim down at the body's eyes from up there.
+                let dy = 4.0 * pr.sin() + 1.6;
+                let horiz = (4.0 * pr.cos()).abs().max(0.001);
+                self.yaw = yaw;
+                self.pitch = ((dy / (horiz * horiz + dy * dy).sqrt()).asin().to_degrees()
+                    as f32)
+                    .clamp(-89.0, 89.0);
+            }
+            // From here the recorded poses move the body through
+            // `move_entity` (Event::ReplayPose), exactly like a live
+            // player's movement packets: per-frame position writes here
+            // fought the tick interpolation and froze the walk animation.
+        }
+    }
+    /// Playback control when a replay is being watched.
+    pub(super) fn replay_control(&self) -> Option<Arc<horizon_client::replay::Control>> {
+        Some(self.remote.as_ref()?.replay.as_ref()?.control.clone())
+    }
     /// ClientPacketListener.handleMovePlayer.
     fn remote_teleport(&mut self, p: &play::PlayerPosition) -> Result<()> {
         use play::relative as rel;
+        // Volt Replay's free camera: the recorded view's teleports must not
+        // yank the detached camera around. The first teleport still lands:
+        // it is the one that makes the player.
+        if let Some(r) = self.remote.as_ref()
+            && let Some(rp) = r.replay.as_ref()
+            && !rp.control.pov.load(std::sync::atomic::Ordering::Relaxed)
+            && self.player.is_some()
+        {
+            return Ok(());
+        }
         let current = self
             .player
             .as_ref()
@@ -6298,16 +6981,15 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|s| self.armor_stand_spawn(&hit, s).is_some());
             let seq = self.next_sequence();
-            let cursor = [
-                (hit.point[0] - f64::from(hit.pos[0])) as f32,
-                (hit.point[1] - f64::from(hit.pos[1])) as f32,
-                (hit.point[2] - f64::from(hit.pos[2])) as f32,
-            ];
             self.send(S::UseItemOn(play::UseItemOn {
                 hand: hand_id(hand),
                 pos: hit.pos,
                 face: i32::from(face_direction(hit.face)),
-                cursor,
+                cursor: [
+                    (hit.point[0] - f64::from(hit.pos[0])) as f32,
+                    (hit.point[1] - f64::from(hit.pos[1])) as f32,
+                    (hit.point[2] - f64::from(hit.pos[2])) as f32,
+                ],
                 inside: hit.face == [0; 3],
                 world_border: false,
                 sequence: seq,
@@ -8015,6 +8697,20 @@ impl Game<'_> {
     }
     /// Connected or connecting with no player yet: `ConnectScreen`, then
     /// `LevelLoadingScreen`, over the panorama with its blur.
+    /// Position of an entity by its network id (upstream: what a voice or an
+    /// entity sound speaks from). The local player is not a tracked entity.
+    pub(super) fn remote_entity_position(&self, id: i32) -> Option<[f64; 3]> {
+        let r = self.remote.as_ref()?;
+        if let Some(p) = self.player.as_ref()
+            && r.entity_id == id
+        {
+            return Some([p.position.x, p.position.y, p.position.z]);
+        }
+        if let Some(m) = self.mobs.iter().find(|m| m.id as i32 == id) {
+            return (!m.silent).then_some([m.position.x, m.position.y, m.position.z]);
+        }
+        r.entities.get(&id).map(|t| t.position)
+    }
     pub(super) fn remote_loading(&self) -> bool {
         use horizon_client::level_loading::Reason;
         self.remote.as_ref().is_some_and(|r| {

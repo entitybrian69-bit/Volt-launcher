@@ -574,6 +574,14 @@ fn do_animate_tick(
     }
     let state = ctx.state(pos);
     block_animate_tick(tables, engine, ctx, state, pos, center);
+    // Subtle Effects (built-in mod): glowing block dust, off by toggle.
+    if crate::subtle_effects::dust_on()
+        && let Some(s) = ctx.registry.state(state)
+        && crate::subtle_effects::block_dust(&s.name).is_some()
+    {
+        let name = s.name.clone();
+        crate::subtle_effects::ambient_dust(engine, &name, pos);
+    }
     let facts = ctx.facts.get(state);
     if facts.fluid != Fluid::None {
         fluid_animate_tick(
@@ -829,6 +837,7 @@ fn block_animate_tick(
             let p = [fx + 0.5, fy + 0.7, fz + 0.5];
             add(engine, T::Smoke, p, [0.0; 3]);
             add(engine, flame, p, [0.0; 3]);
+            crate::subtle_effects::flame_spark(engine, p);
         }
         Animate::WallTorch(flame, facing) => {
             let p = [
@@ -838,6 +847,7 @@ fn block_animate_tick(
             ];
             add(engine, T::Smoke, p, [0.0; 3]);
             add(engine, flame, p, [0.0; 3]);
+            crate::subtle_effects::flame_spark(engine, p);
         }
         Animate::RedstoneTorch => {
             let r = engine.random();
@@ -926,6 +936,7 @@ fn block_animate_tick(
                     add(engine, T::Lava, [fx + 0.5, fy + 0.5, fz + 0.5], v);
                 }
             }
+            crate::subtle_effects::campfire_sparks(engine, [fx + 0.5, fy + 0.5, fz + 0.5]);
         }
         Animate::Leaves(falling, fixed_tint, poplar) => {
             let below = [pos[0], pos[1] - 1, pos[2]];
@@ -1847,6 +1858,7 @@ fn sand_sound_nearby(tables: &AnimateTables, ctx: &AnimateContext, pos: [i32; 3]
 }
 /// `AbstractCandleBlock.addParticlesAndSound`.
 fn candle(engine: &mut ParticleEngine, p: [f64; 3]) {
+    crate::subtle_effects::flame_spark(engine, p);
     let r = engine.random();
     let chance = r.next_float();
     if chance < 0.3 {

@@ -34,6 +34,7 @@ mod instance;
 mod sampler;
 mod semaphore_list;
 mod swapchain;
+pub mod volt_supporter;
 
 pub use adapter::PhysicalDeviceFeatures;
 
@@ -339,6 +340,8 @@ struct RayTracingDeviceExtensionFunctions {
 /// device geometry, but affect the code paths taken internally.
 #[derive(Clone, Debug)]
 struct PrivateCapabilities {
+    graphics_queue_family: u32,
+    flip_y_in_shader: bool,
     image_view_usage: bool,
     timeline_semaphores: bool,
     texture_d24: bool,

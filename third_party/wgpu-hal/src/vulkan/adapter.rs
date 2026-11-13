@@ -698,6 +698,13 @@ impl PhysicalDeviceFeatures {
             | Df::SHADER_F16_IN_F32
             | Df::MSL2_1;
 
+        if caps.device_api_version == vk::API_VERSION_1_0
+            && !caps.supports_extension(khr::storage_buffer_storage_class::NAME)
+        {
+            dl_flags.remove(Df::COMPUTE_SHADERS | Df::VERTEX_STORAGE | Df::FRAGMENT_STORAGE);
+            features.remove(F::CLEAR_TEXTURE);
+        }
+
         dl_flags.set(
             Df::SURFACE_VIEW_FORMATS,
             caps.supports_extension(khr::swapchain_mutable_format::NAME)
@@ -1225,8 +1232,11 @@ impl PhysicalDeviceProperties {
         extensions.push(khr::swapchain::NAME);
 
         if self.device_api_version < vk::API_VERSION_1_1 {
-            // Require `VK_KHR_maintenance1`
-            extensions.push(khr::maintenance1::NAME);
+            // Enable `VK_KHR_maintenance1` when supported; Volt Supporter mode falls back to
+            // shader-side Y-flip + positive viewport height when absent on Vulkan 1.0 drivers.
+            if self.supports_extension(khr::maintenance1::NAME) {
+                extensions.push(khr::maintenance1::NAME);
+            }
 
             // Optional `VK_KHR_maintenance2`
             if self.supports_extension(khr::maintenance2::NAME) {
@@ -1238,8 +1248,11 @@ impl PhysicalDeviceProperties {
                 extensions.push(khr::maintenance3::NAME);
             }
 
-            // Require `VK_KHR_storage_buffer_storage_class`
-            extensions.push(khr::storage_buffer_storage_class::NAME);
+            // Enable `VK_KHR_storage_buffer_storage_class` when supported; Volt Supporter mode
+            // falls back to uniform-only buffers when absent on Vulkan 1.0 drivers.
+            if self.supports_extension(khr::storage_buffer_storage_class::NAME) {
+                extensions.push(khr::storage_buffer_storage_class::NAME);
+            }
 
             // Require `VK_KHR_multiview` if the associated feature was requested
             if requested_features.contains(wgt::Features::MULTIVIEW) {
@@ -1855,10 +1868,40 @@ impl super::InstanceShared {
     ) -> (PhysicalDeviceProperties, PhysicalDeviceFeatures) {
         let capabilities = {
             let mut capabilities = PhysicalDeviceProperties::default();
+            let supporter = super::volt_supporter::supporter_mode();
             capabilities.supported_extensions =
                 unsafe { self.raw.enumerate_device_extension_properties(phd).unwrap() };
+            if supporter {
+                capabilities.supported_extensions.retain(|ext_prop| {
+                    let Ok(name) = ext_prop.extension_name_as_c_str() else {
+                        return false;
+                    };
+                    name != ext::robustness2::NAME
+                        && name != ext::image_robustness::NAME
+                        && name != khr::zero_initialize_workgroup_memory::NAME
+                        && name != khr::pipeline_executable_properties::NAME
+                        && name != khr::timeline_semaphore::NAME
+                        && name != khr::maintenance4::NAME
+                        && name != khr::shader_integer_dot_product::NAME
+                        && name != khr::shader_float16_int8::NAME
+                        && name != khr::spirv_1_4::NAME
+                        && name != khr::buffer_device_address::NAME
+                        && name != khr::acceleration_structure::NAME
+                        && name != khr::ray_query::NAME
+                        && name != khr::ray_tracing_pipeline::NAME
+                        && name != khr::deferred_host_operations::NAME
+                        && name != ext::descriptor_indexing::NAME
+                });
+            }
             capabilities.properties = unsafe { self.raw.get_physical_device_properties(phd) };
-            capabilities.device_api_version = capabilities.properties.api_version;
+            capabilities.device_api_version = if supporter {
+                capabilities
+                    .properties
+                    .api_version
+                    .min(vk::API_VERSION_1_1)
+            } else {
+                capabilities.properties.api_version
+            };
 
             let supports_multiview = capabilities.device_api_version >= vk::API_VERSION_1_1
                 || capabilities.supports_extension(khr::multiview::NAME);
@@ -2307,14 +2350,16 @@ impl super::Instance {
             );
         };
 
+        let supporter = super::volt_supporter::supporter_mode();
         if let Some(driver) = phd_capabilities.driver {
             if driver.conformance_version.major == 0 {
                 if driver.driver_id == vk::DriverId::MOLTENVK {
                     log::debug!("Adapter is not Vulkan compliant, but is MoltenVK, continuing");
-                } else if self
-                    .shared
-                    .flags
-                    .contains(wgt::InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER)
+                } else if supporter
+                    || self
+                        .shared
+                        .flags
+                        .contains(wgt::InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER)
                 {
                     log::debug!("Adapter is not Vulkan compliant: {}", info.name);
                 } else {
@@ -2328,6 +2373,7 @@ impl super::Instance {
         }
         if phd_capabilities.device_api_version == vk::API_VERSION_1_0
             && !phd_capabilities.supports_extension(khr::storage_buffer_storage_class::NAME)
+            && !supporter
         {
             log::debug!(
                 "SPIR-V storage buffer class is not supported, hiding adapter: {}",
@@ -2335,9 +2381,9 @@ impl super::Instance {
             );
             return None;
         }
-        if !phd_capabilities.supports_extension(khr::maintenance1::NAME)
-            && phd_capabilities.device_api_version < vk::API_VERSION_1_1
-        {
+        let has_maintenance1 = phd_capabilities.device_api_version >= vk::API_VERSION_1_1
+            || phd_capabilities.supports_extension(khr::maintenance1::NAME);
+        if !has_maintenance1 && !supporter {
             log::debug!(
                 "VK_KHR_maintenance1 is not supported, hiding adapter: {}",
                 info.name
@@ -2350,11 +2396,16 @@ impl super::Instance {
                 .raw
                 .get_physical_device_queue_family_properties(phd)
         };
-        let queue_family_properties = queue_families.first()?;
-        let queue_flags = queue_family_properties.queue_flags;
-        if !queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-            log::debug!("The first queue only exposes {queue_flags:?}");
-            return None;
+        let (graphics_family_index, queue_family_properties) = queue_families
+            .iter()
+            .enumerate()
+            .find(|(_, props)| props.queue_flags.contains(vk::QueueFlags::GRAPHICS))
+            .and_then(|(idx, props)| u32::try_from(idx).ok().map(|idx| (idx, props)))?;
+        if graphics_family_index != 0 && !supporter {
+            log::info!(
+                "Selected non-zero Vulkan graphics queue family {graphics_family_index} on {}",
+                info.name
+            );
         }
 
         let (available_features, mut downlevel_flags) = phd_features.to_wgpu(
@@ -2391,6 +2442,8 @@ impl super::Instance {
         let alignments = phd_capabilities.to_hal_alignments(has_robust_buffer_access2);
 
         let private_caps = super::PrivateCapabilities {
+            graphics_queue_family: graphics_family_index,
+            flip_y_in_shader: !has_maintenance1,
             image_view_usage: phd_capabilities.device_api_version >= vk::API_VERSION_1_1
                 || phd_capabilities.supports_extension(khr::maintenance2::NAME),
             timeline_semaphores: match phd_features.timeline_semaphore {
@@ -2772,6 +2825,10 @@ impl super::Adapter {
 
             let mut flags = spv::WriterFlags::empty();
             flags.set(
+                spv::WriterFlags::ADJUST_COORDINATE_SPACE,
+                self.private_caps.flip_y_in_shader,
+            );
+            flags.set(
                 spv::WriterFlags::DEBUG,
                 self.instance.flags.contains(wgt::InstanceFlags::DEBUG),
             );
@@ -3002,7 +3059,7 @@ impl super::Adapter {
         let mut enabled_extensions = self.required_device_extensions(features);
         let mut enabled_phd_features = self.physical_device_features(&enabled_extensions, features);
 
-        let family_index = 0; //TODO
+        let family_index = self.private_caps.graphics_queue_family;
         let family_info = vk::DeviceQueueCreateInfo::default()
             .queue_family_index(family_index)
             .queue_priorities(&[1.0]);
@@ -3046,7 +3103,10 @@ impl super::Adapter {
                 vk::Result::ERROR_TOO_MANY_OBJECTS => crate::DeviceError::OutOfMemory,
                 vk::Result::ERROR_INITIALIZATION_FAILED => crate::DeviceError::Lost,
                 vk::Result::ERROR_EXTENSION_NOT_PRESENT | vk::Result::ERROR_FEATURE_NOT_PRESENT => {
-                    crate::hal_usage_error(err)
+                    log::warn!(
+                        "vkCreateDevice rejected an advertised Vulkan extension or feature ({err:?}); treating device open as failed for fallback"
+                    );
+                    crate::DeviceError::Lost
                 }
                 other => super::map_host_device_oom_and_lost_err(other),
             }

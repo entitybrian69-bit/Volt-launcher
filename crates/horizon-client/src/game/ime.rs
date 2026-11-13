@@ -14,6 +14,12 @@ impl Game<'_> {
         if self.dialog_open() {
             return self.dialog_has_text_field();
         }
+        if self.screen == Screen::Options && self.ui.options.typing() {
+            return true;
+        }
+        if self.screen == Screen::Stats && self.stats_typing() {
+            return true;
+        }
         if let Some(title) = self.title.as_mut() {
             return title.focused_field().is_some();
         }
@@ -94,12 +100,45 @@ impl Game<'_> {
 
     /// Text the input method committed (`WindowEvent::Ime(Commit)`).
     pub(super) fn ime_commit(&mut self, text: &str) {
+        if self.screen != Screen::Playing && self.title.is_none() && !text.is_empty() {
+            let mut all_canceled = true;
+            if let Some(view_batch) = self.screen_view_batch() {
+                let view = self.screen_view(&view_batch, self.screen);
+                let bits = super::native_hooks::glfw_modifier_bits(self.modifiers);
+                for c in text.chars() {
+                    let mut canceled = false;
+                    self.native_screen_char_typed_pre(&view, c, bits, &mut canceled);
+                    if !canceled {
+                        all_canceled = false;
+                    }
+                }
+            } else {
+                all_canceled = false;
+            }
+            if all_canceled {
+                return;
+            }
+        }
         preedit::set_preedit(None);
         let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if text.is_empty() || !self.text_field_focused() {
             return;
         }
         if self.dialog_type(&text) {
+            return;
+        }
+        if self.screen == Screen::Options && self.ui.options.typing() {
+            let ev = self.ui.options.key(
+                &mut self.settings,
+                &self.gui.atlas,
+                winit::keyboard::KeyCode::F24,
+                Some(&text),
+            );
+            let _ = self.handle_option_events(ev);
+            return;
+        }
+        if self.screen == Screen::Stats && self.stats_typing() {
+            self.stats_key(Some(&text), false);
             return;
         }
         if self.title.is_some() {

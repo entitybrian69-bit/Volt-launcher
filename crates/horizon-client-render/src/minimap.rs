@@ -106,6 +106,20 @@ fn scan_column(
     top: i32,
     layer: Layer,
 ) -> (u8, i16, u8) {
+    scan_column_with_air(chunk, palette, 0, palette.get(0).0 == 0, x, z, top, layer)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_column_with_air(
+    chunk: &Chunk,
+    palette: &Palette,
+    air: u32,
+    skip_air: bool,
+    x: i32,
+    z: i32,
+    top: i32,
+    layer: Layer,
+) -> (u8, i16, u8) {
     let mut y = top;
     if let Layer::Below(head) = layer {
         let (color, flags) = palette.get(chunk.get(x, head, z));
@@ -115,6 +129,13 @@ fn scan_column(
     }
     let bottom = chunk.min_y();
     while y > bottom {
+        if skip_air && ((y - bottom) & 15) == 15 {
+            let s = ((y - bottom) >> 4) as usize;
+            if chunk.sections.get(s).is_some_and(|sec| sec.is_uniform(air)) {
+                y -= 16;
+                continue;
+            }
+        }
         let (mut color, flags) = palette.get(chunk.get(x, y, z));
         if color == 0 {
             y -= 1;
@@ -155,6 +176,7 @@ fn top_of(chunk: &Chunk, air: u32, layer: Layer) -> i32 {
 }
 fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision: u64) -> Tile {
     let top = top_of(chunk, air, layer);
+    let skip_air = palette.get(air).0 == 0;
     let mut tile = Tile {
         color: [0; 256],
         height: [chunk.min_y() as i16; 256],
@@ -165,7 +187,7 @@ fn scan_tile(chunk: &Chunk, palette: &Palette, air: u32, layer: Layer, revision:
     };
     for z in 0..16 {
         for x in 0..16 {
-            let (c, h, d) = scan_column(chunk, palette, x, z, top, layer);
+            let (c, h, d) = scan_column_with_air(chunk, palette, air, skip_air, x, z, top, layer);
             let i = (z * 16 + x) as usize;
             tile.color[i] = c;
             tile.height[i] = h;

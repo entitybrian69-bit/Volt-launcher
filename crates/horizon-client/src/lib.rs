@@ -8,17 +8,17 @@ pub mod animate_tick;
 pub mod arrows;
 pub use horizon_client_render::{
     assets, atlas_sources, audio, auth, ban_notice, bidi, biome, block_entities, block_entity_anim,
-    block_entity_render, border_render, breaking, brewing, camera, chat, chunk, chunk_map, clouds,
+    block_entity_render, border_render, breaking, brewing, bundled_native, camera, chat, chunk, chunk_map, clouds,
     collisions, command_block, containers, crash, datapack, dynamic_light, effects, environment,
     extras, fast_hash, fog, font, gfx, graphics, graphics_style, graphics_ui, hud, hud_layout,
     hud_overlays, inventory_effects, java_text, jigsaw_block, level_loading, light, lod, logging,
     menu_blur, mesher, minimap, mipmap, mod_list, model_library, models, multiline_edit,
     options_file, options_fixes, options_ui, overlay, pack_screen, packs, par, particles,
     poi_sections, post_chain, potent_sulfur, preedit, providers, screen_draw, screen_effects,
-    sculk, section_mask, settings, shader_pack_list, signs, skins, sound_engine, sound_events,
+    sculk, section_mask, settings, shader_options, shader_pack_list, signs, skins, sound_engine, sound_events,
     sound_preview, spans, split_layout, sprites, streaming, structure_block, tab_list, telemetry,
-    test_block, test_instance_block, testgen, title_edition, trims, ui, vault, weather, widgets,
-    world, worldborder, zip,
+    test_block, test_instance_block, testgen, title_edition, trims, ui, vault, volt_features,
+    volt_mods, volt_qol, volt_settings_ui, weather, widgets, world, worldborder, zip,
 };
 pub mod attack_strength;
 pub mod attribute_updates;
@@ -44,11 +44,13 @@ pub mod creative;
 pub mod cushion;
 pub mod data_cmd;
 pub mod debug_chart;
+pub mod debug_entries;
 pub mod debug_keys;
 pub mod debug_overlay;
 pub mod dialog;
 pub mod dialog_screen;
 pub mod discord_presence;
+pub mod discord_webhook;
 pub mod end_crystal;
 pub mod end_gateway;
 pub mod entities;
@@ -87,6 +89,7 @@ pub mod moved_extras;
 pub mod multiplayer;
 pub mod music;
 pub mod net;
+pub mod replay;
 pub mod nether_portal;
 pub mod no_resources;
 pub mod official_install;
@@ -119,6 +122,7 @@ pub mod sprint;
 pub mod stations;
 pub mod stopwatches;
 pub mod structure_blocks;
+pub mod subtle_effects;
 pub mod text_display;
 pub mod tick_chunk_membership;
 pub mod ticket_levels;

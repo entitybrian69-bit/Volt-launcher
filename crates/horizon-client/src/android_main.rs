@@ -17,6 +17,10 @@ mod account;
 #[allow(dead_code)]
 #[path = "../../../launcher/src/browser.rs"]
 mod browser;
+#[rustfmt::skip]
+#[allow(dead_code)]
+#[path = "../../../launcher/src/server_list.rs"]
+mod server_list;
 #[path = "android/dns.rs"]
 mod android_dns;
 #[path = "android/catalog.rs"]
@@ -27,6 +31,8 @@ mod device_preferences;
 mod device_runtime;
 #[path = "android/diagnostics.rs"]
 mod diagnostics;
+#[path = "android/discord_rpc.rs"]
+mod discord_rpc;
 #[path = "android/display.rs"]
 mod display;
 #[path = "android/document_bridge.rs"]
@@ -57,6 +63,12 @@ mod search_queue;
 mod secure_store;
 #[path = "android/shader_catalog.rs"]
 mod shader_catalog;
+#[path = "android/skin_preview.rs"]
+mod skin_preview;
+#[path = "android/volt_accounts.rs"]
+mod volt_accounts;
+#[path = "android/volt_updater.rs"]
+mod volt_updater;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/skins.rs"]
@@ -64,9 +76,9 @@ mod skins;
 // The shared account protocol needs only the launcher's version and data path.
 mod backend {
     pub const VERSION: &str = if crate::PUBLIC_BUILD {
-        "0.7.6"
+        "1.0.0"
     } else {
-        "0.7.6-dev"
+        "1.0.0-dev"
     };
     static HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     pub fn initialize(home: std::path::PathBuf) {
@@ -176,7 +188,13 @@ pub(crate) fn android_arguments() -> horizon_client::Result<Vec<String>> {
         // Offline identity must never override a licensed session's profile.
         args.extend(["--name".into(), config.name.clone()]);
     }
-    if !config.server.is_empty() {
+    if !config.replay.is_empty() {
+        // Volt Replay: watch the chosen recording instead of joining.
+        args.extend(["--replay".into(), config.replay.clone()]);
+        if config.replay_export {
+            args.extend(["--replay-export".into(), "1".into()]);
+        }
+    } else if !config.server.is_empty() {
         args.extend(["--server".into(), config.server.clone()]);
     }
     if !PUBLIC_BUILD {
@@ -232,8 +250,97 @@ fn init_logging() {
     }
 }
 
+fn apk_engine_stamp() -> Option<String> {
+    let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+    for line in maps.lines() {
+        if !line.contains("libhorizon_android") && !line.contains("/base.apk") {
+            continue;
+        }
+        let raw_path = line.split_whitespace().nth(5)?;
+        let fs_path = raw_path
+            .split_once("!/")
+            .map_or(raw_path, |(apk, _)| apk);
+        let meta = std::fs::metadata(fs_path).ok()?;
+        let mtime = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        return Some(format!(
+            "{}:{}:{}:{}:{}",
+            backend::VERSION,
+            option_env!("HORIZON_ANDROID_BUILD_COMMIT").unwrap_or("none"),
+            fs_path,
+            meta.len(),
+            mtime,
+        ));
+    }
+    None
+}
+
+static ENGINE_DATA_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static ENGINE_DATA_DONE: (std::sync::Mutex<bool>, std::sync::Condvar) =
+    (std::sync::Mutex::new(false), std::sync::Condvar::new());
+static ACTIVE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MAIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn ensure_engine_data(app: &AndroidApp, home: &std::path::Path) {
+    struct DoneGuard;
+    impl Drop for DoneGuard {
+        fn drop(&mut self) {
+            let (lock, cvar) = &ENGINE_DATA_DONE;
+            *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            cvar.notify_all();
+        }
+    }
+    let _done = DoneGuard;
+    let _guard = ENGINE_DATA_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let zip_path = home.join("engine-data.zip");
+    let stamp_path = home.join("engine-data.stamp");
+    let stamp = apk_engine_stamp();
+    let up_to_date = stamp.as_deref().is_some_and(|expected| {
+        zip_path.metadata().is_ok_and(|m| m.len() > 1024)
+            && std::fs::read_to_string(&stamp_path).ok().as_deref() == Some(expected)
+    });
+    if up_to_date {
+        return;
+    }
+    let Some(mut data) = app.asset_manager().open(c"engine-data.zip") else {
+        return;
+    };
+    let copied = (|| -> std::io::Result<()> {
+        let partial = home.join("engine-data.partial");
+        let mut file = std::fs::File::create(&partial)?;
+        std::io::copy(&mut data, &mut file)?;
+        drop(file);
+        std::fs::rename(&partial, &zip_path)?;
+        if let Some(stamp) = &stamp {
+            let _ = std::fs::write(&stamp_path, stamp);
+        }
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        log::error!("Cannot unpack engine data: {error}");
+    }
+}
+
+pub(crate) fn engine_data_ready() -> bool {
+    *ENGINE_DATA_DONE.0.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn wait_for_engine_data() {
+    let (lock, cvar) = &ENGINE_DATA_DONE;
+    let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
+    while !*done {
+        done = cvar.wait(done).unwrap_or_else(|e| e.into_inner());
+    }
+}
+
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
+    let generation = ACTIVE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+    let _main_guard = MAIN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     use winit::platform::android::activity::input::Axis;
     for axis in [
         Axis::Vscroll,
@@ -253,9 +360,17 @@ fn android_main(app: AndroidApp) {
         log::error!("Cannot initialize local diagnostics: {error}");
     }
     if let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
+        // Keep the main native loop thread permanently attached so periodic JNI calls
+        // never churn ART AttachCurrentThread/DetachCurrentThread per frame.
+        let _ = vm.attach_current_thread_permanently();
         secure_store::initialize(vm);
     }
-    let engine_data = app.asset_manager().open(c"engine-data.zip");
+    // Rich Presence through the Discord app on this phone; before any game start.
+    if let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) } {
+        let activity = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr().cast()) };
+        discord_rpc::initialize(vm, &activity);
+    }
+    let app_for_engine = app.clone();
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     let Some(cache) = platform::cache_dir() else {
         log::error!("Android supplied no application cache directory");
@@ -282,36 +397,46 @@ fn android_main(app: AndroidApp) {
     horizon_client::crash::install(home.clone(), "client");
     exit_reports::install(&home);
     let _ = std::fs::remove_file(home.join("android-error.txt"));
-    if let Some(mut data) = engine_data {
-        let copied = (|| -> std::io::Result<()> {
-            let mut file = std::fs::File::create(home.join("engine-data.partial"))?;
-            std::io::copy(&mut data, &mut file)?;
-            drop(file);
-            std::fs::rename(
-                home.join("engine-data.partial"),
-                home.join("engine-data.zip"),
-            )
-        })();
-        if let Err(error) = copied {
-            log::error!("Cannot unpack engine data: {error}");
+    // Unpack `engine-data.zip` (~38 MB) on a background thread so `android_event_loop()`
+    // starts draining NativeActivity lifecycle/input commands immediately on first launch.
+    {
+        *ENGINE_DATA_DONE.0.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        let home_bg = home.clone();
+        let app_fallback = app_for_engine.clone();
+        if std::thread::Builder::new()
+            .name("volt-engine-unpack".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || ensure_engine_data(&app_for_engine, &home_bg))
+            .is_err()
+        {
+            ensure_engine_data(&app_fallback, &home);
         }
     }
     let mut launcher = launcher::Launcher::new(home.clone());
-    let result = android_event_loop()
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
-        .and_then(|events| events.run_app(&mut launcher).map_err(Into::into));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        android_event_loop()
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
+            .and_then(|events| events.run_app(&mut launcher).map_err(Into::into))
+    }))
+    .unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .map(str::to_owned)
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unexpected native panic".into());
+        Err(format!("Android runtime panic: {message}").into())
+    });
     if let Err(error) = result {
         log::error!("Horizon: {error}");
         diagnostics::record_error(&error.to_string());
         horizon_client::crash::report_error(&home, "client", &*error);
         let _ = std::fs::write(home.join("android-error.txt"), error.to_string());
     }
-    // Winit permits one EventLoop per process. NativeActivity otherwise keeps
-    // this process cached after Quit, making the next launch fail. run_app's
-    // exiting callback has completed the world save before we get here.
     drop(launcher);
     diagnostics::finish();
-    platform::finish();
+    if ACTIVE_GENERATION.load(std::sync::atomic::Ordering::Acquire) == generation {
+        platform::finish();
+    }
     APP.with(|slot| *slot.borrow_mut() = None);
-    std::process::exit(0);
 }

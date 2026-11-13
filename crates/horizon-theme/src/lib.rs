@@ -13,6 +13,7 @@ use std::time::Duration;
 pub const FONT: &str = "Geist";
 pub const MONO: &str = "Geist Mono";
 pub mod night;
+pub mod glass;
 
 /// The launcher's and the website's display face (headings, navigation, buttons, badges only):
 /// Pixelify Sans, bundled under the SIL Open Font License (`fonts/OFL-PixelifySans.txt`).
@@ -33,6 +34,7 @@ pub mod fonts {
     pub const BRICOLAGE_SEMIBOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesque-SemiBold.ttf");
     pub const BRICOLAGE_BOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Bold.ttf");
+    pub const BRICOLAGE_DISPLAY_SEMIBOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesqueDisplay-SemiBold.ttf");
     pub const BRICOLAGE_DISPLAY_BOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesqueDisplay-Bold.ttf");
 }

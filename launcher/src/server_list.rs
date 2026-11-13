@@ -72,6 +72,11 @@ impl List {
         })
     }
 
+    /// For edits, fail closed instead of replacing an unreadable or malformed file.
+    pub fn try_load(home: &Path) -> Result<List, String> {
+        Self::read(home).ok_or_else(|| "Could not safely read servers.dat; it was not changed.".into())
+    }
+
     /// The list in `home`, empty when there is none; none when the file is there but can't be read.
     fn read(home: &Path) -> Option<List> {
         let bytes = match fs::read(home.join(FILE)) {
@@ -89,12 +94,12 @@ impl List {
             {
                 Some(Tag::List(list)) => list
                     .iter()
-                    .filter_map(|t| match t {
+                    .map(|t| match t {
                         Tag::Compound(c) => Some(c.clone()),
                         _ => None,
                     })
-                    .collect(),
-                _ => Vec::new(),
+                    .collect::<Option<Vec<_>>>()?,
+                _ => return None,
             },
         };
         Some(List { entries })

@@ -4,11 +4,14 @@ android {
     namespace 'dev.horizon.android'
     compileSdk 35
     defaultConfig {
-        applicationId providers.gradleProperty('appId').getOrElse('dev.horizon.android')
+        applicationId providers.gradleProperty('appId').getOrElse('ae.net.Voltlauncher')
+        // The rolling debug channel is a separate app: its own icon label, so
+        // testers can keep it next to the stable launcher without confusion.
+        manifestPlaceholders = [appLabel: providers.gradleProperty('appId').getOrElse('ae.net.Voltlauncher') == 'ae.net.Voltlauncher.debug' ? 'Volt Debug' : 'Volt Launcher']
         minSdk providers.gradleProperty('minSdk').getOrElse('28').toInteger()
         targetSdk 35
-        versionCode 28
-        versionName '0.7.6'
+        versionCode providers.gradleProperty('versionCode').orElse(providers.environmentVariable('VOLT_VERSION_CODE')).getOrElse('34').toInteger()
+        versionName '1.0.0'
         ndk { abiFilters providers.gradleProperty('abi').get() }
     }
     signingConfigs {
@@ -17,6 +20,10 @@ android {
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing false
+            enableV4Signing false
         }
     }
     buildTypes {
@@ -37,10 +44,13 @@ android {
     sourceSets.main {
         java.srcDirs = ['java']
         manifest.srcFile 'AndroidManifest.xml'
+        // The Discord app's Rich Presence service interface (see THIRD_PARTY_NOTICES.md).
+        aidl.srcDirs = ['aidl']
         jniLibs.srcDirs = ['../../.local/android/gradle-jni']
         assets.srcDirs = ['../../.local/android/gradle-assets']
         res.srcDirs = ['res']
     }
-    packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols += '**/*.so' } }
+    buildFeatures { aidl = true }
+    packaging { jniLibs { useLegacyPackaging = false; keepDebugSymbols += '**/*.so' } }
 }
 layout.buildDirectory = file('../../.local/android/gradle-build')

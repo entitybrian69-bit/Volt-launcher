@@ -323,7 +323,7 @@ impl Game<'_> {
                 } => {
                     let hover = ui::hovered(cursor, *x, *y, *sw, 20.0);
                     let dragging = screen.dragging.is_some_and(|(d, _, _)| d == *id);
-                    ui::slider(
+                    ui::slider_dragging(
                         batch, atlas, *x, *y, *sw, label, *value, hover, true, dragging,
                     );
                 }

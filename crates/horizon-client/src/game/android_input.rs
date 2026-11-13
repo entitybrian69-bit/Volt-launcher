@@ -139,20 +139,152 @@ impl Game<'_> {
         })
     }
     pub(super) fn android_custom_mouse_held(&self, button: MouseButton) -> bool {
-        self.pad.touch.held_custom_tokens().any(|token| {
-            token.strip_prefix("action:").is_some_and(|mapping| {
+        self.pad.touch.held_custom_tokens().any(|token| match token {
+            "special:mouse_pri" => button == MouseButton::Left,
+            "special:mouse_sec" => button == MouseButton::Right,
+            "special:mouse_mid" => button == MouseButton::Middle,
+            _ => token.strip_prefix("action:").is_some_and(|mapping| {
                 horizon_client::keybinds::mouse_button(
                     horizon_client::keybinds::KeyBinds::default_of(mapping),
                 ) == Some(button)
-            })
+            }),
         })
+    }
+    /// Reloads the mod on/off switches (and the extras beside them) from
+    /// `dir`'s `horizon-mods.txt`, and says what changed, so a toggle that
+    /// reached the game is visible proof on screen and in the log.
+    pub(super) fn reload_mod_switches(&mut self, dir: &std::path::Path, announce: bool) {
+        let before = self.settings.mods.disabled.clone();
+        let fresh = horizon_client::mod_list::ModList::load(dir);
+        self.settings.mods.enabled = fresh.enabled;
+        self.settings.mods.disabled = fresh.disabled;
+        self.settings.mods.keys = fresh.keys;
+        self.settings.extras = horizon_client::extras::Extras::load(dir);
+        // `poll_pads` notices the "3D Skins" flip and rebuilds models.
+        self.list_native_mods();
+        if self.settings.mods.disabled == before {
+            return;
+        }
+        let off: Vec<&str> = self
+            .settings
+            .mods
+            .disabled
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let line = if off.is_empty() {
+            "Volt: all mods are on.".to_owned()
+        } else {
+            format!("Volt: {} mod(s) off: {}.", off.len(), off.join(", "))
+        };
+        log::info!("{line} (from {})", dir.display());
+        if announce {
+            self.system_message(horizon_client::text::Text::literal(line));
+        }
+    }
+    /// Once every two seconds: if `horizon-mods.txt` in the game home was
+    /// rewritten by anyone, apply it — independent of the launcher's note.
+    fn watch_mods_file(&mut self) {
+        let now = std::time::Instant::now();
+        if self
+            .mods_file_checked
+            .is_some_and(|t| now.duration_since(t).as_secs_f32() < 2.0)
+        {
+            return;
+        }
+        self.mods_file_checked = Some(now);
+        let dir = std::env::current_dir().unwrap_or_else(|_| crate::backend::game_home());
+        let stamp = std::fs::metadata(dir.join("horizon-mods.txt"))
+            .and_then(|m| m.modified())
+            .ok();
+        if self.mods_file_stamp == stamp {
+            return;
+        }
+        let first = self.mods_file_stamp.is_none() && stamp.is_some();
+        self.mods_file_stamp = stamp;
+        // The first sighting is the file the startup load already read:
+        // record it quietly; afterwards every change applies and is said.
+        if !first {
+            self.reload_mod_switches(&dir, true);
+        }
     }
     pub(super) fn android_custom_events(&mut self) {
         for (name, down) in self.pad.touch.key_events() {
+            match name.as_str() {
+                "special:keyboard" => {
+                    if down {
+                        if crate::platform::active() {
+                            crate::platform::hide();
+                        } else {
+                            self.android_show_keyboard();
+                        }
+                    }
+                    continue;
+                }
+                "special:virtual_mouse" => {
+                    if down {
+                        if matches!(self.screen, Screen::Inventory | Screen::Creative) {
+                            self.inv_clicks = Default::default();
+                            self.inv_drag = None;
+                            self.creative_screen.release();
+                            self.loom_release();
+                        }
+                        for right in self.pad.touch_ui.release_all_mouse() {
+                            let b = if right {
+                                MouseButton::Right
+                            } else {
+                                MouseButton::Left
+                            };
+                            let _ = self.android_custom_mouse(b, false);
+                        }
+                        self.pad.touch_ui.cancel();
+                        self.pad.touch_ui.virtual_mouse ^= true;
+                    }
+                    continue;
+                }
+                "special:menu" => {
+                    if down {
+                        crate::platform::hide();
+                        if let Err(error) = self.pad_back() {
+                            log::warn!("Custom menu button: {error}");
+                        }
+                    }
+                    continue;
+                }
+                "special:scroll_up" | "special:scroll_down" => {
+                    if down {
+                        let step = if name == "special:scroll_up" {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        if let Err(error) = self.android_custom_scroll(step) {
+                            log::warn!("Custom scroll button: {error}");
+                        }
+                    }
+                    continue;
+                }
+                "special:mouse_pri" | "special:mouse_sec" | "special:mouse_mid" => {
+                    let button = match name.as_str() {
+                        "special:mouse_pri" => MouseButton::Left,
+                        "special:mouse_sec" => MouseButton::Right,
+                        _ => MouseButton::Middle,
+                    };
+                    if let Err(error) = self.android_custom_mouse(button, down) {
+                        log::warn!("Custom mouse button: {error}");
+                    }
+                    continue;
+                }
+                _ => {}
+            }
             if let Some(mapping) = name.strip_prefix("action:") {
                 let default = horizon_client::keybinds::KeyBinds::default_of(mapping);
                 let result = if let Some(key) = horizon_client::keybinds::key_code(default) {
-                    self.mapped_key(key, down, false)
+                    if down && self.screenshot_shortcut(key, false) {
+                        Ok(())
+                    } else {
+                        self.mapped_key(key, down, false)
+                    }
                 } else if let Some(button) = horizon_client::keybinds::mouse_button(default) {
                     self.android_custom_mouse(button, down)
                 } else {
@@ -187,6 +319,14 @@ impl Game<'_> {
             } else {
                 self.physical_keys.remove(&key);
             }
+            if down && self.screenshot_shortcut(key, false) {
+                continue;
+            }
+            if down && horizon_client::keybinds::key_name(key)
+                .is_some_and(|name| self.volt_mod_input(name))
+            {
+                continue;
+            }
             self.mod_key(key, down, false);
             self.native_key_event(key, down, false);
             let action = if down {
@@ -195,6 +335,16 @@ impl Game<'_> {
                 KeyAction::Release
             };
             if self.debug_key(key, action) {
+                continue;
+            }
+            if self.volt_gameplay_key(key, down) {
+                continue;
+            }
+            if down
+                && (self.sort_key_press(key)
+                    || self.hdr_key_press(key)
+                    || self.volt_key_press(key))
+            {
                 continue;
             }
             for mapped in self.settings.keys.translate_all(key) {
@@ -213,9 +363,84 @@ impl Game<'_> {
         }
     }
 
+    fn android_custom_scroll(&mut self, raw_y: f64) -> Result<()> {
+        let discrete = self.settings.discrete_scroll;
+        let wheel_sensitivity = f64::from(self.settings.mouse_wheel_sensitivity);
+        let scaled = (if discrete {
+            horizon_client::mouse::java_signum(raw_y)
+        } else {
+            raw_y
+        }) * wheel_sensitivity;
+        let d = scaled as f32;
+        if self.screen == Screen::Playing
+            && !self.screen_over_playing()
+            && self.sleeping.is_none()
+            && self.player.is_some()
+            && !self.volt_zoom_wheel(d)
+            && !self.native_wheel_event(d)
+            && !self.mod_wheel(d)
+            && let Some((wheel, (_, vertical_steps))) =
+                self.mouse
+                    .on_scroll(0.0, raw_y, discrete, wheel_sensitivity)
+        {
+            if self.spectator() && self.spectator_gui.is_menu_active() {
+                self.spectator_scroll(-wheel);
+            } else if self.spectator() {
+                if let Some(player) = &mut self.player {
+                    player.flying_speed = horizon_client::mouse::spectator_flying_speed(
+                        player.flying_speed,
+                        vertical_steps,
+                    );
+                }
+            } else {
+                self.selected = horizon_client::mouse::ScrollWheelHandler::next_selection(
+                    f64::from(wheel),
+                    self.selected as i32,
+                    9,
+                ) as usize;
+            }
+            return Ok(());
+        }
+        let bundle = bundles::takes_bundle_wheel(self.screen)
+            && d != 0.0
+            && self.bundle_scroll(0.0, scaled);
+        if self.screen == Screen::Creative && d != 0.0 && !bundle {
+            self.creative_screen.wheel(f64::from(d), &self.pack.names);
+        } else if self.screen == Screen::Inventory
+            && d != 0.0
+            && !bundle
+            && !self.tweak_scroll(d, self.inventory_target().0)
+        {
+            self.station_scroll(d);
+        } else if self.screen == Screen::Chat && d != 0.0 {
+            self.chat_scroll(d);
+        } else if self.screen == Screen::Options && d != 0.0 {
+            self.options_scroll(d)?;
+        }
+        Ok(())
+    }
+
     fn android_custom_mouse(&mut self, button: MouseButton, down: bool) -> Result<()> {
         if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            if down
+                && (self.sort_mouse_press(button)
+                    || self.hdr_mouse_press(button)
+                    || self.volt_mouse_press(button))
+            {
+                return Ok(());
+            }
             return self.play_mouse(button, down);
+        }
+        if button == MouseButton::Middle {
+            if down {
+                self.inventory_pick_press();
+            } else {
+                self.inventory_pick_release();
+            }
+            if let Some(container) = self.container {
+                self.container_changed(container);
+            }
+            return Ok(());
         }
         let right = button == MouseButton::Right;
         if !matches!(button, MouseButton::Left | MouseButton::Right) {
@@ -277,6 +502,10 @@ impl Game<'_> {
         events: &ActiveEventLoop,
         id: WindowId,
     ) -> Result<bool> {
+        // The embedded Controls Studio owns the screen while it is open.
+        if self.android_studio_touch(t) {
+            return Ok(true);
+        }
         if t.phase == TouchPhase::Ended
             && let Some((right, last)) = self.pad.touch_ui.release_mouse(t.id)
         {
@@ -286,6 +515,7 @@ impl Game<'_> {
             return Ok(true);
         }
         if t.phase == TouchPhase::Cancelled {
+            self.extras.volt.replay_btn_touch = None;
             self.pad.touch_ui.cancel();
             self.android_release_touch_keys(true);
             return Ok(true);
@@ -299,6 +529,49 @@ impl Game<'_> {
         let size = self.window.as_ref().unwrap().inner_size();
         let b = HudBatch::new([size.width, size.height]);
         let p = [t.location.x as f32 / b.scale, t.location.y as f32 / b.scale];
+        if matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+            let _ = self.try_click_volt_hud((p[0], p[1]), false);
+        }
+        // The floating Volt logo: its own gesture owns the touch from the
+        // press to the release (tap opens the hub, drag moves the logo).
+        // It rides over every in-game screen, so no pad_in_menu gate.
+        if self.volt_hub_logo_touch(t.id, (p[0], p[1]), t.phase) {
+            if t.phase == TouchPhase::Started {
+                self.pad.touch.clear();
+                self.pad.touch.ignore(t.id);
+            }
+            return Ok(true);
+        }
+        // The open hub window also rides over menus: it takes the tap
+        // (a tap outside its panel closes it) before the screen below.
+        if self.volt_hub.open
+            && self.pad_in_menu()
+            && t.phase == TouchPhase::Started
+            && self.try_click_volt_hud((p[0], p[1]), true)
+        {
+            return Ok(true);
+        }
+        // The floating replay button: its own gesture owns the touch from
+        // the press to the release (tap, drag, or hold-to-adjust).
+        if (!self.pad_in_menu() || t.phase != TouchPhase::Started)
+            && self.replay_button_touch(t.id, (p[0], p[1]), t.phase)
+        {
+            if t.phase == TouchPhase::Started {
+                self.pad.touch.clear();
+                self.pad.touch.ignore(t.id);
+            }
+            return Ok(true);
+        }
+        if !self.pad_in_menu()
+            && t.phase == TouchPhase::Started
+            && (self.try_click_replay_hud((p[0], p[1]), true)
+                || self.try_click_waypoint_hud_button((p[0], p[1]))
+                || self.try_click_volt_hud((p[0], p[1]), true))
+        {
+            self.pad.touch.clear();
+            self.pad.touch.ignore(t.id);
+            return Ok(true);
+        }
         if let Some(action) = self
             .pad
             .touch_ui
@@ -462,8 +735,30 @@ impl Game<'_> {
     }
     pub(super) fn android_poll_keyboard(&mut self) {
         self.android_custom_events();
+        if let Some(dir) = crate::documents::take_mods_changed() {
+            // The launcher toggled a mod while this game runs: reload the
+            // on/off list (and the extras beside it) from the directory the
+            // launcher says it wrote, so the switch applies without a
+            // restart and without any directory guessing.
+            self.reload_mod_switches(&dir, true);
+        } else {
+            // Belt and braces: watch the file itself, so any writer at all
+            // (another surface, an older launcher path) applies within
+            // seconds even if the in-process note never fired.
+            self.watch_mods_file();
+        }
         if let Some(notice) = crate::documents::poll() {
-            if notice.changed {
+            if notice.controls_changed {
+                // The launcher set our CWD to the active profile before launch;
+                // that CWD copy of horizon-touch.json is the file the touch
+                // overlay loaded, so reload from there (not the root home).
+                let path = std::env::current_dir()
+                    .unwrap_or_else(|_| crate::backend::game_home())
+                    .join("horizon-touch.json");
+                self.settings.touch = horizon_client::touch::Settings::load_from(&path);
+                self.pad.touch.clear();
+                self.pad.touch.settings = self.settings.touch.clone();
+            } else if notice.changed {
                 self.refresh_pack_lists();
                 self.settings.shader_packs =
                     horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
@@ -476,6 +771,9 @@ impl Game<'_> {
             ));
         }
         for out in crate::platform::poll() {
+            if self.volt_studio_osk(&out) {
+                continue;
+            }
             let next_sign_line = self.sign_edit.is_some() && matches!(out, Output::Enter);
             let done =
                 matches!(out, Output::Close) || (matches!(out, Output::Enter) && !next_sign_line);
@@ -488,7 +786,7 @@ impl Game<'_> {
         }
         // Title screens also use Playing: their focused text fields must keep
         // the IME until the user confirms or closes the editor.
-        if !self.pad_in_menu() && crate::platform::active() {
+        if !self.pad_in_menu() && !self.volt_studio_open() && crate::platform::active() {
             crate::platform::hide();
         }
     }

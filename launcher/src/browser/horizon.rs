@@ -538,6 +538,40 @@ fn relative(kind: Kind, id: &str, file_name: &str) -> Result<String, String> {
     }
 }
 
+/// Downloads a native source bundle for later review; this does not run or
+/// build it. The caller must separately know whether its exact digest is in
+/// the installed APK. No arbitrary native code enters a signing job.
+#[cfg(target_os = "android")]
+pub fn download_native_source(
+    project: &Project,
+    home: &Path,
+    progress: &dyn Fn(&str, f32),
+) -> Result<(String, String), String> {
+    // A cached index may be stale; do not download or activate when current
+    // revocations cannot be fetched.
+    let (index, _) = fetch_index()?;
+    let p = index.project(&project.id)
+        .ok_or_else(|| format!("{} isn't in Horizon's registry.", project.title))?;
+    if p.kind != index::Kind::NativeMod || p.id == "accurate_block_placement" {
+        return Err("This project cannot be downloaded as a Volt native mod.".into());
+    }
+    let v = newest(&index, p, None)?;
+    let file = &version_of(&index, p, v, None).files[0];
+    let label = format!("{} {}", p.name, v.version);
+    let path = fetch(file, &home.join("mod-browser/downloads"), local(), &|f| progress(&label, f))?;
+    if let Err(e) = index::check_file(&index, p, v, &path) {
+        let _ = fs::remove_file(&path);
+        return Err(e);
+    }
+    // Keep sources separate from installed code and mod directories. They are
+    // never extracted or executed here. Only valid registry ids become names.
+    let dir = home.join("mod-browser/native-sources");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let target = dir.join(format!("{}.hnmod", p.id));
+    fs::rename(&path, target).map_err(|e| e.to_string())?;
+    Ok((v.version.clone(), v.file.sha256.clone()))
+}
+
 /// Installs a registry project into the game folder `home`: its newest version for this game that
 /// the game the player runs can load, downloaded into `mod-browser/downloads/`, checked against
 /// the index, then moved into place. A mod is `horizon-mods/<id>.hmod`, turned on in

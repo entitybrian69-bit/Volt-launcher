@@ -170,12 +170,18 @@ impl Game<'_> {
         if self.ui.hide_gui {
             return;
         }
-        let (Some(stack), Some(pose)) = (
+        let (Some(stack), Some(mut pose)) = (
             self.item_activation.active(),
             self.item_activation.pose(partial, aspect),
         ) else {
             return;
         };
+        if self.settings.extras.volt_qol.viewmodel_custom
+            && self.settings.extras.volt_qol.vm_totem_scale_pct != 100
+        {
+            let sc = f32::from(self.settings.extras.volt_qol.vm_totem_scale_pct) / 100.0;
+            pose *= glam::Mat4::from_scale(glam::Vec3::splat(sc));
+        }
         let state = self.resolve_item(stack, DisplayContext::Fixed, None, 0);
         let to_world = view.inverse();
         let (a, b) = horizon_client::item_render::gui::items_3d_lights();

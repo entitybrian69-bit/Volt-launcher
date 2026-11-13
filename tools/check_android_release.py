@@ -83,10 +83,14 @@ def inspect_payload(path, public=False):
     return {**totals, 'findings': findings}
 
 
-def audit(path, aapt2, public=False):
+def audit(path, aapt2, public=False, app_id='ae.net.Voltlauncher'):
+    # Only the two Volt identities are ever acceptable: the stable launcher
+    # and the side-by-side debug channel (never installs over the release).
+    if app_id not in ('ae.net.Voltlauncher', 'ae.net.Voltlauncher.debug'):
+        raise ValueError(f'Unexpected app id requested: {app_id}')
     report = inspect_payload(path, public)
     badging = subprocess.check_output([str(aapt2), 'dump', 'badging', str(path)], text=True)
-    if "package: name='dev.horizon.android'" not in badging:
+    if f"package: name='{app_id}'" not in badging:
         raise ValueError('Unexpected Android package identity')
     report['debuggable'] = 'application-debuggable' in badging
     if report['debuggable']:
@@ -107,8 +111,11 @@ def main():
     parser.add_argument('--aapt2', required=True, type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--public', action='store_true')
+    parser.add_argument('--app-id', default='ae.net.Voltlauncher',
+                        choices=['ae.net.Voltlauncher', 'ae.net.Voltlauncher.debug'],
+                        help='Expected applicationId: the stable launcher or the side-by-side debug channel')
     args = parser.parse_args()
-    report = audit(args.apk, args.aapt2, args.public)
+    report = audit(args.apk, args.aapt2, args.public, args.app_id)
     if args.report:
         args.report.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(report, indent=2))

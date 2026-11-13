@@ -18,6 +18,7 @@ pub mod storage;
 pub mod text;
 pub mod ticks;
 
+pub mod game_version;
 pub mod release;
 pub mod version;
 

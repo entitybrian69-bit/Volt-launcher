@@ -52,6 +52,14 @@ pub enum Event {
         name: String,
     },
     Packet(Box<play::Clientbound>),
+    /// Replay playback: where the recorder itself was at this moment of the
+    /// recording, rebuilt from its recorded movement packets.
+    ReplayPose {
+        at: u32,
+        position: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+    },
     /// A packet that failed to decode (skipped, like vanilla's skippable packets).
     DecodeError(String),
     /// The server sent us back to configuration (`ClientboundStartConfigurationPacket`):
@@ -104,6 +112,9 @@ pub struct Session {
     pub cookies: Cookies,
     /// HORIZON_NET_DEBUG=1 logs every packet sent from the game thread.
     debug: bool,
+    /// Volt Replay: the session is being recorded; the network thread
+    /// writes clientbound frames, `send` adds the player's own movement.
+    recorder: Option<Arc<crate::replay::Recorder>>,
 }
 impl Session {
     /// Start connecting in the background, as `auth`'s account when there is one.
@@ -114,8 +125,9 @@ impl Session {
         info: cfg::ClientInformation,
         lang: Arc<Language>,
         resources: PathBuf,
+        recorder: Option<Arc<crate::replay::Recorder>>,
     ) -> Self {
-        Self::start(address, name, auth, info, lang, None, None, resources)
+        Self::start(address, name, auth, info, lang, None, None, resources, recorder)
     }
     /// `ConnectScreen.startConnecting` for a `transfer`: the cookies the
     /// server stored carry to the new connection (`TransferState`).
@@ -127,6 +139,7 @@ impl Session {
         lang: Arc<Language>,
         cookies: Cookies,
         resources: PathBuf,
+        recorder: Option<Arc<crate::replay::Recorder>>,
     ) -> Self {
         Self::start(
             address,
@@ -137,6 +150,7 @@ impl Session {
             None,
             Some(cookies),
             resources,
+            recorder,
         )
     }
     /// Join an integrated server through memory (`Connection.connectToLocalServer`).
@@ -146,8 +160,11 @@ impl Session {
         info: cfg::ClientInformation,
         lang: Arc<Language>,
         resources: PathBuf,
+        recorder: Option<Arc<crate::replay::Recorder>>,
     ) -> Self {
-        Self::start("local", name, None, info, lang, Some(pipe), None, resources)
+        Self::start(
+            "local", name, None, info, lang, Some(pipe), None, resources, recorder,
+        )
     }
     fn start(
         address: &str,
@@ -158,6 +175,7 @@ impl Session {
         local: Option<horizon_protocol::connection::Pipe>,
         cookies: Option<Cookies>,
         resources: PathBuf,
+        recorder: Option<Arc<crate::replay::Recorder>>,
     ) -> Self {
         let (send, events) = channel();
         let writer = Arc::new(Mutex::new(None));
@@ -171,8 +189,10 @@ impl Session {
             (writer.clone(), counters.clone(), cookies.clone());
         let thread_configuring = configuring.clone();
         let (address_owned, name_owned) = (address.to_owned(), name.to_owned());
+        let thread_recorder = recorder.clone();
         let thread = std::thread::Builder::new()
             .name("horizon-net".into())
+            .stack_size(4 * 1024 * 1024)
             .spawn(move || {
                 let result = run(
                     local,
@@ -188,7 +208,11 @@ impl Session {
                     &thread_cookies,
                     transferred,
                     &resources,
+                    thread_recorder.as_deref(),
                 );
+                if let Some(r) = &thread_recorder {
+                    r.finish();
+                }
                 let from_server = result.is_ok();
                 let reason = result.unwrap_or_else(|e| e);
                 if let Some(w) = thread_writer.lock().unwrap().take() {
@@ -211,6 +235,7 @@ impl Session {
             counters,
             cookies,
             debug,
+            recorder,
         }
     }
     /// Everything received since the last poll.
@@ -237,6 +262,23 @@ impl Session {
         let mut writer = self.writer.lock().unwrap();
         if self.configuring.load(Ordering::Relaxed) {
             return;
+        }
+        // Volt Replay keeps the recorder's own movement: the server only
+        // echoes teleports back, so the recorded clientbound stream alone
+        // never carries the player's continuous path.
+        if let Some(recorder) = &self.recorder
+            && matches!(
+                packet,
+                play::Serverbound::MovePlayerPos(_)
+                    | play::Serverbound::MovePlayerPosRot(_)
+                    | play::Serverbound::MovePlayerRot(_)
+            )
+        {
+            let encoded = packet.encode();
+            let mut r = horizon_protocol::buf::Reader::new(&encoded);
+            if let Ok(id) = r.varint() {
+                recorder.record(crate::replay::PHASE_SELF, id, r.rest());
+            }
         }
         if let Some(w) = writer.as_mut()
             && w.send(&packet.encode()).is_err()
@@ -441,6 +483,7 @@ fn run(
     cookies: &Cookies,
     transferred: bool,
     resources: &Path,
+    recorder: Option<&crate::replay::Recorder>,
 ) -> Result<String, String> {
     let (host, port, mut c) = if let Some(pipe) = local {
         (address.to_owned(), 0, Connection::local(pipe))
@@ -566,6 +609,17 @@ fn run(
         .encode(),
     )
     .map_err(e)?;
+    // With the brand reading "vanilla", Horizon hosts learn what this client
+    // is from an explicit hello on the mod-message channel instead. Vanilla
+    // servers discard unknown custom payloads silently.
+    c.send(
+        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+            channel: horizon_protocol::mod_net::CHANNEL.into(),
+            data: Vec::new(),
+        })
+        .encode(),
+    )
+    .map_err(e)?;
     let (mut reader, writer) = c.split();
     *shared_writer.lock().unwrap() = Some(writer);
     let registries = configure(
@@ -576,6 +630,7 @@ fn run(
         send,
         cookies,
         resources,
+        recorder,
     )?;
     let _ = send.send(Event::Joined {
         registries: Arc::new(registries),
@@ -590,6 +645,7 @@ fn run(
         send,
         cookies,
         resources,
+        recorder,
     )
 }
 
@@ -601,9 +657,13 @@ fn receive_play(
     send: &Sender<Event>,
     cookies: &Cookies,
     resources: &Path,
+    recorder: Option<&crate::replay::Recorder>,
 ) -> Result<String, String> {
     loop {
         let (id, payload) = reader.recv().map_err(|e| connection_lost(e, lang))?;
+        if let Some(r) = recorder {
+            r.record(crate::replay::PHASE_PLAY, id, &payload);
+        }
         let packet = match play::Clientbound::decode(id, &payload) {
             Ok(p) => p,
             Err(err) => {
@@ -645,6 +705,7 @@ fn receive_play(
                     send,
                     cookies,
                     resources,
+                    recorder,
                 )?;
                 let _ = send.send(Event::Reconfigured(Arc::new(registries)));
             }
@@ -695,6 +756,7 @@ fn configure(
     send: &Sender<Event>,
     cookies: &Cookies,
     resources: &Path,
+    recorder: Option<&crate::replay::Recorder>,
 ) -> Result<Dynamic, String> {
     let mut registries = Dynamic::default();
     let reply = |p: cfg::Serverbound| -> Result<(), String> {
@@ -705,6 +767,9 @@ fn configure(
     };
     loop {
         let (id, payload) = reader.recv().map_err(|e| connection_lost(e, lang))?;
+        if let Some(r) = recorder {
+            r.record(crate::replay::PHASE_CONFIG, id, &payload);
+        }
         match cfg::Clientbound::decode(id, &payload).map_err(|e| connection_lost(e, lang))? {
             cfg::Clientbound::KeepAlive(k) => reply(cfg::Serverbound::KeepAlive(k))?,
             cfg::Clientbound::CustomPayload(p) if p.channel == crate::content_identity::CHANNEL => {
@@ -776,6 +841,288 @@ fn configure(
     }
 }
 
+impl Session {
+    /// Volt Replay: play a recorded session back. A local thread feeds the
+    /// recorded packets through the same events a live connection produces,
+    /// so the game replays the session exactly; nothing is ever sent.
+    pub fn replay(path: &Path) -> Option<(Self, Arc<crate::replay::Control>)> {
+        let meta = crate::replay::read_meta(path)?;
+        let control = crate::replay::Control::new(meta.duration_ms);
+        let (send, events) = channel();
+        let thread_control = control.clone();
+        let thread_path = path.to_owned();
+        let thread = std::thread::Builder::new()
+            .name("volt-replay".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || feed_replay(&thread_path, &send, &thread_control))
+            .ok();
+        Some((
+            Self {
+                events,
+                writer: Arc::new(Mutex::new(None)),
+                configuring: Arc::new(AtomicBool::new(false)),
+                thread,
+                address: format!("replay:{}", meta.file_name),
+                name: meta.name,
+                counters: Arc::new(Mutex::new(None)),
+                cookies: Cookies::default(),
+                debug: false,
+                recorder: None,
+            },
+            control,
+        ))
+    }
+}
+
+enum Pace {
+    Go,
+    /// A backwards jump: reopen the file and fast-forward to the target.
+    Restart,
+    Exit,
+}
+
+/// Wait until the recording's clock reaches `at`, honouring pause, speed
+/// and seeks. Forward jumps switch to fast-forward (`fast_until`);
+/// backwards jumps ask for a restart, like the original Replay Mod.
+fn pace_replay(
+    control: &crate::replay::Control,
+    virtual_ms: &mut f64,
+    last: &mut std::time::Instant,
+    at: u32,
+    fast_until: &mut Option<u32>,
+) -> Pace {
+    use std::sync::atomic::Ordering::Relaxed;
+    loop {
+        if control.exit.load(Relaxed) {
+            return Pace::Exit;
+        }
+        let seek = control.seek_ms.load(Relaxed);
+        if seek != crate::replay::NO_SEEK {
+            if f64::from(seek) + 500.0 < *virtual_ms {
+                return Pace::Restart;
+            }
+            control.seek_ms.store(crate::replay::NO_SEEK, Relaxed);
+            if f64::from(seek) > *virtual_ms {
+                *fast_until = Some(seek);
+            }
+        }
+        if let Some(target) = *fast_until {
+            if at <= target {
+                *virtual_ms = f64::from(at);
+                control.time_ms.store(at, Relaxed);
+                *last = std::time::Instant::now();
+                return Pace::Go;
+            }
+            *fast_until = None;
+        }
+        if control.paused.load(Relaxed) {
+            std::thread::sleep(Duration::from_millis(30));
+            *last = std::time::Instant::now();
+            continue;
+        }
+        // 10 = 0.1x slow motion; 1600..=6400 = the timelapse speeds.
+        let speed = f64::from(control.speed_pct.load(Relaxed).clamp(10, 6400)) / 100.0;
+        let now = std::time::Instant::now();
+        *virtual_ms += now.duration_since(*last).as_secs_f64() * 1000.0 * speed;
+        *last = now;
+        if *virtual_ms + 0.5 >= f64::from(at) {
+            *virtual_ms = f64::from(at);
+            control.time_ms.store(at, Relaxed);
+            return Pace::Go;
+        }
+        control.time_ms.store(*virtual_ms as u32, Relaxed);
+        let wait = ((f64::from(at) - *virtual_ms) / speed).clamp(1.0, 40.0);
+        std::thread::sleep(Duration::from_millis(wait as u64));
+    }
+}
+
+fn feed_replay(
+    path: &Path,
+    send: &Sender<Event>,
+    control: &Arc<crate::replay::Control>,
+) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let disconnected = |reason: &str| {
+        let _ = send.send(Event::Disconnected {
+            reason: reason.into(),
+            from_server: true,
+        });
+    };
+    let mut joined = false;
+    'restart: loop {
+        let Some(mut feed) = crate::replay::Feed::open(path) else {
+            disconnected("This file is not a Volt replay.");
+            return;
+        };
+        let (uuid, name) = (feed.meta.uuid, feed.meta.name.clone());
+        let mut registries = Dynamic::default();
+        let mut in_config = true;
+        let mut virtual_ms = 0f64;
+        let mut last_tick = std::time::Instant::now();
+        let mut pose = crate::replay::SelfPose::default();
+        let mut fast_until = {
+            let seek = control.seek_ms.swap(crate::replay::NO_SEEK, Relaxed);
+            (seek != crate::replay::NO_SEEK).then_some(seek)
+        };
+        let mut burst = 0u32;
+        if joined {
+            // A backwards seek replays the stream from the start, through
+            // the same reset a proxy's server switch uses.
+            let _ = send.send(Event::Reconfiguring);
+        } else {
+            let _ = send.send(Event::Status("Loading replay...".into()));
+        }
+        while let Some((phase, at, id, payload)) = feed.next() {
+            if control.exit.load(Relaxed) {
+                disconnected("Replay closed.");
+                return;
+            }
+            // Fast-forwarding must not flood the game's queue unboundedly.
+            if fast_until.is_some() {
+                burst += 1;
+                if burst % 512 == 0 {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            match phase {
+                crate::replay::PHASE_CONFIG => {
+                    if !in_config {
+                        in_config = true;
+                        let _ = send.send(Event::Reconfiguring);
+                    }
+                    match cfg::Clientbound::decode(id, &payload) {
+                        Ok(cfg::Clientbound::RegistryData(r)) => registries.add(r),
+                        Ok(cfg::Clientbound::UpdateTags(t)) => registries.add_tags(&t),
+                        Ok(cfg::Clientbound::CustomPayload(p)) => receive_brand(&p, send),
+                        Ok(cfg::Clientbound::FinishConfiguration(_)) => {
+                            in_config = false;
+                            let built = Arc::new(std::mem::take(&mut registries));
+                            let event = if joined {
+                                Event::Reconfigured(built)
+                            } else {
+                                joined = true;
+                                Event::Joined {
+                                    registries: built,
+                                    uuid,
+                                    name: name.clone(),
+                                }
+                            };
+                            if send.send(event).is_err() {
+                                return;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                crate::replay::PHASE_PLAY => {
+                    match pace_replay(control, &mut virtual_ms, &mut last_tick, at, &mut fast_until)
+                    {
+                        Pace::Go => {}
+                        Pace::Restart => continue 'restart,
+                        Pace::Exit => {
+                            disconnected("Replay closed.");
+                            return;
+                        }
+                    }
+                    let packet = match play::Clientbound::decode(id, &payload) {
+                        Ok(p) => p,
+                        Err(err) => {
+                            let name = horizon_protocol::ids::name(
+                                horizon_protocol::State::Play,
+                                horizon_protocol::Direction::Clientbound,
+                                id,
+                            )
+                            .unwrap_or("?");
+                            let _ = send.send(Event::DecodeError(format!("{name}: {err}")));
+                            continue;
+                        }
+                    };
+                    match packet {
+                        play::Clientbound::KeepAlive(_) | play::Clientbound::BundleDelimiter(_) => {}
+                        // The viewer neither downloads packs nor follows
+                        // transfers; the recording already has the result.
+                        play::Clientbound::ResourcePackPush(_)
+                        | play::Clientbound::ResourcePackPop(_)
+                        | play::Clientbound::Transfer(_) => {}
+                        play::Clientbound::StartConfiguration(_) => {
+                            in_config = true;
+                            let _ = send.send(Event::Reconfiguring);
+                        }
+                        play::Clientbound::Disconnect(_) => break,
+                        play::Clientbound::CustomPayload(p) if p.channel == "minecraft:brand" => {
+                            receive_brand(&p, send);
+                        }
+                        other => {
+                            if send.send(Event::Packet(Box::new(other))).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+                crate::replay::PHASE_SELF => {
+                    match pace_replay(control, &mut virtual_ms, &mut last_tick, at, &mut fast_until)
+                    {
+                        Pace::Go => {}
+                        Pace::Restart => continue 'restart,
+                        Pace::Exit => {
+                            disconnected("Replay closed.");
+                            return;
+                        }
+                    }
+                    match play::Serverbound::decode(id, &payload) {
+                        Ok(play::Serverbound::MovePlayerPos(m)) => {
+                            pose.position = [m.x, m.y, m.z];
+                            pose.known = true;
+                        }
+                        Ok(play::Serverbound::MovePlayerPosRot(m)) => {
+                            pose.position = [m.x, m.y, m.z];
+                            pose.yaw = m.yaw;
+                            pose.pitch = m.pitch;
+                            pose.known = true;
+                        }
+                        Ok(play::Serverbound::MovePlayerRot(m)) => {
+                            pose.yaw = m.yaw;
+                            pose.pitch = m.pitch;
+                        }
+                        _ => continue,
+                    }
+                    if pose.known
+                        && send
+                            .send(Event::ReplayPose {
+                                at,
+                                position: pose.position,
+                                yaw: pose.yaw,
+                                pitch: pose.pitch,
+                            })
+                            .is_err()
+                    {
+                        return;
+                    }
+                }
+                _ => {
+                    disconnected("This replay is damaged.");
+                    return;
+                }
+            }
+        }
+        // The end of the recording: hold the world here; a backwards seek
+        // rewinds, exit leaves.
+        control.finished.store(true, Relaxed);
+        let end = control.time_ms.load(Relaxed);
+        control.duration_ms.fetch_max(end, Relaxed);
+        loop {
+            if control.exit.load(Relaxed) {
+                disconnected("Replay finished.");
+                return;
+            }
+            if control.seek_ms.load(Relaxed) != crate::replay::NO_SEEK {
+                continue 'restart;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
 fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
     if payload.channel == "minecraft:brand"
         && let Ok(brand) = horizon_protocol::buf::Reader::new(&payload.data).string(32767)
@@ -791,7 +1138,12 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
 /// The minecraft:brand payload: a string naming the client.
 fn brand() -> Vec<u8> {
     let mut w = horizon_protocol::buf::Writer::new();
-    w.string("horizon");
+    // Exactly vanilla's brand: anti-bot and anti-cheat plugins commonly
+    // treat an unknown `minecraft:brand` as a bot and refuse the join (or
+    // fail their captcha flow), and the engine's behaviour is vanilla
+    // parity anyway. Note a `horizon-clients-only` host turns this brand
+    // away by design; that server-side gate is off by default.
+    w.string("vanilla");
     w.data
 }
 
@@ -1038,6 +1390,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                None,
             ));
         });
         let ended = result
@@ -1085,6 +1438,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 &root,
+                None,
             )
         });
         let mut server = Connection::local(server);
@@ -1153,6 +1507,7 @@ mod tests {
                 counters: Arc::new(Mutex::new(None)),
                 cookies: Cookies::default(),
                 debug: false,
+                recorder: None,
             };
             let started = std::time::Instant::now();
             if explicit_disconnect {
@@ -1201,6 +1556,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                None,
             )
         });
         let mut server = Connection::local(server);
@@ -1252,6 +1608,7 @@ mod tests {
             counters: Arc::new(Mutex::new(None)),
             cookies: Cookies::default(),
             debug: false,
+            recorder: None,
         };
         let (thread_writer, thread_configuring) =
             (session.writer.clone(), session.configuring.clone());
@@ -1264,6 +1621,7 @@ mod tests {
                 &send,
                 &Cookies::default(),
                 Path::new("."),
+                None,
             )
         });
         let mut server = Connection::local(server);
@@ -1311,6 +1669,7 @@ mod tests {
                 &send,
                 &thread_cookies,
                 Path::new("."),
+                None,
             )
         });
         let mut server = Connection::local(server);

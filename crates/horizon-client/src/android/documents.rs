@@ -1,9 +1,10 @@
 //! SAF selection, bounded background imports and explicit collision choices.
+use crate::launcher::pages::theme;
 use horizon_client::{
     Result,
     content_files::{self, Kind},
-    hud::{HudAtlas, HudBatch, rgba},
-    ui_theme::{Face, Ui, color},
+    hud::{HudAtlas, HudBatch},
+    ui_theme::{Face, Ui},
 };
 use jni::{
     JNIEnv,
@@ -18,9 +19,30 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+enum Target {
+    Content {
+        kind: Kind,
+        home: PathBuf,
+    },
+    Controls {
+        root_home: PathBuf,
+        profile_home: PathBuf,
+    },
+    Cosmetic {
+        is_cape: bool,
+        dest_path: PathBuf,
+    },
+    /// A PNG picked for a custom touch button's background image; it is
+    /// re-encoded and copied into the profile's `button-images/` folder.
+    ButtonImage {
+        dest_dir: PathBuf,
+    },
+    VulkanDriver {
+        home: PathBuf,
+    },
+}
 struct Request {
-    kind: Kind,
-    home: PathBuf,
+    target: Target,
     cache: PathBuf,
 }
 struct Conflict {
@@ -32,6 +54,9 @@ struct Conflict {
 pub struct Notice {
     pub text: String,
     pub changed: bool,
+    pub controls_changed: bool,
+    pub cosmetic_imported: Option<(bool, PathBuf)>,
+    pub driver_imported: Option<(String, PathBuf)>,
     pub kind: Option<Kind>,
 }
 #[derive(Default)]
@@ -60,6 +85,20 @@ static STATE: Mutex<State> = Mutex::new(State {
     cursor: (0.0, 0.0),
 });
 static CANCEL: AtomicBool = AtomicBool::new(false);
+/// The launcher rewrote `horizon-mods.txt` (a mod was toggled): the running
+/// game reloads the list next frame, so toggles apply without a restart.
+/// The note carries the directory the launcher wrote, so the game reads
+/// exactly that file — never a guess from its own working directory.
+static MODS_CHANGED: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+pub fn note_mods_changed(dir: &std::path::Path) {
+    *MODS_CHANGED.lock().unwrap_or_else(|e| e.into_inner()) = Some(dir.to_path_buf());
+}
+pub fn take_mods_changed() -> Option<std::path::PathBuf> {
+    MODS_CHANGED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+}
 pub fn busy() -> bool {
     let s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     s.request.is_some() || s.working || s.conflict.is_some()
@@ -78,6 +117,9 @@ fn notice(text: impl Into<String>, changed: bool) {
     s.notice = Some(Notice {
         text,
         changed,
+        controls_changed: false,
+        cosmetic_imported: None,
+        driver_imported: None,
         kind: None,
     });
 }
@@ -88,7 +130,49 @@ fn imported(text: impl Into<String>, kind: Kind) {
     s.notice = Some(Notice {
         text,
         changed: true,
+        controls_changed: false,
+        cosmetic_imported: None,
+        driver_imported: None,
         kind: Some(kind),
+    });
+}
+fn controls_imported(text: impl Into<String>) {
+    let text = text.into();
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.toast = Some((text.clone(), std::time::Instant::now()));
+    s.notice = Some(Notice {
+        text,
+        changed: false,
+        controls_changed: true,
+        cosmetic_imported: None,
+        driver_imported: None,
+        kind: None,
+    });
+}
+fn cosmetic_done(text: impl Into<String>, is_cape: bool, path: PathBuf) {
+    let text = text.into();
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.toast = Some((text.clone(), std::time::Instant::now()));
+    s.notice = Some(Notice {
+        text,
+        changed: false,
+        controls_changed: false,
+        cosmetic_imported: Some((is_cape, path)),
+        driver_imported: None,
+        kind: None,
+    });
+}
+fn driver_done(text: impl Into<String>, label: String, path: PathBuf) {
+    let text = text.into();
+    let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    s.toast = Some((text.clone(), std::time::Instant::now()));
+    s.notice = Some(Notice {
+        text,
+        changed: false,
+        controls_changed: false,
+        cosmetic_imported: None,
+        driver_imported: Some((label, path)),
+        kind: None,
     });
 }
 pub fn poll() -> Option<Notice> {
@@ -96,6 +180,9 @@ pub fn poll() -> Option<Notice> {
         return Some(Notice {
             text: "Content files changed. Reload packs to apply.".into(),
             changed: true,
+            controls_changed: false,
+            cosmetic_imported: None,
+            driver_imported: None,
             kind: None,
         });
     }
@@ -114,12 +201,105 @@ pub fn begin(kind: Kind, home: PathBuf) -> std::result::Result<(), String> {
     let cache = crate::platform::cache_dir()
         .ok_or("Could not access the Android import cache")?
         .join("content-imports");
-    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request { kind, home, cache });
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::Content { kind, home },
+        cache,
+    });
     if !crate::native_ime::pick_document() {
         picker_failed("Android document picker is unavailable");
         return Err("Android document picker is unavailable".into());
     }
     notice(format!("Choose a {} file", kind.label()), false);
+    Ok(())
+}
+pub fn begin_controls(root_home: PathBuf, profile_home: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::Controls {
+            root_home,
+            profile_home,
+        },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice(
+        "Choose a Java launcher control file (.json or .zip)",
+        false,
+    );
+    Ok(())
+}
+pub fn begin_button_image(dest_dir: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::ButtonImage { dest_dir },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice("Choose a PNG image for the button", false);
+    Ok(())
+}
+pub fn begin_cosmetic(is_cape: bool, dest_path: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::Cosmetic { is_cape, dest_path },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    let label = if is_cape { "cape PNG" } else { "skin PNG (64x64 or 64x32)" };
+    notice(format!("Choose a {label} image"), false);
+    Ok(())
+}
+pub fn begin_vulkan_driver(home: PathBuf) -> std::result::Result<(), String> {
+    if busy() {
+        return Err("Finish or cancel the current import first".into());
+    }
+    CANCEL.store(false, Ordering::Relaxed);
+    crate::platform::hide();
+    let cache = crate::platform::cache_dir()
+        .ok_or("Could not access the Android import cache")?
+        .join("content-imports");
+    STATE.lock().unwrap_or_else(|e| e.into_inner()).request = Some(Request {
+        target: Target::VulkanDriver { home },
+        cache,
+    });
+    if !crate::native_ime::pick_document() {
+        picker_failed("Android document picker is unavailable");
+        return Err("Android document picker is unavailable".into());
+    }
+    notice(
+        "Choose a custom Vulkan driver (.zip, .adpkg, or .so)",
+        false,
+    );
     Ok(())
 }
 pub fn picker_failed(error: &str) {
@@ -173,10 +353,16 @@ pub extern "system" fn document_result(
         .spawn(move || {
             let result = (|| -> Result<()> {
                 let mut env = vm.attach_current_thread()?;
-                let fallback = if pending.kind == Kind::Mods {
-                    "import.hmod"
-                } else {
-                    "import.zip"
+                let fallback = match &pending.target {
+                    Target::Content {
+                        kind: Kind::Mods, ..
+                    } => "import.hmod",
+                    Target::Content { .. } => "import.zip",
+                    Target::Controls { .. } => "controls.json",
+                    Target::Cosmetic { is_cape: true, .. } => "cape.png",
+                    Target::Cosmetic { is_cape: false, .. } => "skin.png",
+                    Target::ButtonImage { .. } => "button.png",
+                    Target::VulkanDriver { .. } => "driver.zip",
                 };
                 let opened =
                     crate::document_bridge::open(&mut env, activity.as_obj(), &uri, fallback);
@@ -197,14 +383,6 @@ pub extern "system" fn document_result(
     }
 }
 fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()> {
-    if !content_files::plain_name(&name) || !request.kind.accepts(&name) {
-        return Err("Selected file has the wrong extension for this folder".into());
-    }
-    let dir = request.home.join(request.kind.folder());
-    std::fs::create_dir_all(&dir)?;
-    if std::fs::symlink_metadata(&dir)?.file_type().is_symlink() {
-        return Err("Refusing a redirected content directory".into());
-    }
     std::fs::create_dir_all(&request.cache)?;
     if std::fs::symlink_metadata(&request.cache)?
         .file_type()
@@ -213,10 +391,40 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         return Err("Refusing a redirected import cache".into());
     }
     for entry in std::fs::read_dir(&request.cache)?.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(".import-") && name.ends_with(".part") && entry.file_type()?.is_file() {
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        if entry_name.starts_with(".import-")
+            && entry_name.ends_with(".part")
+            && entry.file_type()?.is_file()
+        {
             let _ = std::fs::remove_file(entry.path());
         }
+    }
+    if let Target::Controls {
+        root_home,
+        profile_home,
+    } = request.target
+    {
+        return stage_controls(&request.cache, &root_home, &profile_home, input, &name);
+    }
+    if let Target::Cosmetic { is_cape, dest_path } = request.target {
+        return stage_cosmetic(is_cape, &dest_path, input, &name);
+    }
+    if let Target::ButtonImage { dest_dir } = request.target {
+        return stage_button_image(&dest_dir, input, &name);
+    }
+    if let Target::VulkanDriver { home } = request.target {
+        return stage_vulkan_driver(&request.cache, &home, input, &name);
+    }
+    let Target::Content { kind, home } = request.target else {
+        unreachable!()
+    };
+    if !content_files::plain_name(&name) || !kind.accepts(&name) {
+        return Err("Selected file has the wrong extension for this folder".into());
+    }
+    let dir = home.join(kind.folder());
+    std::fs::create_dir_all(&dir)?;
+    if std::fs::symlink_metadata(&dir)?.file_type().is_symlink() {
+        return Err("Refusing a redirected content directory".into());
     }
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let staged = request.cache.join(format!(".import-{stamp}.part"));
@@ -227,7 +435,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             .open(&staged)?;
         content_files::copy_bounded(&mut input, &mut output, |bytes| {
             notice(
-                format!("Importing {}: {} KiB", request.kind.label(), bytes / 1024),
+                format!("Importing {}: {} KiB", kind.label(), bytes / 1024),
                 false,
             );
             !CANCEL.load(Ordering::Relaxed)
@@ -235,10 +443,10 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         output.sync_all()?;
         drop(output);
         notice("Checking archive...", false);
-        let native_shader = content_files::validate(&staged, request.kind, &name, || {
+        let native_shader = content_files::validate(&staged, kind, &name, || {
             CANCEL.load(Ordering::Relaxed)
         })?;
-        let name = if request.kind == Kind::Mods {
+        let name = if kind == Kind::Mods {
             format!("{}.hmod", horizon_mods::Package::read(&staged)?.manifest.id)
         } else if native_shader || name.to_ascii_lowercase().ends_with(".hshader") {
             let pack = horizon_shader_api::Pack::read(&staged)?;
@@ -258,7 +466,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
         let target = dir.join(name);
         if target.exists() {
             STATE.lock().unwrap_or_else(|e| e.into_inner()).conflict = Some(Conflict {
-                kind: request.kind,
+                kind,
                 staged: staged.clone(),
                 target,
             });
@@ -272,9 +480,9 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
                 format!(
                     "Imported {} into {}. Enable it in game settings.",
                     target.file_name().unwrap_or_default().to_string_lossy(),
-                    request.kind.label()
+                    kind.label()
                 ),
-                request.kind,
+                kind,
             );
         }
         Ok(())
@@ -282,6 +490,51 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
     if result.is_err() {
         let _ = std::fs::remove_file(staged);
     }
+    result
+}
+
+fn stage_controls(
+    cache: &std::path::Path,
+    root_home: &std::path::Path,
+    profile_home: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let staged = cache.join(format!(".import-controls-{stamp}.part"));
+    let result = (|| -> Result<()> {
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        content_files::copy_bounded(&mut input, &mut output, |bytes| {
+            notice(
+                format!("Importing control layout: {} KiB", bytes / 1024),
+                false,
+            );
+            !CANCEL.load(Ordering::Relaxed)
+        })?;
+        output.sync_all()?;
+        drop(output);
+        if CANCEL.load(Ordering::Relaxed) {
+            return Err("Import cancelled".into());
+        }
+        notice("Converting Java launcher controls...", false);
+        let parsed = horizon_client::touch::import::import_file(&staged, name)?;
+        horizon_client::touch::import::save_preset_and_apply(root_home, profile_home, &parsed)?;
+        let extras = match (parsed.meta.drawers > 0, parsed.meta.has_joystick) {
+            (true, true) => format!(", {} drawers, joystick", parsed.meta.drawers),
+            (true, false) => format!(", {} drawers", parsed.meta.drawers),
+            (false, true) => ", joystick".into(),
+            (false, false) => String::new(),
+        };
+        controls_imported(format!(
+            "Imported \"{}\" ({} • {} buttons{}) — active now!",
+            parsed.meta.name, parsed.meta.format, parsed.meta.buttons, extras
+        ));
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&staged);
     result
 }
 pub fn resolve(choice: Choice) {
@@ -422,45 +675,75 @@ pub fn draw_ui(ui: &mut Ui<'_>) {
             vec![("Cancel", Choice::Cancel)],
         )
     };
-    let w = 440.0f32.min(ui.w - 24.0);
+    let w = 460.0f32.min(ui.w - 24.0);
     let vertical = w < 320.0;
     let height = if vertical {
-        92.0 + choices.len() as f32 * 44.0
+        98.0 + choices.len() as f32 * 44.0
     } else {
-        144.0
+        152.0
     };
     let x = (ui.w - w) / 2.0;
     let y = ((ui.h - height) / 2.0).max(0.0);
-    ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, rgba(0, 0, 0, 180));
-    ui.rounded(x, y, w, height, 2.0, color::BG);
+    ui.rounded(0.0, 0.0, ui.w, ui.h, 0.0, theme::BACKDROP());
+    ui.rounded(x, y, w, height, 14.0, theme::CARD());
+    ui.border(x, y, w, height, 14.0, theme::BORDER_CRIMSON());
     ui.text(
-        Face::Medium,
-        20.0,
-        x + 12.0,
-        y + 12.0,
-        color::TEXT,
+        Face::LauncherMedium,
+        19.0,
+        x + 18.0,
+        y + 14.0,
+        theme::TEXT(),
         if s.conflict.is_some() {
             "File exists"
         } else {
             "Importing file"
         },
     );
-    let name = ui.fit_text(Face::Regular, 16.0, &name, w - 24.0);
-    ui.text(Face::Regular, 16.0, x + 12.0, y + 46.0, color::MUTED, &name);
-    let width = (w - 24.0) / choices.len() as f32;
+    let name = ui.fit_text(Face::LauncherRegular, 14.5, &name, w - 36.0);
+    ui.text(Face::LauncherRegular, 14.5, x + 18.0, y + 48.0, theme::MUTED(), &name);
+    let width = (w - 36.0) / choices.len() as f32;
     for (i, (label, choice)) in choices.into_iter().enumerate() {
         let rect = if vertical {
-            [x + 12.0, y + 86.0 + i as f32 * 44.0, w - 24.0, 38.0]
+            [x + 18.0, y + 88.0 + i as f32 * 44.0, w - 36.0, 38.0]
         } else {
-            [x + 12.0 + i as f32 * width, y + 92.0, width - 4.0, 38.0]
+            [x + 18.0 + i as f32 * width, y + 96.0, width - 6.0, 38.0]
         };
-        ui.rounded(rect[0], rect[1], rect[2], rect[3], 2.0, color::RAISED);
+        let is_primary = matches!(choice, Choice::Replace | Choice::KeepBoth) && i == 0;
+        ui.rounded(
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            8.0,
+            if is_primary {
+                theme::CRIMSON()
+            } else {
+                theme::CARD_INNER()
+            },
+        );
+        ui.border(
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            8.0,
+            if is_primary {
+                theme::CRIMSON_BRIGHT()
+            } else {
+                theme::BORDER()
+            },
+        );
+        let tw = ui.measure(Face::LauncherMedium, 14.5, label);
         ui.text(
-            Face::Medium,
-            16.0,
-            rect[0] + 8.0,
-            rect[1] + 7.0,
-            color::TEXT,
+            Face::LauncherMedium,
+            14.5,
+            rect[0] + ((rect[2] - tw) * 0.5).max(8.0),
+            rect[1] + 8.5,
+            if is_primary {
+                theme::ON_CRIMSON()
+            } else {
+                theme::TEXT()
+            },
             label,
         );
         s.hits.push((
@@ -530,3 +813,352 @@ pub fn handle_event(event: &winit::event::WindowEvent) -> bool {
         _ => false,
     }
 }
+
+/// Decodes any picked image, caps it at 256x256 and writes it as a clean
+/// RGBA PNG into `dest_dir` under a sanitized name derived from the pick.
+fn stage_button_image(
+    dest_dir: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    input
+        .by_ref()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("Image file is too large (max 4 MB)".into());
+    }
+    let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes)
+        .or_else(|_| {
+            image::load_from_memory(&bytes)
+                .map(|img| {
+                    let rgba8 = img.to_rgba8();
+                    let (iw, ih) = rgba8.dimensions();
+                    (iw, ih, rgba8.into_raw())
+                })
+                .map_err(|_| ())
+        })
+        .map_err(|_| "Selected file is not a valid image")?;
+    if w == 0 || h == 0 {
+        return Err("Selected image is empty".into());
+    }
+    const MAX_SIDE: u32 = 256;
+    let (ow, oh) = if w <= MAX_SIDE && h <= MAX_SIDE {
+        (w, h)
+    } else {
+        let f = MAX_SIDE as f32 / w.max(h) as f32;
+        (
+            ((w as f32 * f).round() as u32).max(1),
+            ((h as f32 * f).round() as u32).max(1),
+        )
+    };
+    let mut out = vec![0u8; (ow as usize) * (oh as usize) * 4];
+    for oy in 0..oh {
+        for ox in 0..ow {
+            let sx = (u64::from(ox) * u64::from(w) / u64::from(ow)).min(u64::from(w) - 1) as u32;
+            let sy = (u64::from(oy) * u64::from(h) / u64::from(oh)).min(u64::from(h) - 1) as u32;
+            let si = ((sy * w + sx) * 4) as usize;
+            let di = ((oy * ow + ox) * 4) as usize;
+            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+        }
+    }
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, ow, oh);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG encode failed: {e}"))?;
+        writer
+            .write_image_data(&out)
+            .map_err(|e| format!("PNG write failed: {e}"))?;
+    }
+    // Sanitize the picked name into `[a-z0-9_-]{1,40}.png`.
+    let stem: String = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(".png")
+        .trim_end_matches(".PNG")
+        .chars()
+        .filter_map(|c| {
+            let c = c.to_ascii_lowercase();
+            (c.is_ascii_alphanumeric() || c == '-' || c == '_').then_some(c)
+        })
+        .take(40)
+        .collect();
+    let stem = if stem.is_empty() { "button".into() } else { stem };
+    std::fs::create_dir_all(dest_dir)?;
+    if std::fs::symlink_metadata(dest_dir)?.file_type().is_symlink() {
+        return Err("Refusing a redirected button-images folder".into());
+    }
+    let mut file_name = format!("{stem}.png");
+    let mut n = 2u32;
+    while dest_dir.join(&file_name).exists() && n < 100 {
+        file_name = format!("{stem}-{n}.png");
+        n += 1;
+    }
+    let dest = dest_dir.join(&file_name);
+    let tmp = dest.with_extension("png.tmp");
+    std::fs::write(&tmp, &png_bytes)?;
+    std::fs::rename(&tmp, &dest)?;
+    notice(
+        format!("Imported {file_name} - pick it under Background image."),
+        false,
+    );
+    Ok(())
+}
+
+fn stage_cosmetic(
+    is_cape: bool,
+    dest_path: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    input
+        .by_ref()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("Image file is too large (max 4 MB)".into());
+    }
+    let (w, h, rgba) = horizon_client::hud::decode_bytes(&bytes)
+        .or_else(|_| {
+            image::load_from_memory(&bytes)
+                .map(|img| {
+                    let rgba8 = img.to_rgba8();
+                    let (iw, ih) = rgba8.dimensions();
+                    (iw, ih, rgba8.into_raw())
+                })
+                .map_err(|_| ())
+        })
+        .map_err(|_| "Selected file is not a valid image")?;
+    let normalized_rgba = if is_cape {
+        horizon_client::skins::process_cape(w, h, &rgba)
+            .ok_or("Selected image could not be processed as a cape")?
+    } else {
+        horizon_client::skins::process_legacy_skin(w, h, &rgba)
+            .ok_or("Skin image must be 64x64 or 64x32")?
+    };
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let (out_w, out_h, out_slice) = if is_cape {
+        (64u32, 32u32, &normalized_rgba[..64 * 32 * 4])
+    } else {
+        (64u32, 64u32, normalized_rgba.as_slice())
+    };
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, out_w, out_h);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG encode failed: {e}"))?;
+        writer
+            .write_image_data(out_slice)
+            .map_err(|e| format!("PNG write failed: {e}"))?;
+    }
+    let tmp = dest_path.with_extension("png.tmp");
+    std::fs::write(&tmp, &png_bytes)?;
+    std::fs::rename(&tmp, dest_path)?;
+    let kind_label = if is_cape { "Cape" } else { "Skin" };
+    cosmetic_done(
+        format!("{kind_label} equipped from {name}"),
+        is_cape,
+        dest_path.to_path_buf(),
+    );
+    Ok(())
+}
+
+fn validate_driver_elf(path: &std::path::Path) -> std::result::Result<(), String> {
+    use std::io::Read as _;
+    let mut f = std::fs::File::open(path).map_err(|e| format!("Could not read driver .so: {e}"))?;
+    let mut hdr = [0u8; 20];
+    let n = f
+        .read(&mut hdr)
+        .map_err(|e| format!("Could not inspect driver header: {e}"))?;
+    if n < 20 || hdr[..4] != [0x7F, b'E', b'L', b'F'] {
+        return Err("Selected driver library is not a valid Android ELF .so binary.".into());
+    }
+    let want_class = if cfg!(target_pointer_width = "64") {
+        2u8
+    } else {
+        1u8
+    };
+    if hdr[4] != want_class {
+        return Err(if want_class == 2 {
+            "Selected Vulkan driver is 32-bit, but this device is running 64-bit Volt Launcher."
+                .into()
+        } else {
+            "Selected Vulkan driver is 64-bit, but this device is running 32-bit Volt Launcher."
+                .into()
+        });
+    }
+    Ok(())
+}
+
+fn stage_vulkan_driver(
+    cache: &std::path::Path,
+    home: &std::path::Path,
+    mut input: std::fs::File,
+    name: &str,
+) -> Result<()> {
+    use std::io::Read as _;
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let staged = cache.join(format!(".import-vkdriver-{stamp}.part"));
+    let result = (|| -> Result<()> {
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)?;
+        content_files::copy_bounded(&mut input, &mut output, |bytes| {
+            notice(
+                format!("Importing Vulkan driver: {} KiB", bytes / 1024),
+                false,
+            );
+            !CANCEL.load(Ordering::Relaxed)
+        })?;
+        output.sync_all()?;
+        drop(output);
+        if CANCEL.load(Ordering::Relaxed) {
+            return Err("Import cancelled".into());
+        }
+
+        let driver_dir = home.join("drivers").join("vulkan");
+        std::fs::create_dir_all(&driver_dir)?;
+        if let Ok(entries) = std::fs::read_dir(&driver_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_file() {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+
+        let mut magic = [0u8; 4];
+        {
+            let mut f = std::fs::File::open(&staged)?;
+            let _ = f.read(&mut magic)?;
+        }
+
+        let (driver_label, primary_so) = if magic == [b'P', b'K', 3, 4] {
+            let zip_file = std::fs::File::open(&staged)?;
+            let mut archive = zip::ZipArchive::new(zip_file)
+                .map_err(|e| format!("Invalid Vulkan driver package (.zip/.adpkg): {e}"))?;
+            let mut meta_label: Option<String> = None;
+            let mut meta_lib: Option<String> = None;
+            let mut extracted_sos: Vec<PathBuf> = Vec::new();
+
+            for idx in 0..archive.len() {
+                let mut entry = archive
+                    .by_index(idx)
+                    .map_err(|e| format!("Driver archive read error: {e}"))?;
+                if entry.is_dir() {
+                    continue;
+                }
+                let Some(file_name) = PathBuf::from(entry.name())
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                else {
+                    continue;
+                };
+                if file_name.eq_ignore_ascii_case("meta.json") {
+                    let mut raw = Vec::new();
+                    entry.by_ref().take(64 * 1024).read_to_end(&mut raw)?;
+                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&raw) {
+                        meta_label = v
+                            .get("name")
+                            .and_then(|s| s.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned);
+                        meta_lib = v
+                            .get("libraryName")
+                            .or_else(|| v.get("library"))
+                            .and_then(|s| s.as_str())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned);
+                    }
+                    continue;
+                }
+                if file_name.to_ascii_lowercase().ends_with(".so")
+                    && content_files::plain_name(&file_name)
+                {
+                    let out_path = driver_dir.join(&file_name);
+                    let mut out_file = std::fs::File::create(&out_path)?;
+                    std::io::copy(&mut entry.take(128 * 1024 * 1024), &mut out_file)?;
+                    out_file.sync_all()?;
+                    extracted_sos.push(out_path);
+                }
+            }
+
+            if extracted_sos.is_empty() {
+                return Err("Archive does not contain any Vulkan .so driver libraries.".into());
+            }
+            let chosen = meta_lib
+                .as_deref()
+                .and_then(|want| {
+                    extracted_sos
+                        .iter()
+                        .find(|p| {
+                            p.file_name()
+                                .is_some_and(|n| n.to_string_lossy() == want)
+                        })
+                        .cloned()
+                })
+                .or_else(|| {
+                    extracted_sos
+                        .iter()
+                        .find(|p| {
+                            let lower = p
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_ascii_lowercase();
+                            lower.contains("vulkan") || lower.contains("turnip")
+                        })
+                        .cloned()
+                })
+                .unwrap_or_else(|| extracted_sos[0].clone());
+            validate_driver_elf(&chosen)?;
+            let label = meta_label.unwrap_or_else(|| {
+                PathBuf::from(name)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "Custom Vulkan Driver".into())
+            });
+            (label, chosen)
+        } else if magic == [0x7F, b'E', b'L', b'F'] {
+            validate_driver_elf(&staged)?;
+            let clean_name = PathBuf::from(name)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".so") && content_files::plain_name(n))
+                .unwrap_or_else(|| "libvulkan_custom.so".into());
+            let dest = driver_dir.join(&clean_name);
+            std::fs::copy(&staged, &dest)?;
+            (clean_name, dest)
+        } else {
+            return Err("Choose a Turnip/AdrenoTools .zip/.adpkg package or an ELF .so library.".into());
+        };
+
+        driver_done(
+            format!("Custom Vulkan driver \"{driver_label}\" imported & active!"),
+            driver_label,
+            primary_so,
+        );
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&staged);
+    result
+}
+
+

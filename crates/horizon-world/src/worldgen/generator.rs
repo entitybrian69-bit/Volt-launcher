@@ -277,6 +277,14 @@ fn build_tags(
     }
     Ok(built.tags)
 }
+/// `quantize_parameter_report` for callers outside this module: the mod
+/// content overlay (`horizon-client/src/mod_content.rs`) synthesizes a
+/// `worldgen/presets.json` on roots that ship only the data-generator
+/// reports (the public Android APK), with the same quantizer `load_with`
+/// runs, so its appended mod biomes land in the identical table.
+pub fn quantize_biome_parameter_report(json: &str) -> Result<String, GeneratorError> {
+    quantize_parameter_report(json)
+}
 /// Convert a data-generator `biome_parameters` report into the quantized
 /// preset table format, using vanilla's float `quantizeCoord`.
 fn quantize_parameter_report(json: &str) -> Result<String, GeneratorError> {
@@ -328,6 +336,7 @@ fn loading<T: Send + 'static>(
 ) -> io::Result<std::thread::JoinHandle<T>> {
     std::thread::Builder::new()
         .name("Worldgen loader".into())
+        .stack_size(8 * 1024 * 1024)
         .spawn(load)
 }
 /// A loading thread's result; its panic goes on in this thread.

@@ -70,6 +70,8 @@ fn resolve(home: &Path, id: &str) -> io::Result<Document> {
             Some("mods") => ("horizon-mods", "Mods"),
             Some("packs") => ("resourcepacks", "Resource Packs"),
             Some("shaders") => ("shaderpacks", "Shader Packs"),
+            Some("recordings") => ("recordings", "Recordings"),
+            Some("screenshots") => ("screenshots", "Screenshots"),
             _ => return Err(invalid()),
         };
         (root.join(folder), label, false)
@@ -112,7 +114,7 @@ fn resolve(home: &Path, id: &str) -> io::Result<Document> {
 fn row(home: &Path, id: &str) -> io::Result<Value> {
     if id == ROOT {
         return Ok(
-            json!({"document_id": ROOT, "_display_name": "Horizon Android",
+            json!({"document_id": ROOT, "_display_name": "Volt Launcher",
             "mime_type": DIRECTORY, "flags": 0}),
         );
     }
@@ -135,6 +137,8 @@ fn row(home: &Path, id: &str) -> io::Result<Value> {
             Some("jsonl") => "application/x-ndjson",
             Some("zip" | "hmod" | "hshader") => "application/zip",
             Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("mp4") => "video/mp4",
             Some("json") => "application/json",
             Some("txt" | "wgsl" | "glsl" | "fsh" | "vsh" | "toml") => "text/plain",
             _ => "application/octet-stream",
@@ -163,7 +167,7 @@ fn row(home: &Path, id: &str) -> io::Result<Value> {
 }
 pub fn children(home: &Path, id: &str) -> io::Result<Vec<Value>> {
     if id == ROOT {
-        return ["mods", "packs", "shaders", "reports"]
+        return ["mods", "packs", "shaders", "recordings", "screenshots", "reports"]
             .iter()
             .map(|folder| row(home, &folder_id(profile(home), folder)))
             .collect();
@@ -228,7 +232,7 @@ pub fn open(home: &Path, id: &str, mode: &str) -> io::Result<File> {
 pub fn call(home: &Path, op: &str, id: &str, arg: &str) -> io::Result<Value> {
     match op {
         "roots" => Ok(json!([{"root_id": ROOT, "document_id": ROOT,
-            "title": "Horizon Android", "flags": 18, "mime_types": "*/*"}])),
+            "title": "Volt Launcher", "flags": 18, "mime_types": "*/*"}])),
         "document" => Ok(json!([row(home, id)?])),
         "children" => Ok(json!(children(home, id)?)),
         "child" => Ok(json!(is_child(home, id, arg))),
@@ -346,7 +350,7 @@ mod tests {
         ));
         fs::create_dir_all(&home).unwrap();
         let roots = children(&home, ROOT).unwrap();
-        assert_eq!(roots.len(), 4);
+        assert_eq!(roots.len(), 6);
         assert_eq!(roots[0]["document_id"], "p0/mods");
         for id in [
             "../tokens",

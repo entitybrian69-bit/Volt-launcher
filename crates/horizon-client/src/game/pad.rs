@@ -136,8 +136,28 @@ impl Game<'_> {
         self.settings.touch.inventory_controls
             && matches!(self.screen, Screen::Inventory | Screen::Creative)
     }
+    /// The in-game title screen shows the custom "In menus" touch buttons,
+    /// so the player's keybinds stay usable on the dashboard. The Volt
+    /// Hub's "Show touch controls" switch governs them like everywhere
+    /// else; the open hub window and the editors keep the screen clean.
+    #[cfg(target_os = "android")]
+    pub(super) fn android_title_controls(&self) -> bool {
+        self.title.is_some()
+            && !self.touch_editing()
+            && !self.volt_hub.open
+            && !self.volt_studio_open()
+    }
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &ActiveEventLoop) {
+        // "3D Skins" flipped (Options > Mods, the launcher's Mods tab, or
+        // the Mod Lag Shield): rebuild the extruded models right away.
+        let skins_3d_on = self.native_on("skins_3d");
+        if self.skins_3d_last != Some(skins_3d_on) {
+            if self.skins_3d_last.is_some() {
+                self.refresh_skin_3d_models();
+            }
+            self.skins_3d_last = Some(skins_3d_on);
+        }
         #[cfg(target_os = "android")]
         if !matches!(self.screen, Screen::Playing | Screen::Options)
             && self.pad.touch.editor.is_some()
@@ -151,6 +171,7 @@ impl Game<'_> {
                 &crate::backend::game_home(),
             );
             self.pad.touch.inventory_mode = self.android_inventory_controls();
+            self.pad.touch.menu_screen = self.android_title_controls();
             self.android_virtual_mouse_clicks(event_loop);
             let active = horizon_client::android_runtime::active_input();
             if self.pad.last_input_mode.replace(active).is_some_and(|old| {
@@ -444,6 +465,19 @@ impl Game<'_> {
         })
     }
 
+    /// The on-screen sneak button always toggles (Bedrock parity), even when
+    /// a paired controller's stick-click is configured as hold-to-sneak.
+    fn android_touch_sneak(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.pad.touch.recent_sneak_button()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            false
+        }
+    }
+
     /// Touch fly/swim down is held even when ground sneaking is toggled.
     fn android_touch_descending(&self) -> bool {
         #[cfg(target_os = "android")]
@@ -483,7 +517,7 @@ impl Game<'_> {
                 Ok(())
             }
             "key.sneak"
-                if self.settings.controller.toggle_sneak
+                if (self.settings.controller.toggle_sneak || self.android_touch_sneak())
                     && !self.settings.toggle_crouch
                     && !self.android_touch_descending() =>
             {

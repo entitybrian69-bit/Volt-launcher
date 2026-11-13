@@ -43,10 +43,17 @@ struct Channel {
 #[derive(Default)]
 struct Mixer {
     channels: HashMap<ChannelId, Channel>,
+    voices_scratch: Vec<(ChannelId, [f32; 3], f64)>,
     listener: [f64; 3],
     listener_yaw: f32,
     listener_pitch: f32,
     limiter_peak: f32,
+    underwater_lpf: bool,
+    lpf_state: [f32; 2],
+    cave_reverb: f32,
+    reverb_buf: Vec<[f32; 2]>,
+    reverb_pos: usize,
+    wall_occlusion: f32,
     /// The output device the stream was opened on (`Library.currentDeviceName`).
     #[cfg(feature = "audio")]
     device_name: String,
@@ -142,10 +149,89 @@ fn attach(mixer: &Mutex<Mixer>, channel: ChannelId, samples: Samples, looping: b
         c.looping |= looping;
     }
 }
+/// On Android, opening, reopening, or closing NDK `AAudioStream` executes synchronous
+/// `audioserver` Binder IPC (`200-800 ms`), and `cpal::Stream` is `!Send`. Keep the
+/// stream owned on a dedicated `2 MiB` background thread so `ALooper` never stalls.
+#[cfg(all(feature = "audio", target_os = "android"))]
+enum AndroidStreamCmd {
+    Reopen(String),
+}
+#[cfg(all(feature = "audio", target_os = "android"))]
+struct AndroidStreamHandle {
+    tx: std::sync::mpsc::Sender<AndroidStreamCmd>,
+    live: Arc<std::sync::atomic::AtomicBool>,
+}
+#[cfg(all(feature = "audio", target_os = "android"))]
+impl AndroidStreamHandle {
+    fn spawn(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Self> {
+        if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
+            return Err(reason.into());
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<AndroidStreamCmd>();
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let worker_live = live.clone();
+        let initial = target.to_owned();
+        std::thread::Builder::new()
+            .name("volt-audio-stream".into())
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let mut stream: Option<cpal::Stream> =
+                    match Audio::open_cpal_named(mixer.clone(), &initial) {
+                        Ok(s) => {
+                            worker_live.store(true, std::sync::atomic::Ordering::Release);
+                            Some(s)
+                        }
+                        Err(e) => {
+                            log::warn!("Horizon: no sound: {e}");
+                            worker_live.store(false, std::sync::atomic::Ordering::Release);
+                            None
+                        }
+                    };
+                while let Ok(cmd) = rx.recv() {
+                    match cmd {
+                        AndroidStreamCmd::Reopen(device_name) => {
+                            // Drop the previous AAudioStream on this background thread
+                            // before opening the replacement so `AAudioStream_close`
+                            // never blocks the UI thread either.
+                            stream = None;
+                            match Audio::open_cpal_named(mixer.clone(), &device_name) {
+                                Ok(s) => {
+                                    worker_live.store(true, std::sync::atomic::Ordering::Release);
+                                    stream = Some(s);
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Horizon: could not reopen the audio output: {e}"
+                                    );
+                                    worker_live.store(false, std::sync::atomic::Ordering::Release);
+                                }
+                            }
+                        }
+                    }
+                }
+                drop(stream);
+            })
+            .map_err(|e| format!("could not spawn Android audio stream thread: {e}"))?;
+        Ok(Self { tx, live })
+    }
+
+    fn reopen(&self, target: &str) -> bool {
+        self.tx
+            .send(AndroidStreamCmd::Reopen(target.to_owned()))
+            .is_ok()
+    }
+
+    fn is_live(&self) -> bool {
+        self.live.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 /// The open output stream. A build without the `audio` feature (the server build, which must not
 /// need libasound) never has one.
-#[cfg(feature = "audio")]
+#[cfg(all(feature = "audio", not(target_os = "android")))]
 type Stream = cpal::Stream;
+#[cfg(all(feature = "audio", target_os = "android"))]
+type Stream = AndroidStreamHandle;
 #[cfg(not(feature = "audio"))]
 type Stream = std::convert::Infallible;
 pub struct Audio {
@@ -158,6 +244,8 @@ pub struct Audio {
     pub listener: [f64; 3],
     pub listener_yaw: f32,
     pub master: f32,
+    /// Per-category Volt Sound Muffler gains (`0.0..=1.0`): `[portal, piston, minecart, explosion, rain]`.
+    pub volt_mufflers: [f32; 5],
     /// Seeds of positional plays (the client level random's `nextLong`).
     random: LegacyRandom,
     /// A `SoundSource` index the next sound plays on (`/playsound`).
@@ -294,10 +382,16 @@ impl Backend for MixerBackend {
         if sound.stream {
             // A streamed sound loops by restarting its stream.
             let mixer = self.mixer.clone();
-            std::thread::spawn(move || {
-                let samples = decode(&file).map(|(s, r)| (Arc::new(s), r));
-                attach(&mixer, channel, samples, looping);
-            });
+            if let Err(e) = std::thread::Builder::new()
+                .name("sound stream".into())
+                .stack_size(4 * 1024 * 1024)
+                .spawn(move || {
+                    let samples = decode(&file).map(|(s, r)| (Arc::new(s), r));
+                    attach(&mixer, channel, samples, looping);
+                })
+            {
+                log::warn!("Horizon: could not start sound stream thread: {e}");
+            }
             return;
         }
         let key = format!("{namespace}:{path}");
@@ -306,11 +400,12 @@ impl Backend for MixerBackend {
             attach(&self.mixer, channel, samples, false);
             return;
         }
-        let decoder = self.decoder.get_or_insert_with(|| {
+        if self.decoder.is_none() {
             let (send, receive) = std::sync::mpsc::channel::<Decode>();
             let (mixer, cache) = (self.mixer.clone(), self.cache.clone());
-            std::thread::Builder::new()
+            match std::thread::Builder::new()
                 .name("sound decoder".into())
+                .stack_size(4 * 1024 * 1024)
                 .spawn(move || {
                     for job in receive {
                         // Queued twice before the first decode finished.
@@ -324,11 +419,17 @@ impl Backend for MixerBackend {
                         });
                         attach(&mixer, job.channel, samples, false);
                     }
-                })
-                .expect("sound decoder thread");
-            send
-        });
-        let _ = decoder.send(Decode { key, file, channel });
+                }) {
+                Ok(_) => self.decoder = Some(send),
+                Err(e) => {
+                    log::warn!("Horizon: could not start sound decoder thread: {e}");
+                    return;
+                }
+            }
+        }
+        if let Some(decoder) = &self.decoder {
+            let _ = decoder.send(Decode { key, file, channel });
+        }
     }
     /// `alSourceStop`: any state becomes stopped, an initial source too (a
     /// sound still decoding then never starts).
@@ -422,8 +523,9 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         forward[0] * up[1] - forward[1] * up[0],
     ];
     let dot = |a: [f64; 3], b: [f64; 3]| (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) as f32;
-    // Gains and pans per source for this buffer.
-    let mut voices: Vec<(ChannelId, [f32; 3], f64)> = Vec::new();
+    // Gains and pans per source for this buffer (reuse scratch Vec so real-time audio callbacks never allocate).
+    let mut voices = std::mem::take(&mut mixer.voices_scratch);
+    voices.clear();
     for (id, c) in &mixer.channels {
         let Some((_, source_rate)) = &c.samples else {
             continue;
@@ -441,7 +543,12 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
             ]
         };
         let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() as f32;
-        let gain = c.gain.clamp(0.0, 1.0) * distance_gain(c.linear, distance);
+        let occ = if !c.relative && distance > 5.0 && mixer.wall_occlusion > 0.01 {
+            1.0 - mixer.wall_occlusion * ((distance - 5.0) / 18.0).clamp(0.0, 0.55)
+        } else {
+            1.0
+        };
+        let gain = c.gain.clamp(0.0, 1.0) * distance_gain(c.linear, distance) * occ;
         // Relative sources are already in OpenAL's listener space (-Z ahead).
         let [left, right] = if c.relative {
             stereo_gains(d[0] as f32, d[1] as f32, -d[2] as f32)
@@ -452,7 +559,7 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
         let step = f64::from(*source_rate) / f64::from(rate) * f64::from(c.pitch.max(0.0));
         voices.push((*id, [left, right, gain], step));
     }
-    for (id, [left, right, gain], step) in voices {
+    for &(id, [left, right, gain], step) in &voices {
         let Some(c) = mixer.channels.get_mut(&id) else {
             continue;
         };
@@ -482,6 +589,34 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
             c.position += step;
         }
     }
+    mixer.voices_scratch = voices;
+
+    // #15 Sound Physics Lite: Cave Reverb echo + Submerged Underwater Low-Pass Filter
+    if mixer.cave_reverb > 0.01 && !mixer.reverb_buf.is_empty() && channels >= 2 {
+        let len = mixer.reverb_buf.len();
+        let wet = mixer.cave_reverb.clamp(0.0, 0.45);
+        for frame in data.chunks_mut(channels) {
+            let tap = mixer.reverb_buf[mixer.reverb_pos];
+            let l = frame[0] + tap[1] * wet;
+            let r = frame[1] + tap[0] * wet;
+            mixer.reverb_buf[mixer.reverb_pos] = [l * 0.46, r * 0.46];
+            mixer.reverb_pos = (mixer.reverb_pos + 1) % len;
+            frame[0] = l;
+            frame[1] = r;
+        }
+    }
+    if mixer.underwater_lpf {
+        let alpha = (2600.0 / (rate.max(8000) as f32)).clamp(0.05, 0.32);
+        for frame in data.chunks_mut(channels) {
+            mixer.lpf_state[0] += alpha * (frame[0] - mixer.lpf_state[0]);
+            frame[0] = mixer.lpf_state[0];
+            if channels >= 2 {
+                mixer.lpf_state[1] += alpha * (frame[1] - mixer.lpf_state[1]);
+                frame[1] = mixer.lpf_state[1];
+            }
+        }
+    }
+
     // Limit the whole buffer together, preserving waveform and stereo balance
     // instead of flattening each overloaded sample; release over 200 ms
     // (OpenAL Soft's output limiter, `ALC_OUTPUT_LIMITER_SOFT`, releases
@@ -495,6 +630,53 @@ fn mix(mixer: &mut Mixer, data: &mut [f32], channels: usize, rate: u32) {
             *s *= gain;
         }
         mixer.limiter_peak = (mixer.limiter_peak * release).max(peak);
+    }
+    tap::feed(data, channels as u32, rate);
+}
+/// Volt Recorder's game-audio tap: while installed, every mixed output
+/// buffer is copied to the recorder (interleaved `f32`, with the channel
+/// count and sample rate). One relaxed atomic read per callback when off —
+/// the real-time thread never takes the lock unless recording.
+pub mod tap {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::SyncSender;
+
+    /// One mixed output buffer.
+    pub struct Chunk {
+        /// Interleaved samples, `-1..1`.
+        pub samples: Vec<f32>,
+        pub channels: u32,
+        pub rate: u32,
+    }
+
+    static ON: AtomicBool = AtomicBool::new(false);
+    static SINK: Mutex<Option<SyncSender<Chunk>>> = Mutex::new(None);
+
+    /// Starts copying mixed audio into `sink`; replaces any previous tap.
+    pub fn install(sink: SyncSender<Chunk>) {
+        *SINK.lock().unwrap() = Some(sink);
+        ON.store(true, Ordering::Release);
+    }
+    /// Stops the copies; the receiver sees its channel disconnect.
+    pub fn clear() {
+        ON.store(false, Ordering::Release);
+        *SINK.lock().unwrap() = None;
+    }
+    pub(super) fn feed(data: &[f32], channels: u32, rate: u32) {
+        if !ON.load(Ordering::Acquire) {
+            return;
+        }
+        // The callback must never block: skip when contended or full.
+        if let Ok(guard) = SINK.try_lock()
+            && let Some(sink) = guard.as_ref()
+        {
+            let _ = sink.try_send(Chunk {
+                samples: data.to_vec(),
+                channels,
+                rate,
+            });
+        }
     }
 }
 /// Why the game should not open an output, if it should not:
@@ -521,55 +703,100 @@ fn output_disabled(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<S
 fn open_device(
     device: &cpal::Device,
     mixer: Arc<Mutex<Mixer>>,
-) -> Result<(cpal::Stream, cpal::SupportedStreamConfig)> {
+) -> Result<(cpal::Stream, u32, u16, cpal::SampleFormat)> {
     use cpal::SampleFormat as F;
+    // On Android, cpal 0.16's `default_output_config()` invokes 52 unframed `.unwrap()`
+    // JNI calls to `AudioTrack.getMinBufferSize` and picks 192 kHz via `with_max_sample_rate()`.
+    // Opening native AAudio directly with an explicit 48 kHz / 44.1 kHz stereo config makes
+    // zero JNI calls and preserves Android FastTrack low-latency mixing.
+    #[cfg(target_os = "android")]
+    {
+        for rate in [48_000u32, 44_100u32] {
+            let stream_cfg = cpal::StreamConfig {
+                channels: 2,
+                sample_rate: cpal::SampleRate(rate),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            for format in [F::F32, F::I16] {
+                let opened = match format {
+                    F::F32 => build_stream_with_config::<f32>(device, &stream_cfg, mixer.clone()),
+                    F::I16 => build_stream_with_config::<i16>(device, &stream_cfg, mixer.clone()),
+                    _ => unreachable!(),
+                };
+                if let Ok(stream) = opened
+                    && stream.play().is_ok()
+                {
+                    if let Ok(mut m) = mixer.lock() {
+                        m.device_name = "default".into();
+                        m.device_lost = false;
+                    }
+                    return Ok((stream, rate, 2, format));
+                }
+            }
+        }
+    }
     let config = device.default_output_config()?;
-    let stream = match config.sample_format() {
-        F::F32 => build_stream::<f32>(device, &config, mixer.clone()),
-        F::F64 => build_stream::<f64>(device, &config, mixer.clone()),
-        F::I16 => build_stream::<i16>(device, &config, mixer.clone()),
-        F::I32 => build_stream::<i32>(device, &config, mixer.clone()),
-        F::I8 => build_stream::<i8>(device, &config, mixer.clone()),
-        F::U16 => build_stream::<u16>(device, &config, mixer.clone()),
-        F::U32 => build_stream::<u32>(device, &config, mixer.clone()),
-        F::U8 => build_stream::<u8>(device, &config, mixer.clone()),
+    let format = config.sample_format();
+    let stream_cfg = config.config();
+    let stream = match format {
+        F::F32 => build_stream_with_config::<f32>(device, &stream_cfg, mixer.clone()),
+        F::F64 => build_stream_with_config::<f64>(device, &stream_cfg, mixer.clone()),
+        F::I16 => build_stream_with_config::<i16>(device, &stream_cfg, mixer.clone()),
+        F::I32 => build_stream_with_config::<i32>(device, &stream_cfg, mixer.clone()),
+        F::I8 => build_stream_with_config::<i8>(device, &stream_cfg, mixer.clone()),
+        F::U16 => build_stream_with_config::<u16>(device, &stream_cfg, mixer.clone()),
+        F::U32 => build_stream_with_config::<u32>(device, &stream_cfg, mixer.clone()),
+        F::U8 => build_stream_with_config::<u8>(device, &stream_cfg, mixer.clone()),
         other => Err(format!("unsupported sample format {other}").into()),
     }?;
     stream.play()?;
     if let Ok(mut m) = mixer.lock() {
-        m.device_name = device.name().unwrap_or_default();
+        m.device_name = if cfg!(target_os = "android") {
+            "default".into()
+        } else {
+            device.name().unwrap_or_default()
+        };
         m.device_lost = false;
     }
-    Ok((stream, config))
+    Ok((stream, stream_cfg.sample_rate.0, stream_cfg.channels, format))
 }
 /// The name of the system's default output device.
 #[cfg(feature = "audio")]
 fn default_output_name() -> Option<String> {
+    if cfg!(target_os = "android") {
+        return Some("default".into());
+    }
     cpal::default_host()
         .default_output_device()
         .and_then(|d| d.name().ok())
 }
 #[cfg(feature = "audio")]
-fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
+fn build_stream_with_config<T: cpal::SizedSample + cpal::FromSample<f32>>(
     device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
+    config: &cpal::StreamConfig,
     mixer: Arc<Mutex<Mixer>>,
 ) -> Result<cpal::Stream> {
-    let rate = config.sample_rate().0;
-    let channels = config.channels() as usize;
-    let mut scratch = Vec::new();
+    let rate = config.sample_rate.0.max(1);
+    let channels = (config.channels as usize).max(1);
+    let mut scratch = Vec::with_capacity(4096);
     let on_error = mixer.clone();
     let stream = device.build_output_stream(
-        &config.config(),
+        config,
         move |data: &mut [T], _| {
-            scratch.resize(data.len(), 0.0f32);
-            if let Ok(mut m) = mixer.lock() {
-                mix(&mut m, &mut scratch, channels, rate);
-            } else {
-                scratch.fill(0.0);
-            }
-            for (out, s) in data.iter_mut().zip(&scratch) {
-                *out = T::from_sample(*s);
+            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scratch.resize(data.len(), 0.0f32);
+                if let Ok(mut m) = mixer.lock() {
+                    mix(&mut m, &mut scratch, channels, rate);
+                } else {
+                    scratch.fill(0.0);
+                }
+                for (out, s) in data.iter_mut().zip(&scratch) {
+                    *out = T::from_sample(*s);
+                }
+            }));
+            if ok.is_err() {
+                let zero = T::from_sample(0.0f32);
+                data.fill(zero);
             }
         },
         move |e| {
@@ -587,7 +814,7 @@ fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
 /// Available audio output device names.
 #[cfg(feature = "audio")]
 pub fn output_devices() -> Vec<String> {
-    if output_disabled(|name| std::env::var_os(name)).is_some() {
+    if cfg!(target_os = "android") || output_disabled(|name| std::env::var_os(name)).is_some() {
         return Vec::new();
     }
     let host = cpal::default_host();
@@ -613,20 +840,35 @@ impl Audio {
     pub fn new(root: &Path) -> Self {
         Self::with_device(root, "")
     }
+    pub fn new_with_registry(root: &Path, registry: Option<SoundRegistry>) -> Self {
+        Self::with_device_and_registry(root, "", registry)
+    }
     pub fn with_device(root: &Path, device_name: &str) -> Self {
-        Self::with_output(root, true, device_name)
+        Self::with_output(root, true, device_name, None)
+    }
+    pub fn with_device_and_registry(
+        root: &Path,
+        device_name: &str,
+        registry: Option<SoundRegistry>,
+    ) -> Self {
+        Self::with_output(root, true, device_name, registry)
     }
     /// No output device: the dedicated server.
     pub fn silent(root: &Path) -> Self {
-        Self::with_output(root, false, "")
+        Self::with_output(root, false, "", None)
     }
     /// The output device asked for (`soundDevice`), empty for the system's default; the
     /// default plays when that one can't be opened, as in vanilla.
     pub fn device(&self) -> &str {
         &self.device_name
     }
-    fn with_output(root: &Path, output: bool, target_device: &str) -> Self {
-        let registry = SoundRegistry::load(root);
+    fn with_output(
+        root: &Path,
+        output: bool,
+        target_device: &str,
+        preloaded: Option<SoundRegistry>,
+    ) -> Self {
+        let registry = preloaded.unwrap_or_else(|| SoundRegistry::load(root));
         if output && registry.is_empty() {
             // The game then plays nothing on a working output (#1035, #1076).
             log::warn!(
@@ -669,6 +911,7 @@ impl Audio {
             listener: [0.0; 3],
             listener_yaw: 0.0,
             master: 1.0,
+            volt_mufflers: [1.0; 5],
             random: LegacyRandom::new(crate::sound_engine::unique_seed()),
             source_override: None,
             capture: None,
@@ -689,25 +932,31 @@ impl Audio {
     fn open_named(_: Arc<Mutex<Mixer>>, _: &str) -> Result<Stream> {
         Err("this build has no sound output (built without the `audio` feature)".into())
     }
-    #[cfg(feature = "audio")]
+    #[cfg(all(feature = "audio", target_os = "android"))]
     fn open_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Stream> {
+        AndroidStreamHandle::spawn(mixer, target)
+    }
+    #[cfg(all(feature = "audio", not(target_os = "android")))]
+    fn open_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<Stream> {
+        Self::open_cpal_named(mixer, target)
+    }
+    #[cfg(feature = "audio")]
+    fn open_cpal_named(mixer: Arc<Mutex<Mixer>>, target: &str) -> Result<cpal::Stream> {
         if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
             return Err(reason.into());
         }
         let host = cpal::default_host();
-        if !target.is_empty()
+        if !cfg!(target_os = "android")
+            && !target.is_empty()
             && let Ok(devices) = host.output_devices()
         {
             for device in devices {
                 let name = device.name().unwrap_or_else(|_| "unnamed device".into());
                 if name == target {
                     match open_device(&device, mixer.clone()) {
-                        Ok((stream, config)) => {
+                        Ok((stream, sample_rate, channels, sample_format)) => {
                             log::info!(
-                                "Horizon: audio output {name} ({} Hz, {} channels, {})",
-                                config.sample_rate().0,
-                                config.channels(),
-                                config.sample_format()
+                                "Horizon: audio output {name} ({sample_rate} Hz, {channels} channels, {sample_format})"
                             );
                             return Ok(stream);
                         }
@@ -721,11 +970,18 @@ impl Audio {
                 }
             }
         }
-        Self::open(mixer)
+        Self::open_cpal(mixer)
     }
     #[cfg(feature = "audio")]
     pub fn set_device(&mut self, name: &str) -> Result<()> {
         if !self.backend.live && self._stream.is_none() && !self.engine.loaded {
+            self.device_name = name.to_owned();
+            return Ok(());
+        }
+        #[cfg(target_os = "android")]
+        if let Some(handle) = &self._stream
+            && handle.reopen(name)
+        {
             self.device_name = name.to_owned();
             return Ok(());
         }
@@ -741,35 +997,49 @@ impl Audio {
         Ok(())
     }
     #[cfg(feature = "audio")]
-    fn open(mixer: Arc<Mutex<Mixer>>) -> Result<Stream> {
+    fn open_cpal(mixer: Arc<Mutex<Mixer>>) -> Result<cpal::Stream> {
         if let Some(reason) = output_disabled(|name| std::env::var_os(name)) {
             return Err(reason.into());
         }
         let host = cpal::default_host();
         let mut errors = Vec::new();
-        // The default device first, then any other output a host lists:
-        // a default that cannot open (busy, or a stale ALSA default) should
-        // not leave the game silent when another device works.
-        let default = host.default_output_device();
-        let others = host.output_devices().into_iter().flatten();
         let mut tried = Vec::new();
-        for device in default.into_iter().chain(others) {
-            let name = device.name().unwrap_or_else(|_| "unnamed device".into());
-            if tried.contains(&name) {
-                continue;
-            }
+        // Open the host default device first without eagerly enumerating all devices:
+        // on Android, cpal's Java AudioDeviceInfo enumeration overflows its 16-slot
+        // local JNI frame and can detach a worker thread with a pending exception.
+        if let Some(device) = host.default_output_device() {
+            let name = if cfg!(target_os = "android") {
+                "default".into()
+            } else {
+                device.name().unwrap_or_else(|_| "unnamed device".into())
+            };
             tried.push(name.clone());
             match open_device(&device, mixer.clone()) {
-                Ok((stream, config)) => {
+                Ok((stream, sample_rate, channels, sample_format)) => {
                     log::info!(
-                        "Horizon: audio output {name} ({} Hz, {} channels, {})",
-                        config.sample_rate().0,
-                        config.channels(),
-                        config.sample_format()
+                        "Horizon: audio output {name} ({sample_rate} Hz, {channels} channels, {sample_format})"
                     );
                     return Ok(stream);
                 }
                 Err(e) => errors.push(format!("{name}: {e}")),
+            }
+        }
+        if !cfg!(target_os = "android") {
+            for device in host.output_devices().into_iter().flatten() {
+                let name = device.name().unwrap_or_else(|_| "unnamed device".into());
+                if tried.contains(&name) {
+                    continue;
+                }
+                tried.push(name.clone());
+                match open_device(&device, mixer.clone()) {
+                    Ok((stream, sample_rate, channels, sample_format)) => {
+                        log::info!(
+                            "Horizon: audio output {name} ({sample_rate} Hz, {channels} channels, {sample_format})"
+                        );
+                        return Ok(stream);
+                    }
+                    Err(e) => errors.push(format!("{name}: {e}")),
+                }
             }
         }
         if errors.is_empty() {
@@ -783,6 +1053,43 @@ impl Audio {
             backend: &mut self.backend,
         }
     }
+    /// Updates `#15` Sound Physics Lite parameters & `#15` Per-Sound Muffler percentages.
+    pub fn set_volt_sound_physics(
+        &mut self,
+        underwater_lpf: bool,
+        cave_reverb: f32,
+        wall_occlusion: f32,
+        mufflers_pct: [u16; 5],
+    ) {
+        for (dst, pct) in self.volt_mufflers.iter_mut().zip(mufflers_pct) {
+            *dst = (f32::from(pct.clamp(0, 100)) / 100.0).clamp(0.0, 1.0);
+        }
+        if let Ok(mut m) = self.backend.mixer.lock() {
+            m.underwater_lpf = underwater_lpf;
+            m.cave_reverb = cave_reverb.clamp(0.0, 0.45);
+            if m.cave_reverb > 0.01 && m.reverb_buf.is_empty() {
+                m.reverb_buf.resize(4400, [0.0, 0.0]);
+            }
+            m.wall_occlusion = wall_occlusion.clamp(0.0, 1.0);
+        }
+    }
+
+    fn volt_muffle_gain(&self, event: &str) -> f32 {
+        if event.contains("portal") {
+            self.volt_mufflers[0]
+        } else if event.contains("piston") || event.contains("dispenser") || event.contains("dropper") {
+            self.volt_mufflers[1]
+        } else if event.contains("minecart") {
+            self.volt_mufflers[2]
+        } else if event.contains("explode") || event.contains("lightning_bolt") {
+            self.volt_mufflers[3]
+        } else if event.contains("weather.rain") {
+            self.volt_mufflers[4]
+        } else {
+            1.0
+        }
+    }
+
     /// `SoundManager.updateSource`: the camera position and rotation
     /// (`Listener.setTransform` takes its forward and up vectors).
     pub fn set_listener(&mut self, position: [f64; 3], yaw: f32, pitch: f32) {
@@ -877,7 +1184,10 @@ impl Audio {
                 }
             }
         }
-        if self._stream.is_some()
+        // Android AAudio signals route/disconnect changes via its native error
+        // callback (`device_lost`); avoid 1Hz JNI device-probe thread churn.
+        if !cfg!(target_os = "android")
+            && self._stream.is_some()
             && self.device_probe.is_none()
             && self.device_probe_started.elapsed() >= std::time::Duration::from_secs(1)
         {
@@ -888,6 +1198,12 @@ impl Audio {
     }
     /// `SoundManager.tick(paused)`, once per client tick.
     pub fn tick(&mut self, paused: bool, ctx: &TickContext) {
+        #[cfg(all(feature = "audio", target_os = "android"))]
+        if let Some(handle) = &self._stream {
+            let live = handle.is_live();
+            self.backend.live = live;
+            self.engine.loaded = live;
+        }
         #[cfg(feature = "audio")]
         {
             if self.should_change_device() {
@@ -920,8 +1236,11 @@ impl Audio {
     /// `SoundManager.reload` (resource packs changed): stop every sound, then
     /// read sound events and sound files from the new resource root.
     pub fn reload(&mut self, root: &Path) {
+        self.reload_with_registry(root, None);
+    }
+    pub fn reload_with_registry(&mut self, root: &Path, registry: Option<SoundRegistry>) {
         self.stop_all();
-        self.engine.registry = SoundRegistry::load(root);
+        self.engine.registry = registry.unwrap_or_else(|| SoundRegistry::load(root));
         self.backend.root = root.to_owned();
         let mut cache = self.backend.cache.lock().unwrap();
         cache.entries.clear();
@@ -959,6 +1278,7 @@ impl Audio {
         let source = self
             .source_override
             .unwrap_or_else(|| crate::settings::sound_source(&event));
+        let volume = volume * self.volt_muffle_gain(&event);
         let instance =
             SoundInstance::at(&event, source, volume, pitch, LegacyRandom::new(seed), at);
         let id = self.engine.add(instance, false);
@@ -1011,6 +1331,7 @@ impl Audio {
         let source = self
             .source_override
             .unwrap_or_else(|| crate::settings::sound_source(&event));
+        let volume = volume * self.volt_muffle_gain(&event);
         let random = LegacyRandom::new(seed);
         let instance = match at {
             Some(at) => SoundInstance::at(&event, source, volume, pitch, random, at),

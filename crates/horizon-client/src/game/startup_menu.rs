@@ -45,7 +45,13 @@ pub(super) struct StartupMenu {
 
 impl StartupMenu {
     pub fn new(options: &Options, pack_error: Option<&str>) -> Result<Self> {
-        let pending = if let Some(address) = &options.server {
+        let pending = if let Some(path) = &options.replay {
+            // Volt Replay: --replay outranks --server; the launcher sends
+            // only one of them.
+            Some(PendingWorldEntry::Replay {
+                path: std::path::PathBuf::from(path),
+            })
+        } else if let Some(address) = &options.server {
             Some(PendingWorldEntry::Server {
                 address: address.clone(),
                 name: options.player_name(),
@@ -79,7 +85,14 @@ impl StartupMenu {
         Ok(menu)
     }
 
-    pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
+    pub(super) fn set_root(
+        &mut self,
+        root: PathBuf,
+        settings: &Settings,
+        sounds: Option<horizon_client::sound_events::SoundRegistry>,
+    ) {
+        #[cfg(not(target_os = "android"))]
+        let _ = sounds;
         horizon_client::ui::load_metadata(&root);
         horizon_client::lang::set(horizon_client::lang::Language::load(
             &[&root],
@@ -88,7 +101,9 @@ impl StartupMenu {
         self.root = root;
         #[cfg(target_os = "android")]
         if self.audio.is_none() {
-            self.audio = Some(horizon_client::audio::Audio::new(&self.root));
+            self.audio = Some(horizon_client::audio::Audio::new_with_registry(
+                &self.root, sounds,
+            ));
         }
         if self.title.is_none() {
             let mut title = Title::new(
@@ -109,6 +124,7 @@ impl StartupMenu {
         #[cfg(target_os = "android")]
         {
             game.pad.touch = std::mem::take(&mut self.controls);
+            game.pad.touch_ui = std::mem::take(&mut self.touch);
         }
         #[cfg(target_os = "android")]
         {
@@ -292,7 +308,9 @@ pub(super) fn spawn_loader(
     let progress = progress.clone();
     let handle = std::thread::Builder::new()
         .name("resource-loader".into())
+        .stack_size(8 * 1024 * 1024)
         .spawn(move || {
+            horizon_threads::behind_server();
             let mut pack_error = None;
             let root = packs::startup_root(&vanilla_root, &settings.resource_packs, &[])
                 .unwrap_or_else(|error| {
@@ -310,7 +328,9 @@ pub(super) fn spawn_loader(
                 false,
                 &progress,
                 &mut |gui, root| {
-                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf()));
+                    let sounds = cfg!(target_os = "android")
+                        .then(|| horizon_client::sound_events::SoundRegistry::load(root));
+                    let _ = sender.send(LoaderMsg::Ui(gui, root.to_path_buf(), sounds));
                 },
             )
             .map(|mut loaded| {
@@ -330,7 +350,7 @@ impl Loading {
         if self.loaded.is_none() && !self.delivered {
             loop {
                 match self.receiver.try_recv() {
-                    Ok(LoaderMsg::Ui(gui, root)) => self.set_ui(gui, root),
+                    Ok(LoaderMsg::Ui(gui, root, sounds)) => self.set_ui(gui, root, sounds),
                     Ok(LoaderMsg::Done(result)) => {
                         self.loaded = Some(result);
                         self.delivered = true;
@@ -495,6 +515,22 @@ impl Loading {
                         horizon_client::shader_pack_list::scan(&Game::shader_packs_dir());
                 }
                 Event::ShaderPack => self.save_menu_settings(),
+                Event::OpenShaderOptions => {
+                    let macros = horizon_shaders::Macros::standard();
+                    let name = self.settings.horizon.shader_pack.clone();
+                    self.settings.shader_options =
+                        super::shader_packs::read_shader_options(&name, &self.settings.language, &macros);
+                }
+                Event::ShaderOptions => {
+                    if let Some(options) = self.settings.shader_options.take() {
+                        super::shader_packs::write_shader_options(&options);
+                    }
+                }
+                Event::NativePackOptions(i) => {
+                    if let Some(pack) = self.settings.shader_packs.get(i) {
+                        pack.save_values(&Game::shader_packs_dir());
+                    }
+                }
                 Event::OpenShaderPackFolder => {
                     let dir = Game::shader_packs_dir();
                     let _ = std::fs::create_dir_all(&dir);
@@ -522,7 +558,22 @@ impl Loading {
                     #[cfg(target_os = "android")]
                     self.menu.click_sound(self.settings.volumes);
                 }
-                Event::CopyAgentDetails | Event::Volume(..) => {}
+                Event::ListReplays => {
+                    self.settings.replays = Game::scan_replay_list();
+                }
+                Event::WatchReplay(i) => {
+                    if let Some(entry) = self.settings.replays.get(i) {
+                        // The game is not running yet: queue the replay like
+                        // `--replay`; the handoff plays it once loaded.
+                        self.menu.pending = Some(PendingWorldEntry::Replay {
+                            path: entry.path.clone(),
+                        });
+                        self.menu.options_open = false;
+                        self.menu.dragging = false;
+                        self.save_menu_settings();
+                    }
+                }
+                Event::CopyAgentDetails | Event::WaypointAction(_) | Event::Volume(..) => {}
             }
         }
     }
@@ -552,6 +603,7 @@ impl Loading {
         match action {
             Action::Quit => crate::game::exit_app(event_loop),
             Action::Options => self.open_menu_options(Page::Main),
+            Action::VoltBoost => self.open_menu_options(Page::VoltGlass),
             Action::Accessibility => self.open_menu_options(Page::Accessibility),
             Action::Language => self.open_menu_options(Page::Language),
             Action::Sounds => self.open_menu_options(Page::Sound),
@@ -582,8 +634,9 @@ impl Loading {
         use horizon_client::osk::Output;
         if let Some(notice) = crate::documents::poll() {
             if notice.changed {
-                self.menu.options.pack_infos =
-                    packs::pack_infos(&self.options.as_ref().unwrap().resources);
+                if let Some(options) = &self.options {
+                    self.menu.options.pack_infos = packs::pack_infos(&options.resources);
+                }
                 self.menu.options.pack_screen = None;
                 self.settings.shader_packs =
                     horizon_client::shader_pack_list::scan(&Game::shader_packs_dir());
@@ -594,22 +647,24 @@ impl Loading {
             match out {
                 Output::Text(s) => {
                     if self.menu.options_open {
-                        self.menu
-                            .options
-                            .type_text(&self.gui.as_ref().unwrap().atlas, &s);
+                        if let Some(gui) = &self.gui {
+                            self.menu.options.type_text(&gui.atlas, &s);
+                        }
                     } else if let Some(t) = &mut self.menu.title {
                         t.type_text(&s);
                     }
                 }
                 Output::Backspace => {
                     if self.menu.options_open {
-                        let e = self.menu.options.key(
-                            &mut self.settings,
-                            &self.gui.as_ref().unwrap().atlas,
-                            KeyCode::Backspace,
-                            None,
-                        );
-                        self.menu_option_events(e);
+                        if let Some(gui) = &self.gui {
+                            let e = self.menu.options.key(
+                                &mut self.settings,
+                                &gui.atlas,
+                                KeyCode::Backspace,
+                                None,
+                            );
+                            self.menu_option_events(e);
+                        }
                     } else if let Some(t) = &mut self.menu.title {
                         t.backspace();
                     }
@@ -780,13 +835,15 @@ impl Loading {
             }
             crate::platform::hide();
             if self.menu.options_open {
-                let e = self.menu.options.key(
-                    &mut self.settings,
-                    &self.gui.as_ref().unwrap().atlas,
-                    KeyCode::Escape,
-                    None,
-                );
-                self.menu_option_events(e);
+                if let Some(gui) = self.gui.as_ref() {
+                    let e = self.menu.options.key(
+                        &mut self.settings,
+                        &gui.atlas,
+                        KeyCode::Escape,
+                        None,
+                    );
+                    self.menu_option_events(e);
+                }
             } else if let Some(t) = &mut self.menu.title {
                 t.escape();
             }
@@ -853,13 +910,15 @@ impl Loading {
                         Action::Key(KeyCode::Escape) => {
                             crate::platform::hide();
                             if self.menu.options_open {
-                                let events = self.menu.options.key(
-                                    &mut self.settings,
-                                    &self.gui.as_ref().unwrap().atlas,
-                                    KeyCode::Escape,
-                                    None,
-                                );
-                                self.menu_option_events(events);
+                                if let Some(gui) = self.gui.as_ref() {
+                                    let events = self.menu.options.key(
+                                        &mut self.settings,
+                                        &gui.atlas,
+                                        KeyCode::Escape,
+                                        None,
+                                    );
+                                    self.menu_option_events(events);
+                                }
                             } else if let Some(t) = &mut self.menu.title {
                                 t.escape();
                             }
@@ -1041,7 +1100,9 @@ impl Loading {
                         .map_or([1280, 720], |r| [r.config.width, r.config.height]);
                     let b = HudBatch::new(size);
                     title.drag(self.menu.cursor, (b.width, b.height));
-                    title.drag_field(&self.gui.as_ref().unwrap().atlas, self.menu.cursor.0);
+                    if let Some(gui) = &self.gui {
+                        title.drag_field(&gui.atlas, self.menu.cursor.0);
+                    }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if self.menu.options_open => {
@@ -1121,8 +1182,11 @@ impl Loading {
                     self.apply_menu_settings();
                     self.save_menu_settings();
                 } else if self.menu.options_open {
+                    let Some(gui) = &self.gui else {
+                        return Ok(());
+                    };
                     let shortcut = self.menu.shortcut(&event);
-                    let atlas = &self.gui.as_ref().unwrap().atlas;
+                    let atlas = &gui.atlas;
                     let handled = shortcut.is_some_and(|s| {
                         self.menu
                             .options
@@ -1170,10 +1234,29 @@ impl Loading {
                 self.progress.fraction(),
                 self.settings.file.bool("darkMojangStudiosBackground"),
             );
+            // The Volt Hub chip shows from the very first loading frame, in
+            // the same default spot the in-world hub uses, so the V logo is
+            // on screen instantly instead of appearing only once the world
+            // renders. It becomes interactive the moment the game takes over.
+            {
+                let gw = batch.width;
+                let scale = batch.scale;
+                let mut ui = horizon_client::ui_theme::Ui::new(&gui.atlas, batch, (0.0, 0.0));
+                let kd = scale / ui.density;
+                const S: f32 = 26.0;
+                let (bx, by) = (((gw - S) / 2.0).floor(), 4.0_f32);
+                let (x, y, s) = (bx * kd, by * kd, S * kd);
+                ui.rounded(x, y, s, s, s * 0.28, 0xE618100E);
+                // Crimson outline, ABGR of #DC143C at 90% alpha.
+                ui.border(x, y, s, s, s * 0.28, 0xE53C14DC);
+                let pad = s * 0.12;
+                ui.volt_logo(x + pad, y + pad, s - pad * 2.0, s - pad * 2.0);
+                ui.finish();
+            }
         } else if let Some((win, frame)) = &mut self.menu.win {
             let now = Instant::now();
             // 20 ticks a second: the startup menu runs no tick rate.
-            let delta_ticks = now.duration_since(*frame).as_secs_f32() * 20.0;
+            let delta_ticks = now.saturating_duration_since(*frame).as_secs_f32() * 20.0;
             *frame = now;
             win.draw(batch, &gui.atlas, delta_ticks, Default::default());
             if win.finished(batch.height) {
@@ -1219,7 +1302,7 @@ impl Loading {
     pub(super) fn tick_menu_audio(&mut self) {
         let now = Instant::now();
         let last = self.menu.audio_tick.get_or_insert(now);
-        if now.duration_since(*last) < Duration::from_millis(50) {
+        if now.saturating_duration_since(*last) < Duration::from_millis(50) {
             return;
         }
         *last = now;
@@ -1379,7 +1462,7 @@ mod tests {
         let worker_root = root.clone();
         let worker = std::thread::spawn(move || {
             sender
-                .send(LoaderMsg::Ui(gui(&worker_root), worker_root))
+                .send(LoaderMsg::Ui(gui(&worker_root), worker_root, None))
                 .unwrap();
             published.send(()).unwrap();
             wait.recv().unwrap();

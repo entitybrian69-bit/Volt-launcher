@@ -650,7 +650,28 @@ impl Game<'_> {
     /// (block coordinates), from every player's tickets (`update_chunk_tickets`).
     pub(super) fn entity_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
         let levels = self.tickets.levels();
-        move |x, z| levels.entity_ticking_at(x, z)
+        // Volt Boost's Entity Tick Range: when limited, mobs and dropped
+        // items only tick within the chosen chunk ring around the player.
+        let ring = self
+            .settings
+            .extras
+            .entity_tick_range
+            .limit()
+            .zip(self.player.as_ref().map(|p| {
+                (
+                    (p.position.x.floor() as i32).div_euclid(16),
+                    (p.position.z.floor() as i32).div_euclid(16),
+                )
+            }));
+        move |x, z| {
+            levels.entity_ticking_at(x, z)
+                && match ring {
+                    Some((r, (cx, cz))) => {
+                        (x.div_euclid(16) - cx).abs().max((z.div_euclid(16) - cz).abs()) <= r
+                    }
+                    None => true,
+                }
+        }
     }
     /// The entity phase of `tick_creatures`: every mob's tick, deaths, and the
     /// projectiles and effects that follow from them.
@@ -5214,7 +5235,47 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
-        for mob in &self.mobs {
+        let max_entities = self
+            .settings
+            .extras
+            .entity_cap
+            .limit()
+            .unwrap_or(usize::MAX);
+        let hub_shield = self.settings.extras.hub_lag_shield && self.mobs.len() > 24;
+        let throttle_distant = self.settings.extras.distant_mob_throttle;
+        let mut sorted: Vec<(usize, f64)> = Vec::new();
+        if max_entities < usize::MAX && self.mobs.len() > max_entities {
+            sorted.reserve(self.mobs.len());
+            for (idx, mob) in self.mobs.iter().enumerate() {
+                if self.hides_as_camera(mob.id) {
+                    continue;
+                }
+                let d_sq = (glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z)
+                    - camera)
+                    .length_squared();
+                if hub_shield && d_sq > 18.0 * 18.0 && &*mob.kind.id == "minecraft:player" {
+                    continue;
+                }
+                sorted.push((idx, d_sq));
+            }
+            sorted.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+        }
+        let use_sorted = max_entities < usize::MAX && self.mobs.len() > max_entities;
+        let total_steps = if use_sorted {
+            sorted.len()
+        } else {
+            self.mobs.len()
+        };
+        let mut drawn_count = 0usize;
+        for step in 0..total_steps {
+            if drawn_count >= max_entities {
+                break;
+            }
+            let mob = if use_sorted {
+                &self.mobs[sorted[step].0]
+            } else {
+                &self.mobs[step]
+            };
             let entity_start = out.len();
             let outline = self.mob_outline(mob);
             // Entity.DATA_SHARED_FLAGS_ID invisible: only the name tag draws (and
@@ -5232,6 +5293,30 @@ impl Game<'_> {
                 continue;
             }
             let d = glam::DVec3::new(mob.position.x, mob.position.y, mob.position.z) - camera;
+            let d_sq = d.length_squared();
+            if hub_shield && is_player && d_sq > 18.0 * 18.0 {
+                continue;
+            }
+            // Volt "Frame items" (Volt Settings > Frame items): per-category
+            // loading toggle + draw distance. Defaults (on + Unlimited) keep
+            // vanilla behavior exactly. The local player's own body renders
+            // through a separate path and is never filtered here.
+            {
+                let fx = &self.settings.extras;
+                let (on, dist) = if is_player {
+                    (fx.frame_players, fx.frame_players_distance)
+                } else {
+                    (fx.frame_mobs, fx.frame_mobs_distance)
+                };
+                if !on {
+                    continue;
+                }
+                if let Some(max) = dist.dist_sq()
+                    && d_sq > max
+                {
+                    continue;
+                }
+            }
             // Entity.shouldRenderAtSqrDistance: 64 times the bounding box's
             // mean edge, scaled by the view scale. RemotePlayer's box counts
             // ten times.
@@ -5243,13 +5328,14 @@ impl Game<'_> {
                     1.0
                 };
             let range = edge * 64.0 * scale;
-            if d.length_squared() >= range * range {
+            if d_sq >= range * range {
                 continue;
             }
+            let has_beam = horizon_client::mobs::guardian::beam(mob, alpha as f32).is_some();
             // EntityRenderer.shouldRender: the culling box, grown by 0.5
             // (GuardianRenderer also draws while its beam is out).
             if let Some(view) = &self.view_frustum
-                && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
+                && !has_beam
             {
                 let lo =
                     d.as_vec3() - glam::Vec3::new(w as f32 / 2.0 + 0.5, 0.5, w as f32 / 2.0 + 0.5);
@@ -5259,6 +5345,50 @@ impl Game<'_> {
                     continue;
                 }
             }
+            if outline.is_none()
+                && !has_beam
+                && self.is_aabb_occluded(
+                    [
+                        mob.position.x - w * 0.5,
+                        mob.position.y,
+                        mob.position.z - w * 0.5,
+                    ],
+                    [
+                        mob.position.x + w * 0.5,
+                        mob.position.y + h,
+                        mob.position.z + w * 0.5,
+                    ],
+                )
+            {
+                continue;
+            }
+            drawn_count += 1;
+            let emf_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::EntityModelFeatures);
+            let etf_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::EntityTextureFeatures);
+            let better_anim_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::BetterAnimations);
+            let nea_on = self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::NotEnoughAnimations);
+            let smooth_cutoff = if emf_on { 40.0 * 40.0 } else { 24.0 * 24.0 };
+            let mob_alpha = if throttle_distant && d_sq > smooth_cutoff {
+                0.0
+            } else {
+                alpha
+            };
             self.mark_entity(entity_start, &mob.kind.id);
             let light = self.world.light(
                 mob.position.x.floor() as i32,
@@ -5268,6 +5398,22 @@ impl Game<'_> {
             let mut packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             if mob.fire_ticks > 0 || matches!(mob.species(), Species::Blaze | Species::MagmaCube) {
                 packed = (15 * 16) | ((15 * 16) << 8);
+            } else if etf_on {
+                let id_s = mob.kind.id.as_str();
+                if id_s.ends_with("allay")
+                    || id_s.ends_with("vex")
+                    || id_s.ends_with("warden")
+                    || id_s.ends_with("enderman")
+                    || id_s.ends_with("phantom")
+                    || id_s.ends_with("breeze")
+                    || id_s.ends_with("drowned")
+                {
+                    let min_blk = 11u32 * 16;
+                    let cur_blk = (packed >> 8) & 0xFF;
+                    if cur_blk < min_blk {
+                        packed = (packed & 0xFF) | (min_blk << 8);
+                    }
+                }
             }
             // GlowSquidRenderer.getBlockLightLevel: the body brightens as the
             // dark ticks run out (the block light is the second byte).
@@ -5300,7 +5446,7 @@ impl Game<'_> {
             };
             render(
                 mob,
-                alpha as f32,
+                mob_alpha as f32,
                 camera,
                 &lookup,
                 packed,
@@ -5308,27 +5454,52 @@ impl Game<'_> {
                 &armor,
                 out,
             );
+            if d_sq < 32.0 * 32.0 && ((is_player && nea_on) || (!is_player && better_anim_on)) {
+                let foot_y = (mob.position.y - f64::from(camera[1])) as f32;
+                let phase = (self.world.game_time as f32 + alpha as f32) * 0.14
+                    + (mob.id as u32 as f32) * 0.73;
+                let breath = phase.sin() * 0.014;
+                let sway = (phase * 0.5).cos() * 0.008;
+                for v in &mut out[entity_start..] {
+                    let dy = (v.pos[1] - foot_y).max(0.0);
+                    if dy > 0.25 {
+                        v.pos[1] += dy * breath;
+                        v.pos[0] += (dy - 0.25) * sway;
+                    }
+                }
+            }
             if is_player {
                 // PlayerRenderer's CapeLayer, WingsLayer and SpinAttackEffectLayer.
                 // Only the cape hides with the body; WingsLayer and
                 // SpinAttackEffectLayer have no `isInvisible` check.
                 let chest = mob.extra.chest.as_deref();
-                if !layers_only {
-                    self.player_cape_geometry(mob, chest, camera, alpha as f32, packed, out);
+                let skip_distant_cosmetics = throttle_distant && d_sq > 24.0 * 24.0;
+                if !layers_only && !skip_distant_cosmetics {
+                    self.player_cape_geometry(mob, chest, camera, mob_alpha as f32, packed, out);
                 }
-                if let Some((_, name)) = self
-                    .remote_player_names()
-                    .into_iter()
-                    .find(|(id, _)| *id == mob.id)
+                if !skip_distant_cosmetics
+                    && let Some((_, name)) = self
+                        .remote_player_names()
+                        .into_iter()
+                        .find(|(id, _)| *id == mob.id)
                 {
-                    self.player_ears_geometry(mob, &name, camera, alpha as f32, packed, out);
+                    self.player_ears_geometry(mob, &name, camera, mob_alpha as f32, packed, out);
                 }
-                self.player_elytra_geometry(mob, chest, camera, alpha as f32, packed, out);
-                self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
-                self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
+                self.player_elytra_geometry(mob, chest, camera, mob_alpha as f32, packed, out);
+                self.spin_attack_geometry(mob, camera, mob_alpha as f32, packed, out);
+                if !skip_distant_cosmetics {
+                    self.stuck_in_body_geometry(
+                        mob,
+                        mob.id as i32,
+                        camera,
+                        mob_alpha as f32,
+                        packed,
+                        out,
+                    );
+                }
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
-            self.mob_block_geometry(mob, camera, alpha, packed, out);
+            self.mob_block_geometry(mob, camera, mob_alpha, packed, out);
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if mob.invisible {
@@ -5364,6 +5535,9 @@ impl Game<'_> {
                 );
             }
         }
+        self.extras
+            .drawn_entities
+            .store(drawn_count as u32, std::sync::atomic::Ordering::Relaxed);
         self.elder_apparition_geometry(alpha, out);
         self.spawner_geometry(camera, alpha, out);
         // Projectiles: the baked vanilla arrow model, the rest as item billboards.

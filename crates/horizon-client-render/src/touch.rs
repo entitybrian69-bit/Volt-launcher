@@ -8,9 +8,12 @@ use std::{
 const HOLD_DELAY: Duration = Duration::from_millis(350);
 mod custom;
 mod editor;
+pub mod import;
+pub mod presets;
 pub use custom::CustomButton;
 pub mod layout;
 pub use layout::{Control, Mode, Settings};
+pub use presets::BuiltInPreset;
 /// Entity-placement items retain short-tap placement, like building blocks.
 pub fn item_places_entity_on_tap(item: &str) -> bool {
     let Some(id) = item.strip_prefix("minecraft:") else {
@@ -117,8 +120,6 @@ enum Role {
         committed: bool,
     },
     Ignore,
-    /// The world sneak button emits the vanilla sneak key directly, not a pad stick click.
-    Sneak,
     Shield,
     Button(Button),
 }
@@ -132,9 +133,17 @@ pub struct TouchControls {
     pub auxiliary_only: bool,
     /// Inventory utility buttons emit real modifier/mouse events, never movement.
     pub inventory_mode: bool,
+    /// The in-game title screen (a full menu) is showing: the stock overlay
+    /// hides and custom buttons follow their "In menus" visibility, so the
+    /// player's keybinds stay usable on the dashboard.
+    pub menu_screen: bool,
     pub editor: Option<editor::Editor>,
     fingers: BTreeMap<u64, (Role, [f32; 2])>,
-    custom_fingers: BTreeMap<u64, String>,
+    custom_fingers: BTreeMap<u64, custom::CustomFinger>,
+    toggled_custom: BTreeMap<usize, Vec<String>>,
+    active_custom_tokens: Vec<String>,
+    open_drawers: std::collections::BTreeSet<u16>,
+    pub controls_hidden: bool,
     custom_events: Vec<(String, bool)>,
     pending: PadState,
     pub aim: Option<[f32; 2]>,
@@ -159,11 +168,36 @@ pub struct TouchControls {
     pub break_progress: f32,
     last_marker: Option<([f32; 2], Instant)>,
     last_sneak_tap: Option<Instant>,
+    /// When the on-screen sneak button was last pressed. The pad merge uses
+    /// it to force toggle behavior for touch-origin sneaks, even when the
+    /// controller's stick-click is configured as hold-to-sneak.
+    last_sneak_button: Option<Instant>,
     sprint_latched: bool,
 }
 impl TouchControls {
+    /// Imported Java launcher layouts (Pojav / Zalith / FoldCraft) bind dedicated primary/secondary
+    /// mouse or attack/use buttons and expect center-crosshair aiming rather than tap-anywhere rays.
+    pub fn has_custom_crosshair_controls(&self) -> bool {
+        !self.controls_hidden
+            && self.settings.custom_buttons.iter().any(|b| {
+                b.in_game
+                    && b.drawer_parent.is_none()
+                    && std::iter::once(b.key.as_str())
+                        .chain(b.extra_keys.iter().map(String::as_str))
+                        .any(|token| {
+                            matches!(
+                                token,
+                                "special:mouse_pri"
+                                    | "special:mouse_sec"
+                                    | "action:key.attack"
+                                    | "action:key.use"
+                            )
+                        })
+            })
+    }
+
     pub fn crosshair(&self) -> bool {
-        self.force_crosshair || self.settings.crosshair()
+        self.force_crosshair || self.settings.crosshair() || self.has_custom_crosshair_controls()
     }
 
     pub fn viewport(&mut self, width: u32, height: u32) {
@@ -206,15 +240,25 @@ impl TouchControls {
     pub fn control_at_point(&self, point: [f32; 2]) -> bool {
         self.custom_at(point).is_some() || self.control_at(point).is_some()
     }
+    /// Visible custom buttons with a Pojav-style background image:
+    /// `(normalized rect, opacity, corner radius, file name)`. The game
+    /// pre-draws each picture under the touch overlay pass.
+    pub fn image_buttons(&self) -> Vec<([f32; 4], f32, String)> {
+        let mut out = Vec::new();
+        for (i, b) in self.settings.custom_buttons.iter().enumerate() {
+            if let Some(img) = &b.background_image
+                && self.custom_visible(i)
+            {
+                let p = b.layouts[self.settings.mode.index()];
+                out.push((self.custom_rect(i), p.opacity.clamp(0.0, 1.0), img.clone()));
+            }
+        }
+        out
+    }
     /// Inventory overlays retain custom key holds, but never apply world gestures.
     pub fn clear_world_gesture(&mut self) {
-        let released_sneak = self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak));
         self.fingers
             .retain(|_, (role, _)| matches!(role, Role::Ignore));
-        if released_sneak {
-            self.custom_events.push(("action:key.sneak".into(), false));
-        }
-        self.sneaking = false;
         self.sprint_latched = false;
         self.pending = PadState::default();
         self.aim = None;
@@ -227,6 +271,12 @@ impl TouchControls {
     pub fn owns_pointer(&self, id: u64) -> bool {
         self.fingers.contains_key(&id) || self.custom_fingers.contains_key(&id)
     }
+    /// Whether any finger currently rests on the controls. The frame
+    /// limiter's idle detector counts a held joystick as activity, so a
+    /// player cruising on a stick is never "AFK".
+    pub fn any_finger_down(&self) -> bool {
+        !self.fingers.is_empty() || !self.custom_fingers.is_empty()
+    }
     pub fn ignore(&mut self, id: u64) {
         self.fingers.insert(id, (Role::Ignore, [0.0; 2]));
     }
@@ -234,6 +284,13 @@ impl TouchControls {
         self.pending.set(button, true);
     }
     fn visible(&self, c: Control) -> bool {
+        if self.controls_hidden && self.editor.is_none() {
+            return false;
+        }
+        // Menu screens (the title) never show the stock movement overlay.
+        if self.menu_screen && self.editor.is_none() {
+            return false;
+        }
         if c == Control::Shield && !self.shield_available && self.editor.is_none() {
             return false;
         }
@@ -534,6 +591,13 @@ impl TouchControls {
             }
         }
     }
+    /// A touch sneak press in the last moment: the pad layer treats it as a
+    /// toggle (Bedrock parity) regardless of the controller's stick-click
+    /// hold/toggle preference.
+    pub fn recent_sneak_button(&self) -> bool {
+        self.last_sneak_button
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(600))
+    }
     pub fn shield_held(&self) -> bool {
         self.settings.shield_button
             && self.shield_available
@@ -557,44 +621,39 @@ impl TouchControls {
     }
     /// Coordinates are fractions of the drawable surface. Returns a look delta.
     pub fn update(&mut self, id: u64, point: [f32; 2], started: bool, ended: bool) -> [f32; 2] {
-        if self.custom_update(id, point, started, ended) {
-            return [0.0; 2];
+        if let Some(delta) = self.custom_update(id, point, started, ended) {
+            return delta;
         }
         if ended {
-            if let Some((role, _)) = self.fingers.remove(&id) {
-                match role {
-                    Role::Look {
-                        start,
-                        since,
-                        dragged,
-                        held_use,
-                        ..
-                    } if (!self.crosshair() || self.settings.crosshair_gestures)
-                        && !dragged
-                        && since.elapsed() < HOLD_DELAY =>
-                    {
-                        self.tap_aim = Some(if self.settings.crosshair() || self.projectile_crosshair {
-                            [0.5, 0.5]
-                        } else {
-                            start
-                        });
-                        self.last_marker = Some((start, Instant::now()));
-                        self.pending_tap = Some(held_use);
-                    }
-                    Role::Sneak => {
-                        let still_held = self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak));
-                        self.sneaking = still_held;
-                        if !still_held {
-                            self.custom_events.push(("action:key.sneak".into(), false));
-                        }
-                    }
-                    _ => {}
-                }
+            if let Some((
+                Role::Look {
+                    start,
+                    since,
+                    dragged,
+                    held_use,
+                    ..
+                },
+                _,
+            )) = self.fingers.remove(&id)
+                && (!self.crosshair() || self.settings.crosshair_gestures)
+                && !dragged
+                && since.elapsed() < HOLD_DELAY
+            {
+                self.tap_aim = Some(if self.crosshair() || self.projectile_crosshair {
+                    [0.5, 0.5]
+                } else {
+                    start
+                });
+                self.last_marker = Some((start, Instant::now()));
+                self.pending_tap = Some(held_use);
             }
             return [0.0; 2];
         }
         if started {
             let control = self.control_at(point);
+            if control == Some(Control::Sneak) {
+                self.last_sneak_button = Some(Instant::now());
+            }
             let role = match control {
                 Some(Control::Move)
                     if !self
@@ -644,7 +703,7 @@ impl TouchControls {
                     if self
                         .last_sneak_tap
                         .take()
-                        .is_some_and(|t| now.duration_since(t) < Duration::from_millis(300))
+                        .is_some_and(|t| now.duration_since(t) < Duration::from_millis(500))
                     {
                         Role::Button(Button::RightStick)
                     } else {
@@ -655,13 +714,6 @@ impl TouchControls {
                 Some(Control::Sprint) if self.settings.sprint_toggle => {
                     self.sprint_latched = !self.sprint_latched;
                     Role::Ignore
-                }
-                Some(Control::Sneak) => {
-                    if !self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak)) {
-                        self.custom_events.push(("action:key.sneak".into(), true));
-                    }
-                    self.sneaking = true;
-                    Role::Sneak
                 }
                 Some(c) => Self::button(c).map_or(Role::Ignore, Role::Button),
                 None => Role::Look {
@@ -711,12 +763,9 @@ impl TouchControls {
     }
     pub fn clear(&mut self) {
         self.clear_custom();
-        if self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak)) {
-            self.custom_events.push(("action:key.sneak".into(), false));
-        }
         self.fingers.clear();
-        self.sneaking = false;
         self.last_sneak_tap = None;
+        self.last_sneak_button = None;
         self.sprint_latched = false;
         self.pending = PadState::default();
         self.aim = None;
@@ -740,7 +789,9 @@ impl TouchControls {
         self.aim = self.tap_aim.take();
         self.holding_use = false;
         self.holding = false;
-        if !self.crosshair() || self.settings.crosshair_gestures {
+        let crosshair = self.crosshair();
+        if !crosshair || self.settings.crosshair_gestures {
+            let center_aim = crosshair || self.projectile_crosshair;
             for (role, point) in self.fingers.values_mut() {
                 if let Role::Look {
                     start: _,
@@ -754,12 +805,7 @@ impl TouchControls {
                         *committed = true;
                     }
                     if !*dragged || *committed {
-                        self.aim =
-                            Some(if self.settings.crosshair() || self.projectile_crosshair {
-                                [0.5, 0.5]
-                            } else {
-                                *point
-                            });
+                        self.aim = Some(if center_aim { [0.5, 0.5] } else { *point });
                         if *committed {
                             self.holding = true;
                             self.holding_use = *held_use;
@@ -1231,35 +1277,6 @@ mod tests {
         }
     }
     #[test]
-    fn world_sneak_emits_a_real_key_hold_and_releases_cleanly() {
-        let mut t = TouchControls::default();
-        t.settings.mode = Mode::Crosshair;
-        let point = t.placement(Control::Sneak).center;
-        t.update(1, point, true, false);
-        assert!(t.sneaking);
-        assert_eq!(t.key_events(), [("action:key.sneak".into(), true)]);
-        t.update(1, point, false, true);
-        assert!(!t.sneaking);
-        assert_eq!(t.key_events(), [("action:key.sneak".into(), false)]);
-    }
-
-    #[test]
-    fn world_sneak_shared_fingers_release_only_after_the_last_finger() {
-        let mut t = TouchControls::default();
-        t.settings.mode = Mode::Crosshair;
-        let point = t.placement(Control::Sneak).center;
-        t.update(1, point, true, false);
-        t.update(2, point, true, false);
-        assert_eq!(t.key_events(), [("action:key.sneak".into(), true)]);
-        t.update(1, point, false, true);
-        assert!(t.sneaking);
-        assert!(t.key_events().is_empty());
-        t.update(2, point, false, true);
-        assert!(!t.sneaking);
-        assert_eq!(t.key_events(), [("action:key.sneak".into(), false)]);
-    }
-
-    #[test]
     fn sprint_toggle_survives_finger_release_and_clears_on_focus_loss() {
         let mut t = TouchControls {
             loaded: true,
@@ -1348,22 +1365,6 @@ mod tests {
 
     use super::*;
     #[test]
-    fn editor_can_remove_and_restore_the_movement_joystick() {
-        let mut touch = TouchControls::default();
-        touch.viewport(1920, 1080);
-        touch.open_editor();
-        let center = touch.placement(Control::Move).center;
-        touch.edit_touch(1, center, true, false);
-        assert_eq!(touch.editor.as_ref().unwrap().selected, Some(Control::Move));
-        touch.edit_touch(2, [0.5, 0.915], true, true);
-        assert!(!touch.visible(Control::Move));
-        touch.edit_touch(3, [0.15, 0.165], true, true);
-        touch.edit_touch(4, [0.35, 0.21], true, true);
-        assert!(touch.visible(Control::Move));
-        touch.cancel_editor();
-    }
-
-    #[test]
     fn editor_add_row_creates_a_button_without_closing_the_editor() {
         let mut touch = TouchControls::default();
         touch.viewport(1920, 1080);
@@ -1391,6 +1392,32 @@ mod tests {
         assert!(t.debug_requested);
         t.update(77, at, false, true);
         assert!(!t.owns_pointer(77));
+    }
+    #[test]
+    fn menu_screens_hide_stock_controls_and_use_in_menu_visibility() {
+        let mut t = TouchControls::default();
+        t.viewport(1920, 1080);
+        let mut button = CustomButton::new("key.keyboard.e".to_owned(), 0);
+        button.in_game = true;
+        button.in_menu = false;
+        t.settings.custom_buttons.push(button);
+        let mut in_menu = CustomButton::new("key.keyboard.t".to_owned(), 1);
+        in_menu.in_game = false;
+        in_menu.in_menu = true;
+        t.settings.custom_buttons.push(in_menu);
+        t.menu_screen = true;
+        assert!(!t.visible(Control::Move));
+        assert!(!t.visible(Control::Jump));
+        assert!(!t.visible(Control::Debug));
+        assert!(!t.custom_visible(0), "in_game-only button hides on the title");
+        assert!(t.custom_visible(1), "in_menu button shows on the title");
+        // The Volt Hub's "Show touch controls" switch still rules them all.
+        t.controls_hidden = true;
+        assert!(!t.custom_visible(1));
+        t.controls_hidden = false;
+        t.menu_screen = false;
+        assert!(t.custom_visible(0));
+        assert!(!t.custom_visible(1));
     }
     #[test]
     fn attack_gauge_survives_tap_modes_and_respects_off() {
@@ -1671,6 +1698,16 @@ mod tests {
         assert_eq!(t.state().left, [0.0, 1.0]);
     }
     #[test]
+    fn sneak_taps_mark_touch_origin_for_the_pad_toggle() {
+        let mut t = TouchControls::default();
+        t.settings.mode = Mode::Dpad;
+        assert!(!t.recent_sneak_button());
+        t.update(10, [0.13, 0.76], true, false);
+        assert!(t.recent_sneak_button());
+        t.clear();
+        assert!(!t.recent_sneak_button());
+    }
+    #[test]
     fn editing_owns_input_and_cancel_restores_layouts() {
         let mut t = TouchControls::default();
         t.open_editor();
@@ -1774,5 +1811,22 @@ mod tests {
         touch.update(2, center, false, true);
         touch.poll_state(); // consume the queued tap
         assert!(!touch.poll_state().held(Button::LeftStick));
+    }
+
+    #[test]
+    fn imported_custom_mouse_controls_enable_crosshair_without_thumb_hijack() {
+        let mut touch = TouchControls::default();
+        touch.settings.mode = Mode::Tap;
+        assert!(!touch.crosshair());
+        touch.settings.custom_buttons.push(CustomButton::new(
+            "special:mouse_sec".into(),
+            0,
+        ));
+        assert!(touch.has_custom_crosshair_controls());
+        assert!(touch.crosshair());
+        // Camera thumb resting on empty look area must NOT overwrite center aim!
+        touch.update(1, [0.82, 0.48], true, false);
+        touch.poll_state();
+        assert_ne!(touch.aim, Some([0.82, 0.48]));
     }
 }

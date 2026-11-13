@@ -94,13 +94,7 @@ pub(crate) const ACCESSIBILITY_OPTIONS: &[Opt] = &[
 /// does in Java.
 pub(crate) fn vanilla_control_options() -> Vec<Opt> {
     if cfg!(target_os = "android") {
-        return vec![
-            Opt::ToggleCrouch,
-            Opt::ToggleSprint,
-            Opt::AutoJump,
-            Opt::TouchSensitivityHorizontal,
-            Opt::TouchSensitivityVertical,
-        ];
+        return vec![Opt::ToggleCrouch, Opt::ToggleSprint, Opt::AutoJump];
     }
     let mut options = vec![
         Opt::ToggleCrouch,
@@ -220,6 +214,7 @@ impl Opt {
             Opt::AndroidInputMode => "Input device",
             Opt::TouchSwapJumpSneak => "Swap jump / sneak",
             Opt::TouchAutoSprint => "Auto Sprint",
+            Opt::TouchJoystick => "Movement joystick",
             Opt::Fov => "options.fov",
             Opt::RenderDistance => "options.renderDistance",
             Opt::SimulationDistance => "options.simulationDistance",
@@ -243,10 +238,6 @@ impl Opt {
             Opt::GraphicsBackend => "options.graphicsApi",
             Opt::TextureFiltering => "options.textureFiltering",
             Opt::MaxAnisotropy => "options.maxAnisotropy",
-            Opt::ItemFramesEnabled => "Item frame models",
-            Opt::ItemFramesDistance => "Item frame render distance",
-            Opt::FrameContentsEnabled => "Displayed items in frames",
-            Opt::FrameContentsDistance => "Displayed item render distance",
             Opt::SmoothLighting => "options.ao",
             Opt::Clouds => "options.renderClouds",
             Opt::CloudRange => "options.renderCloudsDistance",
@@ -344,6 +335,20 @@ impl Opt {
             Opt::SharePresence => "options.sharePresence",
             Opt::DirectionalAudio => "options.directionalAudio",
             Opt::MusicToast => "options.musicToast",
+            Opt::VoltResolutionScale => "volt.options.resolution_scale",
+            Opt::TouchPreset => "volt.options.touch_preset",
+            Opt::VoltShaderWindSpeed => "volt.shaders.opt.wind_speed",
+            Opt::VoltShaderWindStrength => "volt.shaders.opt.wind_strength",
+            Opt::VoltShaderShadowRichness => "volt.shaders.opt.shadow_richness",
+            Opt::VoltShaderTorchIntensity => "volt.shaders.opt.torch_intensity",
+            Opt::VoltShaderEmissiveGlow => "volt.shaders.opt.emissive_glow",
+            Opt::VoltShaderWaterReflection => "volt.shaders.opt.water_reflection",
+            Opt::VoltShaderSunsetGlow => "volt.shaders.opt.sunset_glow",
+            Opt::VoltShaderVibrance => "volt.shaders.opt.vibrance",
+            Opt::VoltShaderSaturation => "volt.shaders.opt.saturation",
+            Opt::VoltShaderContrast => "volt.shaders.opt.contrast",
+            Opt::VoltShaderExposure => "volt.shaders.opt.exposure",
+            Opt::VoltShaderWarmth => "volt.shaders.opt.warmth",
         }
     }
     pub(crate) fn kind(self, s: &Settings) -> Kind {
@@ -385,8 +390,6 @@ impl Opt {
             Opt::MaxFps => unit(s.max_fps as f32, 10.0, 260.0),
             Opt::CloudRange => unit(s.cloud_range as f32, 2.0, 128.0),
             Opt::EntityDistance => unit(s.entity_distance, 0.5, 5.0),
-            Opt::ItemFramesDistance => unit(s.horizon.item_frames_distance as f32, 1.0, 64.0),
-            Opt::FrameContentsDistance => unit(s.horizon.frame_contents_distance as f32, 1.0, 64.0),
             Opt::BiomeBlend => unit(s.biome_blend as f32, 0.0, 7.0),
             Opt::Preset => unit(preset_index(&s.graphics_preset) as f32, 0.0, 3.0),
             Opt::Mipmaps => unit(s.mipmap_levels as f32, 0.0, 4.0),
@@ -414,6 +417,45 @@ impl Opt {
             Opt::PadMoveDeadzone => unit(s.controller.move_deadzone, 0.0, 0.5),
             Opt::PadLookDeadzone => unit(s.controller.look_deadzone, 0.0, 0.5),
             Opt::SprintWindow => unit(s.sprint_window as f32, 0.0, 10.0),
+            Opt::VoltResolutionScale => {
+                unit(s.horizon.resolution_scale.clamp(25, 200) as f32, 25.0, 200.0)
+            }
+            Opt::VoltShaderWindSpeed => {
+                unit(s.extras.volt_shaders.wind_speed.clamp(25, 200) as f32, 25.0, 200.0)
+            }
+            Opt::VoltShaderWindStrength => {
+                unit(s.extras.volt_shaders.wind_strength.clamp(25, 200) as f32, 25.0, 200.0)
+            }
+            Opt::VoltShaderShadowRichness => {
+                unit(s.extras.volt_shaders.shadow_richness.clamp(0, 100) as f32, 0.0, 100.0)
+            }
+            Opt::VoltShaderTorchIntensity => {
+                unit(s.extras.volt_shaders.torch_intensity.clamp(50, 200) as f32, 50.0, 200.0)
+            }
+            Opt::VoltShaderEmissiveGlow => {
+                unit(s.extras.volt_shaders.emissive_glow.clamp(0, 200) as f32, 0.0, 200.0)
+            }
+            Opt::VoltShaderWaterReflection => {
+                unit(s.extras.volt_shaders.water_reflection.clamp(0, 150) as f32, 0.0, 150.0)
+            }
+            Opt::VoltShaderSunsetGlow => {
+                unit(s.extras.volt_shaders.sunset_glow.clamp(0, 200) as f32, 0.0, 200.0)
+            }
+            Opt::VoltShaderVibrance => {
+                unit(s.extras.volt_shaders.vibrance.clamp(50, 180) as f32, 50.0, 180.0)
+            }
+            Opt::VoltShaderSaturation => {
+                unit(s.extras.volt_shaders.saturation.clamp(50, 180) as f32, 50.0, 180.0)
+            }
+            Opt::VoltShaderContrast => {
+                unit(s.extras.volt_shaders.contrast.clamp(70, 150) as f32, 70.0, 150.0)
+            }
+            Opt::VoltShaderExposure => {
+                unit(s.extras.volt_shaders.exposure.clamp(70, 150) as f32, 70.0, 150.0)
+            }
+            Opt::VoltShaderWarmth => {
+                unit(s.extras.volt_shaders.warmth.clamp(-50, 50) as f32, -50.0, 50.0)
+            }
             _ => Kind::Cycle,
         }
     }
@@ -544,6 +586,14 @@ impl Opt {
             Opt::TouchSwapJumpSneak => {
                 Some(if s.touch.swap_jump_sneak { "ON" } else { "OFF" }.into())
             }
+            Opt::TouchJoystick => Some(
+                if s.touch.button_visibility[crate::touch::Control::Move as usize] == 2 {
+                    "HIDDEN"
+                } else {
+                    "SHOWN"
+                }
+                .into(),
+            ),
             Opt::TouchAutoSprint => Some(
                 if s.touch.sprint_with_joystick {
                     "ON"
@@ -639,8 +689,6 @@ impl Opt {
             }
             Opt::CloudRange => generic(c, Text::tr("options.chunks", &[&s.cloud_range])),
             Opt::EntityDistance => percent(c, s.entity_distance),
-            Opt::ItemFramesDistance => generic(c, Text::literal(format!("{} chunks", s.horizon.item_frames_distance))),
-            Opt::FrameContentsDistance => generic(c, Text::literal(format!("{} chunks", s.horizon.frame_contents_distance))),
             Opt::BiomeBlend => generic(
                 c,
                 tr(&format!(
@@ -785,11 +833,14 @@ impl Opt {
                 "options.textureFiltering.rgss",
                 "options.textureFiltering.anisotropic",
             ][s.file.int("textureFiltering").clamp(0, 2) as usize]),
-            Opt::GraphicsBackend => tr(match s.horizon.api {
-                crate::graphics::GraphicsApi::OpenGl => "options.graphicsApi.opengl",
-                crate::graphics::GraphicsApi::Vulkan => "options.graphicsApi.vulkan",
-                _ => "options.graphicsApi.default",
-            }),
+            Opt::GraphicsBackend => match s.horizon.api {
+                crate::graphics::GraphicsApi::OpenGl => tr("options.graphicsApi.opengl"),
+                crate::graphics::GraphicsApi::Vulkan => tr("options.graphicsApi.vulkan"),
+                crate::graphics::GraphicsApi::VulkanSupporter => {
+                    Text::literal("Vulkan (Supporter)")
+                }
+                _ => tr("options.graphicsApi.default"),
+            },
             Opt::SmoothLighting => on_off(s.smooth_lighting),
             Opt::Clouds => tr(match s.clouds.as_str() {
                 "false" => "options.off",
@@ -802,8 +853,6 @@ impl Opt {
                 "options.particles.minimal",
             ][usize::from(s.particles.min(2))]),
             Opt::EntityShadows => on_off(s.entity_shadows),
-            Opt::ItemFramesEnabled => on_off(s.horizon.item_frames_enabled),
-            Opt::FrameContentsEnabled => on_off(s.horizon.frame_contents_enabled),
             Opt::Vignette => on_off(s.vignette),
             Opt::Autosave => on_off(s.autosave_indicator),
             Opt::CutoutLeaves => on_off(s.cutout_leaves),
@@ -903,6 +952,70 @@ impl Opt {
                 gamepad::TextKeyboard::Horizon => "horizon.options.keyboard.horizon",
                 gamepad::TextKeyboard::Steam => "horizon.options.keyboard.steam",
             }),
+            Opt::VoltResolutionScale => Text::literal(format!(
+                "{}%",
+                s.horizon.resolution_scale.clamp(25, 200)
+            )),
+            Opt::TouchPreset => {
+                let name = if let Some(p) = crate::touch::BuiltInPreset::detect(&s.touch) {
+                    p.label().to_owned()
+                } else if let Some(meta) = &s.touch.imported_from {
+                    meta.name.clone()
+                } else {
+                    "Custom Layout".to_owned()
+                };
+                Text::literal(name)
+            }
+            Opt::VoltShaderWindSpeed => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.wind_speed.clamp(25, 200)))
+            }
+            Opt::VoltShaderWindStrength => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.wind_strength.clamp(25, 200)
+            )),
+            Opt::VoltShaderShadowRichness => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.shadow_richness.clamp(0, 100)
+            )),
+            Opt::VoltShaderTorchIntensity => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.torch_intensity.clamp(50, 200)
+            )),
+            Opt::VoltShaderEmissiveGlow => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.emissive_glow.clamp(0, 200)
+            )),
+            Opt::VoltShaderWaterReflection => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.water_reflection.clamp(0, 150)
+            )),
+            Opt::VoltShaderSunsetGlow => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.sunset_glow.clamp(0, 200)
+            )),
+            Opt::VoltShaderVibrance => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.vibrance.clamp(50, 180)))
+            }
+            Opt::VoltShaderSaturation => Text::literal(format!(
+                "{}%",
+                s.extras.volt_shaders.saturation.clamp(50, 180)
+            )),
+            Opt::VoltShaderContrast => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.contrast.clamp(70, 150)))
+            }
+            Opt::VoltShaderExposure => {
+                Text::literal(format!("{}%", s.extras.volt_shaders.exposure.clamp(70, 150)))
+            }
+            Opt::VoltShaderWarmth => {
+                let w = s.extras.volt_shaders.warmth.clamp(-50, 50);
+                Text::literal(if w == 0 {
+                    "Neutral".to_owned()
+                } else if w > 0 {
+                    format!("+{w} Warm")
+                } else {
+                    format!("{w} Cool")
+                })
+            }
             _ => Text::empty(),
         }
     }
@@ -953,8 +1066,6 @@ impl Opt {
             Opt::MaxFps => s.max_fps = (step(1.0, 26.0) as u32) * 10,
             Opt::CloudRange => s.cloud_range = step(2.0, 128.0) as i32,
             Opt::EntityDistance => s.entity_distance = step(2.0, 20.0) / 4.0,
-            Opt::ItemFramesDistance => s.horizon.item_frames_distance = step(1.0, 64.0) as u32,
-            Opt::FrameContentsDistance => s.horizon.frame_contents_distance = step(1.0, 64.0) as u32,
             Opt::BiomeBlend => s.biome_blend = step(0.0, 7.0) as i32,
             Opt::Preset => s.graphics_preset = PRESETS[step(0.0, 3.0) as usize].into(),
             Opt::Mipmaps => s.mipmap_levels = step(0.0, 4.0) as i32,
@@ -987,6 +1098,57 @@ impl Opt {
             Opt::PadMoveDeadzone => s.controller.move_deadzone = step(0.0, 50.0) / 100.0,
             Opt::PadLookDeadzone => s.controller.look_deadzone = step(0.0, 50.0) / 100.0,
             Opt::SprintWindow => s.sprint_window = step(0.0, 10.0) as i32,
+            Opt::VoltResolutionScale => {
+                s.horizon.resolution_scale = (25.0 + step(0.0, 35.0) * 5.0) as u32;
+            }
+            Opt::VoltShaderWindSpeed => {
+                s.extras.volt_shaders.wind_speed = (25.0 + step(0.0, 35.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderWindStrength => {
+                s.extras.volt_shaders.wind_strength = (25.0 + step(0.0, 35.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderShadowRichness => {
+                s.extras.volt_shaders.shadow_richness = (step(0.0, 20.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderTorchIntensity => {
+                s.extras.volt_shaders.torch_intensity = (50.0 + step(0.0, 30.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderEmissiveGlow => {
+                s.extras.volt_shaders.emissive_glow = (step(0.0, 40.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderWaterReflection => {
+                s.extras.volt_shaders.water_reflection = (step(0.0, 30.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderSunsetGlow => {
+                s.extras.volt_shaders.sunset_glow = (step(0.0, 40.0) * 5.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderVibrance => {
+                s.extras.volt_shaders.vibrance = (50.0 + step(0.0, 65.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderSaturation => {
+                s.extras.volt_shaders.saturation = (50.0 + step(0.0, 65.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderContrast => {
+                s.extras.volt_shaders.contrast = (70.0 + step(0.0, 40.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderExposure => {
+                s.extras.volt_shaders.exposure = (70.0 + step(0.0, 40.0) * 2.0) as u16;
+                s.extras.volt_shaders.mark_custom();
+            }
+            Opt::VoltShaderWarmth => {
+                s.extras.volt_shaders.warmth = (-50.0 + step(0.0, 50.0) * 2.0) as i16;
+                s.extras.volt_shaders.mark_custom();
+            }
             _ => {}
         }
         if self.affects_preset() {
@@ -1028,6 +1190,21 @@ impl Opt {
             }
         };
         match self {
+            Opt::TouchPreset => {
+                let all = crate::touch::BuiltInPreset::ALL;
+                let cur = crate::touch::BuiltInPreset::detect(&s.touch)
+                    .and_then(|p| all.iter().position(|x| *x == p))
+                    .unwrap_or(0);
+                let chosen = all[usize::from(next(cur as u8, all.len() as u8))];
+                let mut built = chosen.build();
+                built.sensitivity = s.touch.sensitivity;
+                built.sensitivity_horizontal = s.touch.sensitivity_horizontal;
+                built.sensitivity_vertical = s.touch.sensitivity_vertical;
+                built.virtual_mouse_sensitivity = s.touch.virtual_mouse_sensitivity;
+                built.gyroscope = s.touch.gyroscope;
+                built.gyro_sensitivity = s.touch.gyro_sensitivity;
+                s.touch = built;
+            }
             Opt::TouchMode => {
                 let i = crate::touch::Mode::SCHEMES
                     .iter()
@@ -1065,8 +1242,10 @@ impl Opt {
             Opt::TouchAttackSide => s.touch.attack_indicator_left ^= true,
             Opt::TouchSwapJumpSneak => s.touch.swap_jump_sneak ^= true,
             Opt::TouchAutoSprint => s.touch.sprint_with_joystick ^= true,
-            Opt::ItemFramesEnabled => s.horizon.item_frames_enabled ^= true,
-            Opt::FrameContentsEnabled => s.horizon.frame_contents_enabled ^= true,
+            Opt::TouchJoystick => {
+                let v = &mut s.touch.button_visibility[crate::touch::Control::Move as usize];
+                *v = if *v == 2 { 1 } else { 2 };
+            }
             Opt::GuiScale => {
                 let max = crate::window::calculate_scale(framebuffer, 0, s.force_unicode) as u32;
                 let value = s.gui_scale.min(max);
@@ -1115,9 +1294,9 @@ impl Opt {
                 );
             }
             Opt::GraphicsBackend => {
-                // PreferredGraphicsApi: Default, OpenGL, Vulkan; a platform lacking one skips it.
-                use crate::graphics::GraphicsApi::{Auto, OpenGl, Vulkan};
-                let offered: Vec<_> = [Auto, OpenGl, Vulkan]
+                // PreferredGraphicsApi: Default, OpenGL, Vulkan (+ Volt Supporter on Android).
+                use crate::graphics::GraphicsApi::{Auto, OpenGl, Vulkan, VulkanSupporter};
+                let offered: Vec<_> = [Auto, OpenGl, Vulkan, VulkanSupporter]
                     .into_iter()
                     .filter(|a| crate::graphics::GraphicsApi::choices().contains(a))
                     .collect();
@@ -1384,21 +1563,38 @@ pub enum Page {
     NativeMod(usize),
     /// Horizon's shader packs, either kind (`shader_pack_list`).
     ShaderPacks,
+    /// The options of `s.shader_packs[.0]`, a Horizon pack: its `[[pages]]` entry `.1`, the
+    /// first the one the button opens.
+    NativePackOptions(usize, u8),
+    /// The picked `shaders/` pack's options (`shader_options`), one of its screens at a time.
+    ShaderOptions,
     /// Horizon's graphics settings (`graphics_ui`).
     Graphics,
     GraphicsAdvanced,
     GraphicsHdr,
-    /// Item-frame model and displayed-content culling.
-    FrameItems,
     /// Horizon's controller settings and button binds.
     Controller,
     Touch,
     PadBinds,
     Extras,
+    Waypoints,
+    Minimap,
+    VoltBoost,
+    VoltShaders,
+    VoltVisuals,
+    VoltQol,
+    /// Volt Replay only: the session recorder's own small page.
+    VoltReplay,
+    VoltChat,
+    VoltMods,
+    /// Image 1 split-pane frosted-glass Volt Settings hub (`volt_settings_ui`).
+    VoltGlass,
+    /// Image 2 split-pane 50-mod pure-Rust Mod Menu (`volt_mods`).
+    ModMenu,
+    VoltAtlas,
     /// CreditsAndAttributionScreen.
     Credits,
-    /// Horizon Settings: every page Horizon adds, as a mod's settings
-    /// screen hangs off vanilla's Options.
+    /// Volt Settings: every page Volt or Horizon adds, consolidated into one hub.
     Horizon,
     /// AI Agent: agent control on or off, whether an agent is connected, the connection details.
     Agent,
@@ -1414,6 +1610,7 @@ enum Act {
     Done,
     Cycle(Opt),
     Extra(crate::extras::Item),
+    VoltCustom(crate::options_volt_pages::VoltAct),
     Key(&'static str),
     ResetKey(&'static str),
     ResetKeys,
@@ -1426,9 +1623,25 @@ enum Act {
     /// Pick `s.shader_packs[i]`, or turn it off when it is the pick.
     PickShaderPack(usize),
     OpenShaderPackFolder,
+    /// Open the picked pack's Shader Options page.
+    ShaderOptions,
+    /// Open the options page of the Horizon pack `s.shader_packs[.0]`.
+    NativePackOptions(usize),
+    /// Option `.1` of that pack: its next value.
+    NativePackOption(usize, usize),
+    /// Every option of that pack back to its default.
+    NativePackReset(usize),
+    /// Shader Options: the next value of an option, a screen of the pack, the next profile,
+    /// every option back to its default.
+    ShaderOption(String),
+    ShaderScreen(String),
+    ShaderProfile,
+    ShaderReset,
     /// The installed mod's own settings page (capability `ui`), shown as a
     /// screen: `Event::ModSettings` has the game open it.
     ModSettings(usize),
+    /// Play `s.replays[.0]` right here, without leaving the game.
+    WatchReplay(usize),
     /// A native mod's key (mod, key) waits for a key; a button of its page.
     NativeKey(usize, usize),
     NativeButton(usize, usize),
@@ -1436,6 +1649,12 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    AddWaypoint,
+    ClearDeathWaypoints,
+    ToggleWaypoint(usize),
+    CycleWaypointColor(usize),
+    TeleportWaypoint(usize),
+    DeleteWaypoint(usize),
     #[cfg(target_os = "android")]
     TouchControls,
 }
@@ -1449,6 +1668,12 @@ enum WKind {
         label: Text,
         value: f32,
         opt: Opt,
+    },
+    /// An option of a shader pack the pack shows as a slider: its value's place in its list.
+    ShaderSlider {
+        label: Text,
+        value: f32,
+        name: String,
     },
     Text {
         text: Text,
@@ -1499,6 +1724,13 @@ pub enum Event {
     /// A shader pack was picked or turned off: save and apply it.
     ShaderPack,
     OpenShaderPackFolder,
+    /// The Shader Options page opened: read the picked pack's options into `shader_options`.
+    OpenShaderOptions,
+    /// The Shader Options page closed with changes: save them and load the pack again.
+    ShaderOptions,
+    /// The options of `shader_packs[.0]`, a Horizon pack, changed: save them (the pack reloads
+    /// with them).
+    NativePackOptions(usize),
     /// Open the mod's own settings page (capability `ui`): the installed
     /// mod's index in `mods.installed`.
     ModSettings(usize),
@@ -1512,6 +1744,14 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// Teleport to or copy coordinates of `s.volt_waypoints.entries[i]`.
+    WaypointAction(usize),
+    /// The Volt Replay page opened: list the instance's `replays/` folder
+    /// into `s.replays` (the game reads the files; this crate cannot).
+    ListReplays,
+    /// Watch `s.replays[.0]` without leaving the game: the game closes the
+    /// current session if needed and starts replay playback.
+    WatchReplay(usize),
     #[cfg(target_os = "android")]
     TouchControls,
 }
@@ -1536,6 +1776,8 @@ pub struct OptionsUi {
     pub stack: Vec<Page>,
     scroll: f32,
     pub(crate) dragging: Option<Opt>,
+    /// The shader pack option slider held, and where its handle sits.
+    shader_dragging: Option<(String, f32)>,
     /// The pressed slider's own position (`AbstractSliderButton.value`) and
     /// when it last moved: the handle follows the pointer while the option
     /// keeps its stepped value, then snaps to it (`resetValue`).
@@ -1555,6 +1797,9 @@ pub struct OptionsUi {
     language_choice: Option<String>,
     language_search: ui::EditBox,
     pub(crate) settings_search: ui::EditBox,
+    pub waypoint_name: ui::EditBox,
+    /// Active world context `(scope, dimension, [x, y, z])` for the Waypoints page.
+    pub waypoint_context: Option<(String, String, [i32; 3])>,
     /// Packs: the packs found and the selection the screen opens with.
     pub pack_infos: Vec<crate::pack_screen::PackInfo>,
     pub pack_selection: Vec<String>,
@@ -1578,8 +1823,18 @@ pub struct OptionsUi {
     /// Scroll the selected language into the middle on the next layout.
     center_language: bool,
     pub graphics: crate::graphics_ui::GraphicsUi,
+    pub volt_glass: crate::volt_settings_ui::VoltSettingsUi,
+    pub mod_menu: crate::volt_mods::ModMenuUi,
+    /// `Controlling` mod filter on Key Binds (`0 = All`, `1 = Conflicts`, `2 = Unbound`).
+    pub keybind_filter: u8,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
+    /// `#17` Interactive Full-Screen World Atlas state.
+    pub world_atlas: crate::volt_qol::WorldAtlasState,
+    /// Whether the active local player skin uses slim (3px Alex) arms.
+    pub skin_slim: bool,
+    /// Active local player skin sprite key in `HudAtlas`, if loaded.
+    pub skin_key: Option<String>,
 }
 impl Default for OptionsUi {
     fn default() -> Self {
@@ -1587,10 +1842,14 @@ impl Default for OptionsUi {
         search.max_length = 32;
         let mut settings_search = ui::EditBox::new(0.0, 0.0, 200.0, 15.0);
         settings_search.focused = false;
+        let mut waypoint_name = ui::EditBox::new(0.0, 0.0, 200.0, 15.0);
+        waypoint_name.max_length = 28;
+        waypoint_name.focused = false;
         Self {
             stack: vec![Page::Main],
             scroll: 0.0,
             dragging: None,
+            shader_dragging: None,
             slider_value: None,
             scrollbar_drag_y: None,
             selected_key: None,
@@ -1601,6 +1860,8 @@ impl Default for OptionsUi {
             language_choice: None,
             language_search: search,
             settings_search,
+            waypoint_name,
+            waypoint_context: None,
             pack_infos: Vec::new(),
             pack_selection: Vec::new(),
             pack_screen: None,
@@ -1613,7 +1874,13 @@ impl Default for OptionsUi {
             in_world: false,
             center_language: false,
             graphics: Default::default(),
+            volt_glass: Default::default(),
+            mod_menu: Default::default(),
+            keybind_filter: 0,
             agent_status: Vec::new(),
+            world_atlas: Default::default(),
+            skin_slim: false,
+            skin_key: None,
         }
     }
 }
@@ -1671,10 +1938,20 @@ fn option_widget(s: &Settings, opt: Opt, x: f32, y: f32, w: f32) -> Widget {
         Kind::Cycle => button(x, y, w, opt.label(s), Act::Cycle(opt)),
     }
 }
-/// What a button opening one of Horizon's pages says on hover.
+/// What a button opening one of Volt's pages says on hover.
 fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     Some(match page {
-        Page::Horizon => "horizon.pages.settings.tooltip",
+        Page::Horizon | Page::VoltGlass => "horizon.pages.settings.tooltip",
+        Page::ModMenu => "volt.mod_menu.tooltip",
+        Page::VoltBoost => "volt.boost.tooltip",
+        Page::VoltShaders => "volt.shaders.tooltip",
+        Page::VoltVisuals => "volt.visuals.tooltip",
+        Page::VoltQol => "volt.qol.tooltip",
+        Page::VoltChat => "volt.chat.tooltip",
+        Page::VoltMods => "volt.mods.tooltip",
+        Page::VoltAtlas => "volt.atlas.tooltip",
+        Page::Waypoints => "horizon.pages.waypoints.tooltip",
+        Page::Minimap => "horizon.pages.minimap.tooltip",
         Page::Graphics => "horizon.pages.graphics.tooltip",
         Page::GraphicsAdvanced => "horizon.pages.graphics_advanced.tooltip",
         Page::Controller => "horizon.pages.controller.tooltip",
@@ -1686,13 +1963,129 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
     })
 }
 /// Rows of an OptionsList: (big?, options) or a header.
+/// A list's slot with nothing in it: text takes no clicks.
+fn blank_slot(w: f32) -> Widget {
+    Widget {
+        x: 0.0,
+        y: 0.0,
+        w,
+        h: 20.0,
+        kind: WKind::Text {
+            text: Text::literal(""),
+            color: 0,
+            centered: false,
+        },
+        list: false,
+    }
+}
+/// Page `at` of the options of the Horizon pack `s.shader_packs[i]`: the pack's own layout,
+/// else every option two a row.
+fn native_pack_option_rows(s: &Settings, i: usize, at: u8) -> Vec<Row> {
+    use horizon_shader_api::PageItem;
+    let Some(pack) = s.shader_packs.get(i) else {
+        return Vec::new();
+    };
+    let count = pack.options.len().min(pack.values.len());
+    let (columns, items) = match pack.pages.get(usize::from(at)) {
+        Some(page) => (usize::from(page.columns), page.items.clone()),
+        None => (2, (0..count).map(PageItem::Option).collect()),
+    };
+    let width = if columns == 1 { 310.0 } else { 150.0 };
+    let widget = |item: &PageItem| match *item {
+        PageItem::Option(o) if o < count => {
+            let option = &pack.options[o];
+            let value = crate::shader_pack_list::show_value(&option.kind, pack.values[o]);
+            let label = Text::literal(format!("{}: {value}", option.name));
+            button(0.0, 0.0, width, label, Act::NativePackOption(i, o))
+        }
+        PageItem::Page(p) if p < pack.pages.len() => {
+            let label = Text::literal(format!("{}...", pack.pages[p].name));
+            let page = Page::NativePackOptions(i, p as u8);
+            button(0.0, 0.0, width, label, Act::Push(page))
+        }
+        _ => blank_slot(width),
+    };
+    let mut rows = Vec::new();
+    if at == 0 {
+        rows.push(Row::Note(pack.title.clone()));
+    }
+    rows.extend(
+        items
+            .chunks(columns)
+            .map(|row| Row::Buttons(widget(&row[0]), row.get(1).map(widget))),
+    );
+    rows
+}
+/// The open screen of the picked pack: its title, then its items two to a row (one when the
+/// pack asks for a single column).
+fn shader_option_rows(s: &Settings) -> Vec<Row> {
+    let Some(options) = &s.shader_options else {
+        return vec![Row::Header("horizon.shader_options.loading")];
+    };
+    let columns = options
+        .screens
+        .screen(options.screen())
+        .map_or(2, |(_, c)| c);
+    let blank = || blank_slot(150.0);
+    let width = if columns == 1 { 310.0 } else { 150.0 };
+    let widget = |item: &horizon_shaders::ScreenItem| -> Option<Widget> {
+        use horizon_shaders::ScreenItem;
+        Some(match item {
+            ScreenItem::Empty if columns > 2 => return None,
+            ScreenItem::Empty => blank(),
+            ScreenItem::Profile => {
+                button(0.0, 0.0, width, options.profile_label(), Act::ShaderProfile)
+            }
+            ScreenItem::Screen(name) => button(
+                0.0,
+                0.0,
+                width,
+                options.screen_label(name),
+                Act::ShaderScreen(name.clone()),
+            ),
+            ScreenItem::Option(name) => match options.slider_position(name) {
+                Some(value) => Widget {
+                    x: 0.0,
+                    y: 0.0,
+                    w: width,
+                    h: 20.0,
+                    kind: WKind::ShaderSlider {
+                        label: options.option_label(name),
+                        value,
+                        name: name.clone(),
+                    },
+                    list: false,
+                },
+                None => button(
+                    0.0,
+                    0.0,
+                    width,
+                    options.option_label(name),
+                    Act::ShaderOption(name.clone()),
+                ),
+            },
+        })
+    };
+    let widgets: Vec<Widget> = options.items().iter().filter_map(widget).collect();
+    let mut rows = vec![Row::Note(options.title().strip_legacy().plain())];
+    if columns == 1 {
+        rows.extend(widgets.into_iter().map(|w| Row::Buttons(w, None)));
+        return rows;
+    }
+    let mut widgets = widgets.into_iter();
+    while let Some(a) = widgets.next() {
+        rows.push(Row::Buttons(a, widgets.next()));
+    }
+    rows
+}
 enum Row {
     Big(Opt),
     Pair(Opt, Option<Opt>),
     Header(&'static str),
-    /// A line of grey text (a path).
+    /// A line of grey text (a path or waypoint coordinates).
     Note(String),
     Buttons(Widget, Option<Widget>),
+    Four(Widget, Widget, Widget, Widget),
 }
 fn pairs(opts: &[Opt]) -> Vec<Row> {
     opts.chunks(2)
@@ -1705,9 +2098,153 @@ impl OptionsUi {
         let label = format!("{}: {}", item.caption(), item.value(&s.extras));
         button(0.0, 0.0, 150.0, Text::literal(label), Act::Extra(item))
     }
+    fn volt_custom_button(&self, s: &Settings, act: crate::options_volt_pages::VoltAct) -> Widget {
+        let label = format!("{}: {}", act.caption(), act.value(&s.extras));
+        button(0.0, 0.0, 150.0, Text::literal(label), Act::VoltCustom(act))
+    }
+    fn volt_custom_sections(
+        &self,
+        s: &Settings,
+        sections: &[(&'static str, &[crate::options_volt_pages::VoltAct])],
+    ) -> Vec<Row> {
+        let query = self.settings_search.value.trim().to_lowercase();
+        let mut out = Vec::new();
+        for &(header, items) in sections {
+            let mut matched = Vec::new();
+            for &act in items {
+                if !query.is_empty()
+                    && !act.caption().to_lowercase().contains(&query)
+                    && !act.description().to_lowercase().contains(&query)
+                    && !act.value(&s.extras).to_lowercase().contains(&query)
+                {
+                    continue;
+                }
+                matched.push(self.volt_custom_button(s, act));
+            }
+            if !matched.is_empty() {
+                out.push(Row::Header(header));
+                let mut iter = matched.into_iter();
+                while let Some(left) = iter.next() {
+                    out.push(Row::Buttons(left, iter.next()));
+                }
+            }
+        }
+        out
+    }
+    fn has_settings_search(&self, s: &Settings) -> bool {
+        match self.page() {
+            Page::Video
+            | Page::Controls
+            | Page::VoltBoost
+            | Page::VoltQol
+            | Page::VoltChat
+            | Page::VoltVisuals
+            | Page::VoltMods => true,
+            Page::KeyBinds => s
+                .extras
+                .mod_catalog
+                .is_on(crate::volt_mods::VoltModId::Controlling),
+            Page::VoltShaders => s.extras.volt_shaders.enabled,
+            _ => false,
+        }
+    }
     fn settings_search_active(&self) -> bool {
         self.settings_search.focused
-            && matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds)
+            && matches!(
+                self.page(),
+                Page::Video
+                    | Page::Controls
+                    | Page::KeyBinds
+                    | Page::VoltBoost
+                    | Page::VoltShaders
+                    | Page::VoltQol
+                    | Page::VoltChat
+                    | Page::VoltVisuals
+                    | Page::VoltMods
+            )
+    }
+    fn waypoint_name_active(&self) -> bool {
+        self.waypoint_name.focused && self.page() == Page::Waypoints
+    }
+    pub fn typing(&self) -> bool {
+        if Self::graphics_level(self.page()).is_some() {
+            return self.graphics.typing();
+        }
+        match self.page() {
+            Page::VoltGlass => self.volt_glass.typing(),
+            Page::ModMenu => self.mod_menu.typing(),
+            Page::Language => self.language_search.focused,
+            Page::Waypoints => self.waypoint_name.focused,
+            _ => self.settings_search_active(),
+        }
+    }
+    fn extra_section_rows(
+        &self,
+        s: &Settings,
+        defs: Vec<Result<crate::extras::Item, &'static str>>,
+    ) -> Vec<Row> {
+        let query = if self.page() == Page::VoltBoost {
+            self.settings_search.value.trim().to_lowercase()
+        } else {
+            String::new()
+        };
+        let extra = |item: crate::extras::Item| {
+            let value = format!("{}: {}", item.caption(), item.value(&s.extras));
+            let label = if item.key_name().is_some() && self.selected_key == item.key_name() {
+                Text::literal(format!("> {value} <")).with_color(text::YELLOW)
+            } else {
+                Text::literal(value)
+            };
+            let widget = button(0.0, 0.0, 150.0, label, Act::Extra(item));
+            if item
+                .parent()
+                .is_some_and(|parent| parent.switch(&s.extras) == Some(false))
+            {
+                inactive(widget)
+            } else {
+                widget
+            }
+        };
+        let mut rows = Vec::new();
+        let mut section = Vec::new();
+        let mut pending_header: Option<&'static str> = None;
+        let flush = |rows: &mut Vec<Row>,
+                     section: &mut Vec<crate::extras::Item>,
+                     pending_header: &mut Option<&'static str>| {
+            if !section.is_empty() {
+                if let Some(h) = pending_header.take() {
+                    rows.push(Row::Header(h));
+                }
+                rows.extend(
+                    section
+                        .chunks(2)
+                        .map(|c| Row::Buttons(extra(c[0]), c.get(1).map(|&b| extra(b)))),
+                );
+                section.clear();
+            }
+        };
+        for row in defs {
+            match row {
+                Err(header) => {
+                    flush(&mut rows, &mut section, &mut pending_header);
+                    if query.is_empty() {
+                        rows.push(Row::Header(header));
+                    } else {
+                        pending_header = Some(header);
+                    }
+                }
+                Ok(item) => {
+                    if query.is_empty()
+                        || item.caption().to_lowercase().contains(&query)
+                        || item.description().to_lowercase().contains(&query)
+                    {
+                        section.push(item);
+                    }
+                }
+            }
+        }
+        flush(&mut rows, &mut section, &mut pending_header);
+        rows
     }
     #[cfg(target_os = "android")]
     pub fn android_edit_value(&mut self, atlas: &HudAtlas) -> String {
@@ -1716,8 +2253,16 @@ impl OptionsUi {
         {
             return pack.android_edit_value(&crate::screen_draw::Measure(&atlas.font));
         }
-        let edit = if self.page() == Page::Language {
+        let edit = if Self::graphics_level(self.page()).is_some() {
+            &mut self.graphics.search
+        } else if self.page() == Page::VoltGlass {
+            &mut self.volt_glass.search
+        } else if self.page() == Page::ModMenu {
+            &mut self.mod_menu.search
+        } else if self.page() == Page::Language {
             &mut self.language_search
+        } else if self.page() == Page::Waypoints {
+            &mut self.waypoint_name
         } else {
             &mut self.settings_search
         };
@@ -1803,9 +2348,29 @@ impl OptionsUi {
         self.stack.push(page);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
-        if matches!(page, Page::Video | Page::Controls | Page::KeyBinds) {
+        if matches!(
+            page,
+            Page::Video
+                | Page::Controls
+                | Page::KeyBinds
+                | Page::VoltBoost
+                | Page::VoltShaders
+                | Page::VoltQol
+                | Page::VoltChat
+                | Page::VoltVisuals
+                | Page::VoltMods
+        ) {
             self.settings_search.set_value("");
             self.settings_search.focused = false;
+        }
+        if page == Page::KeyBinds {
+            self.keybind_filter = 0;
+        }
+        if page == Page::VoltAtlas {
+            self.world_atlas.center_on_player();
+        }
+        if page == Page::Waypoints {
+            self.waypoint_name.focused = false;
         }
         if page == Page::Language {
             self.language_choice = None;
@@ -1815,11 +2380,16 @@ impl OptionsUi {
         if page == Page::Packs {
             self.pack_screen = None;
         }
-        if matches!(
-            page,
-            Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr
-        ) {
-            self.graphics.reset();
+        if let Some(level) = Self::graphics_level(page) {
+            self.graphics.open_level(level);
+        }
+        if page == Page::VoltGlass {
+            self.volt_glass.reset();
+        }
+        if page == Page::ModMenu {
+            self.mod_menu.search.set_value("");
+            self.mod_menu.search_focused = false;
+            self.mod_menu.scroll.amount = 0.0;
         }
     }
     /// The graphics screen level of `page`, if it is one.
@@ -1830,6 +2400,14 @@ impl OptionsUi {
             Page::GraphicsHdr => Some(crate::graphics_ui::Level::Hdr),
             _ => None,
         }
+    }
+    /// The name of a Horizon pack's options page past its first, as the page's title.
+    fn pack_page_title(s: &Settings, page: Page) -> Option<Text> {
+        let Page::NativePackOptions(pack, at @ 1..) = page else {
+            return None;
+        };
+        let page = s.shader_packs.get(pack)?.pages.get(usize::from(at))?;
+        Some(Text::literal(&page.name))
     }
     fn title(page: Page) -> &'static str {
         match page {
@@ -1849,11 +2427,23 @@ impl OptionsUi {
             Page::Mods => "horizon.pages.mods",
             Page::NativeMod(_) => "Mod Settings",
             Page::ShaderPacks => "horizon.pages.shader_packs",
+            Page::ShaderOptions | Page::NativePackOptions(..) => "horizon.pages.shader_options",
             Page::Graphics | Page::GraphicsAdvanced | Page::GraphicsHdr => "options.videoTitle",
-            Page::FrameItems => "Frame Items",
             Page::Controller => "horizon.pages.controller",
             Page::PadBinds => "horizon.pages.controller_binds",
             Page::Extras => "horizon.pages.extras",
+            Page::Waypoints => "horizon.pages.waypoints",
+            Page::Minimap => "horizon.pages.minimap",
+            Page::VoltBoost => "volt.boost.title",
+            Page::VoltShaders => "volt.shaders.title",
+            Page::VoltVisuals => "volt.visuals.title",
+            Page::VoltQol => "volt.qol.title",
+            Page::VoltReplay => "Volt Replay",
+            Page::VoltChat => "volt.chat.title",
+            Page::VoltMods => "volt.mods.title",
+            Page::VoltGlass => "horizon.pages.settings",
+            Page::ModMenu => "volt.mod_menu.title",
+            Page::VoltAtlas => "volt.atlas.title",
             Page::Touch => "Touch Controls",
             Page::Credits => "credits_and_attribution.screen.title",
             Page::Horizon => "horizon.pages.settings",
@@ -1947,57 +2537,301 @@ impl OptionsUi {
 
     fn list_rows(&self, s: &Settings) -> Vec<Row> {
         match self.page() {
-            Page::Extras => {
-                // Each section's switches two to a row, as vanilla's
-                // OptionsList.addSmall lays out an options screen.
-                let extra = |item: crate::extras::Item| {
-                    let value = format!("{}: {}", item.caption(), item.value(&s.extras));
-                    let label = if item.key_name().is_some() && self.selected_key == item.key_name()
-                    {
-                        Text::literal(format!("> {value} <")).with_color(text::YELLOW)
-                    } else {
-                        Text::literal(value)
-                    };
-                    let widget = button(0.0, 0.0, 150.0, label, Act::Extra(item));
-                    // A setting of a switch that is off does nothing: inactive,
-                    // as vanilla greys out an option that can't apply.
-                    if item
-                        .parent()
-                        .is_some_and(|parent| parent.switch(&s.extras) == Some(false))
-                    {
-                        inactive(widget)
-                    } else {
-                        widget
-                    }
-                };
-                let mut rows = Vec::new();
-                let mut section = Vec::new();
-                let flush = |rows: &mut Vec<Row>, section: &mut Vec<crate::extras::Item>| {
-                    rows.extend(
-                        section
-                            .chunks(2)
-                            .map(|c| Row::Buttons(extra(c[0]), c.get(1).map(|&b| extra(b)))),
-                    );
-                    section.clear();
-                };
-                for row in crate::extras::rows() {
-                    match row {
-                        Err(header) => {
-                            flush(&mut rows, &mut section);
-                            rows.push(Row::Header(header));
-                        }
-                        Ok(item) => section.push(item),
-                    }
+            Page::Extras => self.extra_section_rows(s, crate::extras::rows()),
+            Page::Minimap => self.extra_section_rows(s, crate::extras::minimap_rows()),
+            Page::VoltBoost => {
+                let mut rows = vec![Row::Big(Opt::VoltResolutionScale)];
+                rows.extend(self.volt_custom_sections(
+                    s,
+                    &[(
+                        "Vulkan FPS Engine+ (#6)",
+                        crate::options_volt_pages::BOOST_PLUS_ITEMS,
+                    )],
+                ));
+                rows.extend(self.extra_section_rows(s, crate::extras::volt_boost_rows()));
+                rows
+            }
+            Page::VoltShaders => self.volt_shader_rows(s),
+            Page::VoltVisuals => {
+                use crate::options_volt_pages::VoltAct;
+                let open =
+                    |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
+                let mut rows = vec![
+                    Row::Header("Shaders & Render Pipeline"),
+                    Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("volt.shaders.button"),
+                            Act::Push(Page::VoltShaders),
+                        ),
+                        None,
+                    ),
+                    Row::Buttons(
+                        open("horizon.pages.open.graphics", Page::Graphics),
+                        Some(open(
+                            "horizon.pages.open.graphics_advanced",
+                            Page::GraphicsAdvanced,
+                        )),
+                    ),
+                    Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("horizon.pages.open.shader_packs"),
+                            Act::Push(Page::ShaderPacks),
+                        ),
+                        None,
+                    ),
+                ];
+                rows.extend(self.volt_custom_sections(
+                    s,
+                    &[(
+                        "Connected Textures & 3D Items (#19)",
+                        &[
+                            VoltAct::VisualsCtmGlass,
+                            VoltAct::VisualsBetterGrass,
+                            VoltAct::VisualsDroppedItems3d,
+                        ],
+                    )],
+                ));
+                rows.push(Row::Header("World Lighting"));
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::Fullbright),
+                    Some(self.extra_button(s, crate::extras::Item::DynamicLights)),
+                ));
+                rows
+            }
+            Page::VoltQol => {
+                let mut rows = vec![Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("volt.atlas.open"),
+                        Act::Push(Page::VoltAtlas),
+                    ),
+                    None,
+                )];
+                rows.extend(
+                    self.volt_custom_sections(s, crate::options_volt_pages::QOL_SECTIONS),
+                );
+                rows
+            }
+            Page::VoltReplay => {
+                let mut rows = vec![
+                    Row::Header("Volt Replay \u{2014} Session Recorder"),
+                    Row::Buttons(
+                        self.volt_custom_button(
+                            s,
+                            crate::options_volt_pages::VoltAct::QolReplay,
+                        ),
+                        Some(self.volt_custom_button(
+                            s,
+                            crate::options_volt_pages::VoltAct::QolReplayButton,
+                        )),
+                    ),
+                    Row::Header("While on, every server and world session is saved"),
+                    Row::Header("to this instance's replays folder."),
+                    Row::Header("The on-screen Replay Button floats over the HUD"),
+                    Row::Header("with Start / Pause / End. Drag it anywhere. Hold"),
+                    Row::Header("it a moment, then drag: up-down resizes it,"),
+                    Row::Header("left-right changes its opacity."),
+                    Row::Header("Watching opens Replay Studio: the game HUD gets"),
+                    Row::Header("out of the way, a free spectator camera starts"),
+                    Row::Header("behind your recorded self, and the editor dock"),
+                    Row::Header("sits at the bottom. Camera keyframe paths hang"),
+                    Row::Header("in the world as a red spline."),
+                    Row::Header("The dock: MARK timeline markers, +KF camera"),
+                    Row::Header("keyframes (frame shots calmly \u{2014} pause allowed;"),
+                    Row::Header("each adds 5s of flight), PATH flies their spline"),
+                    Row::Header("smoothly on its own clock, LAPSE x16-x64"),
+                    Row::Header("timelapse (with PATH: a cinematic timelapse;"),
+                    Row::Header("shaders stay on), MUSIC continuous soundtrack,"),
+                    Row::Header("LOOP, and RENDER exports an MP4 to"),
+                    Row::Header("replays/exports \u{2014} all on-device."),
+                    Row::Header("Transport: speeds x0.1-x64, POV/FREE camera."),
+                    Row::Header("Watch a replay \u{2014} it plays right here, in the game:"),
+                ];
+                if s.replays.is_empty() {
+                    rows.push(Row::Note("No replays recorded yet.".to_string()));
                 }
-                flush(&mut rows, &mut section);
+                for (i, r) in s.replays.iter().enumerate() {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            Text::literal(format!("Watch: {}", r.title)),
+                            Act::WatchReplay(i),
+                        ),
+                        None,
+                    ));
+                    rows.push(Row::Note(r.line.clone()));
+                }
+                rows
+            }
+            Page::VoltChat => {
+                let mut rows = vec![Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("options.chat"),
+                        Act::Push(Page::Chat),
+                    ),
+                    None,
+                )];
+                rows.extend(
+                    self.volt_custom_sections(s, crate::options_volt_pages::CHAT_SECTIONS),
+                );
+                rows
+            }
+            Page::VoltMods => {
+                let mut rows = vec![Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("horizon.pages.open.mods"),
+                        Act::Push(Page::Mods),
+                    ),
+                    None,
+                )];
+                rows.extend(
+                    self.volt_custom_sections(s, crate::options_volt_pages::MODS_SECTIONS),
+                );
+                rows
+            }
+            Page::Waypoints => {
+                let mut rows = self.extra_section_rows(s, crate::extras::waypoint_rows());
+                rows.push(Row::Header("Saved Waypoints"));
+                let add_btn = if let Some((_, _, [x, y, z])) = &self.waypoint_context {
+                    button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        Text::literal(format!("+ Add Here ({x}, {y}, {z})")),
+                        Act::AddWaypoint,
+                    )
+                } else {
+                    inactive(button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        Text::literal("+ Add Here (In World)"),
+                        Act::AddWaypoint,
+                    ))
+                };
+                let color_btn = self.extra_button(s, crate::extras::Item::WaypointNewColor);
+                rows.push(Row::Buttons(add_btn, Some(color_btn)));
+
+                if let Some((scope, _, _)) = &self.waypoint_context {
+                    let indices = s.volt_waypoints.scoped_indices(scope);
+                    if indices
+                        .iter()
+                        .any(|&i| s.volt_waypoints.entries[i].is_death)
+                    {
+                        rows.push(Row::Buttons(
+                            button(
+                                0.0,
+                                0.0,
+                                310.0,
+                                Text::literal("Clear Death Waypoints"),
+                                Act::ClearDeathWaypoints,
+                            ),
+                            None,
+                        ));
+                    }
+                    if indices.is_empty() {
+                        rows.push(Row::Note(
+                            "No waypoints saved in this world yet — enter a name above and tap + Add Here."
+                                .into(),
+                        ));
+                    } else {
+                        for idx in indices {
+                            let wp = &s.volt_waypoints.entries[idx];
+                            let dim = crate::volt_features::short_dimension_label(&wp.dimension);
+                            rows.push(Row::Note(format!(
+                                "{}  [{}, {}, {} · {dim}]",
+                                wp.name, wp.x, wp.y, wp.z
+                            )));
+                            let [r, g, b] = wp.color.rgb();
+                            let state_txt = if wp.enabled { "Shown" } else { "Hidden" };
+                            let toggle = button(
+                                0.0,
+                                0.0,
+                                145.0,
+                                Text::literal(format!("{}: {state_txt}", wp.name)),
+                                Act::ToggleWaypoint(idx),
+                            );
+                            let col = button(
+                                0.0,
+                                0.0,
+                                55.0,
+                                Text::literal(wp.color.label()).with_color(
+                                    0xFF00_0000
+                                        | (u32::from(r) << 16)
+                                        | (u32::from(g) << 8)
+                                        | u32::from(b),
+                                ),
+                                Act::CycleWaypointColor(idx),
+                            );
+                            let tp = button(
+                                0.0,
+                                0.0,
+                                50.0,
+                                Text::literal("TP/Copy"),
+                                Act::TeleportWaypoint(idx),
+                            );
+                            let del = button(
+                                0.0,
+                                0.0,
+                                45.0,
+                                Text::literal("Del").with_color(rgba(248, 113, 113, 255)),
+                                Act::DeleteWaypoint(idx),
+                            );
+                            rows.push(Row::Four(toggle, col, tp, del));
+                        }
+                    }
+                } else {
+                    rows.push(Row::Note(
+                        "Join a world or server to manage its waypoints.".into(),
+                    ));
+                }
                 rows
             }
             Page::Horizon => {
-                // Two to a row, as vanilla's OptionsList.addSmall lays out
-                // buttons; each opens a page built from vanilla's widgets.
                 let open =
                     |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
                 vec![
+                    Row::Header("Volt Core Suites"),
+                    Row::Buttons(
+                        open("volt.boost.button", Page::VoltBoost),
+                        Some(open("volt.visuals.button", Page::VoltVisuals)),
+                    ),
+                    Row::Buttons(
+                        open("volt.qol.button", Page::VoltQol),
+                        Some(open("volt.chat.button", Page::VoltChat)),
+                    ),
+                    Row::Header("World Navigation & Maps"),
+                    Row::Buttons(
+                        open("horizon.pages.open.waypoints", Page::Waypoints),
+                        Some(open("horizon.pages.open.minimap", Page::Minimap)),
+                    ),
+                    Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            310.0,
+                            tr("volt.atlas.open"),
+                            Act::Push(Page::VoltAtlas),
+                        ),
+                        None,
+                    ),
+                    Row::Header("Graphics, Input & Horizon Engine"),
                     Row::Buttons(
                         open("horizon.pages.open.graphics", Page::Graphics),
                         Some(open(
@@ -2011,36 +2845,29 @@ impl OptionsUi {
                     ),
                     Row::Buttons(
                         open("horizon.pages.open.extras", Page::Extras),
-                        Some(open("horizon.pages.open.mods", Page::Mods)),
+                        Some(button(
+                            0.0,
+                            0.0,
+                            150.0,
+                            Text::literal("Touch Controls..."),
+                            Act::Push(Page::Touch),
+                        )),
                     ),
                     Row::Buttons(
-                        button(0.0, 0.0, 150.0, Text::literal("Frame Items"), Act::Push(Page::FrameItems)),
-                        Some(open("horizon.pages.open.shader_packs", Page::ShaderPacks)),
-                    ),
-                    // No AI hides the AI Agent page and everything AI.
-                    Row::Buttons(
-                        self.extra_button(s, crate::extras::Item::DiscordPresence),
+                        open("horizon.pages.open.mods", Page::Mods),
                         Some(if s.extras.no_ai {
                             self.extra_button(s, crate::extras::Item::NoAi)
                         } else {
                             open("horizon.pages.open.agent", Page::Agent)
                         }),
                     ),
+                    Row::Buttons(
+                        self.extra_button(s, crate::extras::Item::DiscordPresence),
+                        (!s.extras.no_ai)
+                            .then(|| self.extra_button(s, crate::extras::Item::NoAi)),
+                    ),
                 ]
-                .into_iter()
-                .chain(
-                    (!s.extras.no_ai).then(|| {
-                        Row::Buttons(self.extra_button(s, crate::extras::Item::NoAi), None)
-                    }),
-                )
-                .collect()
             }
-            Page::FrameItems => vec![
-                Row::Big(Opt::ItemFramesEnabled),
-                Row::Big(Opt::ItemFramesDistance),
-                Row::Big(Opt::FrameContentsEnabled),
-                Row::Big(Opt::FrameContentsDistance),
-            ],
             Page::Agent => {
                 let mut rows = vec![Row::Buttons(
                     self.extra_button(s, crate::extras::Item::AgentControl),
@@ -2056,24 +2883,7 @@ impl OptionsUi {
                 rows
             }
             Page::Video => {
-                // Horizon's graphics screens, Simple and Advanced.
-                let mut rows = vec![Row::Buttons(
-                    button(
-                        0.0,
-                        0.0,
-                        150.0,
-                        tr("horizon.pages.open.horizon_graphics"),
-                        Act::Push(Page::Graphics),
-                    ),
-                    Some(button(
-                        0.0,
-                        0.0,
-                        150.0,
-                        tr("horizon.pages.open.graphics_advanced"),
-                        Act::Push(Page::GraphicsAdvanced),
-                    )),
-                )];
-                rows.push(Row::Header("options.video.display.header"));
+                let mut rows = vec![Row::Header("options.video.display.header")];
                 rows.push(Row::Big(Opt::ExclusiveMode));
                 rows.extend(pairs(&[
                     Opt::MaxFps,
@@ -2169,42 +2979,15 @@ impl OptionsUi {
                     controls
                 };
                 rows.extend(pairs(&controls));
-                rows.push(Row::Buttons(
-                    button(
-                        0.0,
-                        0.0,
-                        if cfg!(target_os = "android") {
-                            150.0
-                        } else {
-                            310.0
-                        },
-                        Text::literal("Controller Settings..."),
-                        Act::Push(Page::Controller),
-                    ),
-                    {
-                        #[cfg(target_os = "android")]
-                        {
-                            Some(button(
-                                0.0,
-                                0.0,
-                                150.0,
-                                Text::literal("Touch Controls..."),
-                                Act::Push(Page::Touch),
-                            ))
-                        }
-                        #[cfg(not(target_os = "android"))]
-                        {
-                            None
-                        }
-                    },
-                ));
                 self.filter_option_rows(rows)
             }
             Page::Touch => {
-                let mut rows = vec![Row::Big(Opt::TouchMode)];
+                let mut rows = vec![Row::Big(Opt::TouchPreset), Row::Big(Opt::TouchMode)];
                 rows.extend(pairs(&[
                     Opt::TouchCrosshairGestures,
                     Opt::TouchSensitivity,
+                    Opt::TouchSensitivityHorizontal,
+                    Opt::TouchSensitivityVertical,
                     Opt::TouchOffhand,
                     Opt::TouchShield,
                     Opt::TouchButtonScale,
@@ -2212,6 +2995,7 @@ impl OptionsUi {
                     Opt::TouchAttackSide,
                     Opt::DebugGuiScale,
                     Opt::TouchAnalog,
+                    Opt::TouchJoystick,
                     Opt::TouchSprintButton,
                     Opt::TouchSprintToggle,
                     Opt::TouchInventoryControls,
@@ -2298,10 +3082,32 @@ impl OptionsUi {
             }
             Page::Font => pairs(&[Opt::ForceUnicode, Opt::JapaneseGlyphs]),
             Page::Mods => {
+                // Volt Replay leads the list: Volt's built-in session
+                // recorder, toggled like any other mod. Its Settings button
+                // opens Volt QoL, where the toggle also lives.
+                let replay_label = Text::literal("Volt Replay 1.0.0: ".to_owned())
+                    .append(on_off(s.extras.volt_qol.replay_buffer));
+                let replay = Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        replay_label,
+                        Act::VoltCustom(crate::options_volt_pages::VoltAct::QolReplay),
+                    ),
+                    Some(button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        tr("horizon.mods.settings"),
+                        Act::Push(Page::VoltReplay),
+                    )),
+                );
                 if s.mods.installed.is_empty() {
-                    return vec![Row::Header("horizon.mods.empty")];
+                    return vec![replay, Row::Header("horizon.mods.empty")];
                 }
-                s.mods
+                std::iter::once(replay)
+                    .chain(s.mods
                     .installed
                     .iter()
                     .enumerate()
@@ -2335,7 +3141,7 @@ impl OptionsUi {
                             let widget = button(0.0, 0.0, 310.0, label, Act::ToggleMod(i));
                             Row::Buttons(if dead { inactive(widget) } else { widget }, None)
                         }
-                    })
+                    }))
                     .collect()
             }
             Page::NativeMod(i) => self.native_rows(s, i),
@@ -2343,10 +3149,23 @@ impl OptionsUi {
                 if s.shader_packs.is_empty() {
                     return vec![Row::Header("horizon.shader_packs.empty")];
                 }
-                s.shader_packs
+                let picked = s
+                    .shader_packs
                     .iter()
-                    .enumerate()
-                    .map(|(i, pack)| {
+                    .position(|p| p.file == s.horizon.shader_pack);
+                let options = picked.and_then(|i| {
+                    let pack = &s.shader_packs[i];
+                    let act = match pack.kind {
+                        crate::shader_pack_list::Kind::Classic => Act::ShaderOptions,
+                        _ if pack.options.is_empty() => return None,
+                        crate::shader_pack_list::Kind::Horizon => Act::NativePackOptions(i),
+                    };
+                    let label = tr("horizon.shader_options.open");
+                    Some(Row::Buttons(button(0.0, 0.0, 310.0, label, act), None))
+                });
+                options
+                    .into_iter()
+                    .chain(s.shader_packs.iter().enumerate().map(|(i, pack)| {
                         let kind = match pack.kind {
                             crate::shader_pack_list::Kind::Horizon => {
                                 lang::get("horizon.shader_packs.kind_horizon")
@@ -2356,23 +3175,209 @@ impl OptionsUi {
                         let label = Text::literal(format!("{}{kind}: ", pack.title))
                             .append(on_off(s.horizon.shader_pack == pack.file));
                         Row::Buttons(button(0.0, 0.0, 310.0, label, Act::PickShaderPack(i)), None)
-                    })
+                    }))
                     .collect()
             }
+            Page::ShaderOptions => shader_option_rows(s),
+            Page::NativePackOptions(i, at) => native_pack_option_rows(s, i, at),
             _ => {
                 let _ = s;
                 Vec::new()
             }
         }
     }
+
+    fn volt_shader_rows(&self, s: &Settings) -> Vec<Row> {
+        use crate::extras::Item;
+        use crate::options_volt_pages::VoltAct;
+        #[derive(Clone, Copy)]
+        enum Entry {
+            Item(Item),
+            Volt(VoltAct),
+            Slider(Opt),
+            BigSlider(Opt),
+        }
+        let master = Row::Buttons(
+            button(
+                0.0,
+                0.0,
+                310.0,
+                Text::literal(format!(
+                    "{}: {}",
+                    Item::VoltShaderEnable.caption(),
+                    Item::VoltShaderEnable.value(&s.extras)
+                )),
+                Act::Extra(Item::VoltShaderEnable),
+            ),
+            None,
+        );
+        if !s.extras.volt_shaders.enabled {
+            return vec![master];
+        }
+        let mut rows = vec![master];
+        let query = self.settings_search.value.trim().to_lowercase();
+        let entry_matches = |entry: Entry| -> bool {
+            if query.is_empty() {
+                return true;
+            }
+            match entry {
+                Entry::Item(item) => {
+                    item.caption().to_lowercase().contains(&query)
+                        || item.description().to_lowercase().contains(&query)
+                        || item.value(&s.extras).to_lowercase().contains(&query)
+                }
+                Entry::Volt(act) => {
+                    act.caption().to_lowercase().contains(&query)
+                        || act.description().to_lowercase().contains(&query)
+                        || act.value(&s.extras).to_lowercase().contains(&query)
+                }
+                Entry::Slider(opt) | Entry::BigSlider(opt) => {
+                    lang::get(opt.caption()).to_lowercase().contains(&query)
+                        || lang::get(&opt.tooltip_key(s))
+                            .to_lowercase()
+                            .contains(&query)
+                }
+            }
+        };
+        if query.is_empty()
+            || entry_matches(Entry::Item(Item::VoltShaderProfile))
+            || entry_matches(Entry::Item(Item::VoltShaderReset))
+        {
+            rows.push(Row::Buttons(
+                self.extra_button(s, Item::VoltShaderProfile),
+                Some(self.extra_button(s, Item::VoltShaderReset)),
+            ));
+        }
+        let sections: &[(&str, &[Entry])] = &[
+            (
+                "BSL & Complementary Style & Comfort",
+                &[
+                    Entry::Volt(VoltAct::ShaderStyle),
+                    Entry::Volt(VoltAct::ShaderEyeComfort),
+                    Entry::Volt(VoltAct::ShaderAutoPbr),
+                    Entry::Volt(VoltAct::ShaderGlowingOres),
+                    Entry::Volt(VoltAct::ShaderOreGlow),
+                    Entry::Volt(VoltAct::ShaderCloudShadows),
+                ],
+            ),
+            (
+                "3D Clouds, Milky Way & Atmosphere",
+                &[
+                    Entry::Volt(VoltAct::ShaderCloudsMode),
+                    Entry::Volt(VoltAct::ShaderCloudCoverage),
+                    Entry::Item(Item::VoltShaderCustomSky),
+                    Entry::Item(Item::VoltShaderSunHalo),
+                    Entry::Item(Item::VoltShaderAurora),
+                    Entry::Volt(VoltAct::ShaderNightSkyPlus),
+                    Entry::Volt(VoltAct::ShaderRainbow),
+                    Entry::Item(Item::VoltShaderDepthHaze),
+                    Entry::BigSlider(Opt::VoltShaderSunsetGlow),
+                ],
+            ),
+            (
+                "Moving Vegetation & Wind",
+                &[
+                    Entry::Item(Item::VoltShaderWavePlants),
+                    Entry::Item(Item::VoltShaderWaveLeaves),
+                    Entry::Item(Item::VoltShaderWaveWater),
+                    Entry::Item(Item::VoltShaderStormWind),
+                    Entry::Slider(Opt::VoltShaderWindSpeed),
+                    Entry::Slider(Opt::VoltShaderWindStrength),
+                ],
+            ),
+            (
+                "Lighting & Shadows",
+                &[
+                    Entry::Item(Item::VoltShaderSunShading),
+                    Entry::Item(Item::VoltShaderFoliageGlow),
+                    Entry::Slider(Opt::VoltShaderShadowRichness),
+                    Entry::Item(Item::VoltShaderRainWetness),
+                    Entry::Item(Item::VoltShaderTorchStyle),
+                    Entry::Slider(Opt::VoltShaderTorchIntensity),
+                    Entry::BigSlider(Opt::VoltShaderEmissiveGlow),
+                ],
+            ),
+            (
+                "Water, Foam & Reflections",
+                &[
+                    Entry::Item(Item::VoltShaderWaterRipples),
+                    Entry::Volt(VoltAct::ShaderWaterFoam),
+                    Entry::Item(Item::VoltShaderWaterGlint),
+                    Entry::Item(Item::VoltShaderClearWater),
+                    Entry::Item(Item::VoltShaderUnderwaterRefract),
+                    Entry::BigSlider(Opt::VoltShaderWaterReflection),
+                ],
+            ),
+            (
+                "Post-Processing & Color Grading",
+                &[
+                    Entry::Item(Item::VoltShaderTonemap),
+                    Entry::Item(Item::VoltShaderBloom),
+                    Entry::Item(Item::VoltShaderSunRays),
+                    Entry::Item(Item::VoltShaderVignette),
+                    Entry::Slider(Opt::VoltShaderVibrance),
+                    Entry::Slider(Opt::VoltShaderSaturation),
+                    Entry::Slider(Opt::VoltShaderContrast),
+                    Entry::Slider(Opt::VoltShaderExposure),
+                    Entry::BigSlider(Opt::VoltShaderWarmth),
+                ],
+            ),
+        ];
+        let to_half_widget = |entry: Entry| -> Widget {
+            match entry {
+                Entry::Item(item) => self.extra_button(s, item),
+                Entry::Volt(act) => self.volt_custom_button(s, act),
+                Entry::Slider(opt) | Entry::BigSlider(opt) => {
+                    option_widget(s, opt, 0.0, 0.0, 150.0)
+                }
+            }
+        };
+        for &(header, entries) in sections {
+            let mut section_rows = Vec::new();
+            let mut left: Option<Widget> = None;
+            for &entry in entries {
+                if !entry_matches(entry) {
+                    continue;
+                }
+                match entry {
+                    Entry::BigSlider(opt) => {
+                        if let Some(prev) = left.take() {
+                            section_rows.push(Row::Buttons(prev, None));
+                        }
+                        section_rows.push(Row::Big(opt));
+                    }
+                    half => {
+                        let w = to_half_widget(half);
+                        if let Some(prev) = left.take() {
+                            section_rows.push(Row::Buttons(prev, Some(w)));
+                        } else {
+                            left = Some(w);
+                        }
+                    }
+                }
+            }
+            if let Some(prev) = left.take() {
+                section_rows.push(Row::Buttons(prev, None));
+            }
+            if !section_rows.is_empty() {
+                rows.push(Row::Header(header));
+                rows.extend(section_rows);
+            }
+        }
+        rows
+    }
     /// Build every widget of the current page.
     fn layout(&mut self, s: &Settings, w: f32, h: f32) -> (Vec<Widget>, f32, f32, f32) {
         let mut out = Vec::new();
         let page = self.page();
         let cx = (w / 2.0).floor();
-        if matches!(page, Page::Video | Page::Controls | Page::KeyBinds) {
+        if self.has_settings_search(s) {
             self.settings_search.x = cx - 100.0;
             self.settings_search.y = 17.0;
+        }
+        if page == Page::Waypoints {
+            self.waypoint_name.x = cx - 100.0;
+            self.waypoint_name.y = 17.0;
         }
         let done = |y: f32| button(cx - 100.0, y, 200.0, tr("gui.done"), Act::Done);
         // (list top, list bottom, content height)
@@ -2402,17 +3407,14 @@ impl OptionsUi {
                 let entries = [
                     ("options.skinCustomisation", Some(Page::Skin)),
                     ("options.sounds", Some(Page::Sound)),
-                    ("options.video", Some(Page::Video)),
+                    ("options.video", Some(Page::Graphics)),
                     ("options.controls", Some(Page::Controls)),
                     ("options.language", Some(Page::Language)),
                     ("options.chat", Some(Page::Chat)),
                     ("options.resourcepack", Some(Page::Packs)),
                     ("options.accessibility", Some(Page::Accessibility)),
-                    // Vanilla's Telemetry Data and Credits slots: Horizon's
-                    // settings and its mods, as a mod adds its button here.
-                    // Credits & Attribution (WinScreen's credits) follows them.
-                    ("horizon.pages.open.horizon_settings", Some(Page::Horizon)),
-                    ("horizon.pages.open.mods", Some(Page::Mods)),
+                    ("horizon.pages.mods", Some(Page::Mods)),
+                    ("horizon.pages.open.horizon_settings", Some(Page::VoltGlass)),
                     ("options.credits_and_attribution", Some(Page::Credits)),
                 ];
                 let rows = entries.len().div_ceil(2) as f32;
@@ -2510,9 +3512,58 @@ impl OptionsUi {
                 } else {
                     MAPPINGS.iter().map(|(n, _, c)| (*n, *c)).collect()
                 };
-                let query = self.settings_search.value.to_lowercase();
+                let query = self.settings_search.value.trim().to_lowercase();
+                let controlling_on = s
+                    .extras
+                    .mod_catalog
+                    .is_on(crate::volt_mods::VoltModId::Controlling);
+                let kb_filter = if controlling_on {
+                    self.keybind_filter
+                } else {
+                    0
+                };
                 mappings.retain(|(name, _)| {
-                    query.is_empty() || label(name).to_lowercase().contains(&query)
+                    let bound = if keypad {
+                        s.keypad
+                            .keys(name)
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "key.keyboard.unknown".into())
+                    } else {
+                        s.keys.get(name).to_owned()
+                    };
+                    if kb_filter == 1 {
+                        let has_conflict = if keypad {
+                            crate::keypad::ACTIONS.iter().any(|a| {
+                                a.0 != *name
+                                    && s.keypad.keys(a.0).contains(&bound)
+                                    && bound != "key.keyboard.unknown"
+                            })
+                        } else {
+                            !s.keys.conflicts(name).is_empty()
+                        };
+                        if !has_conflict {
+                            return false;
+                        }
+                    } else if kb_filter == 2 && bound != "key.keyboard.unknown" {
+                        return false;
+                    }
+                    if query.is_empty() {
+                        return true;
+                    }
+                    if let Some(kq) = query.strip_prefix("key:") {
+                        let kq = kq.trim();
+                        return keybinds::display_name(&bound)
+                            .plain()
+                            .to_lowercase()
+                            .contains(kq);
+                    }
+                    label(name).to_lowercase().contains(&query)
+                        || (controlling_on
+                            && keybinds::display_name(&bound)
+                                .plain()
+                                .to_lowercase()
+                                .contains(&query))
                 });
                 mappings.sort_by(|a, b| {
                     let ca = CATEGORIES.iter().position(|c| *c == a.1).unwrap_or(99);
@@ -2831,20 +3882,20 @@ impl OptionsUi {
             // Drawn by `pack_screen`.
             Page::Packs => {}
             _ => {
-                if matches!(page, Page::Video | Page::Controls) {
+                let header_input = self.has_settings_search(s)
+                    && page != Page::KeyBinds
+                    || page == Page::Waypoints;
+                if header_input {
                     top = 38.0;
                 }
                 out.push(Widget {
                     x: 0.0,
-                    y: if matches!(page, Page::Video | Page::Controls) {
-                        4.0
-                    } else {
-                        12.0
-                    },
+                    y: if header_input { 4.0 } else { 12.0 },
                     w,
                     h: 9.0,
                     kind: WKind::Text {
-                        text: tr(Self::title(page)),
+                        text: Self::pack_page_title(s, page)
+                            .unwrap_or_else(|| tr(Self::title(page))),
                         color: u32::MAX,
                         centered: true,
                     },
@@ -2916,6 +3967,16 @@ impl OptionsUi {
                             }
                             y += 25.0;
                         }
+                        Row::Four(mut a, mut b, mut c, mut d) => {
+                            let mut rx = cx - 155.0;
+                            for part in [&mut a, &mut b, &mut c, &mut d] {
+                                part.x = rx;
+                                part.y = y + 2.0;
+                                rx += part.w + 5.0;
+                            }
+                            out.extend([a, b, c, d]);
+                            y += 25.0;
+                        }
                     }
                 }
                 content = y + self.scroll - top + 2.0;
@@ -2923,6 +3984,10 @@ impl OptionsUi {
                 let folder = match page {
                     Page::Mods => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
                     Page::ShaderPacks => Some(("pack.openFolder", Act::OpenShaderPackFolder)),
+                    Page::ShaderOptions => Some(("controls.reset", Act::ShaderReset)),
+                    Page::NativePackOptions(i, _) => {
+                        Some(("controls.reset", Act::NativePackReset(i)))
+                    }
                     _ => None,
                 };
                 if let Some((label, act)) = folder {
@@ -2998,6 +4063,68 @@ impl OptionsUi {
                 .draw(level, s, batch, atlas, cursor, self.in_world);
             return;
         }
+        if self.page() == Page::VoltGlass {
+            self.volt_glass.binding = self.selected_key;
+            self.volt_glass.draw(s, batch, atlas, cursor, self.in_world);
+            return;
+        }
+        if self.page() == Page::ModMenu {
+            self.mod_menu.draw(s, batch, atlas, cursor, self.in_world);
+            return;
+        }
+        if self.page() == Page::Mods {
+            self.draw_mods_glass(s, batch, atlas, cursor);
+            return;
+        }
+        if self.page() == Page::VoltAtlas {
+            ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
+            let title_t = tr(Self::title(Page::VoltAtlas));
+            batch.text_styled(
+                atlas,
+                &title_t,
+                ((w - atlas.font.width_text(&title_t)) / 2.0).floor(),
+                10.0,
+                u32::MAX,
+                true,
+            );
+            // The master Waypoints toggle wins here too, and no world
+            // context means NO waypoints — `is_none_or` used to spill
+            // every world's waypoints onto the map whenever the context
+            // was missing, and the map ignored the off toggle entirely.
+            let wp_list: Vec<(String, [f64; 3], [u8; 3])> = s
+                .volt_waypoints
+                .entries
+                .iter()
+                .filter(|wp| {
+                    s.extras.waypoints
+                        && wp.enabled
+                        && self.waypoint_context.as_ref().is_some_and(|(sc, dm, _)| {
+                            wp.scope == *sc && wp.dimension == *dm
+                        })
+                })
+                .map(|wp| {
+                    (
+                        wp.name.clone(),
+                        [f64::from(wp.x), f64::from(wp.y), f64::from(wp.z)],
+                        wp.color.rgb(),
+                    )
+                })
+                .collect();
+            self.world_atlas
+                .draw_screen(batch, atlas, &s.extras.volt_qol, &wp_list);
+            ui::button(
+                batch,
+                atlas,
+                w - 110.0,
+                h - 24.0,
+                98.0,
+                18.0,
+                &tr("gui.done"),
+                true,
+                ui::hovered(cursor, w - 110.0, h - 24.0, 98.0, 18.0),
+            );
+            return;
+        }
         if self.page() == Page::Packs {
             self.watch_data_packs(atlas, (w, h));
             ui::menu_background(batch, atlas, 0.0, 0.0, w, h, self.in_world);
@@ -3026,6 +4153,75 @@ impl OptionsUi {
             let start = batch.vertices.len();
             let hover = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
                 && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            // A pack's option: its label within the widget (the name shortened), and on hover
+            // the whole label when it was, then what the pack says of it.
+            let shader = s.shader_options.as_ref();
+            let shader_option = match &wd.kind {
+                WKind::Button {
+                    act: Act::ShaderOption(name),
+                    ..
+                }
+                | WKind::ShaderSlider { name, .. } => Some(name),
+                _ => None,
+            };
+            let fitted = shader.zip(shader_option).map(|(o, name)| {
+                o.option_label_within(name, wd.w - 8.0, |t| atlas.font.width_text(t))
+            });
+            if hover && let Some(o) = shader {
+                let comment = match (&wd.kind, shader_option) {
+                    (_, Some(name)) => o.comment(&format!("option.{name}")),
+                    (
+                        WKind::Button {
+                            act: Act::ShaderScreen(screen),
+                            ..
+                        },
+                        _,
+                    ) => o.comment(&format!("screen.{screen}")),
+                    (
+                        WKind::Button {
+                            act: Act::ShaderProfile,
+                            ..
+                        },
+                        _,
+                    ) => o.comment("profile"),
+                    _ => None,
+                };
+                let whole = shader_option
+                    .filter(|_| fitted.as_ref().is_some_and(|f| f.1))
+                    .map(|name| o.option_label(name));
+                let lines: Vec<Text> = whole
+                    .into_iter()
+                    .chain(comment)
+                    .flat_map(|t| atlas.font.split(&t, 200.0))
+                    .collect();
+                if !lines.is_empty() {
+                    tooltip = Some(lines);
+                }
+            }
+            if hover {
+                let pack_text = match &wd.kind {
+                    WKind::Button {
+                        act: Act::NativePackOption(pack, option),
+                        ..
+                    } => s
+                        .shader_packs
+                        .get(*pack)
+                        .and_then(|p| p.options.get(*option))
+                        .map(|o| &o.description),
+                    WKind::Button {
+                        act: Act::Push(Page::NativePackOptions(pack, at)),
+                        ..
+                    } => s
+                        .shader_packs
+                        .get(*pack)
+                        .and_then(|p| p.pages.get(usize::from(*at)))
+                        .map(|p| &p.description),
+                    _ => None,
+                };
+                if let Some(text) = pack_text.filter(|t| !t.is_empty()) {
+                    tooltip = Some(atlas.font.split(&Text::literal(text), 170.0));
+                }
+            }
             if hover {
                 if let WKind::Button {
                     act: Act::Extra(item),
@@ -3033,6 +4229,13 @@ impl OptionsUi {
                 } = &wd.kind
                 {
                     tooltip = Some(atlas.font.split(&Text::literal(item.description()), 170.0));
+                }
+                if let WKind::Button {
+                    act: Act::VoltCustom(vact),
+                    ..
+                } = &wd.kind
+                {
+                    tooltip = Some(atlas.font.split(&Text::literal(vact.description()), 170.0));
                 }
                 if let WKind::Button {
                     act: Act::Push(page),
@@ -3094,6 +4297,7 @@ impl OptionsUi {
             }
             match &wd.kind {
                 WKind::Button { label, active, act } => {
+                    let label = fitted.as_ref().map_or(label, |f| &f.0);
                     ui::button(batch, atlas, wd.x, wd.y, wd.w, wd.h, label, *active, hover);
                     if hover && let Act::Key(name) = act {
                         let conflicts = s.keys.conflicts(name);
@@ -3119,7 +4323,7 @@ impl OptionsUi {
                 WKind::Slider { label, value, opt } => {
                     let dragging = self.dragging == Some(*opt);
                     let shown = self.slider_shown(*opt, *value);
-                    ui::slider(
+                    ui::slider_dragging(
                         batch,
                         atlas,
                         wd.x,
@@ -3127,6 +4331,23 @@ impl OptionsUi {
                         wd.w,
                         label,
                         shown,
+                        hover || dragging,
+                        true,
+                        dragging,
+                    );
+                }
+                WKind::ShaderSlider { label, value, name } => {
+                    let label = fitted.as_ref().map_or(label, |f| &f.0);
+                    let held = self.shader_dragging.as_ref().filter(|(n, _)| n == name);
+                    let dragging = held.is_some();
+                    ui::slider_dragging(
+                        batch,
+                        atlas,
+                        wd.x,
+                        wd.y,
+                        wd.w,
+                        label,
+                        held.map_or(*value, |h| h.1),
                         hover || dragging,
                         true,
                         dragging,
@@ -3210,7 +4431,7 @@ impl OptionsUi {
             }
             self.language_search = search;
         }
-        if matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds) {
+        if self.has_settings_search(s) {
             let mut search = self.settings_search.clone();
             search.draw(batch, atlas, None);
             if search.value.is_empty() && !search.focused {
@@ -3224,6 +4445,216 @@ impl OptionsUi {
                 );
             }
             self.settings_search = search;
+            if self.page() == Page::KeyBinds {
+                let fx = (w / 2.0).floor() + 106.0;
+                let fy = 15.0;
+                let fw = 84.0;
+                let fh = 18.0;
+                let flabel = match self.keybind_filter {
+                    1 => Text::literal("Show: Conflicts").with_color(text::YELLOW),
+                    2 => Text::literal("Show: Unbound").with_color(text::AQUA),
+                    _ => Text::literal("Show: All"),
+                };
+                ui::button(
+                    batch,
+                    atlas,
+                    fx,
+                    fy,
+                    fw,
+                    fh,
+                    &flabel,
+                    true,
+                    ui::hovered(cursor, fx, fy, fw, fh),
+                );
+            }
+        }
+        if self.page() == Page::Waypoints {
+            let mut name_box = self.waypoint_name.clone();
+            name_box.draw(batch, atlas, None);
+            if name_box.value.is_empty() && !name_box.focused {
+                batch.text_styled(
+                    atlas,
+                    &Text::literal("Waypoint name (optional)...")
+                        .with_color(text::GRAY)
+                        .italic(),
+                    name_box.text_x(),
+                    name_box.text_y(),
+                    u32::MAX,
+                    true,
+                );
+            }
+            self.waypoint_name = name_box;
+        }
+        if let Some(lines) = tooltip {
+            ui::tooltip(batch, atlas, &lines, cursor);
+        }
+    }
+    /// `Page::Mods`, reskinned to the Volt Settings frosted-glass look.
+    /// The classic widget geometry is reused untouched — every click
+    /// target, `Act` and test fixture stays exactly where `layout` puts
+    /// it — only the painting differs: a veiled backdrop, a frosted sheet
+    /// behind the list, glass row cards with switch pills, and pill
+    /// buttons for Settings/footer actions.
+    fn draw_mods_glass(
+        &mut self,
+        s: &Settings,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        cursor: (f32, f32),
+    ) {
+        use crate::graphics_style as style;
+        let (w, h) = (batch.width, batch.height);
+        let (widgets, top, bottom, content) = self.layout(s, w, h);
+        let in_world = self.in_world;
+        ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
+        style::fill(batch, atlas, [0.0, 0.0, w, h], style::VEIL);
+        let list = bottom > top;
+        if list {
+            // The frosted sheet behind the scrolling list.
+            let px = (w / 2.0 - 170.0).max(4.0);
+            let pw = (w - 2.0 * px).min(340.0);
+            style::panel(batch, atlas, [px, top + 1.0, pw, bottom - top - 2.0]);
+        }
+        // Brand corner, as on Volt Settings.
+        style::fill(batch, atlas, [10.0, 9.0, 6.0, 6.0], style::ACCENT);
+        batch.text_styled(atlas, &Text::literal("Volt"), 19.0, 8.0, style::WHITE, true);
+        batch.text_styled(atlas, &Text::literal("Mods"), 10.0, 18.0, style::MUTED, true);
+        // Counter corner: enabled over installed (Volt Replay included).
+        let total = s.mods.installed.len() + 1;
+        let on_total = (0..s.mods.installed.len())
+            .filter(|&i| s.mods.is_on(i))
+            .count()
+            + usize::from(s.extras.volt_qol.replay_buffer);
+        let counter = Text::literal(format!("{on_total}/{total} on"));
+        let cw = atlas.font.width_text(&counter);
+        batch.text_styled(atlas, &counter, w - cw - 10.0, 8.0, style::MUTED, true);
+        let mut tooltip: Option<Vec<Text>> = None;
+        for wd in &widgets {
+            if wd.list && (wd.y + wd.h <= top || wd.y >= bottom) {
+                continue;
+            }
+            let start = batch.vertices.len();
+            let hover = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            match &wd.kind {
+                WKind::Button { label, active, act } => {
+                    let rect = [wd.x, wd.y, wd.w, wd.h];
+                    // Rows with a state of their own become glass cards
+                    // with a switch pill; everything else is a pill button.
+                    let toggle = match act {
+                        Act::ToggleMod(i) => s
+                            .mods
+                            .installed
+                            .get(*i)
+                            .map(|m| (m.title.clone(), s.mods.is_on(*i))),
+                        Act::VoltCustom(crate::options_volt_pages::VoltAct::QolReplay) => Some((
+                            "Volt Replay 1.0.0".to_owned(),
+                            s.extras.volt_qol.replay_buffer,
+                        )),
+                        _ => None,
+                    };
+                    if let Some((title, on)) = toggle {
+                        let face = if hover && *active {
+                            style::HOVER
+                        } else {
+                            style::GROUP
+                        };
+                        style::fill(batch, atlas, rect, face);
+                        style::ring(
+                            batch,
+                            atlas,
+                            rect,
+                            if hover && *active {
+                                style::WHITE
+                            } else {
+                                style::EDGE
+                            },
+                        );
+                        let col = if *active { style::WHITE } else { style::MUTED };
+                        let ty = wd.y + ((wd.h - 8.0) / 2.0).floor();
+                        let pill_w = 24.0;
+                        let fitted = style::fit(atlas, &title, wd.w - pill_w - 18.0);
+                        let shown = Text::literal(fitted);
+                        batch.text_styled(atlas, &shown, wd.x + 6.0, ty, col, true);
+                        // A problem or dev marker rides along, muted.
+                        let note = match act {
+                            Act::ToggleMod(i) => s.mods.installed.get(*i).and_then(|m| {
+                                if m.problem.as_deref() == Some(crate::mod_list::NOT_BUILT) {
+                                    Some(tr("horizon.mods.not_built"))
+                                } else if m.problem.is_some() {
+                                    Some(tr("horizon.mods.stopped"))
+                                } else if m.dev {
+                                    Some(tr("horizon.mods.dev"))
+                                } else {
+                                    None
+                                }
+                            }),
+                            _ => None,
+                        };
+                        if let Some(note) = note {
+                            let tw = atlas.font.width_text(&shown);
+                            let nx = wd.x + 6.0 + tw + 3.0;
+                            if nx < wd.x + wd.w - pill_w - 8.0 {
+                                batch.text_styled(atlas, &note, nx, ty, style::MUTED, true);
+                            }
+                        }
+                        let pr = [
+                            wd.x + wd.w - pill_w - 5.0,
+                            wd.y + ((wd.h - 10.0) / 2.0).floor(),
+                            pill_w,
+                            10.0,
+                        ];
+                        style::switch_pill(batch, atlas, pr, if on { 1.0 } else { 0.0 }, on);
+                    } else {
+                        let primary = matches!(act, Act::Done);
+                        style::button(batch, atlas, rect, label, (hover, *active, primary));
+                    }
+                    if hover
+                        && let Act::ToggleMod(i) = act
+                        && let Some(m) = s.mods.installed.get(*i)
+                    {
+                        let description = m.problem.as_deref().unwrap_or(&m.description);
+                        tooltip = Some(atlas.font.split(
+                            &Text::literal(format!("{}\n{description}", m.title)),
+                            170.0,
+                        ));
+                    }
+                    if hover && let Act::VoltCustom(vact) = act {
+                        tooltip =
+                            Some(atlas.font.split(&Text::literal(vact.description()), 170.0));
+                    }
+                }
+                WKind::Text { text, centered, .. } => {
+                    if *centered {
+                        let tw = atlas.font.width_text(text);
+                        batch.text_styled(
+                            atlas,
+                            text,
+                            wd.x + ((wd.w - tw) / 2.0).floor(),
+                            wd.y,
+                            style::SOFT,
+                            true,
+                        );
+                    } else {
+                        batch.text_styled(atlas, text, wd.x, wd.y, style::SOFT, true);
+                    }
+                }
+                _ => {}
+            }
+            if wd.list && (wd.y < top || wd.y + wd.h > bottom) {
+                batch.clip_since(start, 0.0, top, w, bottom);
+            }
+        }
+        if list {
+            let sx = self.scrollbar_x(w);
+            if let Some((ty, th)) = style::scrollbar_thumb(top, bottom, content, self.scroll) {
+                style::scroller(
+                    batch,
+                    atlas,
+                    [sx, top, style::SCROLLER_W, bottom - top],
+                    [sx, ty, style::SCROLLER_W, th],
+                );
+            }
         }
         if let Some(lines) = tooltip {
             ui::tooltip(batch, atlas, &lines, cursor);
@@ -3289,6 +4720,100 @@ impl OptionsUi {
             }
             return events;
         }
+        if self.page() == Page::VoltGlass {
+            use crate::volt_settings_ui::VoltUiAction;
+            if self.selected_key.is_some() && !drag {
+                let button = if right {
+                    winit::event::MouseButton::Right
+                } else {
+                    winit::event::MouseButton::Left
+                };
+                return self.bind_mouse(s, button);
+            }
+            let mut events = Vec::new();
+            for action in self
+                .volt_glass
+                .click(s, (x, y), size, framebuffer, drag, right)
+            {
+                match action {
+                    VoltUiAction::ButtonClick => events.push(Event::ButtonClick),
+                    VoltUiAction::Changed => events.push(Event::Changed),
+                    VoltUiAction::SliderDrag => events.push(Event::SliderDrag),
+                    VoltUiAction::BindKey(name) => self.selected_key = Some(name),
+                    VoltUiAction::OpenModMenu => {
+                        self.push(Page::ModMenu);
+                    }
+                    VoltUiAction::OpenVideoSettings => {
+                        self.push(Page::Graphics);
+                    }
+                    VoltUiAction::OpenShaderPacks => {
+                        self.push(Page::ShaderPacks);
+                        events.push(Event::ListShaderPacks);
+                    }
+                    VoltUiAction::OpenWaypointsManager => self.push(Page::Waypoints),
+                    VoltUiAction::OpenWorldMap => self.push(Page::VoltAtlas),
+                    VoltUiAction::OpenPadBinds => self.push(Page::PadBinds),
+                    VoltUiAction::OpenAgent => self.push(Page::Agent),
+                    VoltUiAction::OpenTouchEditor => {
+                        #[cfg(target_os = "android")]
+                        events.push(Event::TouchControls);
+                        #[cfg(not(target_os = "android"))]
+                        self.push(Page::Touch);
+                    }
+                    VoltUiAction::Done => events.extend(self.back(s)),
+                }
+            }
+            return events;
+        }
+        if self.page() == Page::ModMenu {
+            use crate::volt_mods::ModMenuAction;
+            let mut events = Vec::new();
+            for action in self.mod_menu.click(s, atlas, (x, y), size, drag, right) {
+                match action {
+                    ModMenuAction::ButtonClick => events.push(Event::ButtonClick),
+                    ModMenuAction::Changed => events.push(Event::Changed),
+                    ModMenuAction::OpenFolder => events.push(Event::OpenModFolder),
+                    ModMenuAction::OpenWorldMap => self.push(Page::VoltAtlas),
+                    ModMenuAction::OpenKeyBinds => self.push(Page::KeyBinds),
+                    ModMenuAction::Done => events.extend(self.back(s)),
+                }
+            }
+            return events;
+        }
+        if self.page() == Page::VoltAtlas {
+            if drag {
+                self.world_atlas.pointer_move(size, (x, y));
+                return Vec::new();
+            }
+            if !right && ui::hovered((x, y), size.0 - 110.0, size.1 - 24.0, 98.0, 18.0) {
+                let mut ev = vec![Event::ButtonClick];
+                ev.extend(self.back(s));
+                return ev;
+            }
+            let (mut changed, sfx) =
+                self.world_atlas
+                    .pointer_down(&mut s.extras.volt_qol, size, (x, y));
+            if let Some(pos) = self.world_atlas.pending_waypoint.take()
+                && let Some((scope, dim, _)) = &self.waypoint_context
+            {
+                s.volt_waypoints.add(
+                    scope,
+                    &format!("Atlas ({}, {})", pos[0], pos[2]),
+                    dim,
+                    pos,
+                    s.extras.waypoint_new_color,
+                );
+                changed = true;
+            }
+            let mut ev = Vec::new();
+            if sfx {
+                ev.push(Event::ButtonClick);
+            }
+            if changed {
+                ev.push(Event::Changed);
+            }
+            return ev;
+        }
         if self.page() == Page::Packs {
             let mut events = Vec::new();
             if drag {
@@ -3320,12 +4845,34 @@ impl OptionsUi {
         }
         let (widgets, top, bottom, content) = self.layout(s, size.0, size.1);
         let mut events = Vec::new();
-        if !drag && matches!(self.page(), Page::Video | Page::Controls | Page::KeyBinds) {
+        if !drag && self.has_settings_search(s) {
+            if self.page() == Page::KeyBinds {
+                let fx = (size.0 / 2.0).floor() + 106.0;
+                if ui::hovered((x, y), fx, 15.0, 84.0, 18.0) {
+                    self.keybind_filter = if right {
+                        (self.keybind_filter + 2) % 3
+                    } else {
+                        (self.keybind_filter + 1) % 3
+                    };
+                    self.scroll = 0.0;
+                    events.push(Event::ButtonClick);
+                    return events;
+                }
+            }
             let search = &mut self.settings_search;
             search.focused = ui::hovered((x, y), search.x, search.y, search.width, search.height);
             if search.focused {
                 search.click(atlas, x, false, false);
                 self.scroll = 0.0;
+                events.push(Event::ButtonClick);
+                return events;
+            }
+        }
+        if !drag && self.page() == Page::Waypoints {
+            let nb = &mut self.waypoint_name;
+            nb.focused = ui::hovered((x, y), nb.x, nb.y, nb.width, nb.height);
+            if nb.focused {
+                nb.click(atlas, x, false, false);
                 events.push(Event::ButtonClick);
                 return events;
             }
@@ -3347,6 +4894,15 @@ impl OptionsUi {
                     self.scrollbar_drag_y = None;
                 }
                 return events;
+            }
+            if let Some((name, at)) = &mut self.shader_dragging
+                && let Some(wd) = widgets
+                    .iter()
+                    .find(|wd| matches!(&wd.kind, WKind::ShaderSlider { name: n, .. } if n == name))
+                && let Some(options) = &mut s.shader_options
+            {
+                *at = ui::slider_value(wd.x, wd.w, x);
+                options.set_position(name, *at);
             }
             if let Some(opt) = self.dragging
                 && let Some(wd) = widgets
@@ -3373,8 +4929,46 @@ impl OptionsUi {
             return self.bind_mouse(s, button);
         }
         // AbstractWidget accepts only the primary button. Rebinding above
-        // accepts other mouse buttons, but is not a widget activation.
+        // accepts other mouse buttons, but is not a widget activation. A pack's option steps
+        // back with the other one.
         if right {
+            let name = widgets.iter().find_map(|wd| match &wd.kind {
+                WKind::Button {
+                    active: true,
+                    act: Act::ShaderOption(name),
+                    ..
+                } if ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h)
+                    && !(wd.list && (y < top || y >= bottom)) =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            });
+            if let Some(name) = name
+                && let Some(options) = &mut s.shader_options
+            {
+                options.cycle(&name, true);
+                events.push(Event::ButtonClick);
+            }
+            let native = widgets.iter().find_map(|wd| match wd.kind {
+                WKind::Button {
+                    active: true,
+                    act: Act::NativePackOption(pack, option),
+                    ..
+                } if ui::hovered((x, y), wd.x, wd.y, wd.w, wd.h)
+                    && !(wd.list && (y < top || y >= bottom)) =>
+                {
+                    Some((pack, option))
+                }
+                _ => None,
+            });
+            if let Some((pack, option)) = native
+                && let Some(entry) = s.shader_packs.get_mut(pack)
+                && entry.step_option(option, true, false)
+            {
+                events.push(Event::ButtonClick);
+                events.push(Event::NativePackOptions(pack));
+            }
             return events;
         }
         if ui::scrollbar_thumb(top, bottom, content, self.scroll).is_some()
@@ -3400,6 +4994,9 @@ impl OptionsUi {
                             if p == Page::ShaderPacks {
                                 events.push(Event::ListShaderPacks);
                             }
+                            if p == Page::VoltReplay {
+                                events.push(Event::ListReplays);
+                            }
                             self.push(p)
                         }
                         Act::Done => events.extend(self.back(s)),
@@ -3411,8 +5008,27 @@ impl OptionsUi {
                                 self.selected_key = Some(name);
                             } else {
                                 item.cycle(&mut s.extras, right);
+                                if matches!(
+                                    item,
+                                    crate::extras::Item::VoltPreset
+                                        | crate::extras::Item::VoltAutoOptimize
+                                ) {
+                                    s.extras.distant_lod_boost = false;
+                                    s.horizon.lod_distance = 0;
+                                }
+                                if item == crate::extras::Item::VoltShaderEnable
+                                    && !s.extras.volt_shaders.enabled
+                                {
+                                    self.scroll = 0.0;
+                                    self.settings_search.set_value("");
+                                    self.settings_search.focused = false;
+                                }
                                 events.push(Event::Changed);
                             }
+                        }
+                        Act::VoltCustom(vact) => {
+                            vact.trigger(&mut s.extras, right);
+                            events.push(Event::Changed);
                         }
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::KeyboardProfile => {
@@ -3460,6 +5076,10 @@ impl OptionsUi {
                                 events.push(Event::ModSettings(i));
                             }
                         }
+                        Act::WatchReplay(i) => {
+                            events.push(Event::ButtonClick);
+                            events.push(Event::WatchReplay(i));
+                        }
                         Act::NativeKey(i, k) => {
                             self.selected_key = Some(NATIVE_KEY);
                             self.selected_native_key = Some((i, k));
@@ -3477,12 +5097,98 @@ impl OptionsUi {
                             }
                         }
                         Act::OpenShaderPackFolder => events.push(Event::OpenShaderPackFolder),
+                        Act::ShaderOptions => {
+                            s.shader_options = None;
+                            self.push(Page::ShaderOptions);
+                            events.push(Event::OpenShaderOptions);
+                        }
+                        Act::ShaderOption(name) => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.cycle(&name, false);
+                            }
+                        }
+                        Act::ShaderScreen(screen) => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.path.push(screen);
+                                self.scroll = 0.0;
+                            }
+                        }
+                        Act::ShaderProfile => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.next_profile();
+                            }
+                        }
+                        Act::ShaderReset => {
+                            if let Some(options) = &mut s.shader_options {
+                                options.reset();
+                            }
+                        }
+                        Act::NativePackOptions(i) => {
+                            self.push(Page::NativePackOptions(i, 0));
+                        }
+                        Act::NativePackOption(pack, option) => {
+                            if let Some(entry) = s.shader_packs.get_mut(pack)
+                                && entry.step_option(option, false, false)
+                            {
+                                events.push(Event::NativePackOptions(pack));
+                            }
+                        }
+                        Act::NativePackReset(pack) => {
+                            if let Some(entry) = s.shader_packs.get_mut(pack) {
+                                entry.reset_options();
+                                events.push(Event::NativePackOptions(pack));
+                            }
+                        }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::AddWaypoint => {
+                            if let Some((scope, dim, pos)) = &self.waypoint_context {
+                                let name = self.waypoint_name.value.clone();
+                                s.volt_waypoints.add(
+                                    scope,
+                                    &name,
+                                    dim,
+                                    *pos,
+                                    s.extras.waypoint_new_color,
+                                );
+                                self.waypoint_name.set_value("");
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::ClearDeathWaypoints => {
+                            if let Some((scope, _, _)) = &self.waypoint_context
+                                && s.volt_waypoints.clear_deaths(scope) > 0
+                            {
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::ToggleWaypoint(i) => {
+                            if s.volt_waypoints.toggle(i) {
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::CycleWaypointColor(i) => {
+                            if s.volt_waypoints.cycle_color(i, right) {
+                                events.push(Event::Changed);
+                            }
+                        }
+                        Act::TeleportWaypoint(i) => events.push(Event::WaypointAction(i)),
+                        Act::DeleteWaypoint(i) => {
+                            if s.volt_waypoints.remove(i) {
+                                events.push(Event::Changed);
+                            }
+                        }
                         #[cfg(target_os = "android")]
                         Act::TouchControls => events.push(Event::TouchControls),
                         Act::None => {}
                     }
+                }
+                WKind::ShaderSlider { name, .. } => {
+                    let at = ui::slider_value(wd.x, wd.w, x);
+                    if let Some(options) = &mut s.shader_options {
+                        options.set_position(&name, at);
+                    }
+                    self.shader_dragging = Some((name, at));
                 }
                 WKind::Slider { opt, .. } => {
                     self.dragging = Some(opt);
@@ -3513,14 +5219,17 @@ impl OptionsUi {
     }
     pub fn release(&mut self) -> Vec<Event> {
         self.scrollbar_drag_y = None;
+        self.world_atlas.dragging = false;
         if let Some(p) = &mut self.pack_screen {
             p.release();
         }
         // AbstractSliderButton suppresses the press sound and plays once on
         // release, even if the pointer has left the widget or its value stayed.
-        let slider = self.dragging.take().is_some();
+        let slider = self.dragging.take().is_some() | self.shader_dragging.take().is_some();
         let graphics_slider = self.graphics.release();
-        if slider || graphics_slider {
+        let volt_slider = self.volt_glass.release();
+        self.mod_menu.release();
+        if slider || graphics_slider || volt_slider {
             vec![Event::ButtonClick, Event::Changed]
         } else {
             Vec::new()
@@ -3575,6 +5284,7 @@ impl OptionsUi {
     ) -> Vec<Event> {
         let plain = self.resource_error.is_none()
             && Self::graphics_level(self.page()).is_none()
+            && !matches!(self.page(), Page::VoltGlass | Page::ModMenu)
             && !(self.pack_screen.is_some() && self.stack.last() == Some(&Page::Packs));
         if !plain {
             self.scroll_at(s, size, cursor, amount);
@@ -3607,8 +5317,20 @@ impl OptionsUi {
         if self.resource_error.is_some() {
             return;
         }
-        if let Some(level) = Self::graphics_level(self.page()) {
-            self.graphics.scroll(level, s, size.1, amount);
+        if Self::graphics_level(self.page()).is_some() {
+            self.graphics.scroll_sized(s, size, amount);
+            return;
+        }
+        if self.page() == Page::VoltGlass {
+            self.volt_glass.scroll(s, size, amount);
+            return;
+        }
+        if self.page() == Page::ModMenu {
+            self.mod_menu.scroll(s, size, cursor, amount);
+            return;
+        }
+        if self.page() == Page::VoltAtlas {
+            self.world_atlas.scroll(amount);
             return;
         }
         match &mut self.pack_screen {
@@ -3680,6 +5402,14 @@ impl OptionsUi {
     /// Escape or Done: leave the current page, applying page results.
     pub fn back(&mut self, s: &mut Settings) -> Vec<Event> {
         let mut events = Vec::new();
+        // A pack's screen goes back to the one that opened it.
+        if self.page() == Page::ShaderOptions
+            && let Some(options) = &mut s.shader_options
+            && options.path.pop().is_some()
+        {
+            self.scroll = 0.0;
+            return events;
+        }
         let page = self.stack.pop().unwrap_or(Page::Main);
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
@@ -3688,6 +5418,13 @@ impl OptionsUi {
         self.selected_key = None;
         self.selected_pad_action = None;
         match page {
+            Page::ShaderOptions => {
+                if s.shader_options.as_ref().is_some_and(|o| o.changed) {
+                    events.push(Event::ShaderOptions);
+                } else {
+                    s.shader_options = None;
+                }
+            }
             Page::Language => {
                 if let Some(code) = self.language_choice.take()
                     && code != s.language
@@ -3720,9 +5457,21 @@ impl OptionsUi {
         }
         events
     }
-    /// Typed text (the language search box).
+    /// Typed text (the language or settings/mod search box).
     pub fn type_text(&mut self, atlas: &HudAtlas, text: &str) {
         if self.resource_error.is_some() {
+            return;
+        }
+        if Self::graphics_level(self.page()).is_some() {
+            self.graphics.type_text(text);
+            return;
+        }
+        if self.page() == Page::VoltGlass {
+            self.volt_glass.type_text(text);
+            return;
+        }
+        if self.page() == Page::ModMenu {
+            self.mod_menu.type_text(text);
             return;
         }
         if self.page() == Page::Packs
@@ -3737,6 +5486,8 @@ impl OptionsUi {
         } else if self.settings_search_active() {
             self.settings_search.insert_text(text);
             self.scroll = 0.0;
+        } else if self.waypoint_name_active() {
+            self.waypoint_name.insert_text(text);
         }
     }
     /// Ctrl+A/C/V/X in the language or pack search box; false when neither
@@ -3749,6 +5500,18 @@ impl OptionsUi {
     ) -> bool {
         if self.resource_error.is_some() || self.selected_key.is_some() {
             return false;
+        }
+        if Self::graphics_level(self.page()).is_some() && self.graphics.typing() {
+            let _ = self.graphics.search.shortcut(shortcut, clipboard);
+            return true;
+        }
+        if self.page() == Page::VoltGlass && self.volt_glass.typing() {
+            let _ = self.volt_glass.search.shortcut(shortcut, clipboard);
+            return true;
+        }
+        if self.page() == Page::ModMenu && self.mod_menu.typing() {
+            let _ = self.mod_menu.search.shortcut(shortcut, clipboard);
+            return true;
         }
         if self.page() == Page::Packs
             && let Some(p) = &mut self.pack_screen
@@ -3766,6 +5529,10 @@ impl OptionsUi {
             if self.settings_search.shortcut(shortcut, clipboard) {
                 self.scroll = 0.0;
             }
+            return true;
+        }
+        if self.waypoint_name_active() {
+            let _ = self.waypoint_name.shortcut(shortcut, clipboard);
             return true;
         }
         false
@@ -3853,6 +5620,83 @@ impl OptionsUi {
             };
             return self.bind_key(s, value);
         }
+        if Self::graphics_level(self.page()).is_some() {
+            use crate::graphics_ui::Action;
+            let (actions, consumed) = self.graphics.key(s, key, text, false);
+            let mut events = Vec::new();
+            for action in actions {
+                match action {
+                    Action::ButtonClick => events.push(Event::ButtonClick),
+                    Action::Changed => events.push(Event::Changed),
+                    Action::SliderDrag => events.push(Event::SliderDrag),
+                    Action::OpenAdvanced => self.push(Page::GraphicsAdvanced),
+                    Action::OpenHdr => self.push(Page::GraphicsHdr),
+                    Action::BindKey(name) => self.selected_key = Some(name),
+                    Action::OpenSimple => {
+                        self.stack.pop();
+                        self.push(Page::Graphics);
+                    }
+                    Action::Done => events.extend(self.back(s)),
+                }
+            }
+            if !consumed && key == K::Escape {
+                events.extend(self.back(s));
+            }
+            return events;
+        }
+        if self.page() == Page::VoltGlass {
+            use crate::volt_settings_ui::VoltUiAction;
+            let (actions, consumed) = self.volt_glass.key(s, key, text, false);
+            let mut events = Vec::new();
+            for action in actions {
+                match action {
+                    VoltUiAction::ButtonClick => events.push(Event::ButtonClick),
+                    VoltUiAction::Changed => events.push(Event::Changed),
+                    VoltUiAction::SliderDrag => events.push(Event::SliderDrag),
+                    VoltUiAction::BindKey(name) => self.selected_key = Some(name),
+                    VoltUiAction::OpenModMenu => self.push(Page::ModMenu),
+                    VoltUiAction::OpenVideoSettings => self.push(Page::Graphics),
+                    VoltUiAction::OpenShaderPacks => {
+                        self.push(Page::ShaderPacks);
+                        events.push(Event::ListShaderPacks);
+                    }
+                    VoltUiAction::OpenWaypointsManager => self.push(Page::Waypoints),
+                    VoltUiAction::OpenWorldMap => self.push(Page::VoltAtlas),
+                    VoltUiAction::OpenPadBinds => self.push(Page::PadBinds),
+                    VoltUiAction::OpenAgent => self.push(Page::Agent),
+                    VoltUiAction::OpenTouchEditor => {
+                        #[cfg(target_os = "android")]
+                        events.push(Event::TouchControls);
+                        #[cfg(not(target_os = "android"))]
+                        self.push(Page::Touch);
+                    }
+                    VoltUiAction::Done => events.extend(self.back(s)),
+                }
+            }
+            if !consumed && key == K::Escape {
+                events.extend(self.back(s));
+            }
+            return events;
+        }
+        if self.page() == Page::ModMenu {
+            use crate::volt_mods::ModMenuAction;
+            let (actions, consumed) = self.mod_menu.key(s, key, text, false);
+            let mut events = Vec::new();
+            for action in actions {
+                match action {
+                    ModMenuAction::ButtonClick => events.push(Event::ButtonClick),
+                    ModMenuAction::Changed => events.push(Event::Changed),
+                    ModMenuAction::OpenFolder => events.push(Event::OpenModFolder),
+                    ModMenuAction::OpenWorldMap => self.push(Page::VoltAtlas),
+                    ModMenuAction::OpenKeyBinds => self.push(Page::KeyBinds),
+                    ModMenuAction::Done => events.extend(self.back(s)),
+                }
+            }
+            if !consumed && key == K::Escape {
+                events.extend(self.back(s));
+            }
+            return events;
+        }
         if key == K::Escape {
             return self.back(s);
         }
@@ -3876,6 +5720,15 @@ impl OptionsUi {
                 }
             }
             self.scroll = 0.0;
+        } else if self.waypoint_name_active() {
+            if !self.waypoint_name.key(key, false, false)
+                && let Some(t) = text
+            {
+                let typed: String = t.chars().filter(|c| !c.is_control()).collect();
+                if !typed.is_empty() {
+                    self.waypoint_name.insert_text(&typed);
+                }
+            }
         }
         Vec::new()
     }
@@ -4147,6 +6000,7 @@ mod tests {
         let mut s = Settings::default();
         let mut ui = OptionsUi::default();
         let size = (480.0, 240.0);
+        ui.push(Page::Horizon);
         assert!(ui.layout(&s, size.0, size.1).0.iter().any(|w| {
             matches!(
                 w.kind,
@@ -4253,6 +6107,8 @@ mod tests {
             false,
         );
         assert!(!s.mods.is_on(0));
+        assert!(!ui.back(&mut s).contains(&Event::Close));
+        assert_eq!(ui.page(), Page::Horizon);
         assert!(!ui.back(&mut s).contains(&Event::Close));
         assert_eq!(ui.page(), Page::Main);
     }
@@ -4648,12 +6504,12 @@ mod tests {
                 Row::Pair(a, b) => *a == opt || *b == Some(opt),
                 _ => false,
             }));
-            assert!(rows.iter().any(|row| matches!(row, Row::Buttons(..))));
+            assert!(!rows.iter().any(|row| matches!(row, Row::Buttons(..))));
         }
         ui.settings_search.set_value("no matching video setting");
         let rows = ui.list_rows(&settings);
         assert!(headers(ui.list_rows(&settings)).is_empty());
-        assert!(rows.iter().all(|row| matches!(row, Row::Buttons(..))));
+        assert!(rows.is_empty());
         ui.settings_search.set_value("");
         assert_eq!(headers(ui.list_rows(&settings)), all_headers);
     }
@@ -4752,13 +6608,18 @@ mod tests {
                 false,
             )
         };
-        for page in [Page::Horizon, Page::Extras] {
-            assert_eq!(
-                click(&mut ui, &mut s, Act::Push(page)),
-                vec![Event::ButtonClick]
-            );
-            assert_eq!(ui.page(), page);
-        }
+        assert_eq!(
+            click(&mut ui, &mut s, Act::Push(Page::VoltGlass)),
+            vec![Event::ButtonClick]
+        );
+        assert_eq!(ui.page(), Page::VoltGlass);
+        let _ = ui.stack.pop();
+        ui.push(Page::Horizon);
+        assert_eq!(
+            click(&mut ui, &mut s, Act::Push(Page::Extras)),
+            vec![Event::ButtonClick]
+        );
+        assert_eq!(ui.page(), Page::Extras);
         let (widgets, _, _, _) = ui.layout(&s, size.0, size.1);
         assert_eq!(
             widgets
@@ -5561,26 +7422,71 @@ mod tests {
                 })
                 .collect()
         };
-        // Vanilla's Options buttons, Horizon's two in the Telemetry and Credits slots, then
-        // Credits & Attribution (WinScreen's credits).
+        // Vanilla's Options surfaces Mod Menu, Volt Settings (frosted-glass hub), and Credits.
         let main = pushes(&mut ui);
+        assert!(main.contains(&Page::Graphics));
         assert_eq!(
             &main[main.len() - 3..],
-            [Page::Horizon, Page::Mods, Page::Credits]
+            [Page::Mods, Page::VoltGlass, Page::Credits]
         );
         ui.push(Page::Horizon);
         assert_eq!(
             pushes(&mut ui),
             [
+                Page::VoltBoost,
+                Page::VoltVisuals,
+                Page::VoltQol,
+                Page::VoltChat,
+                Page::Waypoints,
+                Page::Minimap,
+                Page::VoltAtlas,
                 Page::Graphics,
                 Page::GraphicsAdvanced,
                 Page::ShaderPacks,
                 Page::Controller,
                 Page::Extras,
+                Page::Touch,
                 Page::Mods,
                 Page::Agent,
             ]
         );
+        // Verify Waypoints and Minimap pages default to Off and expose their master switch.
+        for (page, master) in [
+            (Page::Waypoints, crate::extras::Item::Waypoints),
+            (Page::Minimap, crate::extras::Item::Minimap),
+        ] {
+            assert_eq!(master.switch(&s.extras), Some(false));
+            ui.push(page);
+            let (widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+            assert!(widgets.iter().any(|w| matches!(
+                &w.kind,
+                WKind::Button {
+                    act: Act::Extra(item),
+                    active: true,
+                    ..
+                } if *item == master
+            )));
+            let _ = ui.stack.pop();
+        }
+        assert_eq!(s.extras.active_volt_optimizations(), 0);
+        ui.push(Page::VoltBoost);
+        let (vb_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        assert!(vb_widgets.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Slider {
+                opt: Opt::VoltResolutionScale,
+                ..
+            }
+        )));
+        assert!(vb_widgets.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Button {
+                act: Act::Extra(crate::extras::Item::VoltPreset),
+                active: true,
+                ..
+            }
+        )));
+        let _ = ui.stack.pop();
         // No AI hides the AI Agent page.
         let mut no_ai = Settings::default();
         no_ai.extras.no_ai = true;
@@ -5605,14 +7511,21 @@ mod tests {
             .collect();
         assert!(acts.contains(&&Act::Extra(crate::extras::Item::AgentControl)));
         assert!(acts.contains(&&Act::CopyAgentDetails));
-        // Vanilla's own pages keep the Horizon pages they had.
+        // Vanilla Video & Controls stay clean while Volt Visuals & Volt Settings house all external pages.
         ui.stack = vec![Page::Main, Page::Video];
         let video = pushes(&mut ui);
-        for page in [Page::Graphics, Page::GraphicsAdvanced] {
-            assert!(video.contains(&page), "{page:?}");
+        assert!(!video.contains(&Page::Graphics));
+        assert!(!video.contains(&Page::GraphicsAdvanced));
+        ui.stack = vec![Page::Main, Page::Horizon, Page::VoltVisuals];
+        let visuals = pushes(&mut ui);
+        for page in [
+            Page::VoltShaders,
+            Page::Graphics,
+            Page::GraphicsAdvanced,
+            Page::ShaderPacks,
+        ] {
+            assert!(visuals.contains(&page), "{page:?}");
         }
-        ui.stack = vec![Page::Main, Page::Controls];
-        assert!(pushes(&mut ui).contains(&Page::Controller));
     }
     #[test]
     fn touch_options_cycle_four_schemes_and_adjust_circle_and_sensitivity() {
@@ -5630,6 +7543,12 @@ mod tests {
         Opt::TouchSprintButton.cycle(&mut settings, false, [1280, 720]);
         assert!(settings.touch.analog_movement);
         assert!(!settings.touch.visible(crate::touch::Control::Sprint));
+        // The movement joystick can be removed and restored from settings.
+        assert!(settings.touch.visible(crate::touch::Control::Move));
+        Opt::TouchJoystick.cycle(&mut settings, false, [1280, 720]);
+        assert!(!settings.touch.visible(crate::touch::Control::Move));
+        Opt::TouchJoystick.cycle(&mut settings, false, [1280, 720]);
+        assert!(settings.touch.visible(crate::touch::Control::Move));
         Opt::TouchCircleSize.set_slider(&mut settings, 0.75);
         assert_eq!(settings.touch.circle_size, 52.0);
         Opt::TouchHorizontalMargin.set_slider(&mut settings, 0.5);
@@ -5650,6 +7569,19 @@ mod tests {
                 ..
             }
         )));
+        for expected in [
+            crate::touch::BuiltInPreset::PojavClassic,
+            crate::touch::BuiltInPreset::ZalithModern,
+            crate::touch::BuiltInPreset::FoldCraft,
+            crate::touch::BuiltInPreset::PvpClaw,
+            crate::touch::BuiltInPreset::VoltDefault,
+        ] {
+            Opt::TouchPreset.cycle(&mut settings, false, [1280, 720]);
+            assert_eq!(
+                crate::touch::BuiltInPreset::detect(&settings.touch),
+                Some(expected)
+            );
+        }
     }
 
     #[test]
@@ -5675,5 +7607,77 @@ mod tests {
             Opt::SoundDevice.cycle(&mut s, true, [854, 480]);
         }
         assert_eq!(s.sound_device, "");
+    }
+
+    #[test]
+    fn volt_shaders_lives_inside_volt_visuals_and_hides_all_customization_when_disabled() {
+        let mut s = Settings::default();
+        assert!(!s.extras.volt_shaders.enabled);
+        let mut ui = OptionsUi::default();
+        let (main_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        assert!(
+            !main_widgets.iter().any(|w| matches!(
+                &w.kind,
+                WKind::Button {
+                    act: Act::Push(Page::VoltShaders),
+                    ..
+                }
+            )),
+            "Volt Shaders lives inside Volt Settings -> Volt Visuals"
+        );
+        ui.push(Page::Horizon);
+        ui.push(Page::VoltVisuals);
+        let (vis_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        assert!(
+            vis_widgets.iter().any(|w| matches!(
+                &w.kind,
+                WKind::Button {
+                    act: Act::Push(Page::VoltShaders),
+                    active: true,
+                    ..
+                }
+            )),
+            "Volt Shaders button must appear inside Volt Visuals"
+        );
+
+        ui.push(Page::VoltShaders);
+        let (off_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        let off_list: Vec<&Widget> = off_widgets.iter().filter(|w| w.list).collect();
+        assert_eq!(
+            off_list.len(),
+            1,
+            "when Enable Shaders is OFF, every profile/customization widget must be hidden"
+        );
+        assert!(matches!(
+            &off_list[0].kind,
+            WKind::Button {
+                act: Act::Extra(crate::extras::Item::VoltShaderEnable),
+                active: true,
+                ..
+            }
+        ));
+
+        s.extras.volt_shaders.enabled = true;
+        let (on_widgets, _, _, _) = ui.layout(&s, 427.0, 240.0);
+        let on_list: Vec<&Widget> = on_widgets.iter().filter(|w| w.list).collect();
+        assert!(
+            on_list.len() >= 35,
+            "enabling Volt Shaders must reveal profiles, moving vegetation, toggles and sliders"
+        );
+        assert!(on_list.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Button {
+                act: Act::Extra(crate::extras::Item::VoltShaderProfile),
+                active: true,
+                ..
+            }
+        )));
+        assert!(on_list.iter().any(|w| matches!(
+            &w.kind,
+            WKind::Slider {
+                opt: Opt::VoltShaderWindSpeed,
+                ..
+            }
+        )));
     }
 }

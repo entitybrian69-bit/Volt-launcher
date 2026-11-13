@@ -271,3 +271,50 @@ Horizon's own mods are native. They live in
 The game keeps the parts that must be fast, such as drawing the minimap's map, and a native mod picks the options
 ([extras.md](extras.md)). Far View is not a mod any more: its distance and detail are Graphics > LOD Distance and Far
 Detail ([graphics.md](graphics.md)).
+
+### Mod biomes (worldgen-api)
+
+A content mod may register its own biomes with `data/<ns>/worldgen/biome/<name>.json` (the vanilla biome
+codec shape: `temperature`, `downfall`, `has_precipitation`, `effects`, `features`, `spawners`), its own
+features with `data/<ns>/worldgen/feature/` (26.3 name; `configured_feature/` still works) and
+`data/<ns>/worldgen/placed_feature/`. A biome file may also carry two keys vanilla data never has:
+`horizon:climate` (each of temperature/humidity/continentalness/erosion/depth/weirdness a `[min, max]`
+range or one number in -2..=2, plus `offset`; a missing field spans the whole range) and
+`horizon:dimension` (`minecraft:overworld` by default, or `minecraft:the_nether`; any other dimension is
+refused). Both keys are stripped before the biome joins the bundle, and the ranges are appended, quantized
+as vanilla's `quantizeCoord` quantizes its preset tables, to that dimension's multi-noise preset in
+`presets.json`. An added biome is placed only where its ranges are the closest match, as a datapack's
+appended entries are. A biome without `horizon:climate` registers but is placed by nothing. This is
+data-only, so it works on Android exactly as on PC, and API 0.2 mods without biome files are unchanged.
+Malformed climate data (out of range, `min > max`, unknown dimension) refuses the mod with the file named.
+Unit coverage: `climate_entry_strips_keys_and_quantizes` in `crates/horizon-client/src/mod_content_tests.rs`.
+
+### Mod items in the creative inventory
+
+The content build also patches `creative-inventory.json`: every mod item (a declared item, or a block's
+item) joins each creative category tab that lists its vanilla template item, right after the template's
+first listing, and the search tab under its id-derived name — the search tab's aligned `lines`/`tags`
+arrays and each tab's `permissions_only` indices are kept consistent (`append_creative` in
+`crates/horizon-client/src/mod_content.rs`). Items also need an `assets/<ns>/items/<name>.json` client
+item definition to render (`item_render.rs` loads definitions, not bare `models/item/` files).
+
+### Biomes Unseen (`biomes_unseen.hmod`)
+
+The showcase content mod for the worldgen API: 44 biomes (39 Overworld, 5 Nether), 176 blocks, 29 items,
+built reproducibly by `scripts/generate_biomes_unseen.py` (which also packages the `.hmod`). It ships as
+a release asset, not inside the APK. Android install: Volt Launcher > Mods > paste the release asset's
+HTTPS URL > Import .hmod (or drop the file into the launcher's "Mods" folder), enable it, start a new
+world. Format decision and evidence: `docs/biomes_unseen/FORMAT-DECISION.md`. CI proof: the
+`Worldgen mod tests (host)` job (biome registration, asset completeness, creative placement) and the
+`Runtime proof (real root, live client)` job — the real `resource_root` over the real prepared root,
+`GeneratorData` and the multi-noise tables, plus a LIVE client run where `/locate biome
+biomes_unseen:bayou` and `/give @s biomes_unseen:cherry_planks` must succeed in a new world.
+
+### Content mod diagnostics (`volt-mods-report.txt`)
+
+At every start (and again when a world opens) the game writes a plain-text report beside
+`options.txt` — on Android that is the game home the Files app shows under "Volt Launcher":
+`volt-mods-report.txt`. For every installed `.hmod` it lists what actually happened: loaded (with
+block/item/biome-definition counts, creative items added, and the biomes placed per dimension),
+not enabled, or refused with the exact reason. The launcher's Installed page shows the same line
+under each mod. Send this file when a mod looks wrong in game.

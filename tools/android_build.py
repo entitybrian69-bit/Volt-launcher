@@ -98,9 +98,14 @@ def main():
     parser.add_argument('--sdk', type=Path, default=os.environ.get('ANDROID_HOME') or Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'Android/Sdk')
     parser.add_argument('--java-home', type=Path, default=os.environ.get('JAVA_HOME') or 'C:/Program Files/Android/Android Studio/jbr')
     parser.add_argument('--skip-rust', action='store_true')
+    parser.add_argument('--prebuilt-library', type=Path,
+                        help='Package this already-built libhorizon_android.so (for example the '
+                             'no-secrets woven-registry-mods artifact) instead of compiling Rust')
     parser.add_argument('--rust-only', action='store_true', help='Build the Rust host without touching shared APK staging')
     parser.add_argument('--release-candidate', action='store_true', help='Build a non-debuggable candidate and audit privacy; this does not authorize redistribution of bundled game resources')
     parser.add_argument('--public', action='store_true', help='Distribution APK: generated tables only; original resources download from Mojang')
+    parser.add_argument('--app-id', choices=['ae.net.Voltlauncher', 'ae.net.Voltlauncher.debug'],
+                        help='Override the applicationId: the debug channel installs beside the release, never over it')
     parser.add_argument('--profile', choices=['release', 'fast', 'dev'], help='Public/candidate builds default to release (ThinLTO); local builds default to optimized fast')
     parser.add_argument('--gradle', type=Path, help='Gradle 8.14 executable (otherwise discover the cached distribution)')
     parser.add_argument('--check', action='store_true', help='Only type-check the Android target')
@@ -111,8 +116,16 @@ def main():
         args.profile = 'release' if args.public or args.release_candidate else 'fast'
     if args.public:
         args.release_candidate = True
-        if args.skip_rust:
+        if args.skip_rust and args.prebuilt_library is None:
             parser.error('--public cannot reuse a native library from a different build mode')
+    if args.prebuilt_library is not None:
+        # Packaging consumes an attested artifact; never compile over it.
+        args.skip_rust = True
+        header = args.prebuilt_library.read_bytes()[:20]
+        machine = int.from_bytes(header[18:20], 'little')
+        expected = {'arm64-v8a': 183, 'armeabi-v7a': 40, 'x86_64': 62, 'x86': 3}.get(args.abi)
+        if header[:4] != b'\x7fELF' or machine != expected:
+            parser.error(f'--prebuilt-library is not an {args.abi} ELF shared object')
     if args.release_candidate and args.profile == 'dev':
         parser.error('--release-candidate requires an optimized release or fast profile')
     suffix = '.exe' if os.name == 'nt' else ''
@@ -173,7 +186,8 @@ def main():
     staging.mkdir(parents=True, exist_ok=True)
     (staging / 'libhorizon_android_native.so').unlink(missing_ok=True)
     for name in ('libhorizon_android.so',):
-        library = target_dir / target / ('debug' if args.profile == 'dev' else args.profile) / name
+        library = args.prebuilt_library if args.prebuilt_library is not None else (
+            target_dir / target / ('debug' if args.profile == 'dev' else args.profile) / name)
         if not library.is_file():
             raise FileNotFoundError(library)
         shutil.copyfile(library, staging / name)
@@ -206,7 +220,10 @@ def main():
         gradle = candidates[0]
     environment['ANDROID_HOME'] = str(args.sdk)
     variant = 'release' if args.release_candidate else 'debug'
-    run([gradle, '--no-daemon', '-p', ROOT / 'packaging/android', '-Pabi=' + args.abi, '-PminSdk=' + str(min_sdk), 'assemble' + variant.title()], cwd=ROOT, env=environment)
+    gradle_props = ['-Pabi=' + args.abi, '-PminSdk=' + str(min_sdk)]
+    if args.app_id:
+        gradle_props.append('-PappId=' + args.app_id)
+    run([gradle, '--no-daemon', '-p', ROOT / 'packaging/android', *gradle_props, 'assemble' + variant.title()], cwd=ROOT, env=environment)
     apk = output / ('horizon-android-public.apk' if args.public else 'horizon-android-release.apk' if args.release_candidate else 'horizon-android.apk')
     shutil.copyfile(ROOT / f'.local/android/gradle-build/outputs/apk/{variant}/HorizonAndroid-{variant}.apk', apk)
     # Invoke the signing JAR directly so Windows does not need a batch-file shell.
@@ -214,7 +231,7 @@ def main():
     run([*signer, 'verify', '--verbose', apk])
     if args.release_candidate:
         import sys
-        run([sys.executable, ROOT / 'tools/check_android_release.py', apk, '--aapt2', tools / ('aapt2' + suffix), *(['--public'] if args.public else [])], cwd=ROOT)
+        run([sys.executable, ROOT / 'tools/check_android_release.py', apk, '--aapt2', tools / ('aapt2' + suffix), *(['--public'] if args.public else []), *(['--app-id', args.app_id] if args.app_id else [])], cwd=ROOT)
     print(f'APK: {apk}', flush=True)
 
 

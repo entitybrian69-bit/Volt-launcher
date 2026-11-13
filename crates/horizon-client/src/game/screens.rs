@@ -35,6 +35,9 @@ impl Screen {
             // WinScreen.extractBackground: the poem fills the screen with the End portal, the
             // credits alone blur. Game::menu_blur knows which one rolls.
             Self::Win => false,
+            // The debug overlay stays readable under the debug options
+            // screen, so no blur (game/debug_options.rs).
+            Self::DebugOptions => false,
         }
     }
 }
@@ -86,6 +89,7 @@ fn pause_buttons(
             2,
             true,
         ),
+        (x0 + 4.0, y0 + 170.0 + down, 204.0, "volt.settings.button", 14, true),
     ]);
     v
 }
@@ -275,6 +279,9 @@ impl Game<'_> {
                 self.capture(true);
             }
             Some(1) => self.open_options(false),
+            Some(14) => {
+                self.open_options_at(false, horizon_client::options_ui::Page::VoltGlass)
+            }
             Some(3) => self.open_stats(),
             Some(4) => self.open_advancements(true),
             Some(9) => self.open_world_options(),
@@ -545,6 +552,7 @@ mod tests {
             Screen::CommandBlock,
             Screen::BlockEditor,
             Screen::Win,
+            Screen::DebugOptions,
         ] {
             assert!(!screen.blurs_background(true));
             assert!(!screen.blurs_background(false));
