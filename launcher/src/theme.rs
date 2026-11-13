@@ -1,7 +1,8 @@
 //! The launcher's view of Horizon's design tokens (`crates/horizon-theme`, described in
-//! `docs/design-system.md`): the night look (`horizon_theme::night`, a night sky or a dawn with
-//! Horizon's violet) in Bricolage Grotesque, with Geist Mono for paths and codes (all bundled, SIL
-//! Open Font License). Screens not rebuilt yet draw the Blocks parts in the night's colours.
+//! `docs/design-system.md`): the night look (`horizon_theme::night`, a still black backdrop with
+//! frosted monochrome glass — no hue anywhere) in Bricolage Grotesque, with Geist Mono for paths
+//! and codes (all bundled, SIL Open Font License). Screens not rebuilt yet draw the Blocks parts
+//! in the night's colours.
 use gpui::{rgb, Hsla, WindowAppearance};
 use horizon_launcher::backend::Appearance;
 use horizon_launcher::themes::Accent;
@@ -21,14 +22,16 @@ pub use tokens::{BLOCK_BEVEL as BEVEL, BLOCK_LIP as LIP};
 /// Shapes and controls, shared with the game's menus and the website.
 pub use tokens::{CONTROL_LARGE, DISABLED, FIELD, PRESSED, RISE, ROW, SEGMENT};
 
-/// Blocks have square corners: these stay for the places that ask for a radius.
-pub const RADIUS: f32 = 0.;
-pub const RADIUS_PLATE: f32 = 0.;
+/// Dark glass: soft rounded corners everywhere, never a sharp block.
+pub const RADIUS: f32 = 16.;
+pub const RADIUS_PLATE: f32 = night::RADIUS_CARD;
 /// Buttons are a little taller than the quiet look's, for their lip.
 pub const CONTROL: f32 = 34.;
-/// The top bar, and the sidebar of instances and servers.
+/// The slim top header, over the page title and the account chip.
 pub const TOPBAR: f32 = 56.;
 pub const SIDEBAR: f32 = 248.;
+/// The far-left icon rail: page navigation only, no labels.
+pub const RAIL: f32 = 76.;
 pub const PAGE_GUTTER: f32 = 32.;
 
 /// Motion: short and eased out, never bouncy.

@@ -809,9 +809,10 @@ impl Launcher {
             .gap(px(10.))
             .w(px(320.))
             .h(px(theme::FIELD + 4.))
-            .px(px(12.))
+            .px(px(14.))
             .overflow_hidden()
-            .border_2()
+            .rounded(px(theme::night::RADIUS_CONTROL))
+            .border_1()
             .border_color(if focused { t.accent } else { t.outline })
             .bg(t.well)
             .text_size(px(theme::UI.px))
@@ -1326,7 +1327,155 @@ impl Launcher {
         )
     }
 
+    /// One result as a dark-glass card: its icon, a source badge, the title, a short line and
+    /// Install — the chosen Resource packs reference's layout, also used for Shader packs.
+    fn mods_card(&mut self, project: &Project, cx: &mut Context<Self>) -> Stateful<Div> {
+        let t = self.theme;
+        let icon = self.mods_icon(project, 48.);
+        let p = project;
+        let m = &self.mods;
+        let busy = m.busy.as_ref().map(|b| b.0.as_str());
+        let checking = m.checking(p);
+        let installed = m.entry(p).is_some();
+        let state: Option<AnyElement> = if busy == Some(p.id.as_str()) {
+            Some(caps(tr("Installing")).text_color(t.ink).into_any_element())
+        } else if checking {
+            Some(caps(tr("Checking")).text_color(t.muted).into_any_element())
+        } else {
+            None
+        };
+        let action: AnyElement = if let Some(state) = state {
+            state
+        } else if installed {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .h(px(theme::CONTROL))
+                .px(px(16.))
+                .rounded(px(theme::night::RADIUS_CONTROL))
+                .bg(t.raised)
+                .border_1()
+                .border_color(t.outline)
+                .child(blocks::icon("check", 14., t.ink))
+                .child(text(theme::UI).text_color(t.ink).child(tr("Installed")))
+                .into_any_element()
+        } else {
+            let label = if p.kind == PackKind::Modpack {
+                "Import"
+            } else {
+                "Install"
+            };
+            let mut install = button(
+                SharedString::from(format!("mods-install-{}", p.id)),
+                label,
+                Kind::Primary,
+                &t,
+            );
+            if busy.is_some() {
+                install = disabled(install);
+            } else {
+                let p = p.clone();
+                install = install.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.mods_install(p.source, p.id.clone(), Some(p.clone()));
+                    cx.stop_propagation();
+                    cx.notify();
+                }));
+            }
+            install.into_any_element()
+        };
+        let open = p.clone();
+        blocks::panel(&t)
+            .id(SharedString::from(format!("mods-card-{}", p.id)))
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .p(px(16.))
+            .cursor_pointer()
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .child(icon)
+                    .child(blocks::badge(p.source.label(), t.muted, &t)),
+            )
+            .child(
+                text(theme::TITLE)
+                    .text_color(t.ink)
+                    .truncate()
+                    .child(p.title.clone()),
+            )
+            .child(
+                text(theme::UI)
+                    .text_color(t.muted)
+                    .child(p.summary.clone()),
+            )
+            .child(div().flex().justify_end().child(action))
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.mods_open(open.clone());
+                cx.notify();
+            }))
+    }
+
+    /// Three cards per visual row (the Cull virtualizer culls a row of cards as one unit), the
+    /// chosen dark-glass layout for Resource packs and Shader packs.
+    fn mods_card_grid(&mut self, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        if let Some(e) = self.mods.error.clone() {
+            return div().child(notice(e, &t));
+        }
+        let total = self.mods.results.len();
+        if total == 0 {
+            let m = &self.mods;
+            let line = if m.searching || !m.searched {
+                tr("Searching…")
+            } else if m.source == SourceId::Horizon {
+                tr("Nothing in Horizon's registry matches yet.")
+            } else if m.everything {
+                tr("Nothing found.")
+            } else {
+                tr("Nothing found that runs in Horizon. Show everything lists the rest.")
+            };
+            return centered(line, &t);
+        }
+        const COLUMNS: usize = 3;
+        let visual_rows = total.div_ceil(COLUMNS);
+        let rows = self.mods.results_list.clone();
+        let scroll = self.content_scroll.handle.clone();
+        let row = |i: usize| {
+            let start = i * COLUMNS;
+            let end = (start + COLUMNS).min(total);
+            let mut line = div().flex().items_stretch().gap(px(16.));
+            for j in start..end {
+                let project = self.mods.results[j].clone();
+                line = line.child(self.mods_card(&project, cx).flex_1().min_w_0());
+            }
+            line
+        };
+        let list = rows.column(&scroll, visual_rows, 16., |_| false, row);
+        let mut out = div().flex().flex_col().child(list);
+        let m = &self.mods;
+        if m.more {
+            let mut more = button("mods-more", "More", Kind::Ghost, &t);
+            if m.searching {
+                more = disabled(more);
+            } else {
+                let offset = m.results.len();
+                more = more.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.mods_search(offset);
+                    cx.notify();
+                }));
+            }
+            out = out.child(div().flex().pt(px(16.)).child(more));
+        }
+        out
+    }
+
     fn mods_results(&mut self, cx: &mut Context<Self>) -> Div {
+        if matches!(self.mods.kind, PackKind::ResourcePack | PackKind::Shader) {
+            return self.mods_card_grid(cx);
+        }
         let t = self.theme;
         let m = &self.mods;
         if let Some(e) = &m.error {
@@ -1522,11 +1671,16 @@ fn source_switch(
         .flex()
         .items_center()
         .h(px(theme::SEGMENT))
-        .px(px(14.))
-        .pb(px(2.))
+        .px(px(16.))
+        .rounded(px(theme::night::RADIUS_CONTROL))
+        .border_1()
+        .border_color(t.outline)
         .opacity(theme::DISABLED)
         .child(
-            blocks::pixel(14., FontWeight::MEDIUM)
+            div()
+                .font_family(theme::FONT)
+                .text_size(px(14.))
+                .font_weight(FontWeight::MEDIUM)
                 .text_color(t.muted)
                 .child(tr("CurseForge (coming soon)")),
         );

@@ -146,7 +146,8 @@ impl Launcher {
                 .items_center()
                 .justify_center()
                 .size(px(size))
-                .border_2()
+                .rounded(px(theme::night::RADIUS_CONTROL))
+                .border_1()
                 .border_color(t.outline)
         };
         match &instance.icon {
@@ -468,7 +469,8 @@ impl Launcher {
                 .items_center()
                 .justify_center()
                 .size(px(40.))
-                .border_2()
+                .rounded(px(theme::night::RADIUS_CONTROL))
+                .border_1()
                 .border_color(if chosen { t.accent } else { t.rule })
                 .cursor_pointer()
                 .hover(move |s| s.border_color(t.outline))
@@ -622,19 +624,19 @@ impl Launcher {
             })))
         };
         // Opaque, as the sign-in sheet: it sits over the page's content.
-        let card = plate::cut(
-            theme::night::PIXEL_CORNER,
-            2,
-            Some(plate::alpha(n.card, 0.98)),
-            Some((plate::alpha(n.stroke, 2. * n.stroke_alpha), 1.)),
-        )
-        .flex()
-        .flex_col()
-        .flex_none()
-        .w_full()
-        .max_w(px(600.))
-        .child(body)
-        .child(foot);
+        let card = div()
+            .relative()
+            .bg(plate::alpha(n.card, 0.98))
+            .rounded(px(theme::night::RADIUS_CARD))
+            .border_1()
+            .border_color(plate::alpha(n.stroke, 2. * n.stroke_alpha))
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w_full()
+            .max_w(px(600.))
+            .child(body)
+            .child(foot);
         Some(
             div()
                 .id("instance-dialog")

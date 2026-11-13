@@ -130,7 +130,8 @@ impl Launcher {
             // The drop outline sits just outside the rows, which line up with the other sections.
             .p(px(2.))
             .mx(px(-4.))
-            .border_2()
+            .rounded(px(theme::RADIUS_PLATE))
+            .border_1()
             .border_color(gpui::transparent_black())
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.border_color(t.accent).bg(t.well))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
@@ -195,7 +196,8 @@ impl Launcher {
             .items_center()
             .justify_center()
             .size(px(40.))
-            .border_2()
+            .rounded(px(theme::night::RADIUS_CONTROL))
+            .border_1()
             .border_color(t.outline)
             .bg(t.well);
         let picture = match icon {

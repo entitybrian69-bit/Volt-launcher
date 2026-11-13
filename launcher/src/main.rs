@@ -1536,9 +1536,11 @@ fn button(
     let label: SharedString = label.into();
     let label = SharedString::from(tr(&label).to_string());
     let t = *t;
+    // Dark glass: Primary is a plain white pill (its label near-black), Secondary a translucent
+    // glass pill with its stroke, Ghost only its label until the pointer is over it.
     let hover = match kind {
         Kind::Primary => t.on_face.opacity(0.10),
-        Kind::Secondary => t.bevel.opacity(if t.dark { 0.10 } else { 0.35 }),
+        Kind::Secondary => t.ink.opacity(0.06),
         Kind::Ghost => t.raised,
     };
     let base = div()
@@ -1549,38 +1551,31 @@ fn button(
         .items_center()
         .justify_center()
         .h(px(theme::CONTROL))
-        .px(px(14.))
-        .font_family(theme::PIXEL)
+        .px(px(16.))
+        .rounded(px(theme::night::RADIUS_CONTROL))
+        .font_family(theme::FONT)
         .text_size(px(15.))
         .font_weight(FontWeight::MEDIUM)
         .cursor_pointer()
-        .child(hover_layer(&id, hover, 0., 0.));
+        .child(hover_layer(&id, hover, theme::night::RADIUS_CONTROL, 0.));
     let base = match kind {
-        Kind::Primary => base
-            .border_2()
-            .border_color(t.outline)
-            .children(blocks::edges(t.face_bevel, t.face_lip, theme::LIP))
-            .bg(t.face)
-            .text_color(t.on_face),
+        Kind::Primary => base.bg(t.face).text_color(t.on_face),
         Kind::Secondary => base
-            .border_2()
-            .border_color(t.outline)
-            .children(blocks::edges(t.button_bevel, t.lip, theme::LIP))
             .bg(t.button)
+            .border_1()
+            .border_color(t.outline)
             .text_color(t.ink),
         Kind::Ghost => base.text_color(t.muted).hover(move |s| s.text_color(t.ink)),
     };
-    // The label sits on the block's face, above its lip; pressing pushes it down.
     let base = base.child(
         div()
             .relative()
             .flex()
             .items_center()
             .gap(px(8.))
-            .pb(px(if kind == Kind::Ghost { 0. } else { 2. }))
             .child(label),
     );
-    keyboard(track_hover(base, id), &t).active(|s| s.opacity(theme::PRESSED).top(px(1.)))
+    keyboard(track_hover(base, id), &t).active(|s| s.opacity(theme::PRESSED))
 }
 
 /// Copies to the clipboard, or into `HORIZON_LAUNCHER_CLIPBOARD` when a test run sets it
@@ -1643,7 +1638,7 @@ fn sync_system_clipboard(text: String) {
     });
 }
 
-/// An on/off switch: a square knob sliding in a sunk track that turns violet when on.
+/// An on/off switch: a round knob sliding in a glass pill track, plain white when on.
 fn switch(id: impl Into<SharedString>, on: bool, t: &Theme) -> Stateful<Div> {
     let t = *t;
     let id: SharedString = id.into();
@@ -1653,7 +1648,8 @@ fn switch(id: impl Into<SharedString>, on: bool, t: &Theme) -> Stateful<Div> {
         .flex_none()
         .w(px(44.))
         .h(px(24.))
-        .border_2()
+        .rounded(px(theme::night::RADIUS_CONTROL))
+        .border_1()
         .border_color(t.outline)
         .cursor_pointer()
         .bg(if on { t.face } else { t.well })
@@ -1662,16 +1658,8 @@ fn switch(id: impl Into<SharedString>, on: bool, t: &Theme) -> Stateful<Div> {
                 .absolute()
                 .top(px(2.))
                 .size(px(16.))
+                .rounded_full()
                 .bg(knob)
-                .child(
-                    div()
-                        .absolute()
-                        .bottom_0()
-                        .left_0()
-                        .right_0()
-                        .h(px(2.))
-                        .bg(if on { t.face_lip } else { t.lip }),
-                )
                 .with_animation(
                     ElementId::named_usize(id, on as usize),
                     Animation::new(theme::MOVE).with_easing(ease_out_quint()),
@@ -1694,7 +1682,8 @@ fn section_title(label: &'static str, icon: &'static str, t: &Theme) -> Div {
         )
 }
 
-/// A segmented control: a sunk track, the chosen segment a raised block.
+/// A row of glass filter pills (Modrinth, CurseForge, Both…): the chosen one a brighter fill, the
+/// others plain outlined pills.
 fn segments<T: Copy + PartialEq + 'static>(
     id: &'static str,
     options: &[(T, &'static str)],
@@ -1707,11 +1696,8 @@ fn segments<T: Copy + PartialEq + 'static>(
         .id(id)
         .flex()
         .flex_none()
-        .p(px(2.))
-        .gap(px(2.))
-        .border_2()
-        .border_color(t.outline)
-        .bg(t.well)
+        .flex_wrap()
+        .gap(px(8.))
         .children(options.iter().map(|&(value, label)| {
             let active = current == value;
             let pick = on_pick.clone();
@@ -1720,19 +1706,15 @@ fn segments<T: Copy + PartialEq + 'static>(
                 .flex()
                 .items_center()
                 .h(px(theme::SEGMENT))
-                .px(px(14.))
-                .pb(px(2.))
-                .font_family(theme::PIXEL)
+                .px(px(16.))
+                .rounded(px(theme::night::RADIUS_CONTROL))
+                .border_1()
+                .border_color(t.outline)
+                .font_family(theme::FONT)
                 .text_size(px(14.))
                 .font_weight(FontWeight::MEDIUM)
                 .cursor_pointer()
-                .when(active, |d| {
-                    d.bg(t.button).text_color(t.ink).children(blocks::edges(
-                        t.button_bevel,
-                        t.lip,
-                        3.,
-                    ))
-                })
+                .when(active, |d| d.bg(t.raised).text_color(t.ink))
                 .when(!active, |d| {
                     d.text_color(t.muted).hover(move |s| s.text_color(t.ink))
                 })
@@ -1794,14 +1776,18 @@ fn disabled(b: Stateful<Div>) -> Stateful<Div> {
     b.opacity(theme::DISABLED).cursor_default().tab_stop(false)
 }
 
-/// A page's title in the pixel face and one line on what it is for.
+/// A page's title, big and bold in the display face, and one line on what it is for.
 fn page_header(title: &str, description: &str, t: &Theme) -> Div {
     div()
         .flex()
         .flex_col()
         .gap(px(10.))
         .child(
-            blocks::pixel(36., FontWeight::SEMIBOLD)
+            div()
+                .font_family(theme::DISPLAY_FONT)
+                .font_weight(FontWeight::BOLD)
+                .text_size(px(36.))
+                .line_height(px(42.))
                 .text_color(t.ink)
                 .child(tr(title).to_string()),
         )
@@ -1965,23 +1951,12 @@ impl Launcher {
     /// client-side decorations), the pages with their icons, then the account and Settings.
     /// The top bar over the pages: their tabs, then the account chip and Settings. No plate: the
     /// sky shows through, under a 1 px rule.
+    /// The slim header above every page's content: just the account chip, right-aligned. Page
+    /// navigation lives in the icon rail now (`icon_rail`), and each page draws its own title
+    /// (`page_header`) at the top of its content, so nothing else belongs up here.
     fn topbar(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let n = t.night;
-        let mut nav = div().flex().flex_none().items_center().gap(px(4.));
-        for (page, label, _) in Page::ALL {
-            if page == Page::Settings {
-                continue;
-            }
-            nav = nav.child(
-                shell::tab(format!("nav-{label}"), tr(label), self.page == page, &t).on_click(
-                    cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.go(page);
-                        cx.notify();
-                    }),
-                ),
-            );
-        }
         // Only a signed-in account says "Microsoft account"; otherwise an offline name, or the
         // one the game made up. A signed-in one shows its face (its UUID's default skin).
         let (name, how) = self.who_plays();
@@ -1996,6 +1971,7 @@ impl Launcher {
                 .items_center()
                 .justify_center()
                 .size(px(28.))
+                .rounded(px(3.))
                 .bg(plate::alpha(n.card_hi, n.card_hi_alpha))
                 .child(blocks::icon("user", 16., shell::c(n.muted)))
                 .into_any_element(),
@@ -2039,10 +2015,57 @@ impl Launcher {
             .relative()
             .child(account)
             .children(self.account_menu(cx));
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_end()
+            .h(px(theme::TOPBAR))
+            .pl(px(theme::PAGE_GUTTER))
+            .pr(px(theme::PAGE_GUTTER))
+            .child(account)
+    }
+
+    /// The far-left icon rail: a slim floating glass pill with one icon per top-level page
+    /// (`Page::ALL`), Settings pinned at its foot. The wordmark sits above the icons unless a
+    /// custom title bar already draws it. This is the launcher's only persistent navigation;
+    /// everything else (instances, servers, the update notice, the community links) lives in
+    /// the Home page's own content now (`home_panel`).
+    fn icon_rail(&mut self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+        let t = self.theme;
+        let n = t.night;
+        let brand = (!titlebar::draws_brand(window)).then(|| {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .pb(px(8.))
+                .child(mark(26., &t))
+        });
+        let mut icons = div().flex().flex_col().items_center().gap(px(6.));
+        for (page, label, icon) in Page::ALL {
+            if page == Page::Settings {
+                continue;
+            }
+            icons = icons.child(
+                shell::icon_button(
+                    SharedString::from(format!("rail-{label}")),
+                    icon,
+                    44.,
+                    self.page == page,
+                    &t,
+                )
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.go(page);
+                    cx.notify();
+                })),
+            );
+        }
         let settings = shell::icon_button(
-            "nav-Settings",
+            "rail-Settings",
             "sliders",
-            40.,
+            44.,
             self.page == Page::Settings,
             &t,
         )
@@ -2051,30 +2074,30 @@ impl Launcher {
             cx.notify();
         }));
         div()
+            .id("icon-rail")
             .flex()
+            .flex_col()
             .flex_none()
             .items_center()
-            .h(px(theme::TOPBAR))
-            .pl(px(theme::PAGE_GUTTER - 14.))
-            .pr(px(12.))
-            .border_b_1()
-            .border_color(plate::alpha(n.stroke, n.rule_alpha))
-            .child(nav)
-            .child(
-                div()
-                    .ml_auto()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(account)
-                    .child(settings),
-            )
+            .w(px(theme::RAIL))
+            .my(px(16.))
+            .ml(px(16.))
+            .py(px(16.))
+            .gap(px(6.))
+            .rounded(px(theme::night::RADIUS_CONTROL))
+            .bg(plate::alpha(n.card, n.card_alpha))
+            .border_1()
+            .border_color(plate::alpha(n.stroke, n.stroke_alpha))
+            .children(brand)
+            .child(icons)
+            .child(div().flex_1())
+            .child(settings)
     }
 
-    /// The sidebar, from the top of the window: the wordmark, Horizon and the imported modpacks,
-    /// the player's servers, then the launcher's own update, the community links and its version.
-    fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// The Home page's own panel, where the instance and server switcher used to live in the
+    /// sidebar: the imported instances, the player's servers, then the launcher's own update,
+    /// the community links and its version. Shown once, above the Home page's banner.
+    fn home_panel(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         let t = self.theme;
         let n = t.night;
         self.load_packs();
@@ -2086,7 +2109,6 @@ impl Launcher {
             },
         ));
         let items = self.instance_items(heading, cx);
-        let mut rows = items.len();
         let list = div()
             .flex()
             .flex_col()
@@ -2102,8 +2124,6 @@ impl Launcher {
         if !servers.is_empty() {
             list = list.child(heading(tr("SERVERS").into()));
         }
-        rows += servers.len();
-        let headings = 1 + usize::from(!servers.is_empty());
         for e in servers {
             let up = self.servers.is_up(&e.dir);
             let open = self.page == Page::Servers && self.servers.open.as_ref() == Some(&e.dir);
@@ -2118,6 +2138,7 @@ impl Launcher {
                             .items_center()
                             .justify_center()
                             .size(px(36.))
+                            .rounded(px(theme::night::RADIUS_CONTROL))
                             .bg(plate::alpha(n.card_hi, n.card_hi_alpha))
                             .child(blocks::icon("server", 18., shell::c(n.ink_soft))),
                     )
@@ -2200,20 +2221,14 @@ impl Launcher {
             }
             _ => {}
         }
-        // Sculk's card above the links: seen without scrolling, on every page but Servers, which shows
-        // its wide banner. Tall where the sidebar has the height for it besides the wordmark, its rows
-        // (52 high each, under headings of 40) and the links, compact otherwise. After a while on
-        // screen a "Hide" beside its label puts it away for good.
-        if self.page != Page::Servers && !self.settings.partner_hidden {
-            let free = f32::from(window.viewport_size().height)
-                - theme::TOPBAR
-                - 40. * headings as f32
-                - 52. * rows as f32
-                - 110.;
+        // Sculk's card above the links: a compact one, since this panel shares the Home page
+        // with the banner below it rather than filling the window's height on its own. After a
+        // while on screen a "Hide" beside its label puts it away for good.
+        if !self.settings.partner_hidden {
             let mut side = div().relative().mb(px(8.)).child(partner::card(
                 "partner-side",
                 theme::SIDEBAR - 20.,
-                free < partner::TALL_HEIGHT,
+                true,
                 &t,
             ));
             if self.settings.partner_seen_secs >= partner::SEEN_BEFORE_HIDE {
@@ -2273,33 +2288,15 @@ impl Launcher {
                     cx.notify();
                 })),
         );
-        // Custom title bars carry the mark and name already.
-        let brand = (!titlebar::draws_brand(window)).then(|| {
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(px(10.))
-                .h(px(theme::TOPBAR))
-                .px(px(8.))
-                .child(mark(24., &t))
-                .child(
-                    shell::text(theme::night::TITLE, shell::c(n.ink))
-                        .font_family(theme::DISPLAY_FONT)
-                        .child("Horizon"),
-                )
-        });
-        shell::sidebar_plate(&t)
-            .id("sidebar")
+        blocks::panel(&t)
+            .id("home-panel")
             .flex()
             .flex_col()
-            .flex_none()
             .w(px(theme::SIDEBAR))
-            .h_full()
-            .px(px(10.))
-            .pb(px(12.))
+            .flex_none()
+            .p(px(14.))
+            .max_h(px(560.))
             .overflow_y_scroll()
-            .children(brand)
             .child(list)
             .child(foot)
     }
@@ -2457,6 +2454,7 @@ impl Launcher {
                     "Start the game, or run a server for others to join.",
                     &t,
                 ))
+                .child(self.home_panel(cx))
                 .child(centered(tr("No version installed yet."), &t).child(
                     button("go-versions", "Choose a version", Kind::Secondary, &t).on_click(
                         cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -2737,7 +2735,12 @@ impl Launcher {
                     // Notes and friends are Horizon's.
                     .children(java.is_none().then(|| self.home_card(&tag, cx))),
             );
-        let mut page = div().flex().flex_col().gap(px(28.)).child(banner);
+        let mut page = div()
+            .flex()
+            .flex_col()
+            .gap(px(28.))
+            .child(self.home_panel(cx))
+            .child(banner);
         if let Some(e) = self.prepare_error.clone() {
             page = page.child(notice(e, &t));
         }
@@ -3205,6 +3208,9 @@ impl Launcher {
             .gap(px(6.))
             .mt(px(8.))
             .p(px(12.))
+            .rounded(px(theme::RADIUS))
+            .border_1()
+            .border_color(t.outline)
             .bg(t.well)
             .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
             .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
@@ -3245,6 +3251,9 @@ impl Launcher {
             .gap(px(6.))
             .mt(px(8.))
             .p(px(12.))
+            .rounded(px(theme::RADIUS))
+            .border_1()
+            .border_color(t.outline)
             .bg(t.well)
             .child(div().text_color(t.danger).child(tr("These mods were made for different Horizon versions").to_string()))
             .child(list.to_owned())
@@ -3285,7 +3294,8 @@ impl Launcher {
             .h(px(30.))
             .px(px(12.))
             .overflow_hidden()
-            .border_2()
+            .rounded(px(theme::RADIUS))
+            .border_1()
             .border_color(if focused { t.accent } else { t.outline })
             .bg(t.well)
             .font_family(theme::MONO)
@@ -3344,7 +3354,8 @@ impl Launcher {
             .h(px(30.))
             .px(px(12.))
             .overflow_hidden()
-            .border_2()
+            .rounded(px(theme::RADIUS))
+            .border_1()
             .border_color(if focused { t.accent } else { t.outline })
             .bg(t.well)
             .font_family(theme::MONO)
@@ -3784,10 +3795,10 @@ impl Launcher {
                     .px(px(16.))
                     .mb(px(8.))
                     .bg(t.panel)
-                    .border_2()
+                    .rounded(px(theme::RADIUS_PLATE))
+                    .border_1()
                     .border_color(t.outline)
-                    .children(blocks::edges(t.bevel, t.lip, theme::BEVEL))
-                    .child(hover_layer(&id, t.raised, 0., 0.))
+                    .child(hover_layer(&id, t.raised, theme::RADIUS_PLATE, 0.))
                     .child(
                         div()
                             .relative()
@@ -3913,9 +3924,9 @@ impl Launcher {
                     .p(px(20.))
                     .mb(px(10.))
                     .bg(t.panel)
-                    .border_2()
+                    .rounded(px(theme::RADIUS_PLATE))
+                    .border_1()
                     .border_color(t.outline)
-                    .children(blocks::edges(t.bevel, t.lip, theme::BEVEL))
                     .child(
                         div()
                             .flex()
@@ -3956,17 +3967,19 @@ impl Launcher {
 /// A thin bar. A known fraction eases from its previous value; an unknown one shuttles slowly.
 /// Progress: a plate-coloured track filling with the accent; work of unknown length shuttles.
 fn progress_bar(fraction: Option<(f32, f32)>, t: &Theme) -> Div {
-    // Night: a thin accent line on a plate's colour, square like the art.
+    // Dark glass: a thin white capsule filling a fainter one, never a tinted colour.
     let n = t.night;
     let bar = div()
         .absolute()
         .top_0()
         .bottom_0()
+        .rounded(px(theme::night::RADIUS_CONTROL))
         .bg(plate::alpha(n.accent, 1.));
     let track = div()
         .relative()
         .flex_1()
         .h(px(6.))
+        .rounded(px(theme::night::RADIUS_CONTROL))
         .bg(plate::alpha(n.card_hi, n.card_hi_alpha))
         .overflow_hidden();
     match fraction {
@@ -4051,7 +4064,7 @@ impl Render for Launcher {
             self.wake_sky(next, cx);
         }
         let topbar = self.topbar(cx);
-        let sidebar = self.sidebar(window, cx);
+        let sidebar = self.icon_rail(window, cx);
         let mut root = div()
             .id("root")
             .track_focus(&self.root_focus)

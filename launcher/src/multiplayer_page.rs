@@ -154,7 +154,8 @@ impl Launcher {
             .items_center()
             .justify_center()
             .size(px(48.))
-            .border_2()
+            .rounded(px(theme::night::RADIUS_CONTROL))
+            .border_1()
             .border_color(t.outline)
             .bg(t.well);
         let picture = match icon {

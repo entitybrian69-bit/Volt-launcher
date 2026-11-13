@@ -43,7 +43,8 @@ impl Launcher {
                 )
                 .size(px(SWATCH))
                 .bg(face)
-                .border_2()
+                .rounded(px(theme::night::RADIUS_CONTROL))
+                .border_1()
                 .border_color(if chosen { t.ink } else { t.outline })
                 .cursor_pointer()
                 .when(chosen, |d| {
