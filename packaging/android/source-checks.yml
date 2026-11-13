@@ -33,6 +33,43 @@ jobs:
       - run: python3 tools/test_android_content.py
       - name: Check workflow export matches the active workflow
         run: cmp .github/workflows/android-source.yml packaging/android/source-checks.yml
+  apk:
+    # Produce an installable arm64 APK for each Android-branch update.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+      CARGO_TARGET_DIR: .local/ci-target
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK and build tools
+        run: sdkmanager "platform-tools" "platforms;android-35" "ndk;28.2.13676358" "build-tools;35.0.0"
+      - name: Install Gradle 8.14
+        run: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.14-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt
+      - name: Prepare pinned Minecraft engine resources
+        run: python3 tools/android_prepare.py
+      - name: Build and audit public arm64 APK
+        run: python3 tools/android_build.py --abi arm64-v8a --public --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME" --gradle /opt/gradle-8.14/bin/gradle
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: volt-launcher-android-arm64
+          path: .local/android/apk/arm64-v8a/horizon-android-public.apk
+          if-no-files-found: error
+          retention-days: 30
   native:
     if: github.event_name == 'workflow_dispatch' && inputs.native_checks
     needs: source
