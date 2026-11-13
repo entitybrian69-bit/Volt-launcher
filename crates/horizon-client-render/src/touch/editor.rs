@@ -604,7 +604,6 @@ impl TouchControls {
         }
     }
 }
-}
 fn key_rect(i: usize) -> [f32; 4] {
     [0.15, 0.25 + i as f32 * 0.072, 0.7, 0.06]
 }
