@@ -71,7 +71,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: volt-launcher-android-arm64
-          path: .local/android/apk/arm64-v8a/horizon-android-public.apk
+          path: .local/android/apk/arm64-v8a/volt-launcher-public.apk
           if-no-files-found: error
           retention-days: 30
   native:

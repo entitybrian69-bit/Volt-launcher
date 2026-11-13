@@ -15,7 +15,7 @@ python tools/android_build.py --abi x86 --public
 python tools/android_build.py --abi x86_64 --public
 ```
 
-Outputs are `.local/android/apk/<abi>/horizon-android-public.apk`.
+Outputs are `.local/android/apk/<abi>/volt-launcher-public.apk`.
 The build signs and audits each APK. Default development APKs are not release
 artifacts: they may contain private resource bundles and enable debugging.
 

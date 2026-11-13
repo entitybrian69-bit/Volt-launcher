@@ -199,7 +199,7 @@ python tools/android_build.py --abi x86_64 --public
 Windows discovers `%LOCALAPPDATA%/Android/Sdk` and Android Studio's JDK. Otherwise
 set `ANDROID_HOME`/`JAVA_HOME` or pass `--sdk`/`--java-home`. `--gradle` selects a
 Gradle executable. Public APKs are written to
-`.local/android/apk/<abi>/horizon-android-public.apk`; signing material stays in
+`.local/android/apk/<abi>/volt-launcher-public.apk`; signing material stays in
 `.local/android/`. Keep the signing key to allow updates over an existing install.
 
 Each APK contains one `libhorizon_android.so`, using the NativeActivity winit
