@@ -845,6 +845,12 @@ pub enum Opt {
     TextureFiltering,
     /// `Options.maxAnisotropyBit`.
     MaxAnisotropy,
+    /// Item-frame model rendering and distance (`horizon-graphics.txt`).
+    ItemFramesEnabled,
+    ItemFramesDistance,
+    /// Displayed item/map rendering and distance (`horizon-graphics.txt`).
+    FrameContentsEnabled,
+    FrameContentsDistance,
 }
 
 #[cfg(test)]
