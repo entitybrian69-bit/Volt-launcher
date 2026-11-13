@@ -1348,6 +1348,22 @@ mod tests {
 
     use super::*;
     #[test]
+    fn editor_can_remove_and_restore_the_movement_joystick() {
+        let mut touch = TouchControls::default();
+        touch.viewport(1920, 1080);
+        touch.open_editor();
+        let center = touch.placement(Control::Move).center;
+        touch.edit_touch(1, center, true, false);
+        assert_eq!(touch.editor.as_ref().unwrap().selected, Some(Control::Move));
+        touch.edit_touch(2, [0.5, 0.915], true, true);
+        assert!(!touch.visible(Control::Move));
+        touch.edit_touch(3, [0.15, 0.165], true, true);
+        touch.edit_touch(4, [0.35, 0.21], true, true);
+        assert!(touch.visible(Control::Move));
+        touch.cancel_editor();
+    }
+
+    #[test]
     fn editor_add_row_creates_a_button_without_closing_the_editor() {
         let mut touch = TouchControls::default();
         touch.viewport(1920, 1080);
