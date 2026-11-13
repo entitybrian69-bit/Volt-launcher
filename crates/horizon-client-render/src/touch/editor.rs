@@ -504,3 +504,4 @@ impl TouchControls {
             false
         }
     }
+}
