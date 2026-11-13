@@ -117,6 +117,8 @@ enum Role {
         committed: bool,
     },
     Ignore,
+    /// The world sneak button emits the vanilla sneak key directly, not a pad stick click.
+    Sneak,
     Shield,
     Button(Button),
 }
@@ -206,8 +208,13 @@ impl TouchControls {
     }
     /// Inventory overlays retain custom key holds, but never apply world gestures.
     pub fn clear_world_gesture(&mut self) {
+        let released_sneak = self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak));
         self.fingers
             .retain(|_, (role, _)| matches!(role, Role::Ignore));
+        if released_sneak {
+            self.custom_events.push(("action:key.sneak".into(), false));
+        }
+        self.sneaking = false;
         self.sprint_latched = false;
         self.pending = PadState::default();
         self.aim = None;
@@ -554,27 +561,35 @@ impl TouchControls {
             return [0.0; 2];
         }
         if ended {
-            if let Some((
-                Role::Look {
-                    start,
-                    since,
-                    dragged,
-                    held_use,
-                    ..
-                },
-                _,
-            )) = self.fingers.remove(&id)
-                && (!self.crosshair() || self.settings.crosshair_gestures)
-                && !dragged
-                && since.elapsed() < HOLD_DELAY
-            {
-                self.tap_aim = Some(if self.settings.crosshair() || self.projectile_crosshair {
-                    [0.5, 0.5]
-                } else {
-                    start
-                });
-                self.last_marker = Some((start, Instant::now()));
-                self.pending_tap = Some(held_use);
+            if let Some((role, _)) = self.fingers.remove(&id) {
+                match role {
+                    Role::Look {
+                        start,
+                        since,
+                        dragged,
+                        held_use,
+                        ..
+                    } if (!self.crosshair() || self.settings.crosshair_gestures)
+                        && !dragged
+                        && since.elapsed() < HOLD_DELAY =>
+                    {
+                        self.tap_aim = Some(if self.settings.crosshair() || self.projectile_crosshair {
+                            [0.5, 0.5]
+                        } else {
+                            start
+                        });
+                        self.last_marker = Some((start, Instant::now()));
+                        self.pending_tap = Some(held_use);
+                    }
+                    Role::Sneak => {
+                        let still_held = self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak));
+                        self.sneaking = still_held;
+                        if !still_held {
+                            self.custom_events.push(("action:key.sneak".into(), false));
+                        }
+                    }
+                    _ => {}
+                }
             }
             return [0.0; 2];
         }
@@ -641,6 +656,13 @@ impl TouchControls {
                     self.sprint_latched = !self.sprint_latched;
                     Role::Ignore
                 }
+                Some(Control::Sneak) => {
+                    if !self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak)) {
+                        self.custom_events.push(("action:key.sneak".into(), true));
+                    }
+                    self.sneaking = true;
+                    Role::Sneak
+                }
                 Some(c) => Self::button(c).map_or(Role::Ignore, Role::Button),
                 None => Role::Look {
                     start: point,
@@ -689,7 +711,11 @@ impl TouchControls {
     }
     pub fn clear(&mut self) {
         self.clear_custom();
+        if self.fingers.values().any(|(role, _)| matches!(role, Role::Sneak)) {
+            self.custom_events.push(("action:key.sneak".into(), false));
+        }
         self.fingers.clear();
+        self.sneaking = false;
         self.last_sneak_tap = None;
         self.sprint_latched = false;
         self.pending = PadState::default();
@@ -1204,6 +1230,35 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn world_sneak_emits_a_real_key_hold_and_releases_cleanly() {
+        let mut t = TouchControls::default();
+        t.settings.mode = Mode::Crosshair;
+        let point = t.placement(Control::Sneak).center;
+        t.update(1, point, true, false);
+        assert!(t.sneaking);
+        assert_eq!(t.key_events(), [("action:key.sneak".into(), true)]);
+        t.update(1, point, false, true);
+        assert!(!t.sneaking);
+        assert_eq!(t.key_events(), [("action:key.sneak".into(), false)]);
+    }
+
+    #[test]
+    fn world_sneak_shared_fingers_release_only_after_the_last_finger() {
+        let mut t = TouchControls::default();
+        t.settings.mode = Mode::Crosshair;
+        let point = t.placement(Control::Sneak).center;
+        t.update(1, point, true, false);
+        t.update(2, point, true, false);
+        assert_eq!(t.key_events(), [("action:key.sneak".into(), true)]);
+        t.update(1, point, false, true);
+        assert!(t.sneaking);
+        assert!(t.key_events().is_empty());
+        t.update(2, point, false, true);
+        assert!(!t.sneaking);
+        assert_eq!(t.key_events(), [("action:key.sneak".into(), false)]);
+    }
+
     #[test]
     fn sprint_toggle_survives_finger_release_and_clears_on_focus_loss() {
         let mut t = TouchControls {
