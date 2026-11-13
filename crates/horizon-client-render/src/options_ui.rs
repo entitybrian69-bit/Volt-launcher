@@ -94,7 +94,13 @@ pub(crate) const ACCESSIBILITY_OPTIONS: &[Opt] = &[
 /// does in Java.
 pub(crate) fn vanilla_control_options() -> Vec<Opt> {
     if cfg!(target_os = "android") {
-        return vec![Opt::ToggleCrouch, Opt::ToggleSprint, Opt::AutoJump];
+        return vec![
+            Opt::ToggleCrouch,
+            Opt::ToggleSprint,
+            Opt::AutoJump,
+            Opt::TouchSensitivityHorizontal,
+            Opt::TouchSensitivityVertical,
+        ];
     }
     let mut options = vec![
         Opt::ToggleCrouch,
@@ -2172,8 +2178,6 @@ impl OptionsUi {
                 rows.extend(pairs(&[
                     Opt::TouchCrosshairGestures,
                     Opt::TouchSensitivity,
-                    Opt::TouchSensitivityHorizontal,
-                    Opt::TouchSensitivityVertical,
                     Opt::TouchOffhand,
                     Opt::TouchShield,
                     Opt::TouchButtonScale,
