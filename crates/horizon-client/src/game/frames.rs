@@ -374,28 +374,53 @@ impl Game<'_> {
         let sprites = &self.gui.atlas.sprites;
         let mut maps: Vec<(i32, glam::Mat4, u32)> = Vec::new();
         let mut items: Vec<(ItemStack, u32, glam::Mat4, u8)> = Vec::new();
-        // ItemFrame.shouldRenderAtSqrDistance: 1024 blocks at a view scale
-        // of 1.
-        let range = 16.0 * 64.0 * self.view_scale();
+        // Frame models and their displayed contents have independent toggles
+        // and ranges. Distances are chunks, matching the player's render-distance
+        // mental model; the default 64 chunks preserves vanilla's 1024-block range.
+        let frame_range = 16.0 * f64::from(self.settings.horizon.item_frames_distance);
+        let contents_range = 16.0 * f64::from(self.settings.horizon.frame_contents_distance);
         for f in &self.item_frames {
             let entity_start = out.len();
-            let map = f.item.as_ref().and_then(super::maps::map_id);
-            // EntityRenderer.shouldRender: its box (a block wide with a map),
-            // measured from the box's centre.
-            let (lo, hi) = f.bounds();
-            let (mut lo, mut hi) = (glam::DVec3::from(lo), glam::DVec3::from(hi));
-            if map.is_some() {
-                let s = f.step();
+            let (base_lo, base_hi) = f.bounds();
+            let (base_lo, base_hi) = (glam::DVec3::from(base_lo), glam::DVec3::from(base_hi));
+            let frame_visible = self.settings.horizon.item_frames_enabled
+                && self.entity_in_view(
+                    camera,
+                    (base_lo + base_hi) / 2.0,
+                    frame_range,
+                    base_lo,
+                    base_hi,
+                );
+            let contents_enabled =
+                self.settings.horizon.frame_contents_enabled && f.item.is_some();
+            let map_model = f.item.as_ref().and_then(super::maps::map_id).is_some();
+            // A map extends one block across the frame's bounding box.
+            let (mut content_lo, mut content_hi) = (base_lo, base_hi);
+            if map_model {
+                let step = f.step();
                 for i in 0..3 {
-                    if s[i] == 0 {
-                        let c = (lo[i] + hi[i]) / 2.0;
-                        (lo[i], hi[i]) = (c - 0.5, c + 0.5);
+                    if step[i] == 0 {
+                        let center = (content_lo[i] + content_hi[i]) / 2.0;
+                        (content_lo[i], content_hi[i]) = (center - 0.5, center + 0.5);
                     }
                 }
             }
-            if !self.entity_in_view(camera, (lo + hi) / 2.0, range, lo, hi) {
+            let contents_visible = contents_enabled
+                && self.entity_in_view(
+                    camera,
+                    (content_lo + content_hi) / 2.0,
+                    contents_range,
+                    content_lo,
+                    content_hi,
+                );
+            if !frame_visible && !contents_visible {
                 continue;
             }
+            let map = if contents_visible {
+                f.item.as_ref().and_then(super::maps::map_id)
+            } else {
+                None
+            };
             let s = f.step();
             // Pose: to the block centre, then X/Y rotation by facing.
             let (x_rot, y_rot) = if s[1] == 0 {
@@ -449,8 +474,8 @@ impl Game<'_> {
             let map_uv = |r: &horizon_client::hud::Rect, uv: [[f32; 2]; 4]| {
                 uv.map(|[u, v]| [r.u0 + u * (r.u1 - r.u0), r.v0 + v * (r.v1 - r.v0)])
             };
-            if !f.invisible {
-                let model = match (f.glow, map.is_some()) {
+            if frame_visible && !f.invisible {
+                let model = match (f.glow, map_model) {
                     (true, true) => &self.glow_map_frame_model,
                     (false, true) => &self.map_frame_model,
                     (true, false) => &self.glow_frame_model,
@@ -474,7 +499,12 @@ impl Game<'_> {
                     );
                 }
             }
-            self.cull_entity_vertices(out, entity_start);
+            if frame_visible {
+                self.cull_entity_vertices(out, entity_start);
+            }
+            if !contents_visible {
+                continue;
+            }
             if let Some(id) = map {
                 // ItemFrameRenderer: the map fills the face, in 90-degree steps.
                 let depth = if f.invisible { 0.5 } else { 0.4375 };
