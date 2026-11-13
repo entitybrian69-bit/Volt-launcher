@@ -216,9 +216,84 @@ impl fmt::Display for Capability {
     }
 }
 
+/// A parsed manifest and the forward-compatibility warnings reading it
+/// raised: unknown fields and capability names (a newer Horizon's) are
+/// ignored with a warning, never a refusal, so tomorrow's mods still load
+/// what this build understands.
+#[derive(Debug)]
+pub struct Tolerated {
+    pub manifest: Manifest,
+    pub warnings: Vec<String>,
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
+        Self::parse_tolerant(text).map(|t| t.manifest)
+    }
+    /// [`Manifest::parse`], keeping the forward-compatibility warnings.
+    /// Validation is unchanged: everything this Horizon understands is
+    /// checked as strictly as ever; only what provably comes from a NEWER
+    /// manifest shape (unknown top-level fields, unknown capability names,
+    /// a newer `api` line on a content-only mod) is tolerated, each with a
+    /// warning the Mods report shows.
+    pub fn parse_tolerant(text: &str) -> Result<Tolerated, String> {
+        let mut warnings = Vec::new();
+        let mut table: toml::Table =
+            text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
+        const KNOWN: [&str; 10] = [
+            "id",
+            "name",
+            "version",
+            "description",
+            "authors",
+            "api",
+            "side",
+            "capabilities",
+            "namespaces",
+            "experimental",
+        ];
+        let mut unknown: Vec<String> = table
+            .keys()
+            .filter(|k| !KNOWN.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        unknown.sort();
+        if !unknown.is_empty() {
+            for key in &unknown {
+                table.remove(key);
+            }
+            warnings.push(format!(
+                "unknown manifest field(s) {}: written for a newer Horizon, ignored here",
+                unknown.join(", ")
+            ));
+        }
+        // Capability names a newer Horizon defines: dropped with a warning
+        // (the mod's known capabilities still work; its code is still held
+        // to `check_imports`, so nothing runs unchecked).
+        for key in ["capabilities", "experimental"] {
+            if let Some(toml::Value::Array(list)) = table.get_mut(key) {
+                list.retain(|v| {
+                    let known = v.as_str().is_none_or(|s| {
+                        Capability::ALL.iter().any(|c| c.to_string() == s)
+                    });
+                    if !known {
+                        warnings.push(format!(
+                            "{key} lists {v}, which this Horizon does not offer: ignored (part of the mod may not work)"
+                        ));
+                    }
+                    known
+                });
+            }
+        }
+        let m = Self::validate(table, &mut warnings)?;
+        Ok(Tolerated {
+            manifest: m,
+            warnings,
+        })
+    }
+    fn validate(table: toml::Table, warnings: &mut Vec<String>) -> Result<Self, String> {
+        let text = toml::to_string(&table).map_err(|e| format!("{MANIFEST}: {e}"))?;
+        let m: Manifest = toml::from_str(&text).map_err(|e| format!("{MANIFEST}: {e}"))?;
         let id_ok = (1..=64).contains(&m.id.len())
             && m.id
                 .bytes()
@@ -230,8 +305,23 @@ impl Manifest {
             ));
         }
         if !APIS.contains(&m.api.as_str()) {
-            return Err(format!(
-                "built for API {}; this Horizon runs {}",
+            // API negotiation: a content-only mod of a NEWER line still
+            // loads what this build understands (its registries content),
+            // with a warning. Anything that would need newer code or
+            // interfaces is refused with the exact reason.
+            let content_only = m.capabilities.contains(&Capability::Registries)
+                && m.capabilities
+                    .iter()
+                    .all(|c| matches!(c, Capability::Registries | Capability::Storage));
+            if !(content_only && m.side != Side::Server) {
+                return Err(format!(
+                    "built for API {}; this Horizon runs {}",
+                    m.api,
+                    APIS.join(" and ")
+                ));
+            }
+            warnings.push(format!(
+                "built for API {}; this Horizon runs {}: its content loads, anything newer in it is ignored",
                 m.api,
                 APIS.join(" and ")
             ));
@@ -317,6 +407,9 @@ pub struct Package {
     pub manifest: Manifest,
     /// None for a content-only mod (capability `registries`, no code).
     pub wasm: Option<Vec<u8>>,
+    /// Forward-compatibility warnings reading it raised (unknown manifest
+    /// fields, a newer API line): shown in the Mods report, never fatal.
+    pub warnings: Vec<String>,
 }
 impl Package {
     /// A `.hmod` (a zip holding `horizon-mod.toml`, `mod.wasm` and, for
@@ -352,13 +445,34 @@ impl Package {
         if wasm.as_ref().is_some_and(|w| w.len() as u64 > MAX_WASM) {
             return Err(format!("{WASM} is over {} MiB", MAX_WASM >> 20));
         }
-        let manifest = Manifest::parse(&toml)?;
+        let Tolerated {
+            manifest,
+            mut warnings,
+        } = Manifest::parse_tolerant(&toml)?;
+        // A newer API line's code can't link this build's interfaces: the
+        // mod's content still loads (`parse_tolerant` only lets a content
+        // mod through), the component is set aside with a warning.
+        let wasm = match wasm {
+            Some(_) if !APIS.contains(&manifest.api.as_str()) => {
+                warnings.push(format!(
+                    "{WASM} ignored: built for API {}, and this Horizon runs code of API {}",
+                    manifest.api,
+                    APIS.join(" and ")
+                ));
+                None
+            }
+            other => other,
+        };
         if wasm.is_none() && !manifest.capabilities.contains(&Capability::Registries) {
             return Err(format!(
                 "{WASM}: missing (only a content mod, with capability registries, may have no code)"
             ));
         }
-        Ok(Package { manifest, wasm })
+        Ok(Package {
+            manifest,
+            wasm,
+            warnings,
+        })
     }
     /// The `.hmod` bytes for `manifest_text` and a component.
     pub fn write(manifest_text: &str, wasm: &[u8]) -> Result<Vec<u8>, String> {
@@ -487,8 +601,85 @@ capabilities = ["game-read", "hud"]
         assert!(Manifest::parse(&bad_id).unwrap_err().contains("is not"));
         let bad_api = EXAMPLE.replace("api = \"0.1\"", "api = \"0.4\"");
         assert!(Manifest::parse(&bad_api).unwrap_err().contains("API 0.4"));
-        let unknown = format!("{EXAMPLE}network = true\n");
-        assert!(Manifest::parse(&unknown).is_err());
+    }
+
+    #[test]
+    fn tolerates_newer_manifests_with_warnings() {
+        // Unknown top-level fields: a newer Horizon's manifest shape loads,
+        // with a warning naming the fields, never a refusal (forward
+        // compatibility; everything known is still validated as strictly).
+        let unknown = format!("{EXAMPLE}network = true\nfuture_table = {{ a = 1 }}\n");
+        let t = Manifest::parse_tolerant(&unknown).unwrap();
+        assert_eq!(t.manifest.id, "coords_hud");
+        assert_eq!(t.warnings.len(), 1);
+        assert!(
+            t.warnings[0].contains("future_table, network")
+                && t.warnings[0].contains("newer Horizon"),
+            "{:?}",
+            t.warnings
+        );
+        // Unknown capability names are dropped with a warning; the known
+        // ones keep working and known validation still applies.
+        let caps = EXAMPLE.replace("\"game-read\", \"hud\"", "\"game-read\", \"teleport\", \"hud\"");
+        let t = Manifest::parse_tolerant(&caps).unwrap();
+        assert_eq!(
+            t.manifest.capabilities,
+            [Capability::GameRead, Capability::Hud]
+        );
+        assert!(t.warnings[0].contains("teleport"), "{:?}", t.warnings);
+        // A newer API line on a content-only mod: its content loads with a
+        // warning. The same line on a code mod is still refused, clearly.
+        let content = "id = \"m\"\nname = \"M\"\nversion = \"1\"\napi = \"0.9\"\ncapabilities = [\"registries\"]\n";
+        let t = Manifest::parse_tolerant(content).unwrap();
+        assert!(
+            t.warnings[0].contains("API 0.9") && t.warnings[0].contains("its content loads"),
+            "{:?}",
+            t.warnings
+        );
+        let e = Manifest::parse_tolerant(&EXAMPLE.replace("api = \"0.1\"", "api = \"0.9\""))
+            .unwrap_err();
+        assert!(e.contains("built for API 0.9"), "{e}");
+        // Garbage that is not provably "newer" still fails: ids, sides and
+        // namespaces are checked exactly as before.
+        assert!(Manifest::parse_tolerant("id = 3\nname = \"x\"").is_err());
+        let bad_side = EXAMPLE.replace("api = \"0.1\"", "api = \"0.1\"\nside = \"everywhere\"");
+        assert!(Manifest::parse_tolerant(&bad_side).is_err());
+    }
+
+    #[test]
+    fn future_api_hmod_loads_content_and_sets_aside_its_code() {
+        let dir = std::env::temp_dir().join(format!("horizon-future-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = "id = \"newmod\"\nname = \"New\"\nversion = \"2\"\napi = \"0.9\"\ncapabilities = [\"registries\"]\nshiny = \"yes\"\n";
+        let bytes = {
+            use std::io::Write;
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file(MANIFEST, options).unwrap();
+            zip.write_all(manifest.as_bytes()).unwrap();
+            zip.start_file(WASM, options).unwrap();
+            zip.write_all(b"\0asm-from-the-future").unwrap();
+            zip.finish().unwrap().into_inner()
+        };
+        let path = dir.join("newmod.hmod");
+        std::fs::write(&path, bytes).unwrap();
+        let p = Package::read(&path).unwrap();
+        assert_eq!(p.manifest.id, "newmod");
+        assert!(p.wasm.is_none(), "future-API code must not be loaded");
+        assert!(
+            p.warnings.iter().any(|w| w.contains("shiny")),
+            "{:?}",
+            p.warnings
+        );
+        assert!(
+            p.warnings
+                .iter()
+                .any(|w| w.contains("mod.wasm ignored") && w.contains("API 0.9")),
+            "{:?}",
+            p.warnings
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

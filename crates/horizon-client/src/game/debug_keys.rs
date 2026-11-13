@@ -160,6 +160,22 @@ impl Game<'_> {
         if !pressed {
             return false;
         }
+        if modifier_was_down
+            && key == KeyCode::KeyJ
+            && self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::LanguageReload)
+        {
+            self.debug_keys.used_debug_key_as_modifier = true;
+            let code = self.settings.language.clone();
+            self.load_language(&code);
+            self.debug_feedback(Text::literal(format!(
+                "Reloaded language '{code}' (Language Reload)"
+            )));
+            return true;
+        }
         // The debug modifier does nothing else.
         if name == binds.get("key.debug.modifier") || name == binds.get("key.debug.overlay") {
             return true;
@@ -475,9 +491,37 @@ impl Game<'_> {
                 ));
             }
         }
+        let apple = &self.settings.extras.mod_catalog;
+        if (apple.is_on(horizon_client::volt_mods::VoltModId::AppleSkin) || self.settings.extras.volt_mods.appleskin_hud)
+            && apple.appleskin_debug
+            && let Some(player) = &self.player
+        {
+            let food = &player.health.food;
+            let exhaustion = if self.remote.is_none() {
+                format!(", exhaustion {:.2}", food.exhaustion)
+            } else {
+                String::new() // Vanilla servers do not send exhaustion to clients.
+            };
+            d.group("food", [format!("Food {}, saturation {:.1}{exhaustion}", food.food, food.saturation)]);
+        }
         let (left, right) = d.columns(&self.debug_chart_lines());
         let atlas = &self.gui.atlas;
-        let mut draws = debug_overlay::draw(&atlas.font, [&left, &right], scale, width);
+        let mut draws = if self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::BetterF3)
+        {
+            debug_overlay::draw_styled(
+                &atlas.font,
+                [&left, &right],
+                scale,
+                width,
+                self.settings.extras.mod_catalog.betterf3_compact,
+            )
+        } else {
+            debug_overlay::draw(&atlas.font, [&left, &right], scale, width)
+        };
         let charts = self.debug_charts.draw(
             &atlas.font,
             width,
@@ -529,7 +573,7 @@ impl Game<'_> {
         self.debug_feedback(Text::translate(key, &[]));
     }
     /// `LocalPlayer.isReducedDebugInfo`: the server's rule or the option.
-    fn reduced_debug_info(&self) -> bool {
+    pub(super) fn reduced_debug_info(&self) -> bool {
         self.settings.reduced_debug_info || self.ui.rules.bool("reduced_debug_info")
     }
     /// The default profile's `3d_crosshair` entry: on while the overlay is
@@ -678,11 +722,15 @@ impl Game<'_> {
                 self.debug_charts.toggle_lightmap(&mut self.debug);
                 true
             }
-            // Screens and overlays Horizon does not draw yet (the debug
-            // options screen, the profiler and its chart, the texture dump):
-            // the keys are used up as in vanilla.
-            DebugAction::DebugOptions
-            | DebugAction::DumpDynamicTextures
+            // F3+F6: the debug options screen (game/debug_options.rs).
+            DebugAction::DebugOptions => {
+                self.toggle_debug_options();
+                true
+            }
+            // Screens and overlays Horizon does not draw yet (the profiler
+            // and its chart, the texture dump): the keys are used up as in
+            // vanilla.
+            DebugAction::DumpDynamicTextures
             | DebugAction::Profiling
             | DebugAction::ProfilingChart => true,
             DebugAction::ShowHitboxes

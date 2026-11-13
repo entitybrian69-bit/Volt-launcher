@@ -2,10 +2,6 @@
 //! The fill and the stroke are rectangles that don't overlap, so a translucent plate keeps one
 //! opacity, and the stroke follows the steps. One canvas paints them all: a plate costs two
 //! elements, however many steps it has.
-//!
-//! The dark-glass look's own plates are plain rounded rectangles ([`plate`]); the stepped-corner
-//! shapes below stay as a tested, still-available primitive.
-#![allow(dead_code)]
 use crate::theme::night::{self, Night};
 use gpui::{canvas, div, point, prelude::*, px, rgba, Bounds, Div, Pixels, Rgba};
 
@@ -14,16 +10,15 @@ pub fn alpha(c: u32, a: f32) -> Rgba {
     rgba(c << 8 | (a * 255.).round() as u32)
 }
 
-/// A dark-glass plate: `card` at its opacity, a soft [`night::RADIUS_CARD`] corner and a 1 px
-/// `stroke` along the edge — frosted glass, never a tinted colour. Its content goes in as
-/// children, as on any div.
+/// A plate: `card` at its opacity, each corner cut in two [`night::PIXEL_CORNER`] steps, with its
+/// 1 px `stroke` along the edge. Its content goes in as children, as on any div.
 pub fn plate(n: &Night) -> Div {
-    div()
-        .relative()
-        .bg(alpha(n.card, n.card_alpha))
-        .rounded(px(night::RADIUS_CARD))
-        .border_1()
-        .border_color(alpha(n.stroke, n.stroke_alpha))
+    cut(
+        night::PIXEL_CORNER,
+        2,
+        Some(alpha(n.card, n.card_alpha)),
+        Some((alpha(n.stroke, n.stroke_alpha), 1.)),
+    )
 }
 
 /// A box of any size whose corners are cut in `steps` steps of `step` px: `fill` inside, and a

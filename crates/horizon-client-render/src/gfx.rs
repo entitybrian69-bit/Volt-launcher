@@ -11,7 +11,12 @@ use crate::{
     sprites::SpriteAnimation,
 };
 use glam::{DVec3, Mat4, Vec3, Vec4};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    path::PathBuf,
+    sync::Arc,
+    time::Instant,
+};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
@@ -113,6 +118,7 @@ mod oit_features;
 #[cfg(any(target_os = "android", test))]
 mod opaque_output;
 mod pack_atlas;
+pub mod native_render;
 pub mod pack_draw;
 mod pack_entities;
 mod pack_hand;
@@ -275,6 +281,9 @@ struct SectionGpu {
     /// When it began to fade out, its column gone over far terrain that
     /// stays behind it (`Renderer::leave_section`); released once it has.
     leaving: Option<std::time::Instant>,
+    /// Animated block sprite layers present in this section, for refcounted
+    /// active-only sprite animation culling.
+    animated_layers: Box<[u16]>,
 }
 impl SectionGpu {
     /// Its fade code this frame (`lod::fade_code`), 0 once whole. `retiring`:
@@ -558,6 +567,7 @@ pub struct Renderer {
     panorama: panorama::Panorama,
     /// `RenderPipelines.WORLD_BORDER` and its buffers.
     border_pipeline: wgpu::RenderPipeline,
+    border_bindings: wgpu::BindGroupLayout,
     border_group: wgpu::BindGroup,
     border_uniform: wgpu::Buffer,
     border_vertices: wgpu::Buffer,
@@ -566,6 +576,7 @@ pub struct Renderer {
     screen_pipelines: [wgpu::RenderPipeline; 8],
     screen_buffer: wgpu::Buffer,
     screen_capacity: u64,
+    entity_bindings: wgpu::BindGroupLayout,
     entity_group: wgpu::BindGroup,
     /// The entity resources with the hand's projection (`hand_globals`).
     hand_group: wgpu::BindGroup,
@@ -579,6 +590,11 @@ pub struct Renderer {
     /// The block sprites, [`SPRITE_SPLIT`] layers per array (the first is
     /// `sprites` in terrain.wgsl, the others `sprites_1`...).
     sprite_textures: Vec<wgpu::Texture>,
+    /// Incremental mip-major block-sprite uploads streamed across title-screen
+    /// frames on Android so `Loading::finish` never stalls `ALooper` or spikes
+    /// Vulkan staging memory with thousands of per-layer `write_texture` calls.
+    pending_sprite_uploads: VecDeque<PendingSpriteArrayUpload>,
+    sprite_upload_scratch: Vec<u8>,
     /// A 1-layer array bound where a pack needs fewer arrays.
     sprite_unused: wgpu::TextureView,
     mip_levels: u32,
@@ -689,6 +705,8 @@ pub struct Renderer {
     pack_post: Option<(i32, Option<pack_post::PackPost>)>,
     /// The post passes of one of Horizon's own shader packs; never beside `pack_post`'s.
     native: Option<native_pack::NativePack>,
+    /// Cached 4-bit block sprite wave/material class lookup table for `NativePack`.
+    native_layer_kinds: Box<[[u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS]>,
     /// Time the shader pack's passes on the GPU (F3, or `HORIZON_SHADER_PACK_TIMING`).
     pass_timing: bool,
     /// The entity vertices Horizon draws itself while a shader pack draws the others.
@@ -725,6 +743,39 @@ pub struct Renderer {
     pub screenshot: Option<ScreenshotRequest>,
     /// Outcome of the last screenshot: frame size, or the error.
     pub screenshot_result: Option<std::result::Result<[u32; 2], String>>,
+    /// Volt Replay's MP4 export: while set, every frame is read back after
+    /// the GUI has drawn and handed over as `(size, bgra, pixels)` —
+    /// tightly packed rows of 4-byte pixels, red and blue swapped when
+    /// `bgra` is true.
+    pub video_sink: Option<Box<dyn FnMut([u32; 2], bool, Vec<[u8; 4]>) + Send>>,
+    /// Volt Recorder: which 2D layers the capture keeps — `(game HUD,
+    /// on-screen controls)`. `(true, true)` records the frame as shown
+    /// (Volt Replay's export); anything else re-composes the capture from
+    /// the pre-GUI frame plus the kept `HudBatch` layers.
+    pub video_layers: (bool, bool),
+    /// Volt Recorder: minimum time between captured frames (the recording
+    /// frame rate); Volt Replay's export keeps the ~30 fps default.
+    pub video_interval: std::time::Duration,
+    /// The pre-GUI frame copy layered captures compose onto.
+    video_layer_tex: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Export readbacks in flight: asynchronously mapped copies, oldest
+    /// first, so the render thread never waits on the GPU for a video
+    /// frame (the old synchronous readback froze gameplay while
+    /// recording). 0 = mapping, 1 = ready, 2 = failed.
+    video_pending: VecDeque<(wgpu::Buffer, Arc<std::sync::atomic::AtomicU8>, [u32; 2], bool)>,
+    /// Export buffers ready for reuse: no per-frame allocations.
+    video_free: Vec<wgpu::Buffer>,
+    /// When the next export frame is due (scheduled cadence: advanced by
+    /// exactly `video_interval` per capture so the recorded rate matches
+    /// the setting). `None` arms an immediate first capture.
+    video_last_capture: Option<Instant>,
+    /// Volt Recorder: GPU-scale captures to this size before readback
+    /// (`None`: the native frame size). Sampling the finished frame makes
+    /// any output size work — above the panel's resolution included — and
+    /// a smaller readback keeps the CPU encoder fed at high frame rates.
+    pub video_scale: Option<[u32; 2]>,
+    /// The capture scale pass and its target, rebuilt on a size change.
+    video_scale_pass: Option<(world_post::Post, wgpu::Texture)>,
     /// Brightness option (lightmap gamma), 0..1.
     pub gamma: f32,
     /// Optional full-light lightmap (Horizon Extras).
@@ -735,7 +786,29 @@ pub struct Renderer {
     oit: Option<oit::Oit>,
     /// Advance animated block textures (Horizon setting; vanilla always does).
     pub animated_textures: bool,
+    /// Tick stride for animated sprite uploads (1 = vanilla 20 Hz, 2 = Volt Boost 10 Hz throttle).
+    pub animation_step_ticks: u64,
+    /// Skip animated block sprite blending/uploads when no resident section uses that layer.
+    pub active_anim_cull: bool,
+    /// Distance-adaptive hysteresis for translucent water/glass re-sorting.
+    pub fast_translucency: bool,
+    active_layer_counts: Vec<u32>,
+    last_animated_tick: Option<u64>,
     present_modes: Vec<wgpu::PresentMode>,
+}
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        // Ensure all in-flight command buffers and swapchain image acquisitions finish
+        // BEFORE destroying `VkSwapchainKHR` (`VUID-vkDestroySwapchainKHR-swapchain-01288`).
+        // Without this, Rust's field-declaration drop order destroys `surface` before `device`,
+        // causing native driver SIGSEGV/SIGABRT during Launcher -> Game handoff on mobile GPUs.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = self.surface.take();
+        if let Ok(spare) = self.spare_surface.get_mut() {
+            let _ = spare.take();
+        }
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
 }
 /// Every layer's mip levels, layer major (`first` is the first layer's
 /// index into `settings`), made by `MipmapGenerator`.
@@ -774,6 +847,19 @@ fn instance_buffer_usage(limits: &wgpu::Limits) -> wgpu::BufferUsages {
 }
 /// Sprite arrays terrain.wgsl binds (`sprites`, `sprites_1`...).
 const SPRITE_ARRAYS: u32 = 8;
+/// Effective `SPRITE_ARRAYS` constant compiled into `terrain.wgsl`.
+/// On Android (where concurrent background `Renderer` rebuilds are skipped on Mali
+/// and `Launcher::open` starts with a 1-layer loading renderer) and whenever
+/// `split < SPRITE_SPLIT`, compile the multi-array branch (`SPRITE_ARRAYS`) up
+/// front so any pack up to `8 * split` layers upgrades in-place via
+/// `replace_world_textures` without recompiling pipelines on the UI thread.
+fn effective_sprite_arrays(layers: u32, split: u32) -> u32 {
+    if cfg!(target_os = "android") || split < SPRITE_SPLIT {
+        SPRITE_ARRAYS
+    } else {
+        layers.div_ceil(split).max(1)
+    }
+}
 /// The layers to give a square texture of `count` layers viewed as a 2D
 /// array. wgpu's OpenGL backend picks a texture's target from its layer
 /// count when it is created: one layer makes a 2D texture and a multiple of
@@ -884,6 +970,7 @@ pub struct PreparedTextures {
     sprites: Vec<(Vec<u8>, u32)>,
     forcefield: (Vec<u8>, u32),
     split: u32,
+    animations: Option<Vec<animate::PreparedAnimation>>,
 }
 impl PreparedTextures {
     pub fn new(
@@ -894,6 +981,18 @@ impl PreparedTextures {
         forcefield: (&[u8], u32),
     ) -> Self {
         Self::with_split(pixels, size, layers, settings, forcefield, sprite_split())
+    }
+
+    /// Precompute animated block-sprite mip sheets on the resource worker so
+    /// `SpriteAnimator` construction on the UI thread needs zero mipmap work.
+    pub fn with_animations(
+        mut self,
+        animations: &[SpriteAnimation],
+        size: u32,
+        settings: &[crate::mipmap::Settings],
+    ) -> Self {
+        self.animations = Some(animate::prepare(animations, size, settings));
+        self
     }
 
     /// Reuse the worker's exact mip bytes when the selected GPU needs smaller arrays.
@@ -922,6 +1021,7 @@ impl PreparedTextures {
             sprites,
             forcefield: self.forcefield,
             split,
+            animations: self.animations,
         }
     }
 
@@ -945,7 +1045,91 @@ impl PreparedTextures {
                 .collect(),
             forcefield: mip_chain(forcefield.0, forcefield.1, &[], 0, 1),
             split,
+            animations: None,
         }
+    }
+}
+
+struct PendingSpriteArrayUpload {
+    array: usize,
+    sprite_size: u32,
+    levels: u32,
+    used_layers: u32,
+    next_layer: u32,
+    chain_bytes: usize,
+    mips: Vec<u8>,
+}
+
+impl PendingSpriteArrayUpload {
+    fn new(array: usize, sprite_size: u32, levels: u32, used_layers: u32, mips: Vec<u8>) -> Self {
+        let layer_bytes = (sprite_size * sprite_size * 4) as usize;
+        let chain_bytes: usize = (0..levels).map(|l| layer_bytes >> (2 * l)).sum();
+        Self {
+            array,
+            sprite_size,
+            levels,
+            used_layers,
+            next_layer: 0,
+            chain_bytes,
+            mips,
+        }
+    }
+
+    fn upload_next_batch(
+        &mut self,
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+        scratch: &mut Vec<u8>,
+        max_bytes: usize,
+        max_layers: u32,
+    ) -> bool {
+        if self.used_layers == 0
+            || self.chain_bytes == 0
+            || self.next_layer >= self.used_layers
+            || self.mips.len() < self.used_layers as usize * self.chain_bytes
+        {
+            return true;
+        }
+        let batch_limit = (max_bytes / self.chain_bytes).clamp(1, max_layers as usize) as u32;
+        let first_layer = self.next_layer;
+        let batch_count = (self.used_layers - first_layer).min(batch_limit);
+        let mut mip_offset = 0usize;
+        for level in 0..self.levels {
+            let edge = (self.sprite_size >> level).max(1);
+            let level_bytes = (edge * edge * 4) as usize;
+            scratch.clear();
+            scratch.reserve(level_bytes * batch_count as usize);
+            for layer in first_layer..first_layer + batch_count {
+                let start = layer as usize * self.chain_bytes + mip_offset;
+                scratch.extend_from_slice(&self.mips[start..start + level_bytes]);
+            }
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: level,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: first_layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                scratch,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(edge * 4),
+                    rows_per_image: Some(edge),
+                },
+                wgpu::Extent3d {
+                    width: edge,
+                    height: edge,
+                    depth_or_array_layers: batch_count,
+                },
+            );
+            mip_offset += level_bytes;
+        }
+        self.next_layer += batch_count;
+        self.next_layer >= self.used_layers
     }
 }
 
@@ -1062,8 +1246,52 @@ fn backend_order(api: GraphicsApi, os: &str, wgpu_backend: bool) -> Vec<wgpu::Ba
         GraphicsApi::Auto if windows => vec![Backends::VULKAN, Backends::DX12, Backends::GL],
         GraphicsApi::Auto => vec![Backends::VULKAN, Backends::GL],
         GraphicsApi::Dx12 if windows => vec![Backends::DX12],
-        GraphicsApi::Vulkan | GraphicsApi::Dx12 => vec![Backends::VULKAN],
+        GraphicsApi::Vulkan | GraphicsApi::VulkanSupporter | GraphicsApi::Dx12 => {
+            vec![Backends::VULKAN]
+        }
         GraphicsApi::OpenGl => vec![Backends::GL],
+    }
+}
+/// Ordered `(Backends, supporter_mode)` pairs `open_device` tries before giving up.
+/// On Android, `Auto` and `Vulkan` try native Vulkan first, then the built-in
+/// Volt Vulkan Supporter compatibility bridge (Vulkan 1.0/1.1 downlevel + shader Y-flip
+/// + non-zero queue family + extension sanitization), and finally OpenGL ES only if
+/// no Vulkan ICD/hardware exists at all.
+fn backend_attempts(api: GraphicsApi, os: &str, wgpu_backend: bool) -> Vec<(wgpu::Backends, bool)> {
+    use wgpu::Backends;
+    if wgpu_backend || os == "macos" {
+        return vec![(Backends::default(), false)];
+    }
+    if os == "android" {
+        return match api {
+            GraphicsApi::OpenGl => vec![(Backends::GL, false)],
+            GraphicsApi::VulkanSupporter => {
+                vec![(Backends::VULKAN, true), (Backends::VULKAN, false)]
+            }
+            GraphicsApi::Vulkan => vec![(Backends::VULKAN, false), (Backends::VULKAN, true)],
+            GraphicsApi::Auto | GraphicsApi::Dx12 => vec![
+                (Backends::VULKAN, false),
+                (Backends::VULKAN, true),
+                (Backends::GL, false),
+            ],
+        };
+    }
+    if api == GraphicsApi::VulkanSupporter {
+        return vec![(Backends::VULKAN, true)];
+    }
+    let mut out = Vec::new();
+    for backend in backend_order(api, os, wgpu_backend) {
+        out.push((backend, false));
+        if backend == Backends::VULKAN && api == GraphicsApi::Auto {
+            out.push((Backends::VULKAN, true));
+        }
+    }
+    out
+}
+fn attempt_name(backends: wgpu::Backends, supporter: bool) -> &'static str {
+    match (backends, supporter) {
+        (wgpu::Backends::VULKAN, true) => "Vulkan (Volt Supporter)",
+        _ => backends_name(backends),
     }
 }
 fn backends_name(backends: wgpu::Backends) -> &'static str {
@@ -1156,22 +1384,34 @@ async fn open_device(
     api: GraphicsApi,
     layers: u32,
 ) -> Result<Opened> {
-    let order = backend_order(
+    let attempts = backend_attempts(
         api.with_env(),
         std::env::consts::OS,
         std::env::var_os("WGPU_BACKEND").is_some(),
     );
     let mut failures = Vec::new();
-    for (attempt, backends) in order.iter().copied().enumerate() {
-        let name = backends_name(backends);
+    for (attempt, (backends, supporter)) in attempts.iter().copied().enumerate() {
+        let name = attempt_name(backends, supporter);
         if attempt > 0 {
             log::warn!("Horizon renderer: trying {name} ({})", failures.join("; "));
         }
+        horizon_hdr::set_vulkan_supporter_mode(backends == wgpu::Backends::VULKAN && supporter);
         match open_with_retry(backends, window, offscreen, layers).await {
-            Ok(opened) => return Ok(opened),
-            Err(e) => failures.push(e),
+            Ok(opened) => {
+                let is_gl = opened.adapter.get_info().backend == wgpu::Backend::Gl;
+                crate::android_runtime::note_opened_backend(is_gl, supporter);
+                if supporter && !is_gl {
+                    log::info!(
+                        "Volt Vulkan Supporter active on {}",
+                        opened.adapter.get_info().name
+                    );
+                }
+                return Ok(opened);
+            }
+            Err(e) => failures.push(format!("{name}: {e}")),
         }
     }
+    horizon_hdr::set_vulkan_supporter_mode(false);
     Err(format!("{NO_GPU_DRIVER} ({})", failures.join("; ")).into())
 }
 /// Why a backend gave no device: no adapter at all, which a second try with the
@@ -1262,13 +1502,18 @@ async fn open_backend(
     // stand-in neither clamps nor drops NaN.
     let mobile = cfg!(target_os = "android");
     let compatibility = crate::android_runtime::compatibility();
+    let supporter = horizon_hdr::vulkan_supporter_mode();
     let features = timing::GpuTimer::features(&adapter)
-        | if compatibility {
+        | if compatibility || supporter {
             wgpu::Features::empty()
         } else {
             cull::Cull::features(&adapter)
         }
-        | oit::features(&adapter)
+        | if supporter {
+            wgpu::Features::empty()
+        } else {
+            oit::features(&adapter)
+        }
         | (adapter.features()
             & (if compatibility {
                 wgpu::Features::empty()
@@ -1320,13 +1565,18 @@ async fn open_backend(
         None => adapter.request_device(&desc).await,
     };
     match opened {
-        Ok((device, queue)) => Ok(Opened {
-            instance,
-            surface,
-            adapter,
-            device,
-            queue,
-        }),
+        Ok((device, queue)) => {
+            device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
+                log::error!("Horizon wgpu uncaptured error: {error}");
+            }));
+            Ok(Opened {
+                instance,
+                surface,
+                adapter,
+                device,
+                queue,
+            })
+        }
         Err(e) => Err(NoDevice::Failed(format!("{name} device: {e}"))),
     }
 }
@@ -1361,6 +1611,11 @@ fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
 }
 impl Renderer {
+    /// Whether this live renderer opened on the OpenGL / OpenGL ES backend.
+    pub fn is_open_gl(&self) -> bool {
+        self.info.backend == wgpu::Backend::Gl
+    }
+
     /// Sections with GPU buffers, for soak tests watching residency.
     pub fn resident_sections(&self) -> usize {
         self.sections.len()
@@ -1445,9 +1700,25 @@ impl Renderer {
         api: GraphicsApi,
     ) -> Result<Self> {
         #[cfg(target_os = "android")]
-        let startup = (!offscreen && api != GraphicsApi::OpenGl)
-            .then(crate::android_runtime::graphics_startup::begin)
-            .flatten();
+        struct CleanExitStartupGuard(Option<crate::android_runtime::graphics_startup::Startup>);
+        #[cfg(target_os = "android")]
+        impl Drop for CleanExitStartupGuard {
+            fn drop(&mut self) {
+                // Only native driver SIGSEGV/SIGABRT or panic unwinds leave `vulkan-startup.pending`;
+                // caught Rust errors must clear it so non-crash fallbacks do not falsely downgrade Vulkan.
+                if !std::thread::panicking()
+                    && let Some(startup) = self.0.take()
+                {
+                    startup.complete();
+                }
+            }
+        }
+        #[cfg(target_os = "android")]
+        let mut startup_guard = CleanExitStartupGuard(
+            (!offscreen && api != GraphicsApi::OpenGl)
+                .then(crate::android_runtime::graphics_startup::begin)
+                .flatten(),
+        );
 
         let split = sprite_split();
         if layers > split * SPRITE_ARRAYS {
@@ -1488,7 +1759,7 @@ impl Renderer {
             }
             None => open_device(&window, offscreen, api, layers).await?,
         };
-        let split = split.min(device.limits().max_texture_array_layers);
+        let split = sprite_split().min(device.limits().max_texture_array_layers);
         #[cfg(target_os = "android")]
         crate::android_runtime::configure_atlas_limit(device.limits().max_texture_dimension_2d);
         let info = adapter.get_info();
@@ -1510,8 +1781,10 @@ impl Renderer {
             }
             config.format = surface_format(&caps.formats, config.format);
             config.view_formats = vec![config.format.remove_srgb_suffix()];
-            // Screenshots copy the presented frame back from the swapchain.
-            if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            // Desktop screenshots and menu blur copy from the swapchain; Android
+            // routes both through FrameScale's GPU-local target so SurfaceFlinger
+            // AHardwareBuffer swapchain images stay pure RENDER_ATTACHMENT (AFBC/UBWC).
+            if !cfg!(target_os = "android") && caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
                 config.usage |= wgpu::TextureUsages::COPY_SRC;
             }
             config.present_mode = previous
@@ -1573,8 +1846,7 @@ impl Renderer {
             };
             (config, Vec::new(), None)
         };
-        let offscreen = surface
-            .is_none()
+        let offscreen = (surface.is_none() && previous.is_none())
             .then(|| Self::offscreen_target(&device, &config));
         if previous.is_none() {
             startup_step(format_args!("creating the pipelines"));
@@ -1598,8 +1870,8 @@ impl Renderer {
             view_dimension: wgpu::TextureViewDimension::D2Array,
             multisampled: false,
         };
-        let sprite_arrays = layers.div_ceil(split).max(1);
-        if sprite_arrays > 1 {
+        let sprite_arrays = effective_sprite_arrays(layers, split);
+        if layers.div_ceil(split).max(1) > 1 {
             log::info!("Horizon: {layers} block textures in {sprite_arrays} arrays");
         }
         let sprite_constants = [
@@ -1877,6 +2149,7 @@ impl Renderer {
                 PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
             })
             .for_split(layers, split);
+        let prepared_animations = prepared.animations;
         let mut mip_levels = 1;
         let sprite_compute = animate::SpriteAnimator::compute(&adapter, &device);
         let sprite_storage = if sprite_compute {
@@ -1885,43 +2158,58 @@ impl Renderer {
             wgpu::TextureUsages::empty()
         };
         let gl = adapter.get_info().backend == wgpu::Backend::Gl;
+        let mut init_uploads = VecDeque::new();
         let sprite_textures: Vec<wgpu::Texture> = prepared
             .sprites
             .into_iter()
             .enumerate()
-            .map(|(array, (mut mips, levels))| {
+            .map(|(array, (mips, levels))| {
                 let first = array as u32 * split;
                 let used = layers.saturating_sub(first).clamp(1, split);
                 let count = array_layers(used, gl);
-                // The extra layers are empty.
-                mips.resize(mips.len() / used as usize * count as usize, 0);
                 mip_levels = levels;
-                device.create_texture_with_data(
-                    &queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some("Block sprites"),
-                        size: wgpu::Extent3d {
-                            width: sprite_size,
-                            height: sprite_size,
-                            depth_or_array_layers: count,
-                        },
-                        mip_level_count: levels,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_DST
-                            // Shader packs' atlas copies them (pack_atlas.rs).
-                            | wgpu::TextureUsages::COPY_SRC
-                            | sprite_storage,
-                        view_formats: &[],
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Block sprites"),
+                    size: wgpu::Extent3d {
+                        width: sprite_size,
+                        height: sprite_size,
+                        depth_or_array_layers: count,
                     },
-                    wgpu::util::TextureDataOrder::LayerMajor,
-                    &mips,
-                )
+                    mip_level_count: levels,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        // Shader packs' atlas copies them (pack_atlas.rs).
+                        | wgpu::TextureUsages::COPY_SRC
+                        | sprite_storage,
+                    view_formats: &[],
+                });
+                init_uploads.push_back(PendingSpriteArrayUpload::new(
+                    array,
+                    sprite_size,
+                    levels,
+                    used,
+                    mips,
+                ));
+                tex
             })
             .collect();
-        let animations = animate::SpriteAnimator::new(
+        let mut init_scratch = Vec::new();
+        while let Some(mut upload) = init_uploads.pop_front() {
+            if let Some(tex) = sprite_textures.get(upload.array) {
+                while !upload.upload_next_batch(
+                    &queue,
+                    tex,
+                    &mut init_scratch,
+                    4 * 1024 * 1024,
+                    256,
+                ) {}
+            }
+        }
+        drop(init_scratch);
+        let animations = animate::SpriteAnimator::new_prepared(
             &device,
             animations,
             sprite_size,
@@ -1929,6 +2217,7 @@ impl Renderer {
             &sprite_textures,
             split,
             sprite_compute,
+            prepared_animations,
         );
         let sprite_unused = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -3067,12 +3356,14 @@ impl Renderer {
             entity_outline,
             panorama,
             border_pipeline,
+            border_bindings,
             border_group,
             border_uniform,
             border_vertices,
             screen_pipelines,
             screen_buffer,
             screen_capacity,
+            entity_bindings,
             entity_group,
             hand_group,
             hand_globals,
@@ -3083,6 +3374,8 @@ impl Renderer {
             globals,
             lightmap,
             sprite_textures,
+            pending_sprite_uploads: VecDeque::new(),
+            sprite_upload_scratch: Vec::new(),
             sprite_unused,
             mip_levels,
             mipmaps: mip_levels - 1,
@@ -3145,12 +3438,19 @@ impl Renderer {
             #[cfg(target_os = "android")]
             opaque_output: None,
             #[cfg(target_os = "android")]
-            startup,
+            startup: if info.backend == wgpu::Backend::Gl {
+                None
+            } else {
+                startup_guard.0.take()
+            },
             hdr: None,
             hdr_output,
             hdr_marker: None,
             pack_post: None,
             native: None,
+            native_layer_kinds: Box::new(
+                [[0u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS],
+            ),
             pass_timing: pack_timing::PassTiming::logging(),
             pack_entity_rest: Vec::new(),
             cloud_bindings,
@@ -3171,11 +3471,25 @@ impl Renderer {
             started: Instant::now(),
             screenshot: None,
             screenshot_result: None,
+            video_sink: None,
+            video_pending: VecDeque::new(),
+            video_free: Vec::new(),
+            video_last_capture: None,
+            video_scale: None,
+            video_scale_pass: None,
+            video_layers: (true, true),
+            video_interval: std::time::Duration::from_millis(31),
+            video_layer_tex: None,
             gamma: 0.5,
             improved_transparency: false,
             oit: None,
             fullbright: false,
             animated_textures: true,
+            animation_step_ticks: 1,
+            active_anim_cull: false,
+            fast_translucency: false,
+            active_layer_counts: Vec::new(),
+            last_animated_tick: None,
             present_modes,
         })
     }
@@ -3265,6 +3579,390 @@ impl Renderer {
         self.resize(size.width, size.height);
         Ok(())
     }
+    /// Swap the HUD atlas, glint and title panorama textures in-place on the
+    /// existing loading renderer without tearing down the surface or recompiling
+    /// any render/compute pipeline.
+    pub fn replace_ui_textures(
+        &mut self,
+        hud_atlas: (&[u8], u32, u32),
+        glint: (&[u8], u32, u32),
+        glint_armor: (&[u8], u32, u32),
+        panorama_faces: &panorama::Faces,
+    ) -> Result<()> {
+        let (atlas_pixels, atlas_width, atlas_height) = hud_atlas;
+        let limit = self.device.limits().max_texture_dimension_2d;
+        if atlas_width.max(atlas_height) > limit {
+            return Err(format!(
+                "the shared atlas is {atlas_width}x{atlas_height}; this GPU allows {limit}x{limit}"
+            )
+            .into());
+        }
+        // Wait for any in-flight GPU frame referencing the previous HUD/panorama
+        // textures before dropping them so mobile Vulkan drivers never fault on
+        // freed descriptors, and unified memory never holds two full HUD atlases.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        self.hud.atlas_texture = None;
+        self.menu_blur = None;
+        self.last_animated_tick = None;
+        let atlas = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Shared atlas"),
+                size: wgpu::Extent3d {
+                    width: atlas_width,
+                    height: atlas_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            atlas_pixels,
+        );
+        let atlas_view = atlas.create_view(&Default::default());
+        let (glint_pixels, glint_width, glint_height) = glint;
+        let glint_texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Enchanted glint"),
+                size: wgpu::Extent3d {
+                    width: glint_width,
+                    height: glint_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            glint_pixels,
+        );
+        let glint_view = glint_texture.create_view(&Default::default());
+        let glint_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Glint"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let (glint_armor_pixels, glint_armor_width, glint_armor_height) = glint_armor;
+        let glint_armor_texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Enchanted armor glint"),
+                size: wgpu::Extent3d {
+                    width: glint_armor_width,
+                    height: glint_armor_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            glint_armor_pixels,
+        );
+        let glint_armor_view = glint_armor_texture.create_view(&Default::default());
+        self.hud.replace_textures(
+            &self.device,
+            atlas,
+            &atlas_view,
+            &glint_view,
+            &glint_sampler,
+        );
+        let atlas_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Atlas"),
+            ..Default::default()
+        });
+        self.entity_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Entity resources"),
+            layout: &self.entity_bindings,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.lightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.lightmap_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&glint_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&glint_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&glint_armor_view),
+                },
+            ],
+        });
+        self.hand_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("First-person hand resources"),
+            layout: &self.entity_bindings,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.hand_globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.lightmap_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&self.lightmap_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&glint_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&glint_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&glint_armor_view),
+                },
+            ],
+        });
+        self.panorama
+            .replace_faces(&self.device, &self.queue, panorama_faces);
+        Ok(())
+    }
+    /// Whether `replace_world_textures` can upgrade this renderer in-place
+    /// without recompiling terrain pipelines (`SPRITE_ARRAYS` matches).
+    pub fn can_replace_world_textures(&self, layers: u32) -> bool {
+        let split = sprite_split().min(self.device.limits().max_texture_array_layers);
+        split > 0
+            && layers <= split.saturating_mul(SPRITE_ARRAYS)
+            && f64::from(effective_sprite_arrays(layers, split)) == self.terrain_sprites[0]
+            && f64::from(split) == self.terrain_sprites[1]
+    }
+    /// Upgrade a loading renderer with the world's block sprite arrays,
+    /// animations and world-border texture in-place on the render thread,
+    /// reusing all compiled pipelines and the already-uploaded HUD/panorama.
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_world_textures(
+        &mut self,
+        sprite_pixels: &[u8],
+        sprite_size: u32,
+        sprite_minimum_size: u32,
+        layers: u32,
+        sprite_mips: &[crate::mipmap::Settings],
+        animations: &[SpriteAnimation],
+        forcefield: (&[u8], u32),
+        prepared: Option<PreparedTextures>,
+    ) -> Result<()> {
+        if !self.can_replace_world_textures(layers) {
+            return Err("renderer terrain sprite array count changed".into());
+        }
+        // Only wait synchronously when live terrain sections are currently bound on
+        // the GPU; on the title screen (`sections.len() == 0`), a non-blocking poll
+        // avoids stalling `ALooper` behind in-flight swapchain work.
+        let poll_mode = if self.sections.len() == 0 {
+            wgpu::PollType::Poll
+        } else {
+            wgpu::PollType::wait_indefinitely()
+        };
+        let _ = self.device.poll(poll_mode);
+        let split = sprite_split().min(self.device.limits().max_texture_array_layers);
+        self.pending_sprite_uploads.clear();
+        self.sprite_upload_scratch = Vec::new();
+        self.sprite_textures.clear();
+        self.pack_atlas = None;
+        self.menu_blur = None;
+        self.last_animated_tick = None;
+        let prepared = prepared
+            .unwrap_or_else(|| {
+                PreparedTextures::new(sprite_pixels, sprite_size, layers, sprite_mips, forcefield)
+            })
+            .for_split(layers, split);
+        let prepared_animations = prepared.animations;
+        let mut mip_levels = 1;
+        let sprite_compute = animate::SpriteAnimator::compute(&self.adapter, &self.device);
+        let sprite_storage = if sprite_compute {
+            wgpu::TextureUsages::STORAGE_BINDING
+        } else {
+            wgpu::TextureUsages::empty()
+        };
+        let gl = self.info.backend == wgpu::Backend::Gl;
+        let mut pending_uploads = VecDeque::new();
+        let sprite_textures: Vec<wgpu::Texture> = prepared
+            .sprites
+            .into_iter()
+            .enumerate()
+            .map(|(array, (mips, levels))| {
+                let first = array as u32 * split;
+                let used = layers.saturating_sub(first).clamp(1, split);
+                let count = array_layers(used, gl);
+                mip_levels = levels;
+                let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Block sprites"),
+                    size: wgpu::Extent3d {
+                        width: sprite_size,
+                        height: sprite_size,
+                        depth_or_array_layers: count,
+                    },
+                    mip_level_count: levels,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC
+                        | sprite_storage,
+                    view_formats: &[],
+                });
+                pending_uploads.push_back(PendingSpriteArrayUpload::new(
+                    array,
+                    sprite_size,
+                    levels,
+                    used,
+                    mips,
+                ));
+                tex
+            })
+            .collect();
+        self.animations = animate::SpriteAnimator::new_prepared(
+            &self.device,
+            animations,
+            sprite_size,
+            sprite_mips,
+            &sprite_textures,
+            split,
+            sprite_compute,
+            prepared_animations,
+        );
+        self.sprite_sampler = self.device.create_sampler(&sprite_sampler_descriptor(0, 1));
+        self.texture_filtering = 0;
+        self.max_anisotropy = 1;
+        let sprite_views = sprite_views(&sprite_textures, &self.sprite_unused, None);
+        self.group = terrain_group(
+            &self.device,
+            "Horizon terrain resources",
+            &self.terrain_layout,
+            &self.globals,
+            &sprite_views,
+            &self.sprite_sampler,
+            &self.lightmap_view,
+            &self.lightmap_sampler,
+        );
+        self.crosshair_group = terrain_group(
+            &self.device,
+            "Debug crosshair resources",
+            &self.terrain_layout,
+            &self.crosshair_globals,
+            &sprite_views,
+            &self.sprite_sampler,
+            &self.lightmap_view,
+            &self.lightmap_sampler,
+        );
+        self.sprite_textures = sprite_textures;
+        self.pending_sprite_uploads = pending_uploads;
+        self.mip_levels = mip_levels;
+        self.mipmaps = mip_levels - 1;
+        self.sprite_minimum_size = sprite_minimum_size;
+        self.lightmap_uploaded = false;
+        if !cfg!(target_os = "android") || layers <= 16 || self.sections.len() > 0 {
+            self.flush_pending_sprite_uploads();
+        }
+
+        let forcefield_size = forcefield.1;
+        let (forcefield_mips, forcefield_levels) = prepared.forcefield;
+        let forcefield_texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Forcefield"),
+                size: wgpu::Extent3d {
+                    width: forcefield_size,
+                    height: forcefield_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: forcefield_levels,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &forcefield_mips,
+        );
+        let forcefield_view = forcefield_texture.create_view(&Default::default());
+        let forcefield_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Forcefield"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        self.border_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("World border resources"),
+            layout: &self.border_bindings,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.globals.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&forcefield_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&forcefield_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.border_uniform.as_entire_binding(),
+                },
+            ],
+        });
+        if self.sections.len() == 0 {
+            self.active_layer_counts.clear();
+        }
+        Ok(())
+    }
     /// Set the live surface aside for a replacement on the same device.
     pub fn release_surface(&mut self) {
         *self
@@ -3283,10 +3981,26 @@ impl Renderer {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
     }
+    /// Poll the GPU device without blocking so completed fences retire early (Volt Reflex).
+    pub fn poll_gpu(&self) {
+        let _ = self.device.poll(wgpu::PollType::Poll);
+    }
+
     /// Reattach a window after surface loss or a failed renderer replacement.
     pub fn recreate_surface(&mut self) -> Result<()> {
         if self.offscreen.is_some() {
             return Ok(());
+        }
+        #[cfg(target_os = "android")]
+        {
+            let size = self.window.inner_size();
+            let max = self.device.limits().max_texture_dimension_2d;
+            if !drawable_size(size.width, size.height, max) {
+                self.suspended = true;
+                return Ok(());
+            }
+            self.config.width = size.width;
+            self.config.height = size.height;
         }
         // The surface set aside for a replacement that failed, else a new one
         // (Wayland allows only one tearing-control object per window surface,
@@ -3312,6 +4026,7 @@ impl Renderer {
             &self.surface_config(),
             self.hdr.as_ref(),
         );
+        self.depth = Self::depth(&self.device, &self.config);
         self.surface = Some(surface);
         self.suspended = false;
         Ok(())
@@ -3577,6 +4292,22 @@ impl Renderer {
         {
             crate::spans::time("upload_submit", || self.queue.submit([copies]));
         }
+        let mut animated_layers = Vec::new();
+        for part in [&mesh.solid, &mesh.translucent] {
+            for v in part.iter().step_by(4) {
+                let layer = v.layer & !crate::mesher::OPAQUE_LAYER;
+                if self.animations.is_animated(layer) && !animated_layers.contains(&layer) {
+                    animated_layers.push(layer);
+                }
+            }
+        }
+        for &layer in &animated_layers {
+            let idx = usize::from(layer);
+            if idx >= self.active_layer_counts.len() {
+                self.active_layer_counts.resize(idx + 1, 0);
+            }
+            self.active_layer_counts[idx] = self.active_layer_counts[idx].saturating_add(1);
+        }
         Some(SectionGpu {
             page,
             start,
@@ -3599,6 +4330,7 @@ impl Renderer {
             flat_id,
             fading: None,
             leaving: None,
+            animated_layers: animated_layers.into_boxed_slice(),
         })
     }
     /// The section copies recorded since the last submission, closed.
@@ -3657,6 +4389,11 @@ impl Renderer {
         }
     }
     fn release_mesh(&mut self, s: SectionGpu) {
+        for &layer in &s.animated_layers {
+            if let Some(c) = self.active_layer_counts.get_mut(usize::from(layer)) {
+                *c = c.saturating_sub(1);
+            }
+        }
         if let (Some(flat), Some(id)) = (&mut self.flat, s.flat_id) {
             flat.remove(id);
         }
@@ -3703,6 +4440,7 @@ impl Renderer {
         self.section_uploaded.clear();
         self.block_entity_revision = next_block_entity_revision();
         self.sections.clear();
+        self.active_layer_counts.clear();
         self.lods.clear();
         self.lod_cutout.clear();
         self.lod_retiring.clear();
@@ -3825,6 +4563,13 @@ impl Renderer {
         }
         if block_entities {
             self.block_entity_revision = next_block_entity_revision();
+        }
+        for s in &released {
+            for &layer in &s.animated_layers {
+                if let Some(c) = self.active_layer_counts.get_mut(usize::from(layer)) {
+                    *c = c.saturating_sub(1);
+                }
+            }
         }
         if let Some(flat) = &mut self.flat {
             for id in released.iter().filter_map(|s| s.flat_id) {
@@ -4075,11 +4820,24 @@ impl Renderer {
         let (pack, labels) =
             native_pack::NativePack::new(&self.device, &terrain, report, &constants)?;
         self.native = pack.draws().then_some(pack);
-        if self.native.is_some() {
+        if let Some(native) = &self.native {
+            native
+                .frame
+                .write_layer_kinds(&self.queue, &self.native_layer_kinds);
             self.pack_post = None;
             self.pack_atlas = None;
         }
         Ok(labels)
+    }
+    /// Uploads the 4-bit block sprite wave/material class table into the active `NativePack`.
+    pub fn set_native_layer_kinds(
+        &mut self,
+        kinds: &[[u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS],
+    ) {
+        *self.native_layer_kinds = *kinds;
+        if let Some(native) = &self.native {
+            native.frame.write_layer_kinds(&self.queue, kinds);
+        }
     }
     /// What a shader pack's gbuffers programs read from Horizon's geometry: the sky's, and
     /// terrain's in the pack's block atlas (made here when missing; none when it does not fit).
@@ -4095,7 +4853,50 @@ impl Renderer {
         }
     }
 
+    fn step_pending_sprite_uploads(&mut self) {
+        let Some(front) = self.pending_sprite_uploads.front_mut() else {
+            return;
+        };
+        let done = match self.sprite_textures.get(front.array) {
+            Some(tex) => front.upload_next_batch(
+                &self.queue,
+                tex,
+                &mut self.sprite_upload_scratch,
+                512 * 1024,
+                64,
+            ),
+            None => true,
+        };
+        if done {
+            self.pending_sprite_uploads.pop_front();
+            if self.pending_sprite_uploads.is_empty() {
+                self.sprite_upload_scratch = Vec::new();
+                horizon_threads::release_free_memory();
+            }
+        }
+    }
+
+    fn flush_pending_sprite_uploads(&mut self) {
+        if self.pending_sprite_uploads.is_empty() {
+            return;
+        }
+        while let Some(mut upload) = self.pending_sprite_uploads.pop_front() {
+            if let Some(tex) = self.sprite_textures.get(upload.array) {
+                while !upload.upload_next_batch(
+                    &self.queue,
+                    tex,
+                    &mut self.sprite_upload_scratch,
+                    4 * 1024 * 1024,
+                    256,
+                ) {}
+            }
+        }
+        self.sprite_upload_scratch = Vec::new();
+        horizon_threads::release_free_memory();
+    }
+
     fn pack_terrain_inputs(&mut self) -> Option<horizon_shaders::GbuffersInputs> {
+        self.flush_pending_sprite_uploads();
         if self.pack_atlas.is_none() {
             let mut encoder = self.device.create_command_encoder(&Default::default());
             let layers = self
@@ -4322,7 +5123,10 @@ impl Renderer {
         self.lightmap_uploaded = true;
     }
     fn animate(&mut self, encoder: &mut wgpu::CommandEncoder, tick: u64) {
-        self.animations.animate(encoder, &mut self.uploads, tick);
+        let active = (self.active_anim_cull && self.sections.len() > 0)
+            .then_some(self.active_layer_counts.as_slice());
+        self.animations
+            .animate_active(encoder, &mut self.uploads, tick, active);
         if let Some(atlas) = &self.pack_atlas {
             atlas.copy(
                 encoder,
@@ -4345,8 +5149,14 @@ impl Renderer {
         if let Some(flat) = &mut self.flat {
             flat.trim(|page| self.arena.has_page(page));
         }
+        if !frame.title {
+            self.flush_pending_sprite_uploads();
+        }
         if self.suspended {
             return Ok(false);
+        }
+        if frame.title {
+            self.step_pending_sprite_uploads();
         }
         let started = Instant::now();
         if self.first_frame == FirstFrame::Acquire {
@@ -4410,7 +5220,14 @@ impl Renderer {
         #[cfg(target_os = "android")]
         let scaled_presentation = surface_frame.as_ref().is_some_and(|f| {
             let physical = [f.texture.width(), f.texture.height()];
-            physical != size
+            frame.menu_blur.is_some()
+                || self.screenshot.is_some()
+                // The Volt recorder copies (and scales) the frame on the GPU:
+                // Android swapchain images are pure RENDER_ATTACHMENT, so a
+                // recording draws into FrameScale's COPY_SRC+TEXTURE_BINDING
+                // target instead of failing the capture copy.
+                || self.video_sink.is_some()
+                || physical != size
                 || winit::platform::android::native_content_rect(physical)
                     != [0, 0, physical[0], physical[1]]
         });
@@ -4462,10 +5279,15 @@ impl Renderer {
         if let Some(stages) = &mut self.gpu_stages {
             stages.begin_prepare(&mut encoder);
         }
-        if self.animated_textures {
-            self.animate(&mut encoder, frame.ticks);
-            self.hud
-                .animate_sprites(&mut self.uploads, &mut encoder, frame.ticks);
+        if !frame.title && self.animated_textures {
+            let step = self.animation_step_ticks.max(1);
+            let anim_tick = frame.ticks / step * step;
+            if self.last_animated_tick != Some(anim_tick) {
+                self.last_animated_tick = Some(anim_tick);
+                self.animate(&mut encoder, anim_tick);
+                self.hud
+                    .animate_sprites(&mut self.uploads, &mut encoder, anim_tick);
+            }
         }
         self.update_lightmap(
             &mut encoder,
@@ -4860,14 +5682,20 @@ impl Renderer {
         // (at least 15) of the visible list. Cached views avoid needless sorts.
         self.translucent_draws.clear();
         let count = visible.len() + visible_lods.len();
-        let budget = (count / 8).max(15).min(count);
+        let fast_trans = self.fast_translucency;
+        let budget = if fast_trans {
+            (count / 16).max(6).min(count)
+        } else {
+            (count / 8).max(15).min(count)
+        };
+        let near_radius = if fast_trans { 1 } else { 2 };
         self.translucency_cursor %= count.max(1);
         for (i, v) in visible.iter().enumerate().rev() {
             let s = self.sections.get_mut(v.slot);
             if let Some((index_page, index_start)) = s.sorted_indices {
-                let nearby = (v.key.0 - camera_section.0).abs() <= 2
-                    && (v.key.1 - camera_section.1).abs() <= 2
-                    && (v.key.2 - camera_section.2).abs() <= 2;
+                let nearby = (v.key.0 - camera_section.0).abs() <= near_radius
+                    && (v.key.1 - camera_section.1).abs() <= near_radius
+                    && (v.key.2 - camera_section.2).abs() <= near_radius;
                 let scheduled = (i + count - self.translucency_cursor) % count < budget;
                 let origin = [
                     v.key.0 * 16,
@@ -4875,9 +5703,12 @@ impl Renderer {
                     v.key.2 * 16,
                 ];
                 if (!s.sort.is_sorted() || nearby || scheduled)
-                    && let Some(indices) =
-                        s.sort
-                            .update(camera.to_array(), origin, &mut self.translucent_sorter)
+                    && let Some(indices) = s.sort.update_adaptive(
+                        camera.to_array(),
+                        origin,
+                        &mut self.translucent_sorter,
+                        fast_trans && !nearby,
+                    )
                 {
                     self.uploads.buffer(
                         &mut encoder,
@@ -6364,9 +7195,66 @@ impl Renderer {
             let first = debug_depth + debug_top;
             pass.draw(0..4, first..first + crosshair);
         }
+        // Volt Recorder: whether this frame is captured, decided before the
+        // GUI draws so a capture excluding the HUD or the touch controls can
+        // put the pre-GUI frame aside and re-compose the kept layers on it.
+        let video_due = self.video_sink.is_some()
+            && self.config.format.block_copy_size(None) == Some(4)
+            && self.video_pending.len() < 4
+            && self
+                .video_last_capture
+                .is_none_or(|due| Instant::now() >= due);
+        let video_layered = video_due
+            && self.video_layers != (true, true)
+            && target_texture
+                .usage()
+                .contains(wgpu::TextureUsages::COPY_SRC);
+        if video_layered {
+            let (w, h) = (self.config.width, self.config.height);
+            let stale = self
+                .video_layer_tex
+                .as_ref()
+                .is_none_or(|(t, _)| t.width() != w || t.height() != h);
+            if stale {
+                let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Volt recorder capture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: target_texture.format(),
+                    usage: wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT
+                        // The recorder's GPU scale pass samples this copy.
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[self.config.format.remove_srgb_suffix()],
+                });
+                let view = tex.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.config.format.remove_srgb_suffix()),
+                    ..Default::default()
+                });
+                self.video_layer_tex = Some((tex, view));
+            }
+            if let Some((tex, _)) = &self.video_layer_tex {
+                encoder.copy_texture_to_texture(
+                    target_texture.as_image_copy(),
+                    tex.as_image_copy(),
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
         let menu_blur = frame
             .menu_blur
-            .filter(|_| self.config.usage.contains(wgpu::TextureUsages::COPY_SRC));
+            .filter(|_| target_texture.usage().contains(wgpu::TextureUsages::COPY_SRC));
         let blur_at = menu_blur.map_or(0, |_| frame.hud.blur_at);
         self.hud.draw_range(
             &mut encoder,
@@ -6399,6 +7287,27 @@ impl Renderer {
             [self.config.width, self.config.height],
             blur_at..frame.hud.vertices.len() as u32,
         );
+        // Volt Recorder: compose the capture — the pre-GUI copy plus only
+        // the layers the recording keeps (the screen above got them all).
+        if video_layered && let Some((_, view)) = &self.video_layer_tex {
+            let total = frame.hud.vertices.len() as u32;
+            let controls_at = frame.hud.controls_at.min(total);
+            let size = [self.config.width, self.config.height];
+            if self.video_layers.0 {
+                self.hud
+                    .draw_range(&mut encoder, view, &self.depth, frame.hud, size, 0..controls_at);
+            }
+            if self.video_layers.1 {
+                self.hud.draw_range(
+                    &mut encoder,
+                    view,
+                    &self.depth,
+                    frame.hud,
+                    size,
+                    controls_at..total,
+                );
+            }
+        }
         if culling && let Some(cull) = &mut self.cull {
             cull.end(&self.device, &mut encoder);
         }
@@ -6421,6 +7330,123 @@ impl Renderer {
                 .take()
                 .and_then(|request| self.take_readback(request, &mut encoder, &target_texture))
         });
+        // Volt Replay's MP4 export grabs the finished frame, GUI included,
+        // the same way a full screenshot does — but asynchronously: the
+        // copy is encoded now, mapped after submit and read back once the
+        // GPU reports it done, a frame or two later. The render thread
+        // never blocks on the GPU and buffers are pooled, so recording no
+        // longer drags the game down. Capture is capped near 30 fps (the
+        // export's frame rate).
+        let mut video_frame: Option<(wgpu::Buffer, [u32; 2])> = None;
+        if video_due {
+            // Scheduled cadence, not "interval since the last grab": the
+            // old gate always slipped past the interval, so a 60 fps game
+            // recorded at 60 fps beat down to ~30 captured frames a second
+            // (choppy playback). Advancing a due-time by the exact interval
+            // keeps the captured rate at the setting; a long hitch resyncs
+            // instead of bursting.
+            let now = Instant::now();
+            let interval = self.video_interval;
+            self.video_last_capture = Some(match self.video_last_capture {
+                Some(due) if now.duration_since(due) < interval => due + interval,
+                _ => now + interval,
+            });
+            let native = [self.config.width, self.config.height];
+            // The scale pass samples its source: a swapchain image without
+            // TEXTURE_BINDING (Android keeps them pure RENDER_ATTACHMENT)
+            // must fall back to the native-size copy instead of tripping a
+            // validation error that kills the device (a black screen).
+            let src_bindable = if video_layered && self.video_layer_tex.is_some() {
+                true
+            } else {
+                target_texture
+                    .usage()
+                    .contains(wgpu::TextureUsages::TEXTURE_BINDING)
+            };
+            let scaled = self
+                .video_scale
+                .map(|[w, h]| [w.clamp(64, 4096) & !1, h.clamp(64, 4096) & !1])
+                .filter(|&s| s != native && src_bindable);
+            let size = scaled.unwrap_or(native);
+            let required = u64::from(padded_row(size[0])) * u64::from(size[1]);
+            let buffer = match self.video_free.pop() {
+                Some(b) if b.size() == required => b,
+                stale => {
+                    if stale.is_some() {
+                        // The frame size changed: the old pool is useless.
+                        self.video_free.clear();
+                    }
+                    self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Horizon video frame"),
+                        size: required,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    })
+                }
+            };
+            if let Some(out) = scaled {
+                let format = self.config.format.remove_srgb_suffix();
+                if self.video_scale_pass.as_ref().is_none_or(|(_, t)| {
+                    t.width() != out[0] || t.height() != out[1] || t.format() != format
+                }) {
+                    let post = world_post::Post::new(&self.device, format);
+                    let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Volt recorder scale"),
+                        size: wgpu::Extent3d {
+                            width: out[0],
+                            height: out[1],
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
+                    });
+                    self.video_scale_pass = Some((post, tex));
+                }
+            }
+            let capture_src = match (video_layered, &self.video_layer_tex) {
+                (true, Some((tex, _))) => tex,
+                _ => &target_texture,
+            };
+            let capture_src = if scaled.is_some() {
+                let (post, tex) = self.video_scale_pass.as_ref().expect("video scale pass");
+                let src_view = capture_src.create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.config.format.remove_srgb_suffix()),
+                    ..Default::default()
+                });
+                let group = post.bind(&self.device, &src_view);
+                post.finish_in_rect(
+                    &mut encoder,
+                    &tex.create_view(&Default::default()),
+                    &group,
+                    None,
+                );
+                tex
+            } else {
+                capture_src
+            };
+            encoder.copy_texture_to_buffer(
+                capture_src.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded_row(size[0])),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+            );
+            video_frame = Some((buffer, size));
+        }
         self.uploads.finish(&encoder);
         if has_section_copies {
             self.section_copy_bytes = 0;
@@ -6505,6 +7531,87 @@ impl Renderer {
                     .map_err(|e| e.to_string()),
             );
         }
+        if let Some((buffer, size)) = video_frame {
+            let bgra = matches!(
+                self.config.format.remove_srgb_suffix(),
+                wgpu::TextureFormat::Bgra8Unorm
+            );
+            let flag = Arc::new(std::sync::atomic::AtomicU8::new(0));
+            let done = flag.clone();
+            buffer.map_async(wgpu::MapMode::Read, .., move |r| {
+                done.store(
+                    if r.is_ok() { 1 } else { 2 },
+                    std::sync::atomic::Ordering::Release,
+                );
+            });
+            self.video_pending.push_back((buffer, flag, size, bgra));
+        }
+        if self.video_sink.is_none() {
+            // The export ended: let go of the in-flight and pooled buffers.
+            if !self.video_pending.is_empty() || !self.video_free.is_empty() {
+                self.video_pending.clear();
+                self.video_free.clear();
+                self.video_last_capture = None;
+                video_pixel_pool()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clear();
+            }
+            if self.video_layer_tex.is_some() {
+                self.video_layer_tex = None;
+                self.video_layers = (true, true);
+                self.video_interval = std::time::Duration::from_millis(31);
+            }
+            if self.video_scale.is_some() || self.video_scale_pass.is_some() {
+                self.video_scale = None;
+                self.video_scale_pass = None;
+            }
+        } else if !self.video_pending.is_empty() {
+            // Nudge the map callbacks along without waiting, then hand
+            // every finished frame (oldest first) to the export.
+            let _ = self.device.poll(wgpu::PollType::Poll);
+            while let Some((buffer, flag, size, bgra)) = self.video_pending.pop_front() {
+                match flag.load(std::sync::atomic::Ordering::Acquire) {
+                    0 => {
+                        self.video_pending.push_front((buffer, flag, size, bgra));
+                        break;
+                    }
+                    1 => {
+                        let (width, height, row) = (
+                            size[0] as usize,
+                            size[1] as usize,
+                            padded_row(size[0]) as usize,
+                        );
+                        // Reuse a pooled vector: a fresh multi-megabyte
+                        // allocation per frame stalls the render thread.
+                        let mut pixels = video_pixel_pool()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .pop()
+                            .unwrap_or_default();
+                        pixels.clear();
+                        pixels.reserve(width * height);
+                        if let Ok(data) = buffer.get_mapped_range(..) {
+                            for y in 0..height {
+                                pixels.extend_from_slice(
+                                    data[y * row..y * row + width * 4].as_chunks::<4>().0,
+                                );
+                            }
+                        }
+                        buffer.unmap();
+                        if pixels.len() == width * height
+                            && let Some(sink) = &mut self.video_sink
+                        {
+                            sink(size, bgra, pixels);
+                        }
+                        self.video_free.push(buffer);
+                    }
+                    _ => {
+                        log::warn!("Horizon renderer: a video export frame failed to map");
+                    }
+                }
+            }
+        }
         let present = Instant::now();
         if let Some(surface_frame) = surface_frame {
             // On Wayland this ties RedrawRequested to the compositor's frame
@@ -6554,6 +7661,14 @@ impl Renderer {
 /// Bytes per row of a `width`-pixel frame read back at 4 bytes a pixel.
 fn padded_row(width: u32) -> u32 {
     (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+}
+/// Pooled pixel vectors for the video capture: the render thread pops one
+/// per captured frame (a fresh multi-megabyte allocation per frame caused
+/// page-fault stalls mid-game), and the recorder thread pushes consumed
+/// frames back. Cleared when a capture session ends.
+pub fn video_pixel_pool() -> &'static std::sync::Mutex<Vec<Vec<[u8; 4]>>> {
+    static POOL: std::sync::Mutex<Vec<Vec<[u8; 4]>>> = std::sync::Mutex::new(Vec::new());
+    &POOL
 }
 /// Encodes the copy of `texture`'s `size` pixels into a mappable buffer.
 pub(crate) fn copy_frame(

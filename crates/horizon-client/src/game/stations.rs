@@ -2148,10 +2148,27 @@ impl Game<'_> {
                 .unwrap_or_else(|| self.pack.names.display_item(&s.item))
         };
         if display.shows("minecraft:container") {
-            for text in
-                horizon_client::item_tooltip::container_lines(stack, &hover_name, &translate)
+            if self.settings.extras.volt_mods.shulker_preview
+                && let Some(data) = stack.data()
+                && !data.container.is_empty()
             {
-                push(&mut lines, text, u32::MAX);
+                let mut shown = 0usize;
+                for (_, item) in &data.container {
+                    if item.count > 0 && shown < 18 {
+                        push(
+                            &mut lines,
+                            format!(" \u{2022} {} x{}", hover_name(item), item.count),
+                            rgba(165, 235, 255, 255),
+                        );
+                        shown += 1;
+                    }
+                }
+            } else {
+                for text in
+                    horizon_client::item_tooltip::container_lines(stack, &hover_name, &translate)
+                {
+                    push(&mut lines, text, u32::MAX);
+                }
             }
         }
         // BannerPatternLayers.addToTooltip: up to six layer names.
@@ -2271,6 +2288,13 @@ impl Game<'_> {
         }
         if display.shows("minecraft:stored_enchantments") {
             for (text, curse) in e.tooltip(stack.stored_enchantments()) {
+                let guide = self
+                    .settings
+                    .extras
+                    .volt_mods
+                    .enchant_guide
+                    .then(|| super::volt_gameplay::enchant_guide_note(&text))
+                    .flatten();
                 push(
                     &mut lines,
                     text,
@@ -2280,10 +2304,20 @@ impl Game<'_> {
                         rgba(170, 170, 170, 255)
                     },
                 );
+                if let Some(note) = guide {
+                    push(&mut lines, note.to_owned(), rgba(110, 225, 195, 255));
+                }
             }
         }
         if display.shows("minecraft:enchantments") {
             for (text, curse) in e.tooltip(stack.enchantments()) {
+                let guide = self
+                    .settings
+                    .extras
+                    .volt_mods
+                    .enchant_guide
+                    .then(|| super::volt_gameplay::enchant_guide_note(&text))
+                    .flatten();
                 push(
                     &mut lines,
                     text,
@@ -2293,6 +2327,9 @@ impl Game<'_> {
                         rgba(170, 170, 170, 255)
                     },
                 );
+                if let Some(note) = guide {
+                    push(&mut lines, note.to_owned(), rgba(110, 225, 195, 255));
+                }
             }
         }
         // DyedItemColor.addToTooltip.
@@ -2470,6 +2507,17 @@ impl Game<'_> {
                     rgba(255, 85, 85, 255),
                 ));
             }
+        }
+        // Read the same food values used by consumption, including items that
+        // are not in a hard-coded vanilla list.
+        let apple = &self.settings.extras.mod_catalog;
+        if !nested && !lines.is_empty()
+            && (apple.is_on(horizon_client::volt_mods::VoltModId::AppleSkin) || self.settings.extras.volt_mods.appleskin_hud)
+            && apple.appleskin_tooltip
+            && (apple.appleskin_tooltip_always || self.has_shift_down())
+            && let Some((nutrition, saturation)) = item_info.and_then(|i| i.food)
+        {
+            lines.push((horizon_client::text::Text::literal(format!("Food: +{nutrition}   Saturation: +{saturation:.1}")), rgba(255, 220, 100, 255)));
         }
         // Native mods last, once getTooltipLines has built every line; a
         // tooltip the stack hides stays hidden.

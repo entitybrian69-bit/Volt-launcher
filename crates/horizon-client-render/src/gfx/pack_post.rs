@@ -353,6 +353,12 @@ fn texture_format(f: Format, features: wgpu::Features) -> wgpu::TextureFormat {
             pick(T::R16Unorm, T::Rg16Unorm, T::Rgba16Unorm)
         }
         (Kind::Unorm, b) if b <= 8 => pick(T::R8Unorm, T::Rg8Unorm, T::Rgba8Unorm),
+        // Android: 32-bit float buffers are halved to 16 bits. Mobile GPUs
+        // rarely offer FLOAT32_FILTERABLE (sampling one with a linear
+        // sampler is a validation error that kills the pack), and a screen
+        // of RGBA32F ping-pong buffers is a large slice of a phone's memory
+        // and bandwidth; half floats render and filter everywhere.
+        (Kind::Float, 32) if cfg!(target_os = "android") => half,
         (Kind::Float, 32) => pick(T::R32Float, T::Rg32Float, T::Rgba32Float),
         (Kind::Float, 11) if features.contains(wgpu::Features::RG11B10UFLOAT_RENDERABLE) => {
             T::Rg11b10Ufloat

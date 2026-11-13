@@ -1,11 +1,10 @@
-//! The launcher's dark-glass frame (docs/design-system.md, "Night"): the sidebar's plate and rows,
-//! and the top bar's tabs, icon buttons and account chip. Every control below is frosted glass —
-//! white lifted off the page at a low opacity, a 1 px white stroke, a fully rounded pill — with no
-//! colour anywhere.
-use crate::plate::alpha;
+//! The launcher's frame in the night look (docs/design-system.md, "Night"): the sidebar's plate
+//! and rows, and the top bar's tabs, icon buttons and account chip. The sky shows between them;
+//! only the sidebar and the selected or hovered parts are plates.
+use crate::plate::{alpha, cut};
 use crate::theme::{self, night, Step, Theme};
 use crate::{hover_fade, keyboard, track_hover};
-use gpui::{div, prelude::*, px, rgb, AnyElement, Div, FontWeight, Hsla, SharedString, Stateful};
+use gpui::{div, prelude::*, px, rgb, Div, FontWeight, Hsla, SharedString, Stateful};
 
 /// A night colour as GPUI's.
 pub fn c(color: u32) -> Hsla {
@@ -26,11 +25,8 @@ pub fn text(step: Step, color: Hsla) -> Div {
         .text_color(color)
 }
 
-/// The old full-height sidebar's ground: `card` at its opacity from the top of the window to the
-/// bottom, with a 1 px stroke on its right edge, square so it meets the window's edges. Unused
-/// since the sidebar became the floating icon rail (`main::icon_rail`), kept as a tested
-/// primitive.
-#[allow(dead_code)]
+/// The sidebar's ground: `card` at its opacity from the top of the window to the bottom, with a
+/// 1 px stroke on its right edge. Square: it meets the window's edges.
 pub fn sidebar_plate(t: &Theme) -> Div {
     let n = t.night;
     div()
@@ -39,34 +35,36 @@ pub fn sidebar_plate(t: &Theme) -> Div {
         .border_color(alpha(n.stroke, n.stroke_alpha))
 }
 
-/// A glass plate behind a selected row or tab: `card_hi`, fully rounded, with its 1 px stroke.
-/// `_steps` is kept so callers don't change: the dark-glass look has one shape, not a pixel-cut
-/// corner per control.
-fn selected(_steps: usize, t: &Theme) -> Div {
+/// A plate behind a selected row or tab: `card_hi`, its corners cut in `steps` pixel steps.
+fn selected(steps: usize, t: &Theme) -> Div {
     let n = t.night;
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
-        .rounded(px(night::RADIUS_CONTROL))
-        .bg(alpha(n.card_hi, n.card_hi_alpha))
-        .border_1()
-        .border_color(alpha(n.stroke, n.stroke_alpha * 1.5))
+    cut(
+        night::PIXEL_CORNER,
+        steps,
+        Some(alpha(n.card_hi, n.card_hi_alpha)),
+        Some((alpha(n.stroke, n.stroke_alpha * 1.5), 1.)),
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 /// The same shape, fading in while the pointer is over `id`, at half the selected plate's
 /// opacity.
-fn hovered(id: &SharedString, _steps: usize, t: &Theme) -> AnyElement {
+fn hovered(id: &SharedString, steps: usize, t: &Theme) -> gpui::AnyElement {
     let n = t.night;
     let layer = move || {
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .rounded(px(night::RADIUS_CONTROL))
-            .bg(alpha(n.card_hi, n.card_hi_alpha * 0.5))
+        cut(
+            night::PIXEL_CORNER,
+            steps,
+            Some(alpha(n.card_hi, n.card_hi_alpha * 0.5)),
+            None,
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
     };
     hover_fade(id, layer, |d, a| d.opacity(a))
 }
@@ -202,7 +200,7 @@ pub fn icon_button(
     )
 }
 
-/// The account chip's glass pill: `card` at its opacity with its stroke, for the picture and two
+/// The account chip's plate: `card` cut in one step with its stroke, for the picture and two
 /// lines that go in as children.
 pub fn chip(id: impl Into<SharedString>, t: &Theme) -> Stateful<Div> {
     let id = id.into();
@@ -219,15 +217,16 @@ pub fn chip(id: impl Into<SharedString>, t: &Theme) -> Stateful<Div> {
         .pr(px(12.))
         .cursor_pointer()
         .child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .rounded(px(night::RADIUS_CONTROL))
-                .bg(alpha(n.card, n.card_alpha))
-                .border_1()
-                .border_color(alpha(n.stroke, n.stroke_alpha)),
+            cut(
+                night::PIXEL_CORNER,
+                1,
+                Some(alpha(n.card, n.card_alpha)),
+                Some((alpha(n.stroke, n.stroke_alpha), 1.)),
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
         )
         .child(hovered(&id, 1, t));
     keyboard(track_hover(d, id), t)
@@ -270,10 +269,22 @@ pub fn action(id: impl Into<SharedString>, kind: Action, t: &Theme) -> Stateful<
             .text_size(px(night::TITLE.px))
             .font_weight(FontWeight::BOLD)
             .text_color(c(n.on_accent))
-            .child(round().bg(alpha(n.accent, 1.)))
+            .child(fill(cut(
+                night::PIXEL_CORNER,
+                1,
+                Some(alpha(n.accent, 1.)),
+                None,
+            )))
             .child(hover_fade(
                 &id,
-                move || round().bg(alpha(n.on_accent, 0.12)),
+                move || {
+                    fill(cut(
+                        night::PIXEL_CORNER,
+                        1,
+                        Some(alpha(n.on_accent, 0.12)),
+                        None,
+                    ))
+                },
                 |d, a| d.opacity(a),
             )),
         Action::Raised => d

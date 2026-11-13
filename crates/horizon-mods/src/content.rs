@@ -193,6 +193,9 @@ pub struct Content {
     pub effects: Vec<MobEffect>,
     /// The namespaces it owns: the mod id, then the manifest's `namespaces`.
     pub namespaces: Vec<String>,
+    /// Forward-compatibility warnings: registry kinds a newer Horizon
+    /// defines were skipped, never refused. Shown in the Mods report.
+    pub warnings: Vec<String>,
 }
 
 /// Reads a mod's content files ([`Content::reader`]).
@@ -279,6 +282,7 @@ impl Content {
             items: Vec::new(),
             effects: Vec::new(),
             namespaces: manifest.owned_namespaces().map(str::to_owned).collect(),
+            warnings: Vec::new(),
         };
         content.check(manifest)?;
         Ok(content)
@@ -321,6 +325,7 @@ impl Content {
         let mut blocks = Vec::new();
         let mut items = Vec::new();
         let mut effects = Vec::new();
+        let mut warnings = Vec::new();
         for name in &self.files {
             let mut parts = name.splitn(3, '/');
             let (top, namespace, rest) = (
@@ -364,11 +369,17 @@ impl Content {
             } else if let Some(effect) = parse("mob_effect") {
                 effects.push((effect, name.clone()));
             } else {
-                return Err(format!(
-                    "{name}: data/{id}/horizon/ holds block/, item/ and mob_effect/*.json only"
+                // A registry kind this build does not read (a newer
+                // Horizon's, or a stray file): skipped with a warning, so
+                // tomorrow's mods keep loading what this build understands.
+                // Everything this build DOES read is still fully checked.
+                let kind = decl.split('/').next().unwrap_or(decl);
+                warnings.push(format!(
+                    "{name}: this Horizon reads block/, item/ and mob_effect/ in data/{id}/horizon/, not {kind}/: skipped (the mod may come from a newer Horizon)"
                 ));
             }
         }
+        self.warnings.append(&mut warnings);
         let mut ids = BTreeSet::new();
         for (block, name) in blocks {
             let file: BlockFile =
@@ -816,7 +827,26 @@ capabilities = ["registries"]
             ],
         );
         assert!(e.contains("also a block's item"), "{e}");
-        refused("other-kind", &[("data/ruby/horizon/entity/a.json", b"{}")]);
+        // A registry kind this build does not read is skipped with a
+        // warning, not refused: a newer Horizon's mods keep loading what
+        // this build understands (forward compatibility).
+        let other_kind = hmod(
+            "other-kind",
+            MANIFEST_TEXT,
+            &[
+                ("data/ruby/horizon/entity/a.json", b"{}"),
+                ("data/ruby/horizon/block/ok.json", BLOCK),
+            ],
+        )
+        .unwrap();
+        assert_eq!(other_kind.blocks.len(), 1, "known kinds still load");
+        assert_eq!(other_kind.warnings.len(), 1);
+        assert!(
+            other_kind.warnings[0].contains("not entity/")
+                && other_kind.warnings[0].contains("skipped"),
+            "{:?}",
+            other_kind.warnings
+        );
         refused(
             "stack",
             &[(

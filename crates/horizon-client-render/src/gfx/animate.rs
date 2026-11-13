@@ -64,6 +64,28 @@ enum Writer {
     },
 }
 
+pub(super) struct PreparedAnimation {
+    chains: Vec<Vec<u8>>,
+    edge: u32,
+}
+
+pub(super) fn prepare(
+    animations: &[SpriteAnimation],
+    size: u32,
+    settings: &[Settings],
+) -> Vec<PreparedAnimation> {
+    animations
+        .iter()
+        .map(|animation| {
+            let pixels: Vec<_> = (0..animation.frame_count())
+                .map(|frame| animation.pixels(frame))
+                .collect();
+            let (chains, edge) = source_chains(&pixels, size, settings, animation.layer);
+            PreparedAnimation { chains, edge }
+        })
+        .collect()
+}
+
 pub(super) struct SpriteAnimator {
     sprites: Vec<Sprite>,
     groups: Vec<Group>,
@@ -72,12 +94,15 @@ pub(super) struct SpriteAnimator {
     size: u32,
     /// The layers the last `animate` rewrote, counted over all arrays.
     changed: Vec<u32>,
+    /// Fast lookup of global sprite layer indices that carry an animation.
+    animated_mask: Vec<bool>,
 }
 
 impl SpriteAnimator {
     /// `textures` are the sprite arrays, `split` layers each, `size` pixels
     /// wide; `animations` hold their frames at that size. `compute`: whether
     /// the device says it runs compute shaders writing storage textures.
+    #[cfg(test)]
     pub fn new(
         device: &wgpu::Device,
         animations: &[SpriteAnimation],
@@ -86,6 +111,22 @@ impl SpriteAnimator {
         textures: &[wgpu::Texture],
         split: u32,
         compute: bool,
+    ) -> Self {
+        Self::new_prepared(
+            device, animations, size, settings, textures, split, compute, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new_prepared(
+        device: &wgpu::Device,
+        animations: &[SpriteAnimation],
+        size: u32,
+        settings: &[Settings],
+        textures: &[wgpu::Texture],
+        split: u32,
+        compute: bool,
+        prepared: Option<Vec<PreparedAnimation>>,
     ) -> Self {
         let pipeline = if compute { pipeline(device) } else { None };
         let limits = device.limits();
@@ -102,11 +143,19 @@ impl SpriteAnimator {
         let mut keys: Vec<(u32, usize)> = Vec::new();
         let mut counts: Vec<usize> = Vec::new();
         let mut sprites = Vec::with_capacity(animations.len());
+        let mut precomputed = prepared
+            .filter(|list| list.len() == animations.len())
+            .map(Vec::into_iter);
         for animation in animations {
-            let pixels: Vec<_> = (0..animation.frame_count())
-                .map(|frame| animation.pixels(frame))
-                .collect();
-            let (chains, edge) = source_chains(&pixels, size, settings, animation.layer);
+            let (chains, edge) = match precomputed.as_mut().and_then(Iterator::next) {
+                Some(entry) => (entry.chains, entry.edge),
+                None => {
+                    let pixels: Vec<_> = (0..animation.frame_count())
+                        .map(|frame| animation.pixels(frame))
+                        .collect();
+                    source_chains(&pixels, size, settings, animation.layer)
+                }
+            };
             let bytes: u64 = chains.iter().map(|chain| chain.len() as u64).sum();
             if bytes > limit {
                 log::warn!(
@@ -147,6 +196,15 @@ impl SpriteAnimator {
                 group,
             });
         }
+        let max_layer = sprites
+            .iter()
+            .map(|s| s.animation.layer as usize)
+            .max()
+            .map_or(0, |m| m + 1);
+        let mut animated_mask = vec![false; max_layer];
+        for s in &sprites {
+            animated_mask[s.animation.layer as usize] = true;
+        }
         let Some((pipeline, layout)) = pipeline else {
             let groups = keys
                 .iter()
@@ -168,6 +226,7 @@ impl SpriteAnimator {
                 },
                 size,
                 changed: Vec::new(),
+                animated_mask,
             };
         };
         let frames: Vec<_> = frames
@@ -247,13 +306,27 @@ impl SpriteAnimator {
             writer: Writer::Gpu { jobs, pipeline },
             size,
             changed: Vec::new(),
+            animated_mask,
         }
+    }
+
+    #[inline]
+    pub fn is_animated(&self, layer: u16) -> bool {
+        self.animated_mask
+            .get(usize::from(layer))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Whether the jobs can run on the GPU: compute shaders writing a
     /// storage texture and reading two storage buffers (not OpenGL before
-    /// 4.3).
+    /// 4.3, and disabled on Android mobile GPUs so multi-mip 2D-array block
+    /// atlases keep hardware AFBC/UBWC read-only layout and avoid Mali Valhall
+    /// storage-array barrier faults and UI-thread pipeline compile stalls).
     pub fn compute(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
+        if cfg!(target_os = "android") {
+            return false;
+        }
         let limits = device.limits();
         adapter
             .get_downlevel_capabilities()
@@ -270,13 +343,27 @@ impl SpriteAnimator {
 
     /// Show every sprite's frame at `tick`, rewriting only the sprites whose
     /// frame or mix changed (`SpriteContents.AnimationState.tick`).
+    #[cfg(test)]
     pub fn animate(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         uploads: &mut Uploads,
         tick: u64,
     ) {
-        if self.collect(tick) == 0 {
+        self.animate_active(encoder, uploads, tick, None);
+    }
+
+    /// Show active sprites' frames at `tick`. When `active_counts` is `Some`,
+    /// animated sprites with zero resident sections (after their initial frame)
+    /// skip CPU/GPU blend and mip writes until a chunk using them loads.
+    pub fn animate_active(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        uploads: &mut Uploads,
+        tick: u64,
+        active_counts: Option<&[u32]>,
+    ) {
+        if self.collect(tick, active_counts) == 0 {
             return;
         }
         let (jobs, pipeline) = match &self.writer {
@@ -336,10 +423,21 @@ impl SpriteAnimator {
 
     /// Queue a job for every sprite whose blend at `tick` differs from what
     /// its layer shows; the number of jobs.
-    fn collect(&mut self, tick: u64) -> usize {
+    fn collect(&mut self, tick: u64, active_counts: Option<&[u32]>) -> usize {
         let mut count = 0;
         self.changed.clear();
         for sprite in &mut self.sprites {
+            if sprite.shown.is_some()
+                && active_counts.is_some_and(|counts| {
+                    counts
+                        .get(sprite.animation.layer as usize)
+                        .copied()
+                        .unwrap_or(0)
+                        == 0
+                })
+            {
+                continue;
+            }
             let blend = sprite.animation.blend(tick);
             if sprite.shown == Some(blend) {
                 continue;

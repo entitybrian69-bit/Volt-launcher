@@ -36,9 +36,52 @@ fn favour() -> bool {
     unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL) != 0 }
 }
 
-#[cfg(not(any(target_vendor = "apple", windows)))]
+#[cfg(target_os = "android")]
+fn favour() -> bool {
+    if !THREAD_BOOST.load(Ordering::Relaxed) {
+        return false;
+    }
+    // Tighten timer slack on the main/render/server thread to 50 us so frame-pacing sleeps
+    // wake crisp on 60/90/120 Hz mobile displays without busy-spinning.
+    // SAFETY: PR_SET_TIMERSLACK takes an unsigned nanosecond value for the calling thread.
+    unsafe { libc::prctl(libc::PR_SET_TIMERSLACK, 50_000usize, 0, 0, 0) == 0 }
+}
+
+#[cfg(not(any(target_vendor = "apple", windows, target_os = "android")))]
 fn favour() -> bool {
     false
+}
+
+/// Enable or disable Volt's mobile Big.LITTLE / timer-slack thread tuning.
+static THREAD_BOOST: AtomicBool = AtomicBool::new(true);
+
+pub fn set_thread_boost(enabled: bool) {
+    THREAD_BOOST.store(enabled, Ordering::Relaxed);
+}
+
+pub fn thread_boost_enabled() -> bool {
+    THREAD_BOOST.load(Ordering::Relaxed)
+}
+
+/// Current process resident memory (RSS) in MiB on Linux and Android (`/proc/self/statm`).
+pub fn resident_ram_mib() -> Option<u64> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+        let rss_pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+        // SAFETY: queries kernel page size; no pointers or mutable state.
+        let page_bytes = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        let page_bytes = if page_bytes > 0 {
+            page_bytes as u64
+        } else {
+            4096
+        };
+        Some(rss_pages.saturating_mul(page_bytes) / (1024 * 1024))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        None
+    }
 }
 
 /// The CPU time the calling thread has used, where only an OS call gives it
@@ -112,6 +155,10 @@ fn behind() -> bool {
     // policy (who 0, pid 0 is the calling thread on Linux and Android); `param` lives
     // across the call.
     unsafe {
+        #[cfg(target_os = "android")]
+        if THREAD_BOOST.load(Ordering::Relaxed) {
+            let _ = libc::prctl(libc::PR_SET_TIMERSLACK, 1_000_000usize, 0, 0, 0);
+        }
         let nice = libc::getpriority(libc::PRIO_PROCESS as _, 0);
         if nice + BEHIND <= 19 {
             libc::setpriority(libc::PRIO_PROCESS as _, 0, nice + BEHIND) == 0
@@ -135,12 +182,18 @@ pub fn idle_current() -> bool {
     idle()
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn idle() -> bool {
     let param = libc::sched_param { sched_priority: 0 };
     // SAFETY: sets the calling thread's own policy (pid 0); `param` lives
     // across the call.
-    unsafe { libc::sched_setscheduler(0, libc::SCHED_IDLE, &param) == 0 }
+    unsafe {
+        #[cfg(target_os = "android")]
+        if THREAD_BOOST.load(Ordering::Relaxed) {
+            let _ = libc::prctl(libc::PR_SET_TIMERSLACK, 2_000_000usize, 0, 0, 0);
+        }
+        libc::sched_setscheduler(0, libc::SCHED_IDLE, &param) == 0
+    }
 }
 
 #[cfg(target_vendor = "apple")]
@@ -158,7 +211,7 @@ fn idle() -> bool {
     unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE) != 0 }
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple", windows)))]
 fn idle() -> bool {
     false
 }
@@ -221,6 +274,9 @@ pub fn configure_allocator() {
 /// native libraries still use: glibc keeps freed pages in the arena of the
 /// thread that allocated them, and macOS in its zones until memory runs short.
 pub fn release_free_memory() {
+    // Android uses Bionic's Scudo/jemalloc global allocator rather than mimalloc;
+    // calling `mi_collect` on Android would lazily map unused mimalloc segments per thread.
+    #[cfg(not(target_os = "android"))]
     // SAFETY: frees only pages no allocation uses (this thread's heap, shared arenas).
     unsafe {
         libmimalloc_sys::mi_collect(true);
@@ -249,7 +305,30 @@ fn release() {
     }
 }
 
-#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_vendor = "apple")))]
+#[cfg(target_os = "android")]
+fn release() {
+    // Android Bionic `<malloc.h>` defines M_PURGE (-101) and M_PURGE_ALL (-104)
+    // to flush Scudo/jemalloc thread caches and quarantine pages back to the OS.
+    const M_PURGE: libc::c_int = -101;
+    const M_PURGE_ALL: libc::c_int = -104;
+    type Mallopt = unsafe extern "C" fn(libc::c_int, libc::c_int) -> libc::c_int;
+    // SAFETY: looks up Bionic's process-wide `mallopt` symbol and purges unused
+    // allocator pages without moving or invalidating any live allocation.
+    unsafe {
+        let sym = libc::dlsym(libc::RTLD_DEFAULT, c"mallopt".as_ptr());
+        if !sym.is_null() {
+            let mallopt: Mallopt = std::mem::transmute(sym);
+            let _ = mallopt(M_PURGE_ALL, 0);
+            let _ = mallopt(M_PURGE, 0);
+        }
+    }
+}
+
+#[cfg(not(any(
+    all(target_os = "linux", target_env = "gnu"),
+    target_os = "android",
+    target_vendor = "apple"
+)))]
 fn release() {}
 
 /// The REPARSE_DATA_BUFFER of a mount point naming `name` (UTF-16, `\??\` prefixed). The length

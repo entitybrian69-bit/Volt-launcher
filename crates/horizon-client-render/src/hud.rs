@@ -78,7 +78,7 @@ pub struct HudAtlas {
     pub glint: (Vec<u8>, u32, u32),
     /// `misc/enchanted_glint_armor`, the armour layers' `GlintSampler`.
     pub glint_armor: (Vec<u8>, u32, u32),
-    white: Rect,
+    pub white: Rect,
 }
 /// Atlas rows reserved for glyphs rasterized at run time.
 pub const GLYPH_ROWS: u32 = 512;
@@ -686,13 +686,22 @@ impl HudAtlas {
             .iter_mut()
             .find(|i| i.0 == crate::title_edition::SPRITE)
             && let Some(pixels) =
-                crate::title_edition::rust_edition(edition.1, edition.2, &edition.3)
+                crate::title_edition::volt_edition(edition.1, edition.2, &edition.3)
         {
             edition.3 = pixels;
         }
         images.push(("horizon/white".into(), 4, 4, vec![255; 64]));
         if full {
             Self::slots(&mut images, crate::trims::slot_size(root));
+            // Embedded, attributed upstream mod artwork; no network access or
+            // per-frame image decoding is needed in either UI.
+            for id in crate::volt_mods::VoltModId::ALL {
+                if let Some((name, bytes)) = crate::volt_mods::upstream_icon(id)
+                    && let Ok((w, h, pixels)) = decode_bytes(bytes)
+                {
+                    images.push((name.to_owned(), w, h, pixels));
+                }
+            }
         }
         #[cfg(target_os = "android")]
         let atlas_limit = crate::android_runtime::atlas_limit().min(MAX_ATLAS_SIZE);
@@ -911,6 +920,10 @@ pub struct HudBatch {
     pub glint_alpha: f32,
     /// Screen's first vertex: the preceding HUD is part of its blurred background.
     pub blur_at: u32,
+    /// Volt Recorder: first vertex of the on-screen touch controls (and
+    /// everything after them, like the on-screen keyboard). Vertices below
+    /// this are the game HUD. `u32::MAX` = the frame has no controls layer.
+    pub controls_at: u32,
     /// Player object profiles encountered while painting text this frame.
     pub inline_profiles: Vec<serde_json::Value>,
 }
@@ -964,6 +977,7 @@ impl HudBatch {
             end_portal: EndPortalFill::default(),
             glint_alpha: 0.75,
             blur_at: 0,
+            controls_at: u32::MAX,
             inline_profiles: Vec::new(),
         }
     }
@@ -1142,6 +1156,25 @@ impl HudBatch {
             v.pos[1] = cy + (v.pos[1] - cy) * sy;
         }
     }
+    /// Move a UI subtree and any depth-preview scissors with it. `dx`/`dy`
+    /// are in batch coordinates; depth scissors are stored in physical pixels.
+    pub fn translate_since(&mut self, start: usize, dx: f32, dy: f32) {
+        for vertex in &mut self.vertices[start..] {
+            vertex.pos[0] += dx;
+            vertex.pos[1] += dy;
+        }
+        let px = (dx * self.scale).round() as i64;
+        let py = (dy * self.scale).round() as i64;
+        for (range, blend) in &mut self.blends {
+            if range.start >= start as u32 {
+                if let Blend::Depth(clip) = blend {
+                    clip[0] = (i64::from(clip[0]) + px).clamp(0, u32::MAX as i64) as u32;
+                    clip[1] = (i64::from(clip[1]) + py).clamp(0, u32::MAX as i64) as u32;
+                }
+            }
+        }
+    }
+
     pub fn clip_since(&mut self, start: usize, x0: f32, y0: f32, x1: f32, y1: f32) {
         let quads: Vec<[HudVertex; 6]> = self.vertices[start..].as_chunks::<6>().0.to_vec();
         self.vertices.truncate(start);
@@ -1638,6 +1671,8 @@ pub struct HudRenderer {
     pub sprite_animations: Vec<(Rect, crate::sprites::SpriteAnimation, (usize, usize, u32))>,
     /// The shared atlas texture, for run-time glyph uploads.
     pub atlas_texture: Option<wgpu::Texture>,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     /// `RenderPipelines.CROSSHAIR`.
     invert_pipeline: wgpu::RenderPipeline,
@@ -1865,6 +1900,8 @@ impl HudRenderer {
         Ok(Self {
             atlas_texture: None,
             sprite_animations: Vec::new(),
+            layout,
+            sampler,
             pipeline,
             invert_pipeline,
             additive_pipeline,
@@ -1876,6 +1913,43 @@ impl HudRenderer {
             buffer,
             capacity,
         })
+    }
+    /// Swap the HUD atlas and glint views in-place without recompiling pipelines.
+    pub fn replace_textures(
+        &mut self,
+        device: &wgpu::Device,
+        atlas: wgpu::Texture,
+        view: &wgpu::TextureView,
+        glint_view: &wgpu::TextureView,
+        glint_sampler: &wgpu::Sampler,
+    ) {
+        self.group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("HUD resources"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(glint_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(glint_sampler),
+                },
+            ],
+        });
+        self.atlas_texture = Some(atlas);
     }
     pub fn animate_sprites(
         &mut self,
@@ -2818,6 +2892,22 @@ mod tests {
     }
 
     #[test]
+    fn translating_ui_subtree_also_moves_depth_scissors() {
+        let mut batch = HudBatch::new([640, 480]);
+        batch.scale = 2.0;
+        let uv = [[0.0; 2]; 4];
+        batch.quad([[0.0; 2]; 4], uv, u32::MAX);
+        let start = batch.vertices.len();
+        batch.quad_3d([[1.0, 2.0, 1.0], [2.0, 2.0, 1.0],
+            [2.0, 3.0, 1.0], [1.0, 3.0, 1.0]], uv, u32::MAX);
+        batch.depth_since(start, [1.0, 2.0, 4.0, 6.0]);
+        batch.translate_since(start, 3.0, 4.0);
+        assert_eq!(batch.vertices[0].pos, [0.0, 0.0]);
+        assert_eq!(batch.vertices[start].pos, [4.0, 6.0]);
+        assert_eq!(batch.runs()[1].1, Blend::Depth([8, 12, 6, 8]));
+    }
+
+    #[test]
     fn hud_shader_validates_both_fragment_entries() {
         let module = naga::front::wgsl::parse_str(include_str!("hud.wgsl")).unwrap();
         naga::valid::Validator::new(
@@ -2899,6 +2989,7 @@ mod tests {
                 end_portal: EndPortalFill::default(),
                 glint_alpha: 0.75,
                 blur_at: 0,
+                controls_at: u32::MAX,
                 inline_profiles: Vec::new(),
             };
             for (image_width, image_height) in [(195, 136), (176, 166), (176, 222)] {

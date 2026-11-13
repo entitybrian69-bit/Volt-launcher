@@ -174,6 +174,11 @@ struct MeshSettings {
     blend_radius: i32,
     smooth_lighting: bool,
     cutout_leaves: bool,
+    cull_leaves: bool,
+    ctm_glass: bool,
+    better_grass: bool,
+    greedy_coalesce: bool,
+    cave_occlusion: bool,
 }
 enum Job {
     Generate(i32, i32),
@@ -247,8 +252,8 @@ struct MeshPool {
     bytes: usize,
 }
 impl MeshPool {
-    const BYTES: usize = 16 << 20;
-    const COUNT: usize = 128;
+    const BYTES: usize = 24 << 20;
+    const COUNT: usize = 256;
     fn take(&mut self) -> SectionMesh {
         let mesh = self.meshes.pop().unwrap_or_default();
         self.bytes -= mesh.capacity_bytes();
@@ -375,9 +380,16 @@ pub struct Streaming {
     /// `BiomeManager`'s zoom seed (the hashed world seed) and `biomeBlendRadius`.
     pub biome_zoom: BiomeZoom,
     pub biome_blend: i32,
-    /// The `ao` and `cutoutLeaves` options.
+    /// The `ao` and `cutoutLeaves` options, plus Volt Boost & Volt Visuals mesher flags.
     pub smooth_lighting: bool,
     pub cutout_leaves: bool,
+    pub cull_leaves: bool,
+    pub ctm_glass: bool,
+    pub better_grass: bool,
+    pub greedy_coalesce: bool,
+    pub cave_occlusion: bool,
+    /// Optional normalized XZ movement/camera lookahead vector for streaming priority.
+    pub lookahead_dir: Option<[f32; 2]>,
     /// Incremental relighting of block edits on lit chunks (see `light::relight`).
     light_tables: Arc<LightTables>,
     /// Applied edits by sequence, replayed onto light jobs snapshotted before them.
@@ -578,6 +590,7 @@ impl Streaming {
                 let light = context.light.clone();
                 thread::Builder::new()
                     .name(format!("horizon-worker-{i}"))
+                    .stack_size(4 * 1024 * 1024)
                     .spawn(move || {
                         // Ticks and frames come first (horizon_threads).
                         horizon_threads::behind_server();
@@ -710,11 +723,18 @@ impl Streaming {
                                         visibility,
                                     };
                                     let recycled = shared.meshes.lock().unwrap().take();
-                                    let mut mesh = mesher.mesh_reusing(
+                                    let mut mesh = mesher.mesh_reusing_with_volt_opts(
                                         &borrow(&region),
                                         sy,
                                         recycled,
                                         &mut mesh_scratch,
+                                        crate::mesher::VoltMeshOpts {
+                                            cull_leaves: settings.cull_leaves,
+                                            ctm_glass: settings.ctm_glass,
+                                            better_grass: settings.better_grass,
+                                            greedy_coalesce: settings.greedy_coalesce,
+                                            cave_occlusion: settings.cave_occlusion,
+                                        },
                                     );
                                     mesh.sort_solid();
                                     faces = Some((context.tables.clone(), mesher.visibility));
@@ -777,6 +797,12 @@ impl Streaming {
             biome_blend: 2,
             smooth_lighting: true,
             cutout_leaves: true,
+            cull_leaves: false,
+            ctm_glass: false,
+            better_grass: false,
+            greedy_coalesce: false,
+            cave_occlusion: false,
+            lookahead_dir: None,
             light_tables,
             light_log: Vec::new(),
             light_edit_sequence: 0,
@@ -822,8 +848,12 @@ impl Streaming {
         self.generated_total += 1;
         for dz in -1..=1 {
             for dx in -1..=1 {
+                let target = (key.0 + dx, key.1 + dz);
+                if !world.chunks.contains_key(&target) {
+                    continue;
+                }
                 for sy in 0..world.layout().sections() as i32 {
-                    world.dirty_sections.insert((key.0 + dx, sy, key.1 + dz));
+                    world.dirty_sections.insert((target.0, sy, target.1));
                 }
             }
         }
@@ -997,7 +1027,21 @@ impl Streaming {
     }
     /// The order jobs around the player run in, lowest first.
     fn distance(&self, x: i32, z: i32) -> i64 {
-        self.ranges().priority(x, z, self.loading)
+        let base = self.ranges().priority(x, z, self.loading);
+        if !self.loading
+            && let Some([fx, fz]) = self.lookahead_dir
+        {
+            let dx = (x - self.center.0) as f32;
+            let dz = (z - self.center.1) as f32;
+            let len = (dx * dx + dz * dz).sqrt();
+            if len > 1.5 {
+                let dot = (dx * fx + dz * fz) / len;
+                if dot < -0.15 {
+                    return base.saturating_add(((base as f32) * (-dot) * 1.5) as i64);
+                }
+            }
+        }
+        base
     }
     /// The 3x3 a light job reads: the finished columns, and for a neighbour
     /// that will not finish (past the area), its decorated proto chunk, as
@@ -1200,8 +1244,12 @@ impl Streaming {
                         if first {
                             for dz in -1..=1 {
                                 for dx in -1..=1 {
+                                    let target = (x + dx, z + dz);
+                                    if !world.chunks.contains_key(&target) {
+                                        continue;
+                                    }
                                     for sy in 0..world.layout().sections() as i32 {
-                                        world.dirty_sections.insert((x + dx, sy, z + dz));
+                                        world.dirty_sections.insert((target.0, sy, target.1));
                                     }
                                 }
                             }
@@ -1571,6 +1619,11 @@ impl Streaming {
                             blend_radius: self.biome_blend,
                             smooth_lighting: self.smooth_lighting,
                             cutout_leaves: self.cutout_leaves,
+                            cull_leaves: self.cull_leaves,
+                            ctm_glass: self.ctm_glass,
+                            better_grass: self.better_grass,
+                            greedy_coalesce: self.greedy_coalesce,
+                            cave_occlusion: self.cave_occlusion,
                         },
                     ),
                 );

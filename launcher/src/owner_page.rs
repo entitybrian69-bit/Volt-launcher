@@ -197,22 +197,22 @@ impl Launcher {
                     })),
             );
         // Opaque: it sits over the page's content, not over the bare sky.
-        let card = div()
-            .relative()
-            .bg(plate::alpha(n.card, 0.98))
-            .rounded(px(theme::night::RADIUS_CARD))
-            .border_1()
-            .border_color(plate::alpha(n.stroke, 2. * n.stroke_alpha))
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            // A set width: text measured at it wraps where it is drawn.
-            .w(px(520.))
-            .max_w_full()
-            .p(px(32.))
-            .child(body)
-            .child(answers)
-            .children(waiting);
+        let card = plate::cut(
+            theme::night::PIXEL_CORNER,
+            2,
+            Some(plate::alpha(n.card, 0.98)),
+            Some((plate::alpha(n.stroke, 2. * n.stroke_alpha), 1.)),
+        )
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        // A set width: text measured at it wraps where it is drawn.
+        .w(px(520.))
+        .max_w_full()
+        .p(px(32.))
+        .child(body)
+        .child(answers)
+        .children(waiting);
         // The sky stays behind, dimmed: the sheet is over the launcher, not instead of it.
         div()
             .id("owner-gate")

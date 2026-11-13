@@ -76,6 +76,16 @@ pub struct Report {
 /// Checks every stage of `pack`, and that each option is an `override` of
 /// its type in some stage. Returns every problem found, not just the first.
 pub fn check(pack: &Pack) -> Result<Report, Vec<Problem>> {
+    check_with_options(pack, true)
+}
+
+/// Parses and validates a trusted built-in pack with naga without re-running
+/// the multi-backend (SPIR-V / Metal / HLSL) min/max translation matrix.
+pub fn prepare_trusted(pack: &Pack) -> Result<Report, Vec<Problem>> {
+    check_with_options(pack, false)
+}
+
+fn check_with_options(pack: &Pack, translate_backends: bool) -> Result<Report, Vec<Problem>> {
     let m = &pack.manifest;
     let stages = m
         .sky
@@ -85,7 +95,7 @@ pub fn check(pack: &Pack) -> Result<Report, Vec<Problem>> {
         .chain(m.post.iter().map(|s| (StageKind::Post, s)));
     let (mut checked, mut problems) = (Vec::new(), Vec::new());
     for (kind, stage) in stages {
-        match check_stage(pack, kind, &stage.file) {
+        match check_stage_with_options(pack, kind, &stage.file, translate_backends) {
             Ok(mut c) => {
                 c.label = stage.name.clone().unwrap_or_else(|| stage.file.clone());
                 checked.push(c);
@@ -123,6 +133,15 @@ pub fn check(pack: &Pack) -> Result<Report, Vec<Problem>> {
 
 /// Builds and checks one stage of `pack` from its file.
 pub fn check_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedStage, Vec<Problem>> {
+    check_stage_with_options(pack, kind, file, true)
+}
+
+fn check_stage_with_options(
+    pack: &Pack,
+    kind: StageKind,
+    file: &str,
+    translate_backends: bool,
+) -> Result<CheckedStage, Vec<Problem>> {
     // First without the entry points, so a missing or mistyped stage function
     // is reported as such rather than as a call that doesn't resolve.
     let mut own = compose(pack, kind, file);
@@ -163,7 +182,9 @@ pub fn check_stage(pack: &Pack, kind: StageKind, file: &str) -> Result<CheckedSt
             format!("{texture_reads} texture reads; a stage may write {MAX_TEXTURE_READS}"),
         ));
     }
-    problems.extend(translate(&module, &info, &pack.manifest.options, file));
+    if translate_backends {
+        problems.extend(translate(&module, &info, &pack.manifest.options, file));
+    }
     if !problems.is_empty() {
         return Err(problems);
     }

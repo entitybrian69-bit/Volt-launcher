@@ -633,6 +633,27 @@ impl Behaviours {
         data::load_with_gameplay(registry, resources_dir, behaviour, gameplay)
     }
 
+    /// Try restoring `.horizon-cache/behaviours-v2.bin` without parsing or building from JSON.
+    pub fn load_cached(registry: &BlockRegistry, resources_dir: &Path) -> Option<Self> {
+        data::load_cached(registry, resources_dir)
+    }
+
+    /// Build behaviour tables from already-parsed inputs without writing the cache snapshot yet,
+    /// allowing callers to drop `behaviour` (~260 MB) and `gameplay` (~110 MB) before snapshot capture.
+    pub fn build_with_gameplay_uncached<G: GameplayStateSource>(
+        registry: &BlockRegistry,
+        resources_dir: &Path,
+        behaviour: &serde_json::Value,
+        gameplay: &[G],
+    ) -> io::Result<Self> {
+        data::build_with_gameplay_uncached(registry, resources_dir, behaviour, gameplay)
+    }
+
+    /// Persist `.horizon-cache/behaviours-v2.bin` after temporary JSON inputs have been freed.
+    pub fn store_cache(&self, registry: &BlockRegistry, resources_dir: &Path) {
+        data::store_cache(registry, resources_dir, self);
+    }
+
     pub fn load_with_behaviour_json(
         registry: &BlockRegistry,
         resources_dir: &Path,

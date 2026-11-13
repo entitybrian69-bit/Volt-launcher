@@ -92,8 +92,7 @@ impl Launcher {
         let path = world.path.clone();
         div()
             .id(SharedString::from(format!("world-drop-{i}")))
-            .rounded(px(theme::RADIUS_PLATE))
-            .border_1()
+            .border_2()
             .mx(px(-4.))
             .p(px(2.))
             .border_color(gpui::transparent_black())

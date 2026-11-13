@@ -744,8 +744,51 @@ impl Game<'_> {
             ),
             upside_down: &up,
         };
-        let draws = self.tab_list.layout(&inputs, &self.gui.atlas.font);
+        let mut draws = self.tab_list.layout(&inputs, &self.gui.atlas.font);
+        let cfg = &self.settings.extras.mod_catalog;
+        let better_ping = cfg.is_on(horizon_client::volt_mods::VoltModId::BetterPingDisplay);
+        let ping_slots: Vec<(i32, i32)> = if better_ping {
+            draws
+                .iter()
+                .filter_map(|d| match d {
+                    horizon_client::hud_layout::GuiDraw::Sprite { sprite, x, y, .. }
+                        if sprite.contains("icon/ping_") =>
+                    {
+                        Some((*x, *y))
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if better_ping && !cfg.better_ping_show_bars {
+            draws.retain(|d| !matches!(d, horizon_client::hud_layout::GuiDraw::Sprite { sprite, .. } if sprite.contains("icon/ping_")));
+        }
         horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
+        if better_ping {
+            let sorted = tab_list::sorted_players(&players, board);
+            let atlas = &self.gui.atlas;
+            for (p, (px, py)) in sorted.into_iter().zip(ping_slots) {
+                if p.latency < 0 {
+                    continue;
+                }
+                let label = format!("{}ms", p.latency);
+                let col = if cfg.better_ping_auto_color {
+                    match p.latency {
+                        0..=59 => 0xFF80_DE4A,
+                        60..=139 => 0xFF35_DCFA,
+                        140..=249 => 0xFF3C_92FB,
+                        _ => 0xFF68_70F0,
+                    }
+                } else {
+                    0xFFA0_A0A0
+                };
+                let tw = HudBatch::text_width(atlas, &label);
+                let right = px as f32 + if cfg.better_ping_show_bars { -2.0 } else { 10.0 };
+                batch.text(atlas, &label, right - tw, py as f32, col, true);
+            }
+        }
     }
 }
 

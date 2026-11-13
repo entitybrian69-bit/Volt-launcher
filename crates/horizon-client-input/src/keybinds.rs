@@ -73,13 +73,18 @@ pub const MAPPINGS: &[(&str, &str, &str)] = &[
     ("key.debug.networkCharts", "key.keyboard.3", "debug"),
     ("key.debug.lightmapTexture", "key.keyboard.4", "debug"),
     ("key.debug.improvedTransparency", "key.keyboard.x", "debug"),
+    // Native Volt actions are handled from physical inputs instead of through
+    // vanilla key translation, so rebinding them cannot remap player movement.
+    ("key.volt.freelook", "key.keyboard.left.alt", "volt_mods"),
+    ("key.volt.zoom", "key.keyboard.c", "volt_mods"),
+    ("key.volt.world_map", "key.keyboard.j", "volt_mods"),
 ];
 /// Mappings Options builds as `ToggleKeyMapping` (hold or toggle by option).
 pub fn is_toggle(name: &str) -> bool {
     matches!(name, "key.sneak" | "key.sprint" | "key.use" | "key.attack")
 }
 /// KeyMapping.Category sort order.
-pub const CATEGORIES: [&str; 8] = [
+pub const CATEGORIES: [&str; 9] = [
     "movement",
     "misc",
     "multiplayer",
@@ -88,6 +93,7 @@ pub const CATEGORIES: [&str; 8] = [
     "creative",
     "spectator",
     "debug",
+    "volt_mods",
 ];
 
 /// InputConstants key names <-> winit physical keys.
@@ -404,7 +410,7 @@ impl KeyBinds {
     fn translated_mappings<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'static str> + 'a {
         MAPPINGS
             .iter()
-            .filter(|m| m.2 != "debug")
+            .filter(|m| m.2 != "debug" && m.2 != "volt_mods")
             .map(|m| m.0)
             .filter(move |n| self.get(n) == key)
     }
@@ -413,7 +419,7 @@ impl KeyBinds {
     fn default_moved(&self, key: &str) -> bool {
         MAPPINGS
             .iter()
-            .any(|(n, d, c)| *d == key && *c != "debug" && !self.is_default(n))
+            .any(|(n, d, c)| *d == key && *c != "debug" && *c != "volt_mods" && !self.is_default(n))
     }
     /// Translate a physical key into the default key of the mapping it is
     /// bound to, so game code written against vanilla defaults follows the
@@ -497,6 +503,23 @@ impl KeyBinds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_bindings_persist_without_translating_vanilla_input() {
+        let mut bindings = KeyBinds::default();
+        bindings.set("key.volt.zoom", "key.keyboard.w");
+        bindings.set("key.volt.freelook", "key.mouse.4");
+        assert_eq!(bindings.get("key.volt.freelook"), "key.mouse.4");
+        assert_eq!(bindings.translate_all(KeyCode::KeyW), vec![Ok(KeyCode::KeyW)]);
+        // Moving zoom away from C must not steal unrelated C input.
+        assert_eq!(bindings.translate_all(KeyCode::KeyC), vec![Ok(KeyCode::KeyC)]);
+        assert!(bindings.conflicts("key.volt.zoom").contains(&"key.forward"));
+        let saved = bindings.saved();
+        let mut restored = KeyBinds::default();
+        for (name, key) in saved { restored.set(name, &key); }
+        assert_eq!(restored, bindings);
+    }
+
     #[test]
     fn container_mouse_hotkeys_follow_slot_bindings_and_pick_item_priority() {
         for button in [MouseButton::Back, MouseButton::Forward, MouseButton::Middle] {

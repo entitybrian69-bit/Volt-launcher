@@ -287,7 +287,7 @@ impl Launcher {
                 .h(px(48.))
                 .w(px(180.))
                 .justify_start()
-                .when(on, |d| d.border_1().border_color(c(n.accent_hi)))
+                .when(on, |d| d.border_2().border_color(c(n.accent_hi)))
                 .gap(px(10.))
                 .children(logo.map(|logo| instance_icons::centred(logo, 24., scale).relative()))
                 .child(

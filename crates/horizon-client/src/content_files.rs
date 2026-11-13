@@ -80,6 +80,7 @@ pub fn validate(
     let mut native_shader = false;
     let mut manifest = false;
     let mut wasm = false;
+    let mut content = false;
     let mut buffer = [0u8; 65536];
     for i in 0..zip.len() {
         if cancelled() {
@@ -106,14 +107,26 @@ pub fn validate(
         }
         pack |= raw == "pack.mcmeta";
         native_shader |= raw == "horizon-shaders.toml";
+        // `shaders/` at the root, or — like OptiFine, Iris and the pack
+        // loader — inside one wrapping folder (`Pack-1.0/shaders/...`).
+        let in_shaders = raw.strip_prefix("shaders/").is_some()
+            || raw
+                .split_once('/')
+                .is_some_and(|(top, rest)| !top.is_empty() && rest.starts_with("shaders/"));
         shader |= native_shader
-            || raw.starts_with("shaders/")
+            || in_shaders
                 && !entry.is_dir()
                 && ["vsh", "fsh", "glsl", "csh", "gsh", "tcs", "tes"]
                     .iter()
                     .any(|ext| raw.ends_with(&format!(".{ext}")));
         manifest |= raw == "horizon-mod.toml";
         wasm |= raw == "mod.wasm";
+        // A content mod's resources: `Package::read` allows capability-
+        // `registries` mods with no `mod.wasm` (content-only), so the
+        // archive sniff must accept them too. Manifest validity and the
+        // registries capability itself are checked by `Package::read`
+        // when the imported file is loaded, not here.
+        content |= !entry.is_dir() && (raw.starts_with("assets/") || raw.starts_with("data/"));
         let expected = entry.size();
         if raw == "pack.mcmeta" && expected > 1 << 20 {
             return Err("Pack metadata is too large".into());
@@ -150,7 +163,7 @@ pub fn validate(
     if !match kind {
         Kind::Packs => pack,
         Kind::Shaders => shader,
-        Kind::Mods => manifest && wasm,
+        Kind::Mods => manifest && (wasm || content),
     } {
         return Err(format!(
             "Archive is not a {} package (required files must be at the ZIP root)",
@@ -240,6 +253,16 @@ mod tests {
         std::fs::write(&path, archive(&[("horizon-shaders.toml", b"manifest")])).unwrap();
         assert!(validate(&path, Kind::Shaders, "Test.zip", || false).unwrap());
         std::fs::write(&path, archive(&[("horizon-mod.toml", b"manifest")])).unwrap();
+        assert!(validate(&path, Kind::Mods, "Test.hmod", || false).is_err());
+        // A content-only .hmod (manifest + assets/data, no mod.wasm, as
+        // `Package::read` allows for capability `registries`) imports.
+        std::fs::write(&path, archive(&[("horizon-mod.toml", b"manifest"), ("assets/x/lang/en_us.json", b"{}"), ("data/x/horizon/block/a.json", b"{}")])).unwrap();
+        assert!(validate(&path, Kind::Mods, "Test.hmod", || false).is_ok());
+        // A code .hmod (manifest + mod.wasm) still imports, and content
+        // without the manifest at the ZIP root still does not.
+        std::fs::write(&path, archive(&[("horizon-mod.toml", b"manifest"), ("mod.wasm", b"wasm")])).unwrap();
+        assert!(validate(&path, Kind::Mods, "Test.hmod", || false).is_ok());
+        std::fs::write(&path, archive(&[("sub/horizon-mod.toml", b"manifest"), ("assets/x/a.json", b"{}")])).unwrap();
         assert!(validate(&path, Kind::Mods, "Test.hmod", || false).is_err());
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
         writer

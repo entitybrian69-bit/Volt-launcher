@@ -1159,6 +1159,32 @@ impl Game<'_> {
         );
     }
 
+    /// Dispatches `S::UseItemOn` with the guest's `(yaw, pitch)` snapshotted at
+    /// inbox arrival time so rotation packets queued around `UseItemOn` cannot
+    /// clobber the placement look direction.
+    pub(super) fn lan_guest_use_item_on(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        packet: play::UseItemOn,
+        rot: Option<(f32, f32)>,
+    ) {
+        let saved = rot.and_then(|(yaw, pitch)| {
+            let gi = host.hub.guests.iter().position(|g| g.conn == conn)?;
+            let prev = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
+            host.hub.guests[gi].yaw = yaw;
+            host.hub.guests[gi].pitch = pitch;
+            Some((gi, prev))
+        });
+        self.lan_guest_packet(host, conn, S::UseItemOn(packet));
+        if let Some((gi, (prev_yaw, prev_pitch))) = saved
+            && let Some(guest) = host.hub.guests.get_mut(gi)
+        {
+            guest.yaw = prev_yaw;
+            guest.pitch = prev_pitch;
+        }
+    }
+
     /// A packet from a guest that the hub does not handle itself.
     pub(super) fn lan_guest_packet(&mut self, host: &mut LanHost, conn: u32, packet: S) {
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
@@ -1670,6 +1696,55 @@ impl Game<'_> {
             }
             S::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.guest_native_net(host, conn, &p.data)
+            }
+            S::CustomPayload(p) if p.channel == horizon_client::skins::VOLT_SKIN_CHANNEL => {
+                if let Some(guest_uuid) = host.hub.guest(conn).map(|g| g.uuid)
+                    && let Some((pkt_uuid, skin, cape)) =
+                        horizon_client::skins::parse_volt_skin_packet(&p.data)
+                    && pkt_uuid == guest_uuid
+                {
+                    let slim_opt = skin.map(|(rgba, is_slim)| {
+                        self.store_skin(format!("volt/skin/{guest_uuid:032x}"), rgba);
+                        is_slim
+                    });
+                    let has_cape = if let Some(rgba) = cape {
+                        self.store_skin(format!("capes/volt_{guest_uuid:032x}"), rgba);
+                        true
+                    } else {
+                        false
+                    };
+                    if let Some(r) = self.remote.as_mut() {
+                        r.volt_peer_skins.insert(guest_uuid, (slim_opt, has_cape));
+                    }
+                    if let Some(m) = host.models.get_mut(&conn) {
+                        if let Some(is_slim) = slim_opt {
+                            m.skin = Some(format!("volt/skin/{guest_uuid:032x}"));
+                            m.slim = is_slim;
+                        }
+                        if has_cape {
+                            m.cape = Some(format!("capes/volt_{guest_uuid:032x}"));
+                        }
+                    }
+                    host.hub.broadcast(&C::CustomPayload(
+                        horizon_protocol::packets::configuration::CustomPayload {
+                            channel: horizon_client::skins::VOLT_SKIN_CHANNEL.into(),
+                            data: p.data,
+                        },
+                    ));
+                    if let Some(host_data) =
+                        horizon_client::skins::build_volt_skin_packet(host.host_uuid)
+                    {
+                        host.hub.send_to(
+                            conn,
+                            &C::CustomPayload(
+                                horizon_protocol::packets::configuration::CustomPayload {
+                                    channel: horizon_client::skins::VOLT_SKIN_CHANNEL.into(),
+                                    data: host_data,
+                                },
+                            ),
+                        );
+                    }
+                }
             }
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {

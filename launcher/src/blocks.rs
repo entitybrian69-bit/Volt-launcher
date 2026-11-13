@@ -36,20 +36,17 @@ pub fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
         .text_color(color)
 }
 
-/// Text in the dark-glass look's own face (Bricolage Grotesque): headings, navigation, buttons,
-/// badges. Named `pixel` still, from the blocky look it replaced, so call sites stay as they are.
+/// Text in the pixel face: headings, navigation, buttons, badges.
 pub fn pixel(size: f32, weight: FontWeight) -> Div {
     div()
-        .font_family(theme::FONT)
+        .font_family(theme::PIXEL)
         .font_weight(weight)
         .text_size(px(size))
         .line_height(px((size * 1.2).round()))
 }
 
 /// The light edge along the top of a raised block and the darker lip along its bottom; the
-/// block must be `relative`. Unused by the dark-glass look (no bevels), kept as a tested
-/// primitive.
-#[allow(dead_code)]
+/// block must be `relative`.
 pub fn edges(top: Hsla, bottom: Hsla, lip: f32) -> [AnyElement; 2] {
     [
         div()
@@ -71,31 +68,32 @@ pub fn edges(top: Hsla, bottom: Hsla, lip: f32) -> [AnyElement; 2] {
     ]
 }
 
-/// A dark-glass panel: rows, cards, notices, dialogs. A soft rounded corner and a 1 px stroke,
-/// never a bevel or a sharp block.
+/// A panel: rows, cards, notices, dialogs.
 pub fn panel(t: &Theme) -> Div {
     div()
         .relative()
         .bg(t.panel)
-        .rounded(px(theme::RADIUS_PLATE))
-        .border_1()
+        .border_2()
         .border_color(t.outline)
+        .children(edges(t.bevel, t.lip, theme::BEVEL))
 }
 
-/// A small pill label: "Runs", "Partly", a version, a source ("Modrinth", "Both").
+/// A small label in a block of its colour: "Runs", "Partly", a version.
 pub fn badge(label: impl Into<SharedString>, color: Hsla, t: &Theme) -> Div {
     let label: SharedString = label.into();
     let label = SharedString::from(crate::i18n::tr(&label).to_string());
+    let tint = if t.dark { 0.14 } else { 0.12 };
     div()
         .flex()
         .flex_none()
         .items_center()
+        .gap(px(6.))
         .h(px(22.))
-        .px(px(10.))
-        .rounded(px(theme::night::RADIUS_CONTROL))
-        .bg(t.raised)
-        .border_1()
+        .px(px(8.))
+        .bg(color.opacity(tint))
+        .border_2()
         .border_color(t.outline)
+        .child(div().size(px(6.)).bg(color))
         .child(
             pixel(12., FontWeight::MEDIUM)
                 .text_color(color)
@@ -103,7 +101,7 @@ pub fn badge(label: impl Into<SharedString>, color: Hsla, t: &Theme) -> Div {
         )
 }
 
-/// Inventory tabs: a row of glass pills, the open one lifted a shade brighter.
+/// Inventory tabs: a row of tabs on top of a panel, the open one joined to it.
 pub fn tabs<T: Copy + PartialEq + 'static>(
     id: &'static str,
     options: &[(T, &'static str, &'static str)],
@@ -114,9 +112,8 @@ pub fn tabs<T: Copy + PartialEq + 'static>(
     let t = *t;
     div()
         .flex()
-        .items_center()
-        .flex_wrap()
-        .gap(px(6.))
+        .items_end()
+        .gap(px(4.))
         .children(options.iter().map(|&(value, label, icon_name)| {
             let open = current == value;
             let pick = on_pick.clone();
@@ -126,27 +123,38 @@ pub fn tabs<T: Copy + PartialEq + 'static>(
                 .flex()
                 .items_center()
                 .gap(px(8.))
-                .h(px(38.))
+                .h(px(if open { 42. } else { 38. }))
                 .px(px(14.))
-                .rounded(px(theme::night::RADIUS_CONTROL))
-                .cursor_pointer()
-                .bg(if open { t.raised } else { t.panel })
-                .border_1()
+                .border_2()
+                .border_b_0()
                 .border_color(t.outline)
-                .child(icon(icon_name, 18., if open { t.ink } else { t.muted }))
+                .cursor_pointer()
+                .bg(if open { t.panel } else { t.side })
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h(px(theme::BEVEL))
+                        .bg(if open { t.bevel } else { t.raised }),
+                )
+                .child(icon(icon_name, 18., if open { t.accent } else { t.muted }))
                 .child(
                     pixel(15., FontWeight::MEDIUM)
                         .text_color(if open { t.ink } else { t.muted })
                         .child(crate::i18n::tr(label)),
                 )
                 .when(!open, |d| d.hover(move |s| s.bg(t.raised)))
+                // The open tab covers the panel's outline under it.
+                .when(open, |d| d.mb(px(-2.)))
                 .on_click(move |_: &ClickEvent, window, cx| pick(value, window, cx));
             crate::keyboard(tab, &t)
         }))
 }
 
 /// A square slot for an icon: the picture at `source` when there is one, else the first letter of
-/// `name` on a raised glass block.
+/// `name` on a raised block.
 pub fn slot(source: Option<ImageSource>, name: &str, size: f32, t: &Theme) -> Div {
     let frame = div()
         .flex()
@@ -155,8 +163,7 @@ pub fn slot(source: Option<ImageSource>, name: &str, size: f32, t: &Theme) -> Di
         .justify_center()
         .size(px(size))
         .overflow_hidden()
-        .rounded(px((size * 0.26).round().min(theme::RADIUS_PLATE)))
-        .border_1()
+        .border_2()
         .border_color(t.outline)
         .bg(t.well);
     match source {

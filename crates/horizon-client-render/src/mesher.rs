@@ -13,6 +13,7 @@ use crate::{
     chunk::{Chunk, MIN_Y},
     models::catalog::BakedFace,
 };
+use horizon_assets::model::Direction as ModelDir;
 use horizon_core::{
     biome::BiomeZoom, geometry::Direction, position::BlockPos, random::position_seed,
 };
@@ -321,23 +322,29 @@ fn visibility_reusing(pad: &Padded, info: &[Info], stack: &mut Vec<usize>) -> u6
             if faces == 0b11_1111 {
                 return ALL_VISIBLE;
             }
-            for (dx, dy, dz) in [
-                (1, 0, 0),
-                (-1, 0, 0),
-                (0, 1, 0),
-                (0, -1, 0),
-                (0, 0, 1),
-                (0, 0, -1),
-            ] {
-                let (nx, ny, nz) = (x + dx, y + dy, z + dz);
-                if !(0..16).contains(&nx) || !(0..16).contains(&ny) || !(0..16).contains(&nz) {
-                    continue;
-                }
-                let n = (ny << 8 | nz << 4 | nx) as usize;
-                if !seen[n] {
-                    seen[n] = true;
-                    stack.push(n);
-                }
+            if x > 0 && !seen[c - 1] {
+                seen[c - 1] = true;
+                stack.push(c - 1);
+            }
+            if x < 15 && !seen[c + 1] {
+                seen[c + 1] = true;
+                stack.push(c + 1);
+            }
+            if z > 0 && !seen[c - 16] {
+                seen[c - 16] = true;
+                stack.push(c - 16);
+            }
+            if z < 15 && !seen[c + 16] {
+                seen[c + 16] = true;
+                stack.push(c + 16);
+            }
+            if y > 0 && !seen[c - 256] {
+                seen[c - 256] = true;
+                stack.push(c - 256);
+            }
+            if y < 15 && !seen[c + 256] {
+                seen[c + 256] = true;
+                stack.push(c + 256);
             }
         }
         for a in 0..6 {
@@ -405,6 +412,9 @@ struct Info {
     overlay: bool,
     /// `LeavesBlock`: with opaque leaves the faces between two leaf blocks are skipped.
     leaves: bool,
+    glass: bool,
+    grass_block: bool,
+    short_foliage: bool,
     blocks_flow: bool,
     ice: bool,
     sturdy: u8,
@@ -435,6 +445,7 @@ pub struct MeshTables {
     water_overlay: u16,
     lava_still: u16,
     lava_flow: u16,
+    grass_top: Option<u16>,
 }
 fn stem_color(age: u8) -> u32 {
     let a = u32::from(age);
@@ -571,6 +582,21 @@ impl MeshTables {
                 legacy_solid: s.legacy_solid,
                 overlay: s.has_class("HalfTransparentBlock") || s.has_class("LeavesBlock"),
                 leaves: s.has_class("LeavesBlock"),
+                glass: name == "glass"
+                    || name == "tinted_glass"
+                    || name.ends_with("_stained_glass"),
+                grass_block: name == "grass_block",
+                short_foliage: matches!(
+                    name,
+                    "short_grass"
+                        | "grass"
+                        | "fern"
+                        | "tall_grass"
+                        | "large_fern"
+                        | "dandelion"
+                        | "poppy"
+                        | "bush"
+                ),
                 blocks_flow: assets.blocks_fluid_flow.contains(&*s.name),
                 ice: s.has_class("IceBlock"),
                 sturdy: s.sturdy_full,
@@ -586,6 +612,7 @@ impl MeshTables {
             water_overlay: layer("minecraft:block/water_overlay")?,
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
+            grass_top: layer("minecraft:block/grass_block_top").ok(),
         })
     }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
@@ -732,43 +759,73 @@ impl Padded {
     }
     fn fill(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32, own: &mut [u32; 4096]) {
         self.blocks.resize(P * P * P, 0);
-        self.blocks.fill(0);
         self.light.resize(P * P * P, 0);
         let (blocks, light) = (&mut self.blocks, &mut self.light);
-        let base_y = region[1][1].map_or(MIN_Y, Chunk::min_y) + sy * 16;
-        // The section itself is unpacked in one pass; the border cells of the
-        // neighbouring sections are read one by one.
+        let Some(center_chunk) = region[1][1] else {
+            blocks.fill(0);
+            let base_y = MIN_Y + sy * 16;
+            for y in -B..16 + B {
+                let wy = base_y + y;
+                for z in -B..16 + B {
+                    for x in -B..16 + B {
+                        let i = pi(x, y, z);
+                        if let Some(c) = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize]
+                        {
+                            blocks[i] = c.get(x & 15, wy, z & 15);
+                            light[i] = c.light(x & 15, wy, z & 15);
+                        } else {
+                            light[i] = 0xF0;
+                        }
+                    }
+                }
+            }
+            return;
+        };
+        let base_y = center_chunk.min_y() + sy * 16;
+        // Unpack the 16³ interior once and copy 16-block X-rows directly.
         own.fill(0);
-        let center = region[1][1].map(|c| &c.sections[sy as usize]);
-        if let Some(section) = center {
-            section.unpack(own);
+        center_chunk.sections[sy as usize].unpack(own);
+        for y in 0..16 {
+            let wy = base_y + y;
+            for z in 0..16 {
+                let dst = pi(0, y, z);
+                let src = (y as usize) << 8 | (z as usize) << 4;
+                blocks[dst..dst + 16].copy_from_slice(&own[src..src + 16]);
+                for x in 0..16 {
+                    light[dst + x as usize] = center_chunk.light(x, wy, z);
+                }
+            }
         }
+        // Populate only the 2-block border shell around the 16³ interior.
         for y in -B..16 + B {
             let wy = base_y + y;
+            let y_border = !(0..16).contains(&y);
             for z in -B..16 + B {
-                for x in -B..16 + B {
-                    let chunk = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize];
-                    let i = pi(x, y, z);
-                    if let Some(c) = chunk {
-                        blocks[i] =
-                            if (0..16).contains(&x) && (0..16).contains(&y) && (0..16).contains(&z)
-                            {
-                                own[(y << 8 | z << 4 | x) as usize]
-                            } else {
-                                c.get(x & 15, wy, z & 15)
-                            };
-                        light[i] = c.light(x & 15, wy, z & 15);
-                    } else if let Some(c) = region[1][1] {
-                        // A neighbour not loaded continues this chunk's edge
-                        // column. As lit air, the outermost chunks' water drew
-                        // a wall toward it (fluids show both sides), a light
-                        // sheet in the water where far terrain carries on.
-                        // Vanilla draws no chunk without its neighbours.
-                        let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
-                        blocks[i] = c.get(ex, wy, ez);
-                        light[i] = c.light(ex, wy, ez);
-                    } else {
-                        light[i] = 0xF0;
+                let z_border = y_border || !(0..16).contains(&z);
+                let row_z = ((z + 16) >> 4) as usize;
+                if z_border {
+                    for x in -B..16 + B {
+                        let i = pi(x, y, z);
+                        if let Some(c) = region[row_z][((x + 16) >> 4) as usize] {
+                            blocks[i] = c.get(x & 15, wy, z & 15);
+                            light[i] = c.light(x & 15, wy, z & 15);
+                        } else {
+                            let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
+                            blocks[i] = center_chunk.get(ex, wy, ez);
+                            light[i] = center_chunk.light(ex, wy, ez);
+                        }
+                    }
+                } else {
+                    for x in (-B..0).chain(16..16 + B) {
+                        let i = pi(x, y, z);
+                        if let Some(c) = region[row_z][((x + 16) >> 4) as usize] {
+                            blocks[i] = c.get(x & 15, wy, z & 15);
+                            light[i] = c.light(x & 15, wy, z & 15);
+                        } else {
+                            let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
+                            blocks[i] = center_chunk.get(ex, wy, ez);
+                            light[i] = center_chunk.light(ex, wy, ez);
+                        }
                     }
                 }
             }
@@ -962,6 +1019,15 @@ pub struct Mesher<'a> {
     /// The `cutoutLeaves` option (fancy graphics); off makes leaves opaque.
     pub cutout_leaves: bool,
 }
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct VoltMeshOpts {
+    pub cull_leaves: bool,
+    pub ctm_glass: bool,
+    pub better_grass: bool,
+    pub greedy_coalesce: bool,
+    pub cave_occlusion: bool,
+}
+
 impl Mesher<'_> {
     /// `region[dz][dx]` are the chunks around the meshed column (centre 1,1).
     pub fn mesh(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32) -> SectionMesh {
@@ -979,6 +1045,41 @@ impl Mesher<'_> {
         mut out: SectionMesh,
         scratch: &mut MeshScratch,
     ) -> SectionMesh {
+        // `mut` keeps this a weavable target for native fluid-physics mixins
+        // that borrow `out` mutably before the forward call.
+        self.mesh_reusing_with_volt_opts(region, sy, out, scratch, VoltMeshOpts::default())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn mesh_reusing_with_leaf_cull(
+        &mut self,
+        region: &[[Option<&Chunk>; 3]; 3],
+        sy: i32,
+        out: SectionMesh,
+        scratch: &mut MeshScratch,
+        cull_leaves: bool,
+    ) -> SectionMesh {
+        self.mesh_reusing_with_volt_opts(
+            region,
+            sy,
+            out,
+            scratch,
+            VoltMeshOpts {
+                cull_leaves,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub(crate) fn mesh_reusing_with_volt_opts(
+        &mut self,
+        region: &[[Option<&Chunk>; 3]; 3],
+        sy: i32,
+        mut out: SectionMesh,
+        scratch: &mut MeshScratch,
+        volt: VoltMeshOpts,
+    ) -> SectionMesh {
+        let cull_leaves = volt.cull_leaves;
         out.clear();
         let center = region[1][1].expect("centre chunk");
         let section = &center.sections[sy as usize];
@@ -990,6 +1091,16 @@ impl Mesher<'_> {
         let pad = &scratch.padded;
         out.visibility = visibility_reusing(pad, &self.tables.info, &mut scratch.visibility);
         let base_y = center.min_y() + sy * 16;
+        // #6 Volt Boost+ Sealed Underground Chunk Occlusion: when `out.visibility == 0`,
+        // all 6 boundary shells of this section are 100% opaque solid blocks, so any buried
+        // cavity strictly inside `1..15`^3 cannot be seen from outside this section.
+        let skip_sealed_interior = volt.cave_occlusion
+            && out.visibility == 0
+            && base_y < 48
+            && !own.iter().any(|&bid| {
+                let st = &self.tables.info[bid as usize];
+                st.emission > 0 || st.block_entity
+            });
         let mut tints = Tints::new(
             region,
             self.biomes,
@@ -999,11 +1110,20 @@ impl Mesher<'_> {
         );
         let info = &self.tables.info;
         let catalog = &self.render.model_catalog;
-        let mut models = Vec::new();
+        let mut models = Vec::with_capacity(8);
         for y in 0..16 {
             for z in 0..16 {
+                let row = pi(0, y, z);
                 for x in 0..16 {
-                    let id = pad.blocks[pi(x, y, z)];
+                    if skip_sealed_interior
+                        && (1..15).contains(&x)
+                        && (1..15).contains(&y)
+                        && (1..15).contains(&z)
+                    {
+                        continue;
+                    }
+                    let idx = row + x as usize;
+                    let id = pad.blocks[idx];
                     if id == 0 {
                         continue;
                     }
@@ -1012,12 +1132,15 @@ impl Mesher<'_> {
                         out.block_entities
                             .push(([center.x * 16 + x, base_y + y, center.z * 16 + z], id));
                     }
-                    if state.solid
-                        && Direction::ALL.iter().all(|d| {
-                            let [dx, dy, dz] = d.normal();
-                            info[pad.blocks[pi(x + dx, y + dy, z + dz)] as usize].solid
-                        })
-                    {
+                    let neighbors = [
+                        pad.blocks[idx - P * P],
+                        pad.blocks[idx + P * P],
+                        pad.blocks[idx - P],
+                        pad.blocks[idx + P],
+                        pad.blocks[idx - 1],
+                        pad.blocks[idx + 1],
+                    ];
+                    if state.solid && neighbors.iter().all(|&nb| info[nb as usize].solid) {
                         continue;
                     }
                     if state.fluid.kind() != FluidKind::Empty {
@@ -1051,12 +1174,16 @@ impl Mesher<'_> {
                     };
                     let mut visible = [false; 6];
                     for d in Direction::ALL {
-                        let [dx, dy, dz] = d.normal();
-                        let neighbor = pad.blocks[pi(x + dx, y + dy, z + dz)];
+                        let neighbor = neighbors[d as usize];
                         let other = &info[neighbor as usize];
-                        // LeavesBlock.skipRendering with opaque leaves.
-                        let opaque_leaves = !self.cutout_leaves && state.leaves && other.leaves;
+                        // LeavesBlock.skipRendering with opaque leaves, or Volt Boost Smart Leaf Culling
+                        // (skips hidden interior leaf-to-leaf faces while keeping outer canopy cutout).
+                        let opaque_leaves =
+                            (!self.cutout_leaves || cull_leaves) && state.leaves && other.leaves;
+                        let same_partial_cull =
+                            volt.greedy_coalesce && neighbor == id && (state.glass || state.ice);
                         visible[d as usize] = !opaque_leaves
+                            && !same_partial_cull
                             && self
                                 .visibility
                                 .should_render_face(
@@ -1081,6 +1208,8 @@ impl Mesher<'_> {
                                 face,
                                 ao,
                                 state,
+                                id,
+                                volt,
                             );
                         }
                     }
@@ -1118,6 +1247,8 @@ impl Mesher<'_> {
         face: &BakedFace,
         ao: bool,
         state: &Info,
+        block_id: u32,
+        volt: VoltMeshOpts,
     ) {
         let q = &face.quad;
         let tier = state.tier.max(hdr_tier("", q.light_emission));
@@ -1137,8 +1268,86 @@ impl Mesher<'_> {
             };
             ([lighting::gray(directional); 4], [coords; 4])
         };
-        let tint = Self::tint(state, q.tint_index, tints, pos);
-        let target = if face.translucent {
+
+        // #19 Better Grass Sides: lush green side quad when neighboring slope/foliage is grass.
+        let mut override_layer: Option<u16> = None;
+        let mut force_grass_tint = false;
+        if volt.better_grass
+            && state.grass_block
+            && let Some(top_layer) = self.tables.grass_top
+            && matches!(
+                q.facing,
+                ModelDir::North | ModelDir::South | ModelDir::East | ModelDir::West
+            )
+        {
+            let [nx, ny, nz] = lighting::step(pos, q.facing);
+            let adj_same = &self.tables.info[pad.blocks[pi(nx, ny, nz)] as usize];
+            let adj_below = &self.tables.info[pad.blocks[pi(nx, ny - 1, nz)] as usize];
+            if adj_below.grass_block || adj_same.short_foliage || adj_same.grass_block {
+                override_layer = Some(top_layer | OPAQUE_LAYER);
+                force_grass_tint = true;
+            }
+        }
+
+        // #19 Connected Glass (CTM): seamless borderless windows by trimming 1-texel UV border
+        // along any in-plane edge shared with an identical glass block.
+        let mut uvs = q.uv;
+        if volt.ctm_glass && state.glass && q.cull.is_some() {
+            let [x, y, z] = pos;
+            let (u_neg_same, u_pos_same, v_neg_same, v_pos_same) = match q.facing {
+                ModelDir::North => (
+                    pad.blocks[pi(x + 1, y, z)] == block_id,
+                    pad.blocks[pi(x - 1, y, z)] == block_id,
+                    pad.blocks[pi(x, y + 1, z)] == block_id,
+                    pad.blocks[pi(x, y - 1, z)] == block_id,
+                ),
+                ModelDir::South => (
+                    pad.blocks[pi(x - 1, y, z)] == block_id,
+                    pad.blocks[pi(x + 1, y, z)] == block_id,
+                    pad.blocks[pi(x, y + 1, z)] == block_id,
+                    pad.blocks[pi(x, y - 1, z)] == block_id,
+                ),
+                ModelDir::East => (
+                    pad.blocks[pi(x, y, z + 1)] == block_id,
+                    pad.blocks[pi(x, y, z - 1)] == block_id,
+                    pad.blocks[pi(x, y + 1, z)] == block_id,
+                    pad.blocks[pi(x, y - 1, z)] == block_id,
+                ),
+                ModelDir::West => (
+                    pad.blocks[pi(x, y, z - 1)] == block_id,
+                    pad.blocks[pi(x, y, z + 1)] == block_id,
+                    pad.blocks[pi(x, y + 1, z)] == block_id,
+                    pad.blocks[pi(x, y - 1, z)] == block_id,
+                ),
+                ModelDir::Up | ModelDir::Down => (
+                    pad.blocks[pi(x - 1, y, z)] == block_id,
+                    pad.blocks[pi(x + 1, y, z)] == block_id,
+                    pad.blocks[pi(x, y, z - 1)] == block_id,
+                    pad.blocks[pi(x, y, z + 1)] == block_id,
+                ),
+            };
+            const INSET_LO: f32 = 1.0 / 16.0;
+            const INSET_HI: f32 = 15.0 / 16.0;
+            for uv in &mut uvs {
+                if u_neg_same && uv[0] < 0.02 {
+                    uv[0] = INSET_LO;
+                } else if u_pos_same && uv[0] > 0.98 {
+                    uv[0] = INSET_HI;
+                }
+                if v_neg_same && uv[1] < 0.02 {
+                    uv[1] = INSET_LO;
+                } else if v_pos_same && uv[1] > 0.98 {
+                    uv[1] = INSET_HI;
+                }
+            }
+        }
+
+        let tint = if force_grass_tint {
+            Some(tints.get(Resolver::Grass, pos[0], pos[1], pos[2]))
+        } else {
+            Self::tint(state, q.tint_index, tints, pos)
+        };
+        let target = if face.translucent && override_layer.is_none() {
             &mut out.translucent
         } else {
             &mut out.solid
@@ -1152,14 +1361,16 @@ impl Mesher<'_> {
             let p = q.positions[i];
             target.push(TerrainVertex::new(
                 [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]],
-                q.uv[i],
-                // Opaque leaves (forceOpaque) and quads over opaque texels draw in the
-                // solid layer: no alpha cutout (a dirt path's side skips its clear top row).
-                if face.opaque && !face.translucent || !self.cutout_leaves && state.leaves {
-                    face.layer as u16 | OPAQUE_LAYER
-                } else {
-                    face.layer as u16
-                },
+                uvs[i],
+                override_layer.unwrap_or(
+                    // Opaque leaves (forceOpaque) and quads over opaque texels draw in the
+                    // solid layer: no alpha cutout (a dirt path's side skips its clear top row).
+                    if face.opaque && !face.translucent || !self.cutout_leaves && state.leaves {
+                        face.layer as u16 | OPAQUE_LAYER
+                    } else {
+                        face.layer as u16
+                    },
+                ),
                 emitting(pack_rgb(rgb), tier),
                 pack_coords(lighting::with_emission(coords[i], q.light_emission)),
             ));

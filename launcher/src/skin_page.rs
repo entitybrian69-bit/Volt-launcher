@@ -149,8 +149,7 @@ impl Launcher {
                 .w(px(w + 24.))
                 .h(px(h + 24.))
                 .bg(t.well)
-                .rounded(px(theme::RADIUS_PLATE))
-                .border_1()
+                .border_2()
                 .border_color(t.outline)
                 .child(match image {
                     Some(i) => gpui::img(i).w(px(w)).h(px(h)).into_any_element(),

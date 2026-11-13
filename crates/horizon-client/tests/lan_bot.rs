@@ -210,6 +210,16 @@ impl Server {
         for event in events {
             match event {
                 HostEvent::Joined(conn) => self.hub.place_new_player(conn, &mut ctx),
+                HostEvent::UseItemOn {
+                    conn, packet: p, ..
+                } => {
+                    let at = [p.pos[0], p.pos[1] + 1, p.pos[2]];
+                    ctx.world
+                        .set(at[0], at[1], at[2], BlockStateId(STONE))
+                        .unwrap();
+                    self.placed.push((conn, at, STONE, p.sequence));
+                    self.hub.ack(conn, p.sequence);
+                }
                 HostEvent::Packet(conn, packet) => {
                     if let S::UseItemOn(p) = *packet {
                         let at = [p.pos[0], p.pos[1] + 1, p.pos[2]];

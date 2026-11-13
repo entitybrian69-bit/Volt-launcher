@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Original Volt V mark; scalable TV launcher banner, no game assets. -->
+<!-- Volt Launcher scalable TV banner, obsidian & crimson-red, no game assets. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="320dp" android:height="180dp"
     android:viewportWidth="320" android:viewportHeight="180">
-    <path android:fillColor="#000000" android:pathData="M0,0h320v180h-320z" />
-    <path android:fillColor="#ffffff" android:pathData="M100,40 L124,40 L160,110 L196,40 L220,40 L160,140 Z" />
-    <path android:fillColor="#9a9a9a" android:pathData="M0,158h320v4h-320z" />
+    <path android:fillColor="#07070A" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#9A9AA8" android:pathData="M126,38l28,88l20,0l42,-96l-18,0l-34,76l-20,-68z" />
+    <path android:fillColor="#F4F4F8" android:pathData="M116,42l30,88l20,0l42,-96l-22,0l-30,70l-18,-62z" />
+    <path android:fillColor="#DC143C" android:pathData="M0,162h320v18h-320z" />
 </vector>

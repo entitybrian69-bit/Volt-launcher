@@ -61,13 +61,27 @@ pub struct Source {
 /// position and level. Overwrites `out`.
 pub fn select(sources: &[Source], camera: DVec3, out: &mut Vec<[f32; 4]>) {
     out.clear();
-    let key = |s: &Source| s.at.distance_squared(camera);
-    let mut near: Vec<&Source> = sources
+    let mut near: Vec<(f64, usize, &Source)> = sources
         .iter()
-        .filter(|s| s.level > 0 && key(s) <= REACH * REACH)
+        .enumerate()
+        .filter_map(|(idx, s)| {
+            if s.level == 0 {
+                return None;
+            }
+            let d2 = s.at.distance_squared(camera);
+            (d2 <= REACH * REACH).then_some((d2, idx, s))
+        })
         .collect();
-    near.sort_by(|a, b| key(a).total_cmp(&key(b)));
-    out.extend(near.into_iter().take(MAX).map(|s| {
+    let cmp =
+        |(da, ia, _): &(f64, usize, &Source), (db, ib, _): &(f64, usize, &Source)| {
+            da.total_cmp(db).then_with(|| ia.cmp(ib))
+        };
+    if near.len() > MAX {
+        near.select_nth_unstable_by(MAX, cmp);
+        near.truncate(MAX);
+    }
+    near.sort_unstable_by(cmp);
+    out.extend(near.into_iter().map(|(_, _, s)| {
         let p = (s.at - camera).as_vec3();
         [p.x, p.y, p.z, f32::from(s.level.min(15))]
     }));

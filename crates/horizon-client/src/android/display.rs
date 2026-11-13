@@ -64,13 +64,18 @@ fn desired(window: &winit::window::Window) -> Option<[u32; 2]> {
     }
     let [_, _, width, height] =
         winit::platform::android::native_content_rect([physical.width, physical.height]);
-    let view = [width, height];
+    // Upstream (Horizon Android): never a zero-sized view — a fold or
+    // rotation can report an empty content rect for a frame, which would
+    // divide the input scale by zero below.
+    let view = [width.max(1), height.max(1)];
     let size = scale.buffer_size(view);
+    // Upstream sets the input scale before comparing sizes, so touches map
+    // correctly even on the frames where a resize is still pending.
+    winit::platform::android::set_native_input_scale([
+        size[0] as f64 / view[0] as f64,
+        size[1] as f64 / view[1] as f64,
+    ]);
     if size == [current.width, current.height] {
-        winit::platform::android::set_native_input_scale([
-            size[0] as f64 / view[0] as f64,
-            size[1] as f64 / view[1] as f64,
-        ]);
         None
     } else {
         Some(size)

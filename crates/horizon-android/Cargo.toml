@@ -10,6 +10,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 horizon-client-input = { path = "../horizon-client-input" }
+# Native physics mixins woven into game/*.rs call horizon_client_render
+# directly; this crate compiles those sources, so it needs the direct dep.
+horizon-client-render = { path = "../horizon-client-render" }
 horizon-anticheat = { path = "../horizon-anticheat" }
 horizon-client = { path = "../horizon-client", default-features = false }
 android_logger = "0.15"
@@ -43,6 +46,7 @@ bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
 png = "0.18"
 sha2 = "0.10.9"
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 # hlsl-out: the gfx.rs tests translate every shader as wgpu's DirectX 12 backend does. A normal feature,

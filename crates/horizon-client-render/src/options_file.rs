@@ -128,7 +128,7 @@ static TABLE: LazyLock<Vec<Def>> = LazyLock::new(|| {
             V::Double(0.75),
         ),
         b("cutoutLeaves", true),
-        b("enableVsync", true),
+        b("enableVsync", !cfg!(target_os = "android")),
         def(
             "entityDistanceScaling",
             O(Scaled(2, 20, 4.0, 0.5, 5.0)),

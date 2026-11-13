@@ -88,6 +88,31 @@ impl Game<'_> {
     pub(super) fn shader_packs_dir() -> std::path::PathBuf {
         Self::options_path().with_file_name(horizon_client::shader_pack_list::DIR)
     }
+    /// This instance's saved replays, newest first, for the Volt Replay
+    /// page's in-game watch list (the recorder writes next to the
+    /// options file too: the working directory is the game home).
+    pub(super) fn scan_replay_list() -> Vec<horizon_client::settings::ReplayListEntry> {
+        horizon_client::replay::list(&Self::options_path().with_file_name("replays"))
+            .into_iter()
+            .map(|m| horizon_client::settings::ReplayListEntry {
+                title: if m.server.is_empty() {
+                    m.file_name.clone()
+                } else {
+                    m.server.clone()
+                },
+                line: if m.name.is_empty() {
+                    horizon_client::replay::format_time(m.duration_ms)
+                } else {
+                    format!(
+                        "{} - {}",
+                        horizon_client::replay::format_time(m.duration_ms),
+                        m.name
+                    )
+                },
+                path: m.path,
+            })
+            .collect()
+    }
     pub(super) fn gui_size(&self) -> (f32, f32) {
         let size = self
             .renderer
@@ -111,6 +136,7 @@ impl Game<'_> {
         ui.open_at(!from_title && self.title.is_none(), page);
         let root = self.options.resources.clone();
         ui.languages = lang::available(&[&root]);
+        self.sync_waypoint_ui_context();
         self.refresh_pack_lists();
     }
     /// While the resource pack screen is open, `resourcepacks/` is looked at once a second
@@ -125,7 +151,7 @@ impl Game<'_> {
         if self
             .pack_folder
             .as_ref()
-            .is_some_and(|(at, _)| now.duration_since(*at).as_secs_f32() < 1.0)
+            .is_some_and(|(at, _)| now.saturating_duration_since(*at).as_secs_f32() < 1.0)
         {
             return;
         }
@@ -155,6 +181,11 @@ impl Game<'_> {
     }
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
         self.watch_pack_folder();
+        self.sync_waypoint_ui_context();
+        horizon_client::volt_mods::sync_catalog_from_engine(
+            &mut self.settings.extras,
+            &self.settings.horizon,
+        );
         let mut ui = std::mem::take(&mut self.ui.options);
         ui.draw(&self.settings, batch, &self.gui.atlas, self.cursor);
         self.ui.options = ui;
@@ -175,6 +206,7 @@ impl Game<'_> {
         let framebuffer = self.renderer.as_ref().map_or([1280, 720], |r| {
             [r.config.width as i32, r.config.height as i32]
         });
+        let was_typing = self.ui.options.typing();
         let mut ui = std::mem::take(&mut self.ui.options);
         let events = ui.click(
             &mut self.settings,
@@ -186,8 +218,20 @@ impl Game<'_> {
             false,
             right,
         );
+        let now_typing = ui.typing();
         self.ui.options = ui;
+        self.options_show_keyboard_on_focus(was_typing, now_typing);
         self.handle_option_events(events)
+    }
+    /// Pops the soft keyboard when an options search box gains focus.
+    /// Kept out of [`Self::options_mouse`] so native-mod mixins can weave
+    /// that target without statement-level `cfg` attributes in its body.
+    fn options_show_keyboard_on_focus(&mut self, was_typing: bool, now_typing: bool) {
+        #[cfg(target_os = "android")]
+        if !was_typing && now_typing {
+            self.android_show_keyboard();
+        }
+        let _ = (was_typing, now_typing);
     }
     pub(super) fn options_drag(&mut self) -> Result<()> {
         let size = self.gui_size();
@@ -282,6 +326,34 @@ impl Game<'_> {
                     let text = self.agent_details();
                     self.clipboard.set(&text);
                 }
+                Event::WaypointAction(idx) => {
+                    self.execute_waypoint_action(idx);
+                }
+                Event::ListReplays => {
+                    self.settings.replays = Self::scan_replay_list();
+                }
+                Event::WatchReplay(i) => {
+                    if let Some(entry) = self.settings.replays.get(i) {
+                        let path = entry.path.clone();
+                        // Leave whatever is open first; the pending entry
+                        // starts playback once the session has closed (a
+                        // local world's save finishes before `pending_entry`
+                        // is looked at again).
+                        if self.remote.is_some() {
+                            self.leave_server(None)?;
+                        } else if self.title.is_none() {
+                            self.close_world()?;
+                        }
+                        self.pending_entry = Some(super::PendingWorldEntry::Replay { path });
+                        // Close the options like `Event::Close`, back to
+                        // the title screen under the loading overlay.
+                        self.settings.save(&Self::options_path());
+                        self.options_to_game = false;
+                        self.options_to_world_options = false;
+                        self.screen = Screen::Playing;
+                        self.dragging = false;
+                    }
+                }
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
@@ -330,6 +402,13 @@ impl Game<'_> {
                 }
                 // Saved; the next frame's `shader_pack_inputs` loads the pick.
                 Event::ShaderPack => self.settings.save(&Self::options_path()),
+                Event::OpenShaderOptions => self.open_shader_options(),
+                Event::ShaderOptions => self.save_shader_options(),
+                Event::NativePackOptions(i) => {
+                    if let Some(pack) = self.settings.shader_packs.get(i) {
+                        pack.save_values(&Self::shader_packs_dir());
+                    }
+                }
                 Event::OpenShaderPackFolder => {
                     let dir = Self::shader_packs_dir();
                     let _ = std::fs::create_dir_all(&dir);
@@ -379,6 +458,12 @@ impl Game<'_> {
     /// Settings that Horizon applies beyond render distance, volume and GUI scale.
     pub(super) fn apply_ui_settings(&mut self) {
         self.apply_fullscreen();
+        if self.settings.extras.auto_drs == horizon_client::volt_features::AutoDrsMode::Off
+            && !self.settings.extras.thermal_guard
+        {
+            self.extras.drs_scale = 1.0;
+        }
+        let effective_drs = self.extras.effective_drs_scale();
         let s = &self.settings;
         if let Some(r) = self.renderer.as_mut() {
             r.gamma = s.gamma;
@@ -386,13 +471,16 @@ impl Game<'_> {
             r.improved_transparency = s.improved_transparency;
             r.set_present_mode(s.vsync, s.horizon.present_mode);
             r.animated_textures = s.horizon.animated_textures;
+            r.animation_step_ticks = if s.extras.anim_throttle { 2 } else { 1 };
+            r.active_anim_cull = s.extras.active_anim_cull;
+            r.fast_translucency = s.extras.fast_translucency;
             r.set_mipmap_levels(s.mipmap_levels.max(0) as u32);
             r.set_texture_filtering(
                 s.file.int("textureFiltering"),
                 s.file.int("maxAnisotropyBit"),
             );
             r.set_world_post(
-                s.horizon.resolution_scale as f32 / 100.0,
+                (s.horizon.resolution_scale as f32 / 100.0 * effective_drs).clamp(0.25, 2.0),
                 s.horizon.fxaa,
                 s.horizon.taa,
                 s.horizon.upscaling.ratio(),
@@ -406,6 +494,26 @@ impl Game<'_> {
                 &Self::options_path().with_file_name(horizon_client::graphics::HDR_MARKER),
             );
         }
+        self.particles.max_particles = s.extras.particle_budget.max_particles();
+        // Volt "Frame items": the particle distance combines with the Volt
+        // Boost particle budget (the tighter limit wins); the toggle hides
+        // every particle.
+        self.particles.max_render_distance_sq = if !s.extras.frame_particles {
+            Some(0.0)
+        } else {
+            match (
+                s.extras.particle_budget.max_distance_sq(),
+                s.extras.frame_particles_distance.dist_sq(),
+            ) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            }
+        };
+        self.particles.burst_shield = s.extras.chaos_particle_shield;
+        self.particles.frustum_cull = s.extras.particle_frustum_cull;
+        horizon_threads::set_thread_boost(s.extras.thread_boost);
+        #[cfg(target_os = "android")]
+        crate::native_ime::set_keep_screen_awake(s.extras.keep_screen_awake);
         let mut volumes = s.volumes;
         volumes[0] = 1.0;
         horizon_client::settings::set_source_volumes(volumes);
@@ -446,6 +554,13 @@ impl Game<'_> {
     /// `FramerateLimitTracker.getFramerateLimit`: the Max Framerate option,
     /// throttled when minimised, idle, or in a menu without a world.
     pub(super) fn framerate_limit(&self) -> i32 {
+        self.framerate_limit_reasoned().0
+    }
+    /// The frame cap and the stage that set it ("-" when only the player's
+    /// Max Framerate stands), so the Perf HUD makes a low cap diagnosable
+    /// on the device itself.
+    pub(super) fn framerate_limit_reasoned(&self) -> (i32, &'static str) {
+        use horizon_client::window::{ThrottleReason, throttle_reason};
         let context = FrameContext {
             inactivity: if self.settings.inactivity_fps_limit == "minimized" {
                 InactivityFpsLimit::Minimized
@@ -463,15 +578,99 @@ impl Game<'_> {
                 .as_ref()
                 .is_some_and(|w| matches!(w.fullscreen(), Some(Fullscreen::Exclusive(_)))),
             now_ms: self.started.elapsed().as_millis() as i64,
-            latest_input_ms: self.last_input.duration_since(self.started).as_millis() as i64,
+            latest_input_ms: self
+                .last_input
+                .saturating_duration_since(self.started)
+                .as_millis() as i64,
             has_level: self.title.is_none(),
             has_screen: self.title.is_some() || self.screen != super::Screen::Playing,
             has_overlay: false,
         };
-        let limit = framerate_limit(self.settings.max_fps as i32, context);
-        self.settings
+        let option = self.settings.max_fps as i32;
+        let limit = framerate_limit(option, context);
+        let mut reason = if limit < option {
+            match throttle_reason(context) {
+                ThrottleReason::WindowIconified => "MINIMIZED",
+                ThrottleReason::LongAfk => "AFK>10M",
+                ThrottleReason::ShortAfk => "AFK>1M",
+                ThrottleReason::OutOfLevelMenu => "MENU",
+                ThrottleReason::None => "-",
+            }
+        } else {
+            "-"
+        };
+        let battery = self
+            .settings
             .horizon
-            .battery_limit(limit, self.title.is_none(), self.focused)
+            .battery_limit(limit, self.title.is_none(), self.focused);
+        if battery < limit {
+            reason = "BATTERY";
+        }
+        let mut limit = battery;
+        if let Some(idle_cap) = self.settings.extras.dynamic_fps.cap_fps() {
+            let cap = idle_cap as i32;
+            let now_ms = self.started.elapsed().as_millis() as i64;
+            let latest_input_ms = self
+                .last_input
+                .saturating_duration_since(self.started)
+                .as_millis() as i64;
+            let idle_ms = now_ms.saturating_sub(latest_input_ms);
+            if !self.focused {
+                if cap.min(15) < limit {
+                    reason = "UNFOCUSED";
+                }
+                limit = limit.min(cap.min(15));
+            } else if self.title.is_some() || self.screen != super::Screen::Playing {
+                // Menus stay smooth while they are being used; the idle cap
+                // only applies after ten seconds without any input.
+                if idle_ms > 10_000 {
+                    if cap < limit {
+                        reason = "IDLE-MENU";
+                    }
+                    limit = limit.min(cap);
+                }
+            } else if idle_ms > 45_000 && self.replay_control().is_none() {
+                // AFK drop, except while a replay plays: watching is
+                // hands-off by nature.
+                if cap < limit {
+                    reason = "IDLE-AFK";
+                }
+                limit = limit.min(cap);
+            }
+        }
+        if self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::DynamicFps)
+        {
+            let cap = i32::from(
+                self.settings
+                    .extras
+                    .mod_catalog
+                    .dynamic_fps_idle_cap
+                    .clamp(5, 60),
+            );
+            let now_ms = self.started.elapsed().as_millis() as i64;
+            let latest_input_ms = self
+                .last_input
+                .saturating_duration_since(self.started)
+                .as_millis() as i64;
+            if !self.focused {
+                if cap < limit {
+                    reason = "UNFOCUSED";
+                }
+                limit = limit.min(cap);
+            } else if now_ms.saturating_sub(latest_input_ms) > 35_000
+                && self.replay_control().is_none()
+            {
+                if cap.max(15) < limit {
+                    reason = "DYNFPS-MOD";
+                }
+                limit = limit.min(cap.max(15));
+            }
+        }
+        (limit, reason)
     }
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the
@@ -480,8 +679,21 @@ impl Game<'_> {
         if self.options.frames.is_some() {
             return;
         }
+        if self.settings.extras.volt_reflex
+            && self.title.is_none()
+            && let Some(r) = self.renderer.as_ref()
+        {
+            r.poll_gpu();
+        }
         let limit = self.framerate_limit();
-        match self.settings.horizon.pacing {
+        let pacing = if cfg!(target_os = "android") && self.title.is_some() {
+            horizon_client::graphics::Pacing::Efficient
+        } else if self.settings.extras.volt_reflex {
+            horizon_client::graphics::Pacing::Precise
+        } else {
+            self.settings.horizon.pacing
+        };
+        match pacing {
             horizon_client::graphics::Pacing::Precise => {
                 horizon_client::window::end_frame(&mut self.limiter, limit, &mut self.frame_clock)
             }

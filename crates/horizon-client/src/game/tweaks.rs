@@ -71,13 +71,8 @@ struct Drag {
 }
 
 impl Game<'_> {
-    /// The open screen is one the tweaks run in, with the extra on.
-    pub(super) fn tweaks_on(&self) -> bool {
-        if !self.settings.extras.mouse_tweaks
-            || self.screen != Screen::Inventory
-            || self.station.is_some()
-            || self.mount_active()
-        {
+    pub(super) fn tweaks_menu_eligible(&self) -> bool {
+        if self.screen != Screen::Inventory || self.station.is_some() || self.mount_active() {
             return false;
         }
         if self.remote.is_some() {
@@ -85,6 +80,16 @@ impl Game<'_> {
         } else {
             matches!(self.container_kind(), None | Some(BlockEntity::Chest(_)))
         }
+    }
+    /// The open screen is one the tweaks run in, with the extra on.
+    pub(super) fn tweaks_on(&self) -> bool {
+        (self.settings.extras.mouse_tweaks
+            || self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::MouseTweaks))
+            && self.tweaks_menu_eligible()
     }
     /// One ordinary click on a game slot. False when nothing took it.
     pub(super) fn tweak_click(&mut self, slot: usize, button: i32, input: Input) -> bool {
@@ -133,6 +138,9 @@ impl Game<'_> {
         }
         let held = self.carried.clone();
         if right {
+            if !self.settings.extras.mod_catalog.mouse_tweaks_rmb {
+                return false;
+            }
             // A result slot takes nothing: its press stays vanilla's.
             if shift || held.is_none() || self.tweak_result(slot) {
                 return false;
@@ -225,9 +233,17 @@ impl Game<'_> {
     pub(super) fn tweak_release(&mut self) {
         self.tweaks.drag = None;
     }
-    /// The wheel over an inventory screen: true when the tweaks used it.
+    /// The wheel over an inventory screen: true when the tweaks or Item Scroller used it.
     pub(super) fn tweak_scroll(&mut self, delta: f32, slot: Option<usize>) -> bool {
-        if !self.settings.extras.mouse_tweaks_wheel || !self.tweaks_on() || self.carried.is_some() {
+        let scroller_on = self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::ItemScroller)
+            && self.settings.extras.mod_catalog.item_scroller_wheel;
+        let wheel_on =
+            (self.settings.extras.mouse_tweaks_wheel && self.tweaks_on()) || scroller_on;
+        if !wheel_on || !self.tweaks_menu_eligible() || self.carried.is_some() {
             return false;
         }
         let Some(slot) = slot else {

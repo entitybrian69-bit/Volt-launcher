@@ -375,17 +375,17 @@ impl Launcher {
                 |i| rule(self.mod_row(rows[i].clone(), busy, cx).into_any_element()),
             )
         };
-        let card = div()
-            .relative()
+        let card = plate::cut(
+            night::PIXEL_CORNER,
+            2,
             // Nearly opaque: a list reads over the sunset.
-            .bg(alpha(n.card, 0.94))
-            .rounded(px(night::RADIUS_CARD))
-            .border_1()
-            .border_color(alpha(n.stroke, n.stroke_alpha))
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(body);
+            Some(alpha(n.card, 0.94)),
+            Some((alpha(n.stroke, n.stroke_alpha), 1.)),
+        )
+        .flex()
+        .flex_col()
+        .child(header)
+        .child(body);
         (
             actions,
             div()

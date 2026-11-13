@@ -181,6 +181,39 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+/// Cosmetic-only mods Volt Boost's Mod Lag Shield rests: purely visual,
+/// no gameplay or storage behaviour, so stopping their hooks mid-session
+/// loses nothing. Keep gameplay aids (sorting, placement, HUD info) out.
+const COSMETIC_MODS: &[&str] = &[
+    "visuality_horizon",
+    "skins_3d",
+    "eatinganimation",
+    "itemnew",
+    "chatheads",
+    "hitbox_plus",
+    "not_enough_animations",
+    "player_animations",
+    "subtle_effects",
+    "elytratrails",
+];
+
+/// Mod settings are tiny one-value files read through `native_setting`;
+/// mods poll them freely (some per frame), so reads come from this RAM
+/// cache and only ever touch the filesystem once per key. Writes go
+/// through the cache to disk. Keyed `mod_id\u{1f}key`; one data root per
+/// process, shared by the window's and the integrated server's `Game`.
+static SETTING_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
+> = std::sync::OnceLock::new();
+
+fn setting_cache()
+-> std::sync::MutexGuard<'static, std::collections::HashMap<String, Option<String>>> {
+    SETTING_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
 /// furnace sets its `lit`. Horizon sends every write to players, so
@@ -636,6 +669,37 @@ const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.use", None),
 ];
 
+/// The open screen, for the screen hooks (`native_screen_render_post`, the
+/// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre`
+/// and `native_screen_mouse_scrolled_pre`, and the key ones
+/// `native_screen_key_pressed_pre` and `native_screen_char_typed_pre`): what
+/// it is, its menu and title, where its container panel is, how many slots
+/// its menu has, and where the mouse and the frame's partial tick are.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeScreenView<'a> {
+    /// One id per `Screen` (`Screen::id`): `inventory`, `creative`, `paused`,
+    /// `stats`, `options`, `win`… Every container, station and mod window
+    /// draws on the inventory screen and so reports `inventory`: tell them
+    /// apart by `menu` and `title` and by `slots`.
+    pub id: &'static str,
+    /// The type id of the menu the server opened for this screen
+    /// (`minecraft:generic_9x3`, `minecraft:furnace`, a mod's own id). None
+    /// on a screen without one.
+    pub menu: Option<&'a str>,
+    /// The title the server gave the open menu, if it has one. None when the
+    /// server gave none and on a screen the client opened.
+    pub title: Option<&'a Text>,
+    /// The screen's container panel in GUI pixels, `[x, y, width, height]`;
+    /// the whole window for a screen with none.
+    pub rect: [f32; 4],
+    /// The slots the open menu has, as `Game::slots` counts them.
+    pub slots: usize,
+    /// The pointer in GUI pixels, as `native_cursor` gives it.
+    pub mouse: [f32; 2],
+    /// This frame's partial tick, 0 to 1.
+    pub partial_tick: f32,
+}
+
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// Once a frame, in a world or not, after Horizon's extras.
@@ -646,6 +710,38 @@ impl Game<'_> {
     /// and on servers), and the server's own (`native_window` is false
     /// there: the single player server thread, a dedicated server).
     pub(super) fn native_tick(&mut self) {}
+    /// Before one first-person hand and its displayed stack are drawn
+    /// (RenderHandEvent). Equip progress is the inverse arm height,
+    /// including the item's swap animation scale. Cancel skips that hand's
+    /// default geometry, including its map and arm geometry. It only
+    /// hides: the hook has no way to draw a replacement.
+    #[allow(dead_code)]
+    pub(super) fn native_render_hand(
+        &self,
+        hand: horizon_client::first_person::Hand,
+        stack: Option<&ItemStack>,
+        partial: f32,
+        swing: f32,
+        equip: f32,
+        canceled: &mut bool,
+    ) {
+        let _ = (hand, stack, partial, swing, equip, canceled);
+    }
+    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
+    /// `animation` arrives with its consumable's (`eat`, `drink`), else
+    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
+    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
+    /// Asked each frame the hand draws an item in use, for an item with no
+    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
+    /// theirs). Client-side.
+    #[allow(dead_code)]
+    pub(super) fn native_use_animation(
+        &self,
+        stack: &ItemStack,
+        animation: &mut horizon_world::consumable::UseAnimation,
+    ) {
+        let _ = (stack, animation);
+    }
     /// The world's phases, read-only; `error_text` carries the engine's
     /// own open-failure text, empty otherwise. Server-side; the deprecated
     /// in-frame path delivers no lifecycle events. A server loop or final
@@ -1144,6 +1240,166 @@ impl Game<'_> {
     pub(super) fn native_on_equip(&mut self, slot: &str, new: Option<&ItemStack>) {
         let _ = (slot, new);
     }
+    /// The open screen has drawn itself and its tooltips (`Screen.render`,
+    /// the point of `ScreenEvent.Render.Post`): draw over it with the batch,
+    /// `screen.rect` being its container panel (or the whole window) and
+    /// `screen.id` the screen it is. Once a frame on the window, never while
+    /// playing with no screen; `&self`, so it reads and draws only. API 78.
+    pub(super) fn native_screen_render_post(
+        &self,
+        batch: &mut HudBatch,
+        screen: &NativeScreenView<'_>,
+    ) {
+        let _ = (batch, screen);
+    }
+    /// A mouse button went down over the open screen
+    /// (`ScreenEvent.MouseButtonPressed.Pre`): `screen.mouse` is where the
+    /// pointer is, `button` the button's GLFW index (0 left, 1 right, 2
+    /// middle, 3 back, 4 forward) and `modifiers` GLFW's bits (shift 1,
+    /// control 2, alt 4, super 8). Set `canceled` and the press goes no
+    /// further: no slot, no screen button, no drag. API 80.
+    pub(super) fn native_screen_mouse_button_pressed_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, button, modifiers, canceled);
+    }
+    /// A mouse button went up over the open screen
+    /// (`ScreenEvent.MouseButtonReleased.Pre`), with the same `screen`,
+    /// `button` and `modifiers` as the press. Set `canceled` and the release
+    /// goes no further; cancel one only when its press was cancelled too.
+    /// API 80.
+    pub(super) fn native_screen_mouse_button_released_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        button: i32,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, button, modifiers, canceled);
+    }
+    /// The wheel turned over the open screen (`ScreenEvent.MouseScrolled.Pre`):
+    /// `scroll` is the wheel's movement in x and y as the game's own scroll
+    /// handler scales it. Set `canceled` and the screen never sees it. API 80.
+    pub(super) fn native_screen_mouse_scrolled_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        scroll: [f64; 2],
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, scroll, modifiers, canceled);
+    }
+    /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`):
+    /// `key` is vanilla's name for it (`key.keyboard.e`), `repeat` whether it
+    /// is the keyboard's auto-repeat of a held press. Set `canceled` and the
+    /// screen never sees it. API 80.
+    pub(super) fn native_screen_key_pressed_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        key: &str,
+        repeat: bool,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, key, repeat, modifiers, canceled);
+    }
+    /// A character was typed over the open screen (`ScreenEvent.CharacterTyped.Pre`):
+    /// `c` is the character the text field would take. Set `canceled` and the
+    /// screen never sees it. API 80.
+    pub(super) fn native_screen_char_typed_pre(
+        &self,
+        screen: &NativeScreenView<'_>,
+        c: char,
+        modifiers: u32,
+        canceled: &mut bool,
+    ) {
+        let _ = (screen, c, modifiers, canceled);
+    }
+    /// Render-thread notification after a resource-pack reload has applied
+    /// successfully: atlas, models, renderer and client caches already refer
+    /// to the new resources. Selection and server-pack reloads share this
+    /// point; initial startup does not fire it. API 99.
+    pub(super) fn native_client_resources_reloaded(&mut self) {}
+    /// A command a mod registered, typed on the dedicated server's console,
+    /// without its slash: set `ran` when it is yours. A name no mod
+    /// registered goes to vanilla's dispatcher as before. API 99.
+    pub(super) fn native_perform_console_command(&mut self, command: &str, ran: &mut bool) {
+        let _ = (command, ran);
+    }
+    /// Before one of vanilla's HUD layers draws, by id: hide it by setting
+    /// `canceled`, or draw under it. Layer ids are `minecraft:crosshair`,
+    /// `minecraft:hotbar`, `minecraft:effects`, `minecraft:boss_overlay`,
+    /// `minecraft:selected_item_name`, `minecraft:chat`, `minecraft:tab_list`
+    /// and the rest of the vanilla paint order, as upstream API 139 names
+    /// them. A hidden layer still runs its game logic and `post` still
+    /// fires.
+    pub(super) fn native_gui_layer_pre(
+        &mut self,
+        layer: &str,
+        batch: &mut HudBatch,
+        canceled: &mut bool,
+    ) {
+        let _ = (layer, batch, canceled);
+    }
+    /// After one of vanilla's HUD layers (or after the layer a mod hid),
+    /// with the ids of `native_gui_layer_pre`: draw here to put something
+    /// above the layer. API 139.
+    pub(super) fn native_gui_layer_post(&mut self, layer: &str, batch: &mut HudBatch) {
+        let _ = (layer, batch);
+    }
+    /// Draws one vanilla HUD layer between the mods' hooks:
+    /// `native_gui_layer_pre` (which may hide it), the layer, then
+    /// `native_gui_layer_post`. `None` when a mod hid the layer.
+    pub(super) fn gui_layer<R>(
+        &mut self,
+        layer: &str,
+        batch: &mut HudBatch,
+        draw: impl FnOnce(&mut Self, &mut HudBatch) -> R,
+    ) -> Option<R> {
+        let mut canceled = false;
+        self.native_gui_layer_pre(layer, batch, &mut canceled);
+        let mut drawn = None;
+        if !canceled {
+            drawn = Some(draw(self, batch));
+        }
+        self.native_gui_layer_post(layer, batch);
+        drawn
+    }
+}
+
+/// A winit mouse button as GLFW numbers it (0 left, 1 right, 2 middle,
+/// 3 back, 4 forward), for the screen mouse hooks.
+pub(super) fn glfw_mouse_button(button: MouseButton) -> i32 {
+    match button {
+        MouseButton::Left => 0,
+        MouseButton::Right => 1,
+        MouseButton::Middle => 2,
+        MouseButton::Back => 3,
+        MouseButton::Forward => 4,
+        MouseButton::Other(n) => i32::from(n),
+    }
+}
+
+/// Winit modifiers as GLFW's bits: shift 1, control 2, alt 4, super 8.
+pub(super) fn glfw_modifier_bits(m: winit::keyboard::ModifiersState) -> u32 {
+    let mut bits = 0;
+    if m.shift_key() {
+        bits |= 1;
+    }
+    if m.control_key() {
+        bits |= 2;
+    }
+    if m.alt_key() {
+        bits |= 4;
+    }
+    if m.super_key() {
+        bits |= 8;
+    }
+    bits
 }
 
 fn dimension_id(dimension: LevelDimension) -> &'static str {
@@ -1335,8 +1591,20 @@ impl Game<'_> {
     }
     /// Whether the player left mod `mod_id` on in Options > Mods. A mod
     /// turned off does nothing (check this first in each hook) until the
-    /// launcher's next build leaves it out.
+    /// launcher's next build leaves it out. Volt Boost's Mod Lag Shield
+    /// additionally rests cosmetic-only mods — their hooks answer "off" so
+    /// their per-frame work stops — without touching the player's choices.
     pub(super) fn native_on(&self, mod_id: &str) -> bool {
+        // Hot path: woven hooks ask this from per-frame and per-entity call
+        // sites. With nothing disabled and no lag shield (the common case)
+        // answer from two flag reads, no string work at all.
+        if !self.settings.extras.mod_lag_shield {
+            if self.settings.mods.disabled.is_empty() {
+                return true;
+            }
+        } else if COSMETIC_MODS.contains(&mod_id) {
+            return false;
+        }
         !self.settings.mods.disabled.contains(mod_id)
     }
     /// Sets a block in the current authoritative level through `Level.setBlock`.
@@ -1660,6 +1928,66 @@ impl Game<'_> {
             .chat
             .add(atlas, line, None, ChatSource::Client, self.ticks, focused);
     }
+    /// The rain and thunder levels of the world in place, each 0.0 to 1.0
+    /// (`Level.getRainLevel` and `Level.getThunderLevel`): what a solar panel
+    /// or a wind turbine reads. Both 0 in the Nether and the End, which have
+    /// no weather (`Level.canHaveWeather`). API 97.
+    pub(super) fn native_weather(&self) -> (f32, f32) {
+        if self.dim.id() != "minecraft:overworld" {
+            return (0.0, 0.0);
+        }
+        self.world.weather.levels(1.0)
+    }
+    /// Opens a screen of mod `mod_id`'s own over the world: the screen hooks
+    /// fire over it as over any other, so the mod draws it in
+    /// `native_screen_render_post` and takes its clicks, scroll, keys and
+    /// typing there; the mouse is freed, and Escape closes it. Every mod's own
+    /// screen has the `NativeScreenView.id` `mod`, so a mod's screen hooks
+    /// check `native_mod_screen()` is its own before drawing. True when it is
+    /// open: false while another screen is (or another mod's), over the title
+    /// screen, a book, a sign editor, a dialog or a prompt, while the world
+    /// loads, and anywhere but the window's own client. API 111.
+    pub(super) fn native_mod_screen_open(&mut self, mod_id: &str) -> bool {
+        let blocked = self.title.is_some()
+            || self.renderer.is_none()
+            || self.lan_acting.is_some()
+            || self.player.is_none()
+            || self.screen_over_playing()
+            || self.remote_loading();
+        let owner = self.native_mod_screen();
+        if let Some(open) = mod_screen_opens(self.screen, blocked, owner, mod_id) {
+            return open;
+        }
+        self.native_mod_screen = Some(mod_id.to_owned());
+        self.screen = Screen::Mod;
+        self.keys.clear();
+        self.left = false;
+        self.right = false;
+        self.mining = None;
+        self.capture(false);
+        true
+    }
+    /// Closes mod `mod_id`'s own screen, if it is open. API 111.
+    pub(super) fn native_mod_screen_close(&mut self, mod_id: &str) {
+        if self.native_mod_screen().is_some_and(|id| id == mod_id) {
+            self.close_native_mod_screen();
+        }
+    }
+    /// The mod whose own screen is open, if one is (Escape, or another screen
+    /// replacing it, closes it). API 111.
+    pub(super) fn native_mod_screen(&self) -> Option<&str> {
+        self.native_mod_screen
+            .as_deref()
+            .filter(|_| self.screen == Screen::Mod)
+    }
+    /// A native mod's own screen closes (Escape, or `native_mod_screen_close`).
+    pub(super) fn close_native_mod_screen(&mut self) {
+        self.native_mod_screen = None;
+        if self.screen == Screen::Mod {
+            self.screen = Screen::Playing;
+            self.capture(true);
+        }
+    }
     /// A native mod's own folder: `horizon-mods/.horizon-mod-data/<id>/`,
     /// where the WebAssembly mod of the same id kept its storage, so a
     /// player's settings carry over. Not created here.
@@ -1667,13 +1995,22 @@ impl Game<'_> {
         let mods = Self::options_path().with_file_name(mod_list::DIR);
         mods.join(".horizon-mod-data").join(mod_id)
     }
-    /// A mod's setting `key` (one file per key in `native_data_dir`).
+    /// A mod's setting `key` (one file per key in `native_data_dir`),
+    /// served from the RAM cache: mods may poll settings every frame
+    /// without touching the filesystem.
     pub(super) fn native_setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        let cache_key = format!("{mod_id}\u{1f}{key}");
+        if let Some(cached) = setting_cache().get(&cache_key) {
+            return cached.clone();
+        }
         let path = self.native_data_dir(mod_id).join(key);
-        fs::read_to_string(path).ok().map(|v| v.trim().to_owned())
+        let value = fs::read_to_string(path).ok().map(|v| v.trim().to_owned());
+        setting_cache().insert(cache_key, value.clone());
+        value
     }
-    /// Keeps a mod's setting `key`.
+    /// Keeps a mod's setting `key`, in the cache and on disk.
     pub(super) fn native_set_setting(&self, mod_id: &str, key: &str, value: &str) {
+        setting_cache().insert(format!("{mod_id}\u{1f}{key}"), Some(value.to_owned()));
         let dir = self.native_data_dir(mod_id);
         let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
     }
@@ -2242,8 +2579,26 @@ impl Game<'_> {
     }
     /// Options > Mods' rows for the native mods, after the others.
     pub(super) fn list_native_mods(&mut self) {
+        if self.settings.mods.disabled.is_empty() {
+            log::info!("Volt mods: nothing turned off");
+        } else {
+            let off: Vec<&str> = self
+                .settings
+                .mods
+                .disabled
+                .iter()
+                .map(String::as_str)
+                .collect();
+            log::info!("Volt mods: {} off: {}", off.len(), off.join(", "));
+        }
         let mut mods = Vec::new();
         self.native_mods(&mut mods);
+        self.bundled_zoom_list(&mut mods);
+        self.bundled_hud_list(&mut mods);
+        self.volt_builtins_list(&mut mods);
+        // A mod turned off (here or in the launcher's Mods tab) stops
+        // running (`native_on`) but STAYS in this list showing Off, so the
+        // player can turn it back on from either place.
         // A WebAssembly mod of the same id doesn't run (`start_mods`): the
         // native row stands for it, and alone toggles its `mod.<id>` line.
         self.settings
@@ -2253,6 +2608,9 @@ impl Game<'_> {
         for m in mods {
             let mut buttons = Vec::new();
             self.native_settings(&m.id, &mut buttons);
+            self.bundled_zoom_settings(&m.id, &mut buttons);
+            self.bundled_hud_settings(&m.id, &mut buttons);
+            self.volt_builtins_settings(&m.id, &mut buttons);
             let page = NativePage {
                 keys: m.keys,
                 buttons,
@@ -2275,6 +2633,9 @@ impl Game<'_> {
             return;
         };
         self.native_settings_click(&id, button);
+        self.bundled_zoom_click(&id, button);
+        self.bundled_hud_click(&id, button);
+        self.volt_builtins_click(&id, button);
         self.native_settings_refresh(i);
     }
     /// Native mod `i`'s page opened: its labels asked again, so that they
@@ -2285,10 +2646,46 @@ impl Game<'_> {
         };
         let mut buttons = Vec::new();
         self.native_settings(&id, &mut buttons);
+        self.bundled_zoom_settings(&id, &mut buttons);
+        self.bundled_hud_settings(&id, &mut buttons);
+        self.volt_builtins_settings(&id, &mut buttons);
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
             page.buttons = buttons;
         }
+    }
+    /// The open screen as a native mod sees it (`NativeScreenView`): its id,
+    /// the open menu's type and title, its slot count, and its panel's
+    /// rectangle, with the mouse and the partial tick.
+    pub(super) fn screen_view(&self, batch: &HudBatch, screen: Screen) -> NativeScreenView<'_> {
+        NativeScreenView {
+            id: screen.id(),
+            menu: self.remote_menu_type().filter(|m| !m.is_empty()),
+            title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
+            rect: self.screen_rect(batch, screen),
+            slots: self.slots().len(),
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        }
+    }
+    /// The open screen's container panel in GUI pixels, or the whole window
+    /// for a screen with none (`NativeScreenView.rect`).
+    pub(super) fn screen_rect(&self, batch: &HudBatch, screen: Screen) -> [f32; 4] {
+        if screen != Screen::Inventory && screen != Screen::Creative {
+            return [0.0, 0.0, batch.width, batch.height];
+        }
+        let image = self.container_image(batch);
+        [
+            image.left as f32,
+            image.top as f32,
+            image.width as f32,
+            image.height as f32,
+        ]
+    }
+    /// A GUI-sized batch for building a `NativeScreenView` outside drawing.
+    pub(super) fn screen_view_batch(&self) -> Option<HudBatch> {
+        let r = self.renderer.as_ref()?;
+        Some(HudBatch::new([r.config.width, r.config.height]))
     }
     /// A key event for `native_key`.
     pub(super) fn native_key_event(&mut self, key: KeyCode, pressed: bool, repeat: bool) {
@@ -2300,17 +2697,21 @@ impl Game<'_> {
                 self.native_panel_key(name);
             }
             self.native_key(name, pressed);
+            self.bundled_zoom_key(name, pressed);
+            self.volt_builtins_key(name, pressed);
         }
     }
     /// A mouse button while playing, for `native_key`.
     pub(super) fn native_mouse_event(&mut self, button: MouseButton, pressed: bool) {
         let name = keybinds::mouse_name(button);
         self.native_key(&name, pressed);
+        self.bundled_zoom_key(&name, pressed);
     }
     /// Wheel steps while playing: whether a native mod took them.
     pub(super) fn native_wheel_event(&mut self, steps: f32) -> bool {
         let mut claimed = false;
         self.native_wheel(steps, &mut claimed);
+        self.bundled_zoom_wheel(steps, &mut claimed);
         claimed
     }
     /// A client mod's command: a native mod's first, then a WebAssembly mod's.
@@ -2327,6 +2728,7 @@ impl Game<'_> {
         }
         let mut zoom = None;
         self.native_zoom(&mut zoom);
+        self.bundled_zoom_view(&mut zoom);
         // As the WebAssembly runtime clamped a mod's zoom.
         let z = zoom?;
         let factor = finite(z.factor, 1.0, 10.0);
@@ -2344,6 +2746,7 @@ impl Game<'_> {
     pub(super) fn native_minimap_now(&self) -> Option<NativeMinimap> {
         let mut minimap = None;
         self.native_minimap(&mut minimap);
+        self.bundled_minimap(&mut minimap);
         minimap.map(|m| NativeMinimap {
             size: finite(m.size, 16.0, 256.0),
             blocks_per_pixel: finite(m.blocks_per_pixel, 0.5, 4.0),
@@ -2398,6 +2801,25 @@ fn config_dir(options: &Path) -> Result<PathBuf, String> {
 /// `v` within `lo..=hi`; `lo` when it is not a number.
 fn finite(v: f32, lo: f32, hi: f32) -> f32 {
     if v.is_finite() { v.clamp(lo, hi) } else { lo }
+}
+
+/// What `native_mod_screen_open(mod_id)` does over `screen` (`blocked`: an
+/// overlay, the title screen, no window or no player; `owner`'s own screen
+/// open): `None` opens it, `Some` answers without changing anything (true:
+/// `mod_id`'s is already open).
+fn mod_screen_opens(
+    screen: Screen,
+    blocked: bool,
+    owner: Option<&str>,
+    mod_id: &str,
+) -> Option<bool> {
+    if screen == Screen::Mod {
+        return Some(owner == Some(mod_id));
+    }
+    if screen != Screen::Playing || blocked {
+        return Some(false);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -2513,6 +2935,8 @@ mod tests {
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
+        let render_source = include_str!("../../../horizon-client-render/src/gfx/native_render.rs");
+        let mut render_names = BTreeSet::new();
         for hook in hooks {
             let name = hook["name"].as_str().unwrap();
             let version = hook["version"].as_u64().unwrap();
@@ -2520,6 +2944,17 @@ mod tests {
                 version > 0 && contracts.insert((name, version)),
                 "invalid or duplicate hook: {name} v{version}"
             );
+            let target = hook["target"].as_str().unwrap();
+            // Render-crate hook points live in gfx/native_render.rs; the
+            // game-crate ones in this file or GameLevel's section below.
+            if target == format!("horizon_client_render::gfx::native_render::native_{name}") {
+                assert!(
+                    render_source.contains(&format!("pub fn native_{name}(")),
+                    "render hook point missing: {name}"
+                );
+                render_names.insert(name);
+                continue;
+            }
             names.insert(name);
             let owner = if level_hooks.contains(name) {
                 "GameLevel"
@@ -2527,7 +2962,7 @@ mod tests {
                 "Game"
             };
             assert_eq!(
-                hook["target"].as_str().unwrap(),
+                target,
                 format!("horizon_client::game::native_hooks::{owner}<'_>::native_{name}")
             );
         }

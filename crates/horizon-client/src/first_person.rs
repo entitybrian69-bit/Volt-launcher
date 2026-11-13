@@ -547,6 +547,17 @@ impl HandSway {
         let y_bob = crate::camera::lerp(partial, self.y_bob_o, self.y_bob);
         [(view_x_rot - x_bob) * 0.1, (view_y_rot - y_bob) * 0.1]
     }
+    /// The camera-relative hand space: the inverse view matrix turned by
+    /// the sway. Woven native mods (the Punchy port among them) call this
+    /// as `game.sway.to_world(a, &game.view)`; the engine's first-person
+    /// path in `game.rs` computes the same product inline from the game's
+    /// own pitch and yaw, which the camera mirrors in first person.
+    pub fn to_world(&self, partial: f32, view: &crate::camera::Camera) -> glam::Mat4 {
+        let [sway_x, sway_y] = self.rotation(partial, view.x_rot, view.y_rot);
+        crate::camera::view_matrix(view.y_rot, view.x_rot).inverse()
+            * glam::Mat4::from_rotation_x(sway_x.to_radians())
+            * glam::Mat4::from_rotation_y(sway_y.to_radians())
+    }
 }
 
 /// `HitResult` at the crosshair (`Minecraft.hitResult`).
@@ -916,6 +927,34 @@ impl Clicks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hand_sway_to_world_matches_the_inline_first_person_product() {
+        // The method woven native mods call must equal game.rs' inline
+        // view.inverse() * rot_x(sway) * rot_y(sway) for the same angles.
+        let mut sway = HandSway::default();
+        sway.tick(3.0, 10.0);
+        sway.tick(6.0, 20.0);
+        let mut view = crate::camera::Camera::default();
+        (view.x_rot, view.y_rot) = (7.5, 33.0);
+        let a = 0.25;
+        let [sx, sy] = sway.rotation(a, view.x_rot, view.y_rot);
+        let inline = crate::camera::view_matrix(view.y_rot, view.x_rot).inverse()
+            * glam::Mat4::from_rotation_x(sx.to_radians())
+            * glam::Mat4::from_rotation_y(sy.to_radians());
+        let method = sway.to_world(a, &view);
+        assert!(
+            method
+                .to_cols_array()
+                .iter()
+                .zip(inline.to_cols_array())
+                .all(|(m, i)| (m - i).abs() < 1e-6),
+            "to_world diverged from the inline product"
+        );
+        // And the sway really lags: with bobs behind the view, both
+        // rotation components are non-zero.
+        assert!(sx != 0.0 && sy != 0.0);
+    }
 
     #[test]
     fn equip_displacement_uses_the_visible_items_scale() {

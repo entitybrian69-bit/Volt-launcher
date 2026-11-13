@@ -9,9 +9,10 @@ pub mod manifest;
 pub mod package;
 pub mod reference;
 pub mod stages;
+pub mod volt_shaders;
 
-pub use check::{Problem, Report, check};
+pub use check::{Problem, Report, check, prepare_trusted};
 pub use inputs::Frame;
-pub use manifest::{API, MANIFEST, Manifest, OptionKind, PackOption, SCHEMA, Stage};
+pub use manifest::{API, MANIFEST, Manifest, OptionKind, OptionPage, PackOption, PageItem, SCHEMA, Stage};
 pub use package::{EXTENSION, Pack};
 pub use stages::{Composed, StageKind, compose};

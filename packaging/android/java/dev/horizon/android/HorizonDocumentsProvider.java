@@ -25,11 +25,19 @@ public final class HorizonDocumentsProvider extends DocumentsProvider {
     private static native int nativeOpen(String home, String id, String mode)
             throws FileNotFoundException;
 
+    private static boolean loaded;
+    private static synchronized void ensureLoaded() {
+        if (!loaded) {
+            System.loadLibrary("horizon_android");
+            loaded = true;
+        }
+    }
+
     @Override public boolean onCreate() {
-        System.loadLibrary("horizon_android");
         return true;
     }
     private String call(String operation, String id, String arg) throws FileNotFoundException {
+        ensureLoaded();
         return nativeCall(getContext().getFilesDir().getAbsolutePath(), operation, id, arg);
     }
     private Cursor query(String operation, String id, String[] projection, String[] defaults)
@@ -94,6 +102,7 @@ public final class HorizonDocumentsProvider extends DocumentsProvider {
     @Override public ParcelFileDescriptor openDocument(String id, String mode, CancellationSignal signal)
             throws FileNotFoundException {
         if (signal != null) signal.throwIfCanceled();
+        ensureLoaded();
         return ParcelFileDescriptor.adoptFd(nativeOpen(
                 getContext().getFilesDir().getAbsolutePath(), id, mode));
     }

@@ -18,6 +18,15 @@ const PREFIX: &str = "horizon_terrain_";
 /// The entries around the pack's `material`: vanilla's vertex work without the lightmap
 /// product, then the material, the alpha test and fog as `fs_solid` and `fs_translucent` do.
 const ENTRIES: &str = "
+@group(3) @binding(1) var<uniform> horizon_terrain_layer_kinds: array<vec4<u32>, 256>;
+override horizon_terrain_volt_pack: bool = false;
+override horizon_terrain_wave_plants: bool = false;
+override horizon_terrain_wave_leaves: bool = false;
+override horizon_terrain_wave_water: bool = false;
+override horizon_terrain_storm_wind: bool = false;
+override horizon_terrain_wind_speed: f32 = 1.0;
+override horizon_terrain_wind_strength: f32 = 1.0;
+
 struct HorizonMaterialOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -29,14 +38,89 @@ struct HorizonMaterialOut {
     @location(6) spherical: f32,
     @location(7) cylindrical: f32,
 }
+fn horizon_material_layer_kind(raw_layer: u32) -> u32 {
+    let idx = raw_layer & 0x7fffu;
+    if idx >= 8192u {
+        return 0u;
+    }
+    let packed4 = horizon_terrain_layer_kinds[idx >> 5u];
+    let comp = (idx >> 3u) & 3u;
+    var word = packed4.x;
+    if comp == 1u {
+        word = packed4.y;
+    } else if comp == 2u {
+        word = packed4.z;
+    } else if comp == 3u {
+        word = packed4.w;
+    }
+    return (word >> ((idx & 7u) * 4u)) & 15u;
+}
 fn horizon_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f32>,
     light: vec2<u32>, origin: vec3<f32>) -> HorizonMaterialOut {
-    let pos = position + origin;
+    var pos = position + origin;
+    var mat_tag = 1.0;
+    if horizon_terrain_volt_pack {
+        let kind = horizon_material_layer_kind(layer);
+        let emission = 15u - (u32(round(color.a * 255.0)) & 15u);
+        if kind == 5u || kind == 6u {
+            mat_tag = 0.125;
+        } else if kind == 9u {
+            mat_tag = 0.28;
+        } else if kind >= 1u && kind <= 4u {
+            mat_tag = 0.44;
+        } else if kind == 7u {
+            mat_tag = 0.60;
+        } else if emission > 0u {
+            mat_tag = 0.76;
+        } else if kind == 8u {
+            mat_tag = 0.90;
+        }
+        if kind >= 1u && kind <= 5u {
+            let dist_fade = clamp(1.0 - length(pos) * (1.0 / 56.0), 0.0, 1.0);
+            if dist_fade > 0.001 {
+                let cam_mod = frame.camera_position - floor(frame.camera_position * (1.0 / 64.0)) * 64.0;
+                let wp = pos + cam_mod;
+                let storm = select(1.0, 1.0 + frame.rain * 0.45 + frame.thunder * 0.40, horizon_terrain_storm_wind);
+                let rate = select(1.0, 1.30, horizon_terrain_storm_wind && frame.rain > 0.2);
+                let t = frame.time * horizon_terrain_wind_speed * rate;
+                let amp = horizon_terrain_wind_strength * storm * dist_fade;
+                if kind == 1u && horizon_terrain_wave_leaves {
+                    let px = wp.x * 0.7853982 + wp.y * 0.5890486 + wp.z * 0.3926991;
+                    let pz = wp.z * 0.7853982 - wp.x * 0.3926991 + wp.y * 0.4908739;
+                    let gust = 0.75 + 0.25 * sin(t * 0.7 + (wp.x + wp.z) * 0.0981748);
+                    let s = 0.036 * amp * gust;
+                    pos.x += sin(t * 2.1 + px) * s;
+                    pos.y += cos(t * 1.7 + px + pz) * (s * 0.35);
+                    pos.z += cos(t * 1.85 + pz) * s;
+                } else if (kind >= 2u && kind <= 4u) && horizon_terrain_wave_plants {
+                    var weight = clamp(1.0 - uv.y, 0.0, 1.0);
+                    if kind == 3u {
+                        weight = 1.0 + 0.80 * clamp(1.0 - uv.y, 0.0, 1.0);
+                    } else if kind == 4u {
+                        weight = clamp(uv.y, 0.0, 1.0);
+                    }
+                    let px = wp.x * 1.1780972 + wp.z * 0.7853982;
+                    let pz = wp.z * 1.1780972 - wp.x * 0.5890486;
+                    let gust = 0.70 + 0.30 * sin(t * 0.85 + (wp.x * 0.1963495 + wp.z * 0.0981748));
+                    let s = 0.055 * weight * amp * gust;
+                    let dx = sin(t * 2.6 + px) * s;
+                    let dz = cos(t * 2.25 + pz) * (s * 0.85);
+                    pos.x += dx;
+                    pos.z += dz;
+                    pos.y -= (dx * dx + dz * dz) * 1.8;
+                } else if kind == 5u && horizon_terrain_wave_water {
+                    let w1 = sin(t * 2.2 + wp.x * 0.7853982 + wp.z * 0.3926991);
+                    let w2 = cos(t * 1.65 - wp.x * 0.3926991 + wp.z * 0.7853982);
+                    pos.y += ((w1 + w2) * 0.5 - 0.55) * 0.026 * min(amp, 1.5);
+                }
+            }
+        }
+    }
     var out: HorizonMaterialOut;
     out.clip = horizon_terrain_globals.view_proj * vec4(pos, 1.0);
     out.uv = uv;
     out.layer = layer;
-    out.tint = vec4(color.rgb, 1.0);
+    out.tint = vec4(color.rgb, mat_tag);
     let block = max(f32(light.y), horizon_terrain_dynamic_block_light(pos));
     let sky = f32(light.x);
     // 16 per level, 15 levels.

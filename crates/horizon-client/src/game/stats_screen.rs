@@ -161,6 +161,10 @@ pub(super) struct StatsUi {
     /// The list's scrolling: the wheel and the held scrollbar.
     scroll: horizon_client::ui::Scroll,
     sort: Option<(usize, i32)>,
+    /// `Better Statistics Screen` live search query and non-zero filter.
+    pub(super) search: String,
+    pub(super) search_focused: bool,
+    pub(super) non_zero_only: bool,
 }
 /// `MenuTabBar` geometry: three tabs over at most 400 pixels.
 fn tabs(w: f32) -> (f32, f32) {
@@ -188,13 +192,63 @@ impl Game<'_> {
     fn stats_bar(w: f32) -> f32 {
         ((w - 280.0) / 2.0).floor() + 280.0 + 6.0
     }
+    pub(super) fn stats_better_on(&self) -> bool {
+        self.settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::BetterStats)
+    }
+    pub(super) fn stats_typing(&self) -> bool {
+        self.stats_better_on() && self.stats_ui.search_focused
+    }
+    pub(super) fn stats_key(&mut self, text: Option<&str>, backspace: bool) {
+        if !self.stats_typing() {
+            return;
+        }
+        if backspace {
+            self.stats_ui.search.pop();
+            self.stats_ui.scroll.amount = 0.0;
+        } else if let Some(t) = text {
+            for ch in t.chars() {
+                if !ch.is_control() && self.stats_ui.search.len() < 28 {
+                    self.stats_ui.search.push(ch);
+                }
+            }
+            self.stats_ui.scroll.amount = 0.0;
+        }
+    }
+    fn stat_general_rows(&self) -> Vec<(Text, String)> {
+        let better = self.stats_better_on();
+        let q = if better {
+            self.stats_ui.search.trim().to_lowercase()
+        } else {
+            String::new()
+        };
+        let hide_zero = better && self.stats_ui.non_zero_only;
+        let mut sorted: Vec<(Text, String)> = CUSTOM
+            .iter()
+            .filter_map(|(k, f)| {
+                let v = self.stats.get("custom", &format!("minecraft:{k}"));
+                if hide_zero && v == 0 {
+                    return None;
+                }
+                let label = Text::translate(&format!("stat.minecraft.{k}"), &[]);
+                if !q.is_empty() && !label.plain().to_lowercase().contains(&q) && !k.contains(&q) {
+                    return None;
+                }
+                Some((label, format(*f, v)))
+            })
+            .collect();
+        sorted.sort_by_key(|(l, _)| l.plain());
+        sorted
+    }
     fn stats_content(&self) -> f32 {
         let (row_h, rows) = self.stats_rows();
         row_h * rows as f32 + 4.0
     }
     fn stats_rows(&self) -> (f32, usize) {
         match self.stats_ui.tab {
-            0 => (14.0, CUSTOM.len()),
+            0 => (14.0, self.stat_general_rows().len()),
             1 => (22.0, self.stat_items().len() + 1),
             _ => (36.0, self.stat_mobs().len()),
         }
@@ -203,18 +257,42 @@ impl Game<'_> {
     /// while their list has rows.
     fn stats_tab_active(&self, i: usize) -> bool {
         match i {
-            1 => !self.stat_items().is_empty(),
-            2 => !self.stat_mobs().is_empty(),
+            1 => !self.stat_items_unfiltered_empty(),
+            2 => !self.stat_mobs_unfiltered_empty(),
             _ => true,
         }
     }
+    fn stat_items_unfiltered_empty(&self) -> bool {
+        !COLUMNS.iter().any(|(ty, _)| {
+            self.stats
+                .values
+                .get(&format!("minecraft:{ty}"))
+                .is_some_and(|m| m.iter().any(|(k, v)| *v > 0 && k != "minecraft:air"))
+        })
+    }
+    fn stat_mobs_unfiltered_empty(&self) -> bool {
+        !["killed", "killed_by"].iter().any(|ty| {
+            self.stats
+                .values
+                .get(&format!("minecraft:{ty}"))
+                .is_some_and(|m| m.values().any(|&v| v > 0))
+        })
+    }
     /// Items (and block items) with any non-zero column.
     fn stat_items(&self) -> Vec<String> {
+        let q = if self.stats_better_on() {
+            self.stats_ui.search.trim().to_lowercase()
+        } else {
+            String::new()
+        };
         let mut items: Vec<String> = Vec::new();
         for (ty, _) in COLUMNS {
             if let Some(m) = self.stats.values.get(&format!("minecraft:{ty}")) {
                 for (k, v) in m {
                     if *v > 0 && k != "minecraft:air" && !items.contains(k) {
+                        if !q.is_empty() && !k.to_lowercase().contains(&q) {
+                            continue;
+                        }
                         items.push(k.clone());
                     }
                 }
@@ -227,11 +305,24 @@ impl Game<'_> {
         items
     }
     fn stat_mobs(&self) -> Vec<String> {
+        let q = if self.stats_better_on() {
+            self.stats_ui.search.trim().to_lowercase()
+        } else {
+            String::new()
+        };
         let mut mobs: Vec<String> = Vec::new();
         for ty in ["killed", "killed_by"] {
             if let Some(m) = self.stats.values.get(&format!("minecraft:{ty}")) {
                 for (k, v) in m {
                     if *v > 0 && !mobs.contains(k) {
+                        let name =
+                            Text::translate(&format!("entity.{}", k.replace(':', ".")), &[]);
+                        if !q.is_empty()
+                            && !k.to_lowercase().contains(&q)
+                            && !name.plain().to_lowercase().contains(&q)
+                        {
+                            continue;
+                        }
                         mobs.push(k.clone());
                     }
                 }
@@ -297,15 +388,7 @@ impl Game<'_> {
         let mut tip = None;
         match self.stats_ui.tab {
             0 => {
-                let mut sorted: Vec<(Text, String)> = CUSTOM
-                    .iter()
-                    .map(|(k, f)| {
-                        let label = Text::translate(&format!("stat.minecraft.{k}"), &[]);
-                        let v = self.stats.get("custom", &format!("minecraft:{k}"));
-                        (label, format(*f, v))
-                    })
-                    .collect();
-                sorted.sort_by_key(|(l, _)| l.plain());
+                let sorted = self.stat_general_rows();
                 for (i, (label, value)) in sorted.iter().enumerate() {
                     let y = row_y(i);
                     if !visible(y) {
@@ -461,6 +544,48 @@ impl Game<'_> {
     }
     fn draw_stats_footer(&self, batch: &mut HudBatch, w: f32, h: f32) {
         let atlas = &self.gui.atlas;
+        if self.stats_better_on() {
+            let sx = (w / 2.0 - 196.0).floor();
+            let sy = h - FOOTER + 6.0;
+            let sw = 104.0;
+            let border = if self.stats_ui.search_focused {
+                0xFFFF_869A
+            } else {
+                0xFF60_6068
+            };
+            batch.fill(atlas, sx, sy, sw, 20.0, border);
+            batch.fill(atlas, sx + 1.0, sy + 1.0, sw - 2.0, 18.0, 0xFF10_1016);
+            let shown = if self.stats_ui.search.is_empty() && !self.stats_ui.search_focused {
+                ("Search stats...", 0xFF90_909A)
+            } else {
+                (self.stats_ui.search.as_str(), u32::MAX)
+            };
+            batch.text(atlas, shown.0, sx + 4.0, sy + 6.0, shown.1, true);
+
+            let bx = sx + sw + 6.0;
+            let hover = ui::hovered(self.cursor, bx, sy, 108.0, 20.0);
+            ui::button(
+                batch,
+                atlas,
+                bx,
+                sy,
+                108.0,
+                20.0,
+                &Text::translate("gui.done", &[]),
+                true,
+                hover,
+            );
+
+            let fx = bx + 114.0;
+            let fhover = ui::hovered(self.cursor, fx, sy, 86.0, 20.0);
+            let flbl = if self.stats_ui.non_zero_only {
+                Text::literal("Filter: >0")
+            } else {
+                Text::literal("Filter: All")
+            };
+            ui::button(batch, atlas, fx, sy, 86.0, 20.0, &flbl, true, fhover);
+            return;
+        }
         let (bx, by) = ((w / 2.0 - 100.0).floor(), h - FOOTER + 6.0);
         let hover = ui::hovered(self.cursor, bx, by, 200.0, 20.0);
         ui::button(
@@ -495,7 +620,31 @@ impl Game<'_> {
                 return;
             }
         }
-        if ui::hovered(
+        if self.stats_better_on() {
+            let sx = (w / 2.0 - 196.0).floor();
+            let sy = h - FOOTER + 6.0;
+            self.stats_ui.search_focused = ui::hovered(self.cursor, sx, sy, 104.0, 20.0);
+            if self.stats_ui.search_focused {
+                self.audio
+                    .play("minecraft:ui.button.click", None, 0.25, 1.0);
+                return;
+            }
+            let bx = sx + 110.0;
+            if ui::hovered(self.cursor, bx, sy, 108.0, 20.0) {
+                self.audio
+                    .play("minecraft:ui.button.click", None, 0.25, 1.0);
+                self.screen = Screen::Paused;
+                return;
+            }
+            let fx = bx + 114.0;
+            if ui::hovered(self.cursor, fx, sy, 86.0, 20.0) {
+                self.stats_ui.non_zero_only = !self.stats_ui.non_zero_only;
+                self.stats_ui.scroll.amount = 0.0;
+                self.audio
+                    .play("minecraft:ui.button.click", None, 0.25, 1.0);
+                return;
+            }
+        } else if ui::hovered(
             self.cursor,
             (w / 2.0 - 100.0).floor(),
             h - FOOTER + 6.0,

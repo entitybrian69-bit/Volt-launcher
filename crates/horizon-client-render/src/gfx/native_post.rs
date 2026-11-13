@@ -30,10 +30,12 @@ pub struct NativePost {
     format: wgpu::TextureFormat,
 }
 
-/// The `frame` every stage of a pack reads (group 3, binding 0), written once a frame.
+/// The `frame` every stage of a pack reads (group 3, binding 0), written once a frame, plus
+/// the 4-bit block sprite wave/material lookup table (binding 1) read by `NativeMaterial`.
 pub struct NativeFrame {
     pub(super) buffer: wgpu::Buffer,
-    /// Group 3 of the stages that read only the frame (the sky).
+    pub(super) layers: wgpu::Buffer,
+    /// Group 3 of the stages that read the frame and layer table (sky and terrain).
     pub layout: wgpu::BindGroupLayout,
     pub group: wgpu::BindGroup,
     start: std::time::Instant,
@@ -54,6 +56,22 @@ fn frame_entry(visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
+const LAYER_TABLE_BYTES: u64 =
+    (horizon_shader_api::volt_shaders::LAYER_KINDS_VECS * std::mem::size_of::<[u32; 4]>()) as u64;
+
+fn layers_entry(visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding: 1,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: wgpu::BufferSize::new(LAYER_TABLE_BYTES),
+        },
+        count: None,
+    }
+}
+
 impl NativeFrame {
     pub fn new(device: &wgpu::Device) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -62,25 +80,50 @@ impl NativeFrame {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let layers = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Native shader pack sprite kinds"),
+            size: LAYER_TABLE_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Native shader pack frame"),
-            entries: &[frame_entry(wgpu::ShaderStages::VERTEX_FRAGMENT)],
+            entries: &[
+                frame_entry(wgpu::ShaderStages::VERTEX_FRAGMENT),
+                layers_entry(wgpu::ShaderStages::VERTEX_FRAGMENT),
+            ],
         });
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Native shader pack frame"),
             layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: layers.as_entire_binding(),
+                },
+            ],
         });
         Self {
             buffer,
+            layers,
             layout,
             group,
             start: std::time::Instant::now(),
             frames: 0,
         }
+    }
+
+    /// Uploads the 4-bit per-sprite wave/material class table once when a pack is activated.
+    pub fn write_layer_kinds(
+        &self,
+        queue: &wgpu::Queue,
+        kinds: &[[u32; 4]; horizon_shader_api::volt_shaders::LAYER_KINDS_VECS],
+    ) {
+        queue.write_buffer(&self.layers, 0, bytemuck::cast_slice(kinds.as_slice()));
     }
 
     /// Writes this frame's inputs, for a world of `size`.

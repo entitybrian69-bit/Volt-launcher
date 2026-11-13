@@ -131,14 +131,17 @@ pub enum GraphicsApi {
     #[default]
     Auto,
     Vulkan,
+    /// Built-in Volt Vulkan Supporter bridge for older, non-conformant, or buggy mobile GPUs.
+    VulkanSupporter,
     Dx12,
     /// OpenGL, for GPUs with no Vulkan or DirectX 12 driver (Windows and Linux).
     OpenGl,
 }
 impl GraphicsApi {
-    pub const ALL: [GraphicsApi; 4] = [
+    pub const ALL: [GraphicsApi; 5] = [
         GraphicsApi::Auto,
         GraphicsApi::Vulkan,
+        GraphicsApi::VulkanSupporter,
         GraphicsApi::Dx12,
         GraphicsApi::OpenGl,
     ];
@@ -151,6 +154,12 @@ impl GraphicsApi {
             GraphicsApi::Dx12,
             GraphicsApi::OpenGl,
         ];
+        const ANDROID: [GraphicsApi; 4] = [
+            GraphicsApi::Auto,
+            GraphicsApi::Vulkan,
+            GraphicsApi::VulkanSupporter,
+            GraphicsApi::OpenGl,
+        ];
         const LINUX: [GraphicsApi; 3] =
             [GraphicsApi::Auto, GraphicsApi::Vulkan, GraphicsApi::OpenGl];
         const MACOS: [GraphicsApi; 1] = [GraphicsApi::Auto];
@@ -158,6 +167,8 @@ impl GraphicsApi {
             &WINDOWS
         } else if cfg!(target_os = "macos") {
             &MACOS
+        } else if cfg!(target_os = "android") {
+            &ANDROID
         } else {
             &LINUX
         }
@@ -166,6 +177,7 @@ impl GraphicsApi {
         match self {
             GraphicsApi::Auto => "auto",
             GraphicsApi::Vulkan => "vulkan",
+            GraphicsApi::VulkanSupporter => "vulkan_supporter",
             GraphicsApi::Dx12 => "dx12",
             GraphicsApi::OpenGl => "opengl",
         }
@@ -174,6 +186,7 @@ impl GraphicsApi {
         match self {
             GraphicsApi::Auto => "Auto",
             GraphicsApi::Vulkan => "Vulkan",
+            GraphicsApi::VulkanSupporter => "Vulkan (Supporter)",
             GraphicsApi::Dx12 => "DirectX 12",
             GraphicsApi::OpenGl => "OpenGL",
         }
@@ -358,14 +371,6 @@ pub struct Graphics {
     pub cave_culling: bool,
     /// Skip drawing entities hidden behind opaque terrain.
     pub entity_culling: bool,
-    /// Draw item-frame models; independent of displayed contents.
-    pub item_frames_enabled: bool,
-    /// Item-frame model range, in chunks (1..=64).
-    pub item_frames_distance: u32,
-    /// Draw items and maps displayed inside item frames.
-    pub frame_contents_enabled: bool,
-    /// Displayed item/map range, in chunks (1..=64).
-    pub frame_contents_distance: u32,
     /// Meshed sections uploaded per frame; 0 uploads all that are ready.
     pub chunk_updates: u32,
     /// Section mesh bytes uploaded per frame, in KiB; 0 is unlimited.
@@ -422,10 +427,6 @@ impl Default for Graphics {
             far_detail: FarDetail::Full,
             cave_culling: true,
             entity_culling: false,
-            item_frames_enabled: true,
-            item_frames_distance: 64,
-            frame_contents_enabled: true,
-            frame_contents_distance: 64,
             chunk_updates: 0,
             upload_budget_kib: 0,
             sky: true,
@@ -488,10 +489,6 @@ impl Graphics {
                 "farDetail" => g.far_detail = FarDetail::parse(value),
                 "caveCulling" => g.cave_culling = flag(g.cave_culling),
                 "entityCulling" => g.entity_culling = flag(g.entity_culling),
-                "itemFramesEnabled" => g.item_frames_enabled = flag(g.item_frames_enabled),
-                "itemFramesDistance" => g.item_frames_distance = number(g.item_frames_distance).clamp(1, 64),
-                "frameContentsEnabled" => g.frame_contents_enabled = flag(g.frame_contents_enabled),
-                "frameContentsDistance" => g.frame_contents_distance = number(g.frame_contents_distance).clamp(1, 64),
                 "chunkUpdates" => g.chunk_updates = number(g.chunk_updates).min(512),
                 "uploadBudgetKiB" => g.upload_budget_kib = number(g.upload_budget_kib).min(65536),
                 "sky" => g.sky = flag(g.sky),
@@ -507,7 +504,7 @@ impl Graphics {
                     }
                 }
                 "workers" => g.workers = number(g.workers).min(64),
-                "resolutionScale" => g.resolution_scale = number(g.resolution_scale).clamp(50, 200),
+                "resolutionScale" => g.resolution_scale = number(g.resolution_scale).clamp(25, 200),
                 "fxaa" => g.fxaa = flag(g.fxaa),
                 "taa" => g.taa = flag(g.taa),
                 "upscaling" => g.upscaling = Upscaling::parse(value),
@@ -546,16 +543,12 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nitemFramesEnabled:{}\nitemFramesDistance:{}\nframeContentsEnabled:{}\nframeContentsDistance:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\ngraphicsApi:{}\npickedShaderPack:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\ngraphicsApi:{}\npickedShaderPack:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
             bool_text(self.cave_culling),
             bool_text(self.entity_culling),
-            bool_text(self.item_frames_enabled),
-            self.item_frames_distance,
-            bool_text(self.frame_contents_enabled),
-            self.frame_contents_distance,
             self.chunk_updates,
             self.upload_budget_kib,
             bool_text(self.sky),
@@ -689,9 +682,27 @@ mod tests {
     fn the_api_choice_matches_the_system() {
         let choices = GraphicsApi::choices();
         if cfg!(windows) {
-            assert_eq!(choices, GraphicsApi::ALL);
+            assert_eq!(
+                choices,
+                [
+                    GraphicsApi::Auto,
+                    GraphicsApi::Vulkan,
+                    GraphicsApi::Dx12,
+                    GraphicsApi::OpenGl
+                ]
+            );
         } else if cfg!(target_os = "macos") {
             assert_eq!(choices, [GraphicsApi::Auto]);
+        } else if cfg!(target_os = "android") {
+            assert_eq!(
+                choices,
+                [
+                    GraphicsApi::Auto,
+                    GraphicsApi::Vulkan,
+                    GraphicsApi::VulkanSupporter,
+                    GraphicsApi::OpenGl
+                ]
+            );
         } else {
             assert_eq!(
                 choices,
@@ -708,10 +719,6 @@ mod tests {
             far_detail: FarDetail::Reduced,
             cave_culling: false,
             entity_culling: true,
-            item_frames_enabled: false,
-            item_frames_distance: 32,
-            frame_contents_enabled: false,
-            frame_contents_distance: 24,
             chunk_updates: 12,
             upload_budget_kib: 4096,
             sky: false,

@@ -481,6 +481,32 @@ impl Game<'_> {
         reg.enchantments = list("data/minecraft/enchantment");
         reg.structures = list("data/minecraft/worldgen/structure");
         reg.biomes = list("data/minecraft/worldgen/biome");
+        // Content mods' biomes live in data/<ns>/worldgen/biome of the
+        // merged root: list every namespace so /locate biome and the
+        // worldgen/biome resource arguments accept them too.
+        for ns in std::fs::read_dir(root.join("data")).into_iter().flatten().flatten() {
+            let Some(ns_name) = ns.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if ns_name == "minecraft" {
+                continue;
+            }
+            for e in std::fs::read_dir(ns.path().join("worldgen/biome"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if let Some(n) = e
+                    .file_name()
+                    .to_str()
+                    .and_then(|s| s.strip_suffix(".json"))
+                {
+                    reg.biomes.push(format!("{ns_name}:{n}"));
+                }
+            }
+        }
+        reg.biomes.sort();
+        reg.biomes.dedup();
         reg.clocks = list("data/minecraft/world_clock");
         reg.dimensions = vec![
             "minecraft:overworld".into(),
@@ -532,6 +558,23 @@ impl Game<'_> {
             }
         }
         let reg = &mut self.ui.registries;
+        // The export's by_registry carries vanilla's worldgen/biome list and
+        // `Registries::ids` prefers it over `biomes`: append the content
+        // mods' biomes there too, or /locate biome rejects their ids.
+        let mod_biomes: Vec<String> = reg
+            .biomes
+            .iter()
+            .filter(|b| !b.starts_with("minecraft:"))
+            .cloned()
+            .collect();
+        if let Some(r) = reg.by_registry.get_mut("minecraft:worldgen/biome") {
+            for b in mod_biomes {
+                if !r.ids.contains(&b) {
+                    r.ids.push(b);
+                }
+            }
+            r.ids.sort();
+        }
         reg.timelines = self.ui.timelines.keys().cloned().collect();
         reg.time_markers = self
             .ui
@@ -728,9 +771,39 @@ impl Game<'_> {
     }
     /// A line on the window's own chat when the Chat option lets `source`
     /// through; running mods hear it.
-    fn local_chat_line(&mut self, text: Text, indicator: Option<u32>, source: ChatSource) {
+    fn local_chat_line(&mut self, mut text: Text, indicator: Option<u32>, source: ChatSource) {
         if !self.ui.chat.shows(source) {
             return;
+        }
+        let plain = text.plain();
+        if self.settings.extras.volt_chat.chat_mention_ping && source == ChatSource::Player {
+            let me = self.player_display_name().plain();
+            if !me.is_empty() && plain.to_lowercase().contains(&me.to_lowercase()) {
+                self.audio.play_button_click();
+            }
+        }
+        if self.settings.extras.volt_chat.chat_compact_spam {
+            let count = match &mut self.extras.volt.last_chat_line {
+                Some((prev, n)) if *prev == plain => {
+                    *n = n.saturating_add(1);
+                    Some(*n)
+                }
+                slot => {
+                    *slot = Some((plain.clone(), 1));
+                    None
+                }
+            };
+            if let Some(n) = count {
+                text = text.append(
+                    Text::literal(format!(" (x{n})")).with_color(horizon_client::text::GRAY),
+                );
+            }
+        }
+        if self.settings.extras.volt_chat.chat_timestamps {
+            let secs = (self.started.elapsed().as_secs()) % 3600;
+            text = Text::literal(format!("[{:02}:{:02}] ", secs / 60, secs % 60))
+                .with_color(horizon_client::text::DARK_GRAY)
+                .append(text);
         }
         let focused = self.screen == Screen::Chat;
         let heard = self.mods.running().then(|| text.plain());
@@ -865,6 +938,10 @@ impl Game<'_> {
     /// The Chat option's restrictions stop the message here too, so a
     /// control-socket `chat` cannot send what the player's setting hides.
     pub(super) fn handle_chat_input(&mut self, message: &str) {
+        if self.try_volt_chat_calculator(message) {
+            self.ui.chat.add_recent(message);
+            return;
+        }
         if !self.chat_abilities().allows(message) {
             return;
         }
@@ -942,6 +1019,40 @@ impl Game<'_> {
             if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
                 self.wake_up();
                 return;
+            }
+        }
+        if self.settings.extras.volt_chat.chat_quick_bar {
+            let by = height - 30.0;
+            for (i, kind) in [0usize, 1, 2, 3].into_iter().enumerate() {
+                let bx = 4.0 + i as f32 * 56.0;
+                if cursor.0 >= bx
+                    && cursor.0 <= bx + 52.0
+                    && cursor.1 >= by
+                    && cursor.1 <= by + 13.0
+                {
+                    let msg = match kind {
+                        0 => "gg".to_owned(),
+                        1 => {
+                            if let Some(p) = self.player.as_ref() {
+                                format!(
+                                    "My XYZ: {}, {}, {} [{}]",
+                                    p.position.x.floor() as i32,
+                                    p.position.y.floor() as i32,
+                                    p.position.z.floor() as i32,
+                                    self.dim.id()
+                                )
+                            } else {
+                                "On my way!".to_owned()
+                            }
+                        }
+                        2 => "On my way!".to_owned(),
+                        _ => "Need backup here!".to_owned(),
+                    };
+                    self.audio.play_button_click();
+                    self.handle_chat_input(&msg);
+                    self.close_chat(ChatExit::Intentional);
+                    return;
+                }
             }
         }
         if let Some(screen) = self.ui.chat_screen.as_mut() {
@@ -1082,13 +1193,82 @@ impl Game<'_> {
     }
     /// Chat lines over the HUD (focused while the chat screen is open).
     pub(super) fn draw_chat(&mut self, batch: &mut HudBatch) {
+        // A plain wrapper keeps this hookable by compile-time mixins.
+        self.draw_chat_impl(batch);
+    }
+    fn draw_chat_impl(&mut self, batch: &mut HudBatch) {
         let focused = self.screen == Screen::Chat;
         if self.ui.hide_gui && !focused {
             return;
         }
-        self.ui
-            .chat
-            .draw(batch, &self.gui.atlas, self.ticks, focused);
+        if !self
+            .settings
+            .extras
+            .mod_catalog
+            .is_on(horizon_client::volt_mods::VoltModId::ChatHeads)
+            || self.settings.chat_visibility != 0
+        {
+            self.ui
+                .chat
+                .draw(batch, &self.gui.atlas, self.ticks, focused);
+            return;
+        }
+        let mut skin_lookup: Vec<(String, String, bool)> = Vec::new();
+        if let Some((players, _, upside_down)) = self.remote_tab_players() {
+            for p in players {
+                let skin = self.face_skin(p.uuid, &p.skin);
+                let flip = upside_down.contains(&p.uuid);
+                skin_lookup.push((p.name, skin, flip));
+            }
+        } else {
+            let my_name = self.options.player_name();
+            let my_skin = self
+                .player_model
+                .as_ref()
+                .and_then(|m| m.skin.clone())
+                .unwrap_or_else(|| "entity/player/wide/steve".into());
+            let flip = my_name == "Dinnerbone" || my_name == "Grumm";
+            skin_lookup.push((my_name, my_skin, flip));
+        }
+        let mut draws = self.ui.chat.layout(batch.height as i32, self.ticks, focused);
+        let mut faces = Vec::new();
+        for d in &mut draws {
+            if let horizon_client::hud_layout::GuiDraw::Text {
+                text, x, y, color, ..
+            } = d
+            {
+                let plain = text.plain();
+                let trimmed = plain.trim_start();
+                let matched = skin_lookup.iter().find(|(name, _, _)| {
+                    !name.is_empty()
+                        && (trimmed.starts_with(&format!("<{name}>"))
+                            || trimmed.starts_with(&format!("[{name}]"))
+                            || trimmed.starts_with(&format!("{name}:"))
+                            || trimmed.starts_with(&format!("{name} ")))
+                });
+                if let Some((_, skin, flip)) = matched {
+                    *x += 10;
+                    horizon_client::tab_list::face(
+                        &mut faces,
+                        skin,
+                        0,
+                        *y,
+                        8,
+                        true,
+                        *flip,
+                        *color,
+                    );
+                }
+            }
+        }
+        if !faces.is_empty()
+            && let Some(pop_idx) = draws
+                .iter()
+                .rposition(|d| matches!(d, horizon_client::hud_layout::GuiDraw::Pop))
+        {
+            draws.splice(pop_idx..pop_idx, faces);
+        }
+        horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
     }
     /// `HoverEvent.EntityTooltipInfo.getTooltipLines`: the name when the
     /// event has one, the entity type and the UUID.
@@ -1149,6 +1329,37 @@ impl Game<'_> {
         let draws = screen.draw(&m, mouse, blink, background);
         horizon_client::screen_draw::paint(batch, &self.gui.atlas, &draws);
         self.ui.chat_screen = Some(screen);
+        if self.settings.extras.volt_chat.chat_quick_bar {
+            let by = batch.height - 30.0;
+            let atlas = &self.gui.atlas;
+            for (i, lbl) in ["GG", "Share XYZ", "OMW!", "Backup!"].iter().enumerate() {
+                let bx = 4.0 + i as f32 * 56.0;
+                batch.fill(
+                    atlas,
+                    bx,
+                    by,
+                    52.0,
+                    13.0,
+                    horizon_client::hud::rgba(20, 24, 36, 220),
+                );
+                batch.fill(
+                    atlas,
+                    bx,
+                    by,
+                    52.0,
+                    1.0,
+                    horizon_client::hud::rgba(224, 48, 68, 240),
+                );
+                batch.text(
+                    atlas,
+                    lbl,
+                    bx + 5.0,
+                    by + 2.5,
+                    horizon_client::hud::rgba(245, 247, 255, 255),
+                    true,
+                );
+            }
+        }
         if self.ui.in_bed_chat && self.sleeping.is_some() {
             let (x, y, w, h) = Self::leave_bed_button(batch.width, batch.height);
             let label = Text::literal(horizon_client::lang::get_or(
@@ -1439,9 +1650,17 @@ impl Game<'_> {
         let Some(path) = self.ui.screenshot_message.take() else {
             return;
         };
+        let copy_clip = result.is_ok()
+            && self
+                .settings
+                .extras
+                .mod_catalog
+                .is_on(horizon_client::volt_mods::VoltModId::ScreenshotToClipboard);
         #[cfg(target_os = "android")]
         if result.is_ok() {
-            if let Err(error) = crate::gallery::save(&path) {
+            // Publishing is asynchronous; gallery reports whether the image URI
+            // was actually copied after MediaStore finishes writing it.
+            if let Err(error) = crate::gallery::save(&path, copy_clip) {
                 self.system_message(Text::literal(error));
             }
             return;
@@ -1458,7 +1677,15 @@ impl Game<'_> {
                         ..Style::default()
                     },
                 );
-                Text::translate("screenshot.success", &[link])
+                let base = Text::translate("screenshot.success", &[link]);
+                if copy_clip {
+                    base.append(
+                        Text::literal(" [Image clipboard unavailable on this platform]")
+                            .with_color(horizon_client::text::RED),
+                    )
+                } else {
+                    base
+                }
             }
             Err(e) => Text::translate("screenshot.failure", &[Text::literal(e.clone())]),
         };

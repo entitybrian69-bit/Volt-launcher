@@ -120,22 +120,70 @@ pub fn clear_keypad() {
 pub fn keypad_state() -> crate::gamepad::PadState {
     KEYPAD.lock().unwrap().poll()
 }
-static OPEN_GL: AtomicBool = AtomicBool::new(cfg!(target_pointer_width = "32"));
+static OPEN_GL: AtomicBool = AtomicBool::new(false);
+static VULKAN_SUPPORTER: AtomicBool = AtomicBool::new(cfg!(target_pointer_width = "32"));
+
 pub fn configure_graphics(open_gl: bool) {
     OPEN_GL.store(open_gl, Ordering::Relaxed);
+    if open_gl {
+        VULKAN_SUPPORTER.store(false, Ordering::Relaxed);
+        horizon_hdr::set_vulkan_supporter_mode(false);
+    }
 }
+
+pub fn configure_graphics_api(api: crate::graphics::GraphicsApi) {
+    match api {
+        crate::graphics::GraphicsApi::OpenGl => {
+            OPEN_GL.store(true, Ordering::Relaxed);
+            VULKAN_SUPPORTER.store(false, Ordering::Relaxed);
+            horizon_hdr::set_vulkan_supporter_mode(false);
+        }
+        crate::graphics::GraphicsApi::VulkanSupporter => {
+            OPEN_GL.store(false, Ordering::Relaxed);
+            VULKAN_SUPPORTER.store(true, Ordering::Relaxed);
+            horizon_hdr::set_vulkan_supporter_mode(true);
+        }
+        _ => {
+            OPEN_GL.store(false, Ordering::Relaxed);
+            VULKAN_SUPPORTER.store(false, Ordering::Relaxed);
+            horizon_hdr::set_vulkan_supporter_mode(false);
+        }
+    }
+}
+
+pub fn note_opened_backend(open_gl: bool, supporter: bool) {
+    OPEN_GL.store(open_gl, Ordering::Relaxed);
+    VULKAN_SUPPORTER.store(!open_gl && supporter, Ordering::Relaxed);
+}
+
+pub fn vulkan_supporter_active() -> bool {
+    VULKAN_SUPPORTER.load(Ordering::Relaxed)
+}
+
 pub fn graphics_api() -> crate::graphics::GraphicsApi {
     if OPEN_GL.load(Ordering::Relaxed) {
         crate::graphics::GraphicsApi::OpenGl
+    } else if VULKAN_SUPPORTER.load(Ordering::Relaxed) {
+        crate::graphics::GraphicsApi::VulkanSupporter
     } else {
         crate::graphics::GraphicsApi::Vulkan
     }
 }
+
+pub fn configure_custom_vulkan_driver(path: Option<std::path::PathBuf>) {
+    horizon_hdr::set_custom_vulkan_driver_path(path);
+}
+
+pub fn custom_vulkan_driver_status() -> Option<String> {
+    horizon_hdr::last_vulkan_driver_status()
+}
+
 pub fn configure_gpu(batching: bool) {
     GPU_BATCHING.store(batching, Ordering::Relaxed);
 }
 pub fn compatibility() -> bool {
-    cfg!(target_os = "android") && !GPU_BATCHING.load(Ordering::Relaxed)
+    cfg!(target_os = "android")
+        && (!GPU_BATCHING.load(Ordering::Relaxed) || VULKAN_SUPPORTER.load(Ordering::Relaxed))
 }
 
 pub use crate::clipboard::{ClipboardHooks, clipboard_get, clipboard_set, install_clipboard};
@@ -143,6 +191,9 @@ pub use crate::clipboard::{ClipboardHooks, clipboard_get, clipboard_set, install
 static RETURN_TO_LAUNCHER: AtomicBool = AtomicBool::new(false);
 pub fn return_to_launcher() {
     RETURN_TO_LAUNCHER.store(true, Ordering::Release);
+}
+pub fn launcher_return_pending() -> bool {
+    RETURN_TO_LAUNCHER.load(Ordering::Acquire)
 }
 pub fn take_launcher_return() -> bool {
     RETURN_TO_LAUNCHER.swap(false, Ordering::AcqRel)

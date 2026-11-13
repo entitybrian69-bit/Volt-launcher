@@ -86,6 +86,19 @@ impl Control {
         }
     }
 }
+pub const MAX_CUSTOM_BUTTONS: usize = 256;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedMeta {
+    pub name: String,
+    pub format: String,
+    pub buttons: usize,
+    #[serde(default)]
+    pub drawers: usize,
+    #[serde(default)]
+    pub has_joystick: bool,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Placement {
     pub center: [f32; 2],
@@ -93,7 +106,7 @@ pub struct Placement {
     pub opacity: f32,
 }
 impl Placement {
-    pub(super) fn new(x: f32, y: f32, size: f32) -> Self {
+    pub fn new(x: f32, y: f32, size: f32) -> Self {
         Self {
             center: [x, y],
             size,
@@ -121,6 +134,23 @@ impl Placement {
         for c in &mut self.center {
             *c = if c.is_finite() {
                 c.clamp(0.025, 0.975)
+            } else {
+                0.5
+            };
+        }
+    }
+    pub fn sanitize_imported(&mut self) {
+        if !self.size.is_finite() {
+            self.size = 0.12;
+        }
+        if !self.opacity.is_finite() {
+            self.opacity = 0.65;
+        }
+        self.size = self.size.clamp(0.025, 0.55);
+        self.opacity = self.opacity.clamp(0.0, 1.0);
+        for c in &mut self.center {
+            *c = if c.is_finite() {
+                c.clamp(0.01, 0.99)
             } else {
                 0.5
             };
@@ -159,6 +189,8 @@ pub struct Settings {
     pub vertical_margin: f32,
     #[serde(deserialize_with = "deserialize_layouts")]
     pub layouts: [[Placement; 14]; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<ImportedMeta>,
 }
 // Append new buttons without resetting a player's existing ten-button layout.
 fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
@@ -236,6 +268,7 @@ impl Default for Settings {
             horizontal_margin: 0.0,
             vertical_margin: 0.0,
             layouts,
+            imported_from: None,
         }
     }
 }
@@ -326,13 +359,12 @@ impl Settings {
         } else {
             32.0
         };
-        self.custom_buttons.truncate(32);
+        self.custom_buttons.truncate(MAX_CUSTOM_BUTTONS);
         self.custom_buttons
             .retain(|b| super::CustomButton::valid_token(&b.key));
+        let imported = self.imported_from.is_some();
         for button in &mut self.custom_buttons {
-            for p in &mut button.layouts {
-                p.sanitize();
-            }
+            button.sanitize(imported);
         }
         for p in self.layouts.iter_mut().flatten() {
             p.sanitize();

@@ -281,6 +281,12 @@ pub struct Jukebox {
     pub ticks: i64,
     pub playing: bool,
 }
+impl Jukebox {
+    /// `JukeboxBlockEntity.getTheItem`: the disc it holds.
+    pub fn record(&self) -> Option<&ItemStack> {
+        self.record.as_ref()
+    }
+}
 /// `BrewingStandBlockEntity` state. Slots: 0-2 bottles, 3 ingredient, 4 fuel.
 #[derive(Clone, Debug, Default)]
 pub struct BrewingStand {

@@ -1,10 +1,12 @@
-//! Discord Rich Presence: "Playing Horizon" on the player's Discord profile, with what they are
-//! doing (docs/native-client.md). A thread of its own talks to the Discord app on this computer
-//! through its local IPC socket (Discord's RPC docs: `discord-ipc-N`, frames of opcode u32 LE +
-//! length u32 LE + JSON). The game only calls [`set`] each frame: a change wakes the thread,
-//! which connects when Discord runs, retries every 15 s when it doesn't, keeps under Discord's
-//! update limit and clears the activity on quit. Nothing is sent with the setting off,
-//! or with `HORIZON_NO_DISCORD=1`.
+//! Discord Rich Presence: "Playing Volt Launcher" on the player's Discord profile, with what
+//! they are doing (docs/native-client.md). A thread of its own talks to Discord: on desktop
+//! through the Discord app's local IPC socket (Discord's RPC docs: `discord-ipc-N`, frames of
+//! opcode u32 LE + length u32 LE + JSON), on Android through the Rich Presence service the
+//! signed-in Discord app on the same phone exports (a [`Backend`] the Android entry point
+//! registers; the JNI lives in its crate root, this library forbids such FFI). The game only calls
+//! [`set`] each frame: a change wakes the thread, which connects when Discord runs, retries
+//! every 15 s when it doesn't, keeps under Discord's update limit and clears the activity on
+//! quit. Nothing is sent with the setting off, or with `HORIZON_NO_DISCORD=1`.
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
@@ -16,9 +18,12 @@ use serde_json::{Value, json};
 
 use crate::command::args::GameMode;
 
-/// The "Horizon" application on Discord's developer portal (public: it names the game). Its
-/// Rich Presence assets: `horizon`, the logo.
-pub const DISCORD_APP_ID: &str = "1563857609738690560";
+/// The "Volt Launcher" application on Discord's developer portal (public: it names the game).
+/// Its Rich Presence assets: `volt`, the logo.
+pub const DISCORD_APP_ID: &str = "1569933452453875823";
+/// The two buttons under the activity (Discord allows at most two).
+pub const WEBSITE: &str = "https://entitybrian69-bit.github.io/Volt-launcher/";
+pub const DISCORD_INVITE: &str = "https://discord.gg/WsBxGsKyhU";
 /// Whether the application has the game-mode images (`survival`, `creative`, `adventure`,
 /// `spectator`) beside the logo; it doesn't yet.
 const MODE_IMAGES: bool = false;
@@ -61,6 +66,8 @@ pub enum Play {
 pub enum Status {
     /// The player turned Rich Presence off: the activity is cleared.
     Off,
+    /// Browsing the launcher, before a game session starts.
+    Launcher,
     Menus,
     World {
         play: Play,
@@ -109,18 +116,29 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
 static STOPPED: Condvar = Condvar::new();
 static THREAD: OnceLock<Thread> = OnceLock::new();
 
-/// Starts the presence thread, once: when the game starts, never for a dedicated server.
+/// Starts the presence thread when the game starts, never for a dedicated server.
 /// `automated` runs (offscreen, benchmarks) only talk to a test's fake Discord.
+/// After a [`stop`] (Android's launcher stops presence when a game session ends but
+/// the process lives on) the parked thread is reused: calling `start` again resumes it.
 pub fn start(enabled: bool, automated: bool) {
     let fake_discord = std::env::var_os(IPC_DIR_ENV).is_some();
-    if THREAD.get().is_some()
-        || std::env::var_os("HORIZON_NO_DISCORD").is_some_and(|v| v != "0")
+    if std::env::var_os("HORIZON_NO_DISCORD").is_some_and(|v| v != "0")
         || (automated && !fake_discord)
     {
         return;
     }
-    if !enabled {
-        lock().wanted.status = Status::Off;
+    {
+        let mut s = lock();
+        s.stop = false;
+        s.stopped = false;
+        s.wanted = Wanted {
+            status: if enabled { Status::Menus } else { Status::Off },
+            since: None,
+        };
+    }
+    if let Some(thread) = THREAD.get() {
+        thread.unpark();
+        return;
     }
     match std::thread::Builder::new()
         .name("Discord presence".into())
@@ -165,7 +183,7 @@ fn unix_now() -> u64 {
 }
 
 fn run() {
-    let mut client: Option<Client> = None;
+    let mut client: Option<Conn> = None;
     let mut sent: Option<(Wanted, Instant)> = None;
     let mut last_try: Option<Instant> = None;
     let mut limit = RateLimit::default();
@@ -181,9 +199,10 @@ fn run() {
             }
             sent = None;
             if stop {
+                // Flush acknowledged; park instead of exiting so a later
+                // `start` (the next game session on Android) resumes this thread.
                 lock().stopped = true;
                 STOPPED.notify_all();
-                return;
             }
             std::thread::park();
             continue;
@@ -195,7 +214,7 @@ fn run() {
                 continue;
             }
             last_try = Some(now);
-            client = Client::connect();
+            client = Conn::connect();
             if client.is_none() {
                 continue;
             }
@@ -203,12 +222,12 @@ fn run() {
         let due = sent.is_none_or(|(w, at)| w != wanted || now - at >= REFRESH);
         if !due {
             let (_, at) = sent.expect("sent");
-            std::thread::park_timeout(REFRESH - (now - at));
+            rest(client.as_mut(), REFRESH - (now - at));
             continue;
         }
         let wait = limit.wait(now);
         if !wait.is_zero() {
-            std::thread::park_timeout(wait);
+            rest(client.as_mut(), wait);
             continue;
         }
         limit.record(now);
@@ -224,11 +243,79 @@ fn run() {
     }
 }
 
+/// Parks between updates. With a registered backend connected, it wakes about once a second
+/// to pump the backend's completion callbacks so they never pile up.
+fn rest(conn: Option<&mut Conn>, timeout: Duration) {
+    match conn {
+        Some(Conn::Ext(b)) => {
+            b.pump();
+            std::thread::park_timeout(timeout.min(Duration::from_secs(1)));
+        }
+        _ => std::thread::park_timeout(timeout),
+    }
+}
+
+/// A platform transport for the same JSON activities the IPC path sends (Android: the Discord
+/// app's exported Rich Presence service). It lives in the platform's crate root — this library
+/// forbids the FFI such a transport needs — and only ever runs on the presence thread that
+/// connected it.
+pub trait Backend {
+    /// Publishes `activity` ([`activity`]'s JSON: `details`, `state`, `timestamps.start` in
+    /// unix seconds, `buttons`); `None` clears it. `Err` drops the connection for a reconnect.
+    fn set_activity(&mut self, activity: Option<&Value>) -> io::Result<()>;
+    /// Dispatches any queued completion callbacks; called about once a second while parked.
+    fn pump(&mut self);
+    fn close(self: Box<Self>);
+}
+
+/// Tries to open the platform transport; `None` falls back to the IPC socket.
+pub type BackendConnect = fn() -> Option<Box<dyn Backend>>;
+static BACKEND: OnceLock<BackendConnect> = OnceLock::new();
+
+/// Registers the platform transport, once, before [`start`] (Android's entry point does).
+pub fn register_backend(connect: BackendConnect) {
+    let _ = BACKEND.set(connect);
+}
+
+/// One connection to Discord: a registered platform transport, or the desktop app's IPC socket.
+enum Conn {
+    Ipc(Client),
+    Ext(Box<dyn Backend>),
+}
+impl Conn {
+    fn connect() -> Option<Self> {
+        if let Some(b) = BACKEND.get().and_then(|connect| connect()) {
+            return Some(Conn::Ext(b));
+        }
+        Client::connect().map(Conn::Ipc)
+    }
+    fn set_activity(&mut self, activity: Option<Value>) -> io::Result<()> {
+        match self {
+            Conn::Ipc(c) => c.set_activity(activity),
+            Conn::Ext(b) => b.set_activity(activity.as_ref()),
+        }
+    }
+    fn close(self) {
+        match self {
+            Conn::Ipc(c) => c.close(),
+            Conn::Ext(b) => b.close(),
+        }
+    }
+}
+
+/// The logo shown on the activity. Primary: the website's hosted PNG —
+/// Discord resolves external image URLs in activity assets, so the logo
+/// shows without portal uploads. Builds that reject URL assets fall back
+/// to the `volt` art asset key (uploaded on the developer portal).
+pub const LOGO_URL: &str = "https://entitybrian69-bit.github.io/Volt-launcher/assets/volt-logo.png";
+pub const LOGO_ASSET: &str = "volt";
+
 /// The activity Discord shows for `status`; `None` clears it.
 fn activity(status: Status, since: Option<u64>) -> Option<Value> {
-    let mut assets = json!({"large_image": "horizon", "large_text": "Horizon"});
+    let mut assets = json!({"large_image": LOGO_URL, "large_text": "Volt Launcher"});
     let (details, state, party) = match status {
         Status::Off => return None,
+        Status::Launcher => ("In the launcher", None, None),
         Status::Menus => ("In the menus", None, None),
         Status::World {
             play,
@@ -259,6 +346,10 @@ fn activity(status: Status, since: Option<u64>) -> Option<Value> {
         }
     };
     let mut a = json!({"details": details, "assets": assets});
+    a["buttons"] = json!([
+        {"label": "Website", "url": WEBSITE},
+        {"label": "Join the Discord", "url": DISCORD_INVITE},
+    ]);
     if let Some(state) = state {
         a["state"] = state.into();
     }
@@ -518,7 +609,15 @@ mod tests {
         let menus = activity(Status::Menus, None).unwrap();
         assert_eq!(menus["details"], "In the menus");
         assert!(menus.get("state").is_none() && menus.get("timestamps").is_none());
-        assert_eq!(menus["assets"]["large_image"], "horizon");
+        assert_eq!(menus["assets"]["large_image"], LOGO_URL);
+
+        let launcher = activity(Status::Launcher, None).unwrap();
+        assert_eq!(launcher["details"], "In the launcher");
+        assert!(launcher.get("state").is_none() && launcher.get("timestamps").is_none());
+        assert_eq!(menus["buttons"][0]["label"], "Website");
+        assert_eq!(menus["buttons"][0]["url"], WEBSITE);
+        assert_eq!(menus["buttons"][1]["label"], "Join the Discord");
+        assert_eq!(menus["buttons"][1]["url"], DISCORD_INVITE);
 
         let single = activity(world(Play::Singleplayer, Dimension::Nether), Some(1000)).unwrap();
         assert_eq!(single["details"], "Singleplayer");
@@ -557,6 +656,28 @@ mod tests {
         assert_eq!(w.since, Some(60));
         assert!(w.update(Status::Off, 70));
         assert_eq!(w.since, None);
+    }
+
+    /// A registered platform backend (Android's Discord-app bridge) wins over the IPC socket
+    /// scan and receives the same JSON activities.
+    #[test]
+    fn registered_backend_carries_the_activity() {
+        struct Fake;
+        impl Backend for Fake {
+            fn set_activity(&mut self, activity: Option<&Value>) -> io::Result<()> {
+                let a = activity.expect("an activity");
+                assert_eq!(a["details"], "In the menus");
+                assert_eq!(a["buttons"][0]["url"], WEBSITE);
+                Ok(())
+            }
+            fn pump(&mut self) {}
+            fn close(self: Box<Self>) {}
+        }
+        register_backend(|| Some(Box::new(Fake)));
+        let mut conn = Conn::connect().expect("the registered backend");
+        assert!(matches!(&conn, Conn::Ext(_)));
+        conn.set_activity(activity(Status::Menus, None)).unwrap();
+        conn.close();
     }
 
     #[test]

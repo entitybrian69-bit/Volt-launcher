@@ -1463,3 +1463,683 @@ fn shapes_reject_unknown_or_missing_template_values() {
     }
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn climate_entry_strips_keys_and_quantizes() {
+    let text = r#"{"temperature":0.8,"downfall":0.4,"has_precipitation":true,"horizon:dimension":"minecraft:the_nether","horizon:climate":{"temperature":[0.5,1.5],"humidity":0.0,"offset":0.25}}"#;
+    let (entry, stripped) = ClimateEntry::take("ruby:cove", text).unwrap().unwrap();
+    // The nether DIMENSION maps to the `minecraft:nether` parameter list:
+    // that is the key the real `presets.json` holds (the engine's built-in
+    // preset holders are `minecraft:overworld` and `minecraft:nether`,
+    // `biome_source/codec.rs`). `minecraft:the_nether` matched nothing.
+    assert_eq!(entry.preset, "minecraft:nether");
+    assert!(!stripped.contains("horizon:climate") && !stripped.contains("horizon:dimension"));
+    assert!(stripped.contains("\"temperature\":0.8"));
+    let q = serde_json::to_string(&entry.quantized()).unwrap();
+    assert!(q.contains("\"coordinates\":[[5000,15000],[0,0]"), "{q}");
+    assert!(q.contains("\"offset\":2500,\"biome\":\"ruby:cove\""), "{q}");
+    // No climate keys: registers only, placed by nothing.
+    assert!(ClimateEntry::take("ruby:x", r#"{"temperature":0.8}"#).unwrap().is_none());
+    // Out-of-range and inverted ranges are refused, not clamped silently.
+    assert!(ClimateEntry::take("ruby:x", r#"{"horizon:climate":{"temperature":[2.0,1.0]}}"#).is_err());
+    assert!(ClimateEntry::take("ruby:x", r#"{"horizon:climate":{"temperature":9.0}}"#).is_err());
+    assert!(ClimateEntry::take("ruby:x", r#"{"horizon:dimension":"minecraft:the_end","horizon:climate":{}}"#).is_err());
+}
+
+/// The real `biomes_unseen.hmod` (MIT, Biomes Unseen Contributors; the
+/// placement name `minecraft:surface_heightmap` fixed to vanilla's
+/// `minecraft:heightmap`): its 44 biome definitions load through the mod
+/// reader, every one carries valid `horizon:climate` data, the stripped
+/// text parses as the engine's biome codec does, every placement modifier
+/// of its placed features is one the engine decodes, and the appended
+/// preset tables parse back through the same `from_quantized_json` the
+/// world generator runs on `worldgen/presets.json`.
+#[test]
+fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
+    use horizon_mods::{Content, Package};
+    use horizon_world::worldgen::biome::MultiNoiseBiomeSource;
+    use horizon_world::worldgen::biome_temperature::BiomeTemperatureSettings;
+    use horizon_world::worldgen::placement::PlacementModifier;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    assert_eq!(package.manifest.id, "biomes_unseen");
+    let content = Content::read(&path, &package.manifest).unwrap();
+    let m = ContentMod {
+        id: package.manifest.id.clone(),
+        content,
+    };
+    let mut reader = m.content.reader().unwrap();
+    let mut overworld: Vec<ClimateEntry> = Vec::new();
+    let mut nether: Vec<ClimateEntry> = Vec::new();
+    let mut placements = 0;
+    let mut features = 0;
+    for file in &m.content.files {
+        // Tag files (data/<ns>/tags/...) take build()'s tag path, exactly
+        // as its is_tag check routes them.
+        if file.starts_with("data/") && file.contains("/tags/") {
+            continue;
+        }
+        let Some((bundle, id)) = worldgen_entry(file) else {
+            continue;
+        };
+        let text = String::from_utf8(reader.read(file).unwrap()).unwrap();
+        match bundle {
+            "worldgen/biomes.json" => {
+                let (entry, stripped) = ClimateEntry::take(&id, &text)
+                    .unwrap_or_else(|e| panic!("{file}: {e}"))
+                    .unwrap_or_else(|| panic!("{file}: no horizon:climate"));
+                // The engine's biome codec reads the stripped text.
+                BiomeTemperatureSettings::from_json(&stripped)
+                    .unwrap_or_else(|e| panic!("{file}: {e}"));
+                assert!(!stripped.contains("horizon:climate"), "{file}");
+                match entry.preset.as_str() {
+                    "minecraft:overworld" => overworld.push(entry),
+                    "minecraft:nether" => nether.push(entry),
+                    other => panic!("{file}: unexpected preset {other}"),
+                }
+            }
+            "worldgen/placed_features.json" => {
+                let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let Some(list) = doc["placement"].as_array() else {
+                    panic!("{file}: no placement list");
+                };
+                for p in list {
+                    // Every placement modifier is one the engine decodes.
+                    PlacementModifier::from_json(&p.to_string())
+                        .unwrap_or_else(|e| panic!("{file}: {p}: {e}"));
+                    placements += 1;
+                }
+            }
+            "worldgen/features.json" => features += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(overworld.len() + nether.len(), 44, "biome definitions");
+    assert_eq!(features, 25);
+    assert!(placements > 0, "placed features carry placements");
+    // The entries joined to a vanilla-shaped table, parsed back by the same
+    // code the world generator runs on `presets.json`.
+    let vanilla = r#"[{"coordinates":[[-10000,10000],[-5000,5000],[-10000,10000],[-10000,10000],[0,0],[-10000,10000]],"offset":0,"biome":"minecraft:plains"}]"#;
+    for (preset, entries) in [
+        ("minecraft:overworld", &overworld),
+        ("minecraft:nether", &nether),
+    ] {
+        let refs: Vec<&ClimateEntry> = entries.iter().collect();
+        let table = append_climates(vanilla, preset, &refs).unwrap();
+        let source = MultiNoiseBiomeSource::from_quantized_json(&table).unwrap();
+        let mut ids: Vec<&str> = source
+            .parameters()
+            .entries()
+            .iter()
+            .map(|(_, biome)| biome.as_str())
+            .filter(|biome| biome.starts_with("biomes_unseen:"))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), entries.len(), "{preset}");
+        println!(
+            "{preset}: {} Biomes Unseen biome(s) registered in the multi-noise preset table",
+            ids.len()
+        );
+        for id in &ids {
+            println!("  {id}");
+        }
+    }
+    assert_eq!((overworld.len(), nether.len()), (39, 5));
+}
+
+/// Every Biomes Unseen block and item ships complete client assets — a
+/// blockstate whose models exist, model chains that resolve to real
+/// textures, an `items/<name>.json` client item definition and an English
+/// name — and `append_creative` places every item in the creative
+/// category and search tabs next to its vanilla template.
+#[test]
+fn biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries() {
+    use horizon_assets::item_model::ClientItem;
+    use horizon_mods::{Content, Package};
+    use serde_json::Value;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::Path;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    let content = Content::read(&path, &package.manifest).unwrap();
+    let files: BTreeSet<&str> = content.files.iter().map(String::as_str).collect();
+    let mut reader = content.reader().unwrap();
+    let mut read = |file: &str| -> Value {
+        serde_json::from_slice(&reader.read(file).unwrap())
+            .unwrap_or_else(|e| panic!("{file}: {e}"))
+    };
+    // The declarations: block path -> (template, has an item), item path -> template.
+    let mut blocks: BTreeMap<String, (String, bool)> = BTreeMap::new();
+    let mut items: BTreeMap<String, String> = BTreeMap::new();
+    for file in &content.files {
+        if let Some(p) = file
+            .strip_prefix("data/biomes_unseen/horizon/block/")
+            .and_then(|p| p.strip_suffix(".json"))
+        {
+            let d = read(file);
+            let template = d["template"].as_str().unwrap().to_owned();
+            let item = d["item"].as_bool().unwrap_or(true);
+            blocks.insert(p.to_owned(), (template, item));
+        } else if let Some(p) = file
+            .strip_prefix("data/biomes_unseen/horizon/item/")
+            .and_then(|p| p.strip_suffix(".json"))
+        {
+            items.insert(p.to_owned(), read(file)["template"].as_str().unwrap().to_owned());
+        }
+    }
+    assert_eq!((blocks.len(), items.len()), (176, 29));
+    // Every model of the mod: parents and declared textures must exist.
+    let mut models: BTreeMap<String, Value> = BTreeMap::new();
+    let mut textures = 0;
+    for file in &content.files {
+        if let Some(p) = file
+            .strip_prefix("assets/biomes_unseen/models/")
+            .and_then(|p| p.strip_suffix(".json"))
+        {
+            models.insert(format!("biomes_unseen:{p}"), read(file));
+        } else if file.starts_with("assets/biomes_unseen/textures/") && file.ends_with(".png") {
+            textures += 1;
+        }
+    }
+    for (id, model) in &models {
+        if let Some(parent) = model["parent"].as_str()
+            && let Some(p) = parent.strip_prefix("biomes_unseen:")
+        {
+            assert!(models.contains_key(parent), "{id}: parent {p} missing");
+        }
+        for (slot, value) in model["textures"].as_object().into_iter().flatten() {
+            let t = value.as_str().unwrap_or_default();
+            if let Some(p) = t.strip_prefix("biomes_unseen:") {
+                assert!(
+                    files.contains(format!("assets/biomes_unseen/textures/{p}.png").as_str()),
+                    "{id}: texture {slot} = {t} missing"
+                );
+            }
+        }
+    }
+    // A model's chain inside the mod must reach at least one real texture
+    // (a chain ending at a vanilla parent still needs its own textures:
+    // `minecraft:block/cube_all` and the like draw the `textures` slots).
+    let textured = |mut id: String| -> bool {
+        for _ in 0..10 {
+            let Some(model) = models.get(&id) else {
+                return false; // A vanilla model carries no mod texture.
+            };
+            if model["textures"]
+                .as_object()
+                .is_some_and(|t| t.values().any(|v| {
+                    v.as_str().is_some_and(|s| !s.starts_with('#'))
+                }))
+            {
+                return true;
+            }
+            match model["parent"].as_str() {
+                Some(p) if p.starts_with("biomes_unseen:") => id = p.to_owned(),
+                _ => return false,
+            }
+        }
+        false
+    };
+    // Blockstates: every block has one and its models exist and are textured.
+    let blockstate_models = |d: &Value| -> Vec<String> {
+        let mut out = Vec::new();
+        let entries = |v: &Value, out: &mut Vec<String>| {
+            for e in v.as_array().cloned().unwrap_or_else(|| vec![v.clone()]) {
+                if let Some(m) = e["model"].as_str() {
+                    out.push(m.to_owned());
+                }
+            }
+        };
+        for v in d["variants"].as_object().into_iter().flatten().map(|(_, v)| v) {
+            entries(v, &mut out);
+        }
+        for p in d["multipart"].as_array().into_iter().flatten() {
+            entries(&p["apply"], &mut out);
+        }
+        out
+    };
+    let lang = read("assets/biomes_unseen/lang/en_us.json");
+    for (block, _) in &blocks {
+        let file = format!("assets/biomes_unseen/blockstates/{block}.json");
+        assert!(files.contains(file.as_str()), "{block}: no blockstate");
+        let refs = blockstate_models(&read(&file));
+        assert!(!refs.is_empty(), "{block}: blockstate names no model");
+        for m in refs {
+            assert!(models.contains_key(&m), "{block}: model {m} missing");
+            assert!(textured(m.clone()), "{block}: model {m} resolves to no texture");
+        }
+        assert!(
+            lang[format!("block.biomes_unseen.{block}")].is_string(),
+            "{block}: no lang key"
+        );
+    }
+    // Item definitions: every item-bearing id has `items/<name>.json` the
+    // engine's own decoder accepts, naming a model that exists and is
+    // textured; and its English name.
+    let mut bearing: Vec<(String, String)> = Vec::new(); // (id, template item)
+    for (b, (template, item)) in &blocks {
+        if *item {
+            bearing.push((format!("biomes_unseen:{b}"), template.clone()));
+        }
+    }
+    for (i, template) in &items {
+        bearing.push((format!("biomes_unseen:{i}"), template.clone()));
+        assert!(
+            lang[format!("item.biomes_unseen.{i}")].is_string(),
+            "{i}: no lang key"
+        );
+    }
+    bearing.sort_by(|a, b| a.0.cmp(&b.0)); // `Plan` sorts items by id.
+    let mut definitions = 0;
+    for (id, _) in &bearing {
+        let name = id.strip_prefix("biomes_unseen:").unwrap();
+        let file = format!("assets/biomes_unseen/items/{name}.json");
+        assert!(files.contains(file.as_str()), "{id}: no item definition");
+        let d = read(&file);
+        ClientItem::from_json(&d.to_string()).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let model = d["model"]["model"].as_str().unwrap().to_owned();
+        assert!(models.contains_key(&model), "{id}: definition model {model} missing");
+        assert!(textured(model.clone()), "{id}: definition model {model} untextured");
+        definitions += 1;
+    }
+    println!(
+        "assets: {} blockstates, {} models, {definitions} item definitions, {textures} textures, {} lang keys verified",
+        blocks.len(),
+        models.len(),
+        lang.as_object().map_or(0, serde_json::Map::len)
+    );
+    // The creative export: templates listed once per tab (plus a duplicate
+    // to prove only the first listing takes insertions), an operator-only
+    // index and the search tab's aligned arrays.
+    let templates: BTreeSet<&str> = bearing.iter().map(|(_, t)| t.as_str()).collect();
+    let mut tab_items: Vec<String> = templates.iter().map(|t| (*t).to_owned()).collect();
+    tab_items.push("minecraft:command_block".into()); // Operator-only.
+    let operator_index = tab_items.len() - 1;
+    tab_items.push("minecraft:oak_planks".into()); // The duplicate listing.
+    let search_lines: Vec<Value> = tab_items.iter().map(|_| serde_json::json!([])).collect();
+    let doc = serde_json::json!({ "tabs": [
+        { "type": "CATEGORY", "id": "minecraft:building_blocks", "items": tab_items,
+          "permissions_only": [operator_index] },
+        { "type": "INVENTORY", "id": "minecraft:inventory", "items": [] },
+        { "type": "SEARCH", "id": "minecraft:search", "items": tab_items,
+          "lines": search_lines, "tags": search_lines,
+          "permissions_only": [operator_index] },
+    ]});
+    let mut doc: J = serde_json::from_str(&doc.to_string()).unwrap();
+    let warnings = append_creative(&mut doc, &bearing);
+    assert_eq!(warnings, Vec::<String>::new());
+    for (t, want_arrays) in [(0usize, false), (2, true)] {
+        let Some(J::Arr(tabs)) = doc.get_mut("tabs") else { panic!("no tabs") };
+        let tab = &tabs[t];
+        let Some(J::Arr(stacks)) = tab.get("items") else { panic!("no items") };
+        let ids: Vec<&str> = stacks
+            .iter()
+            .map(|v| match v { J::Str(s) => s.as_str(), _ => "" })
+            .collect();
+        for (id, _) in &bearing {
+            assert_eq!(
+                ids.iter().filter(|s| *s == id).count(),
+                1,
+                "tab {t}: {id} must appear exactly once"
+            );
+        }
+        if want_arrays {
+            for key in ["lines", "tags"] {
+                let Some(J::Arr(a)) = tab.get(key) else { panic!("no {key}") };
+                assert_eq!(a.len(), ids.len(), "{key} aligned");
+            }
+        }
+        let Some(J::Arr(only)) = tab.get("permissions_only") else { panic!() };
+        let J::Num(n) = &only[0] else { panic!() };
+        let moved = n.as_u64().unwrap() as usize;
+        assert_eq!(ids[moved], "minecraft:command_block", "tab {t}: operator index follows its item");
+    }
+    println!(
+        "creative inventory: {} Biomes Unseen item(s) join the category and search tabs",
+        bearing.len()
+    );
+}
+
+/// The Android importer's archive check (`content_files::validate`,
+/// `android/documents.rs` runs it on every picked file) accepts the
+/// shipped Biomes Unseen content mod: manifest at the ZIP root plus
+/// content, no `mod.wasm` required for a content-only `.hmod`.
+#[test]
+fn biomes_unseen_hmod_passes_android_import_validation() {
+    use crate::content_files::{Kind, validate};
+    use std::path::Path;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let native_shader = validate(&path, Kind::Mods, "biomes_unseen.hmod", || false)
+        .unwrap_or_else(|e| panic!("rejected: {e}"));
+    assert!(!native_shader);
+    println!("android import validation: biomes_unseen.hmod accepted as a Mods package");
+}
+
+/// The DEVICE path end to end, over the REAL prepared root: `resource_root`
+/// with the shipped `biomes_unseen.hmod` (exactly what `game/mods.rs::
+/// content_root` runs on Android at startup), then the loaders a running
+/// game uses - the block registry, the item network ids `/give` resolves,
+/// `GeneratorData::load` and the multi-noise preset tables a new world's
+/// server samples, and the creative export the creative screens read.
+#[test]
+#[ignore = "full prepared root: the CI worldgen job runs it"]
+fn biomes_unseen_full_root_runtime() {
+    use horizon_mods::{Content, Package};
+    use horizon_world::worldgen::biome::MultiNoiseBiomeSource;
+    let Some(base) = prepared() else {
+        panic!("no prepared root: run tools/android_prepare.py first");
+    };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    let m = ContentMod {
+        id: package.manifest.id.clone(),
+        content: Content::read(&path, &package.manifest).unwrap(),
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("volt-biomes-full-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let root = resource_root(&base, std::slice::from_ref(&m), &scratch).unwrap();
+    assert_ne!(root, base, "the overlay must be built");
+
+    // 1. Block registry: every declared block is a real state.
+    let assets = Assets::load(&root).unwrap();
+    let vanilla = Assets::load(&base).unwrap();
+    let mut blocks = 0;
+    for block in &m.content.blocks {
+        assert!(
+            assets.registry.default_state(&block.id).is_some(),
+            "{} missing from the block registry",
+            block.id
+        );
+        blocks += 1;
+    }
+    assert_eq!(blocks, 176);
+    assert!(assets.registry.len() > vanilla.registry.len());
+
+    // 2. /give: the item registry report resolves mod item ids to network ids.
+    let ids =
+        horizon_protocol::registry::Builtin::load(&root.join("registries.json")).unwrap();
+    let items = ids.get("minecraft:item").unwrap();
+    for id in ["biomes_unseen:cherry_planks", "biomes_unseen:tanzanite", "biomes_unseen:fir_door"] {
+        assert!(items.id(id).is_some(), "{id} missing from /give's registry");
+    }
+
+    // 3. The world generator loads the overlay and its preset tables place
+    // the mod biomes (this is what a new world's server samples).
+    let data = horizon_world::worldgen::generator::GeneratorData::load(
+        &root.join("worldgen"),
+        assets.registry,
+    );
+    let data = data.unwrap_or_else(|e| panic!("GeneratorData::load on the overlay: {e}"));
+    drop(data);
+    let presets: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("worldgen/presets.json")).unwrap())
+            .unwrap();
+    for (preset, want) in [("minecraft:overworld", 39), ("minecraft:nether", 5)] {
+        let table = presets[preset].as_str().unwrap_or_else(|| panic!("{preset} table missing"));
+        let source = MultiNoiseBiomeSource::from_quantized_json(table).unwrap();
+        let mut found: Vec<&str> = source
+            .parameters()
+            .entries()
+            .iter()
+            .map(|(_, biome)| biome.as_str())
+            .filter(|b| b.starts_with("biomes_unseen:"))
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found.len(), want, "{preset}");
+        println!(
+            "full root {preset}: {} Biomes Unseen biome(s) in the live preset table",
+            found.len()
+        );
+    }
+
+    // 4. Creative screens: the export the game reads lists the mod items.
+    let creative = creative_count(&root, &m.content.namespaces);
+    assert_eq!(creative, 193, "creative export");
+    println!("full root creative: {creative} Biomes Unseen item(s) in the export");
+    println!("full root runtime: resource_root, registry, /give ids, GeneratorData and creative all verified over the real prepared root");
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// Subtle Effects AT RUNTIME, over the REAL prepared root and the REAL
+/// render path: the exact `animate_tick` call `game/render_tick.rs` makes
+/// every render tick, with the real `AnimateTables`, block registry,
+/// collision cache and a world holding torches, glowstone and lit
+/// campfires. The same scene is ticked once with the built-in off and once
+/// on: the off run spawns NO small-flame sparks and NO glowing dust (so
+/// the counted particles are attributable to the mod alone), the on run
+/// spawns hundreds - the bursts a player actually sees near a torch.
+#[test]
+#[ignore = "full prepared root: the CI worldgen job runs it"]
+fn subtle_effects_burst_in_the_live_animate_tick() {
+    use crate::animate_tick::{AnimateContext, AnimateTables, animate_tick};
+    use crate::biome::Biomes;
+    use crate::chunk::Chunk;
+    use crate::particles::{ParticleEngine, ParticleType};
+    use crate::subtle_effects::{self, Flags};
+    use crate::world::World;
+    use horizon_world::block_collision::BlockCollisionRegistry;
+    use horizon_world::collision::CachedCollisionRegistry;
+    use horizon_world::registry::BlockStateId;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+    let _guard = subtle_effects::FLAGS_LOCK.lock().unwrap();
+    let Some(base) = prepared() else {
+        panic!("no prepared root: run tools/android_prepare.py first");
+    };
+    let assets = Assets::load(&base).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&base, registry).unwrap();
+    let (named, _) = nbt::read_named(
+        &fs::read(base.join("cached-collision.nbt")).unwrap(),
+        Limits::tables(),
+    )
+    .unwrap();
+    let cached = CachedCollisionRegistry::from_nbt(&named.tag, registry).unwrap();
+    let collision = BlockCollisionRegistry::new(Arc::new(cached)).unwrap();
+    let biomes = Biomes::load(&base).unwrap();
+    let tables = AnimateTables::load(&base, registry, &biomes).unwrap();
+
+    // A dense display layer at y 70 in chunk (0, 0): a row of lit
+    // campfires, then alternating torches and glowstone. Neighbour chunks
+    // are resident air, like a loaded world around the player.
+    let torch = registry.default_state("minecraft:torch").unwrap();
+    let glowstone = registry.default_state("minecraft:glowstone").unwrap();
+    let lit = "true";
+    let campfire = (0..registry.len() as u32)
+        .map(BlockStateId)
+        .find(|id| {
+            registry.state(*id).is_some_and(|s| {
+                s.name == "minecraft:campfire"
+                    && s.properties.get("lit").is_some_and(|v| v == lit)
+                    && s.properties.get("waterlogged").is_none_or(|v| v == "false")
+            })
+        })
+        .expect("a lit, dry campfire state exists");
+    assert!(tables.is_lit_campfire(campfire.0), "the chosen campfire state ticks particles");
+    let air = registry.default_state("minecraft:air").unwrap();
+    let mut world = World::new(air, 1);
+    for cx in -2..=2 {
+        for cz in -2..=2 {
+            world
+                .chunks
+                .insert((cx, cz), Arc::new(Chunk::empty(cx, cz)));
+        }
+    }
+    let (mut torches, mut stones, mut fires) = (0, 0, 0);
+    for x in 0..16 {
+        for z in 0..16 {
+            let state = if z == 0 {
+                fires += 1;
+                campfire
+            } else if (x + z) % 2 == 0 {
+                torches += 1;
+                torch
+            } else {
+                stones += 1;
+                glowstone
+            };
+            world.set(x, 70, z, state).unwrap();
+        }
+    }
+    assert!(torches > 100 && stones > 90 && fires == 16);
+
+    // The same context render_tick.rs builds, with a clear sky.
+    let raining_at = |_: [i32; 3]| -> bool { false };
+    let height_no_leaves = |_: [i32; 3]| -> i32 { 0 };
+    let model_offset = |_: BlockStateId, _: i32, _: i32| -> Option<[f64; 3]> { None };
+    let gateway_particles = |_: BlockStateId, _: [i32; 3]| -> usize { 0 };
+    let ctx = AnimateContext {
+        world: &world,
+        facts: &facts,
+        collision: &collision,
+        biomes: &biomes,
+        registry,
+        raining_at: &raining_at,
+        height_no_leaves: &height_no_leaves,
+        firefly_bush_sounds: false,
+        creaking_active: false,
+        sky_darken: 0,
+        marker: None,
+        model_offset: &model_offset,
+        gateway_particles: &gateway_particles,
+        thundering: false,
+        ultrawarm: false,
+    };
+    let before = subtle_effects::flags();
+    let run = |enabled: bool| {
+        subtle_effects::set_flags(Flags {
+            enabled,
+            sparks: true,
+            dust: true,
+            burning: true,
+            slimes: true,
+            density: 1,
+        });
+        subtle_effects::set_suspended(false);
+        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        engine.seed_randoms(7, 7, 7);
+        engine.requested = Some(Vec::new());
+        // 30 render ticks with the player standing on the display floor.
+        for _ in 0..30 {
+            animate_tick(&tables, &mut engine, &ctx, [8, 70, 8]);
+        }
+        let got = engine.requested.take().unwrap();
+        let count =
+            |ty: ParticleType| got.iter().filter(|(o, _, _)| o.ty == ty).count();
+        (
+            count(ParticleType::SmallFlame),
+            count(ParticleType::Dust),
+            count(ParticleType::Flame),
+        )
+    };
+    let (off_small, off_dust, off_flame) = run(false);
+    let (on_small, on_dust, on_flame) = run(true);
+    subtle_effects::set_flags(before);
+    // Off: vanilla alone - torches make Flame and Smoke, never SmallFlame;
+    // glowstone makes nothing. So every counted spark/dust mote is ours.
+    assert_eq!(off_small, 0, "vanilla spawns no small-flame sparks here");
+    assert_eq!(off_dust, 0, "vanilla spawns no glowing dust");
+    assert!(off_flame > 100, "the torches do burn in vanilla: {off_flame}");
+    // On: the bursts are unmissable - hundreds of sparks and motes in a
+    // 1.5-second window - and the campfires add ember flames over vanilla.
+    assert!(on_small > 300, "torch spark bursts at runtime: {on_small}");
+    assert!(on_dust > 150, "glowstone dust shimmer at runtime: {on_dust}");
+    assert!(
+        on_flame > off_flame + 50,
+        "campfire embers add flames: {on_flame} vs {off_flame}"
+    );
+    println!(
+        "live animate_tick: subtle effects off {off_small}/{off_dust}/{off_flame} on {on_small}/{on_dust}/{on_flame} (small flame/dust/flame over 30 render ticks)"
+    );
+    println!("live animate_tick: Subtle Effects spawns visible bursts on the real render path");
+}
+
+/// The ANDROID-SHAPED root: the public APK ships no `worldgen/presets.json`
+/// (tools/android_build.py's `generated_engine_file` allowlist), only the
+/// `worldgen/biome_parameters/*.json` reports - the exact shape that made
+/// every mod biome silently vanish on devices. `build` must synthesize the
+/// quantized tables from the reports and append the mod's climates.
+#[test]
+#[cfg(unix)]
+#[ignore = "full prepared root: the CI worldgen job runs it"]
+fn biomes_unseen_android_shaped_root_places_biomes() {
+    use horizon_mods::{Content, Package};
+    use horizon_world::worldgen::biome::MultiNoiseBiomeSource;
+    let Some(base) = prepared() else {
+        panic!("no prepared root: run tools/android_prepare.py first");
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("volt-biomes-android-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    // An Android-shaped copy: the real root minus the quantized tables.
+    // (Links for the bulk, so the copy is cheap; the test only needs the
+    // presets file GONE and the reports present.)
+    let android_base = scratch.join("android-base");
+    fs::create_dir_all(&android_base).unwrap();
+    for entry in fs::read_dir(&base).unwrap().flatten() {
+        std::os::unix::fs::symlink(entry.path(), android_base.join(entry.file_name())).unwrap();
+    }
+    // worldgen/ must be a real directory so presets.json can be absent.
+    fs::remove_file(android_base.join("worldgen")).unwrap();
+    fs::create_dir(android_base.join("worldgen")).unwrap();
+    for entry in fs::read_dir(base.join("worldgen")).unwrap().flatten() {
+        if entry.file_name() == "presets.json" {
+            continue;
+        }
+        std::os::unix::fs::symlink(
+            entry.path(),
+            android_base.join("worldgen").join(entry.file_name()),
+        )
+        .unwrap();
+    }
+    assert!(android_base.join("worldgen/biome_parameters").exists(),
+        "the prepared root ships no biome_parameters reports; the Android shape cannot be reproduced");
+    assert!(!android_base.join("worldgen/presets.json").exists());
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.hmod");
+    let package = Package::read(&path).unwrap();
+    let m = ContentMod {
+        id: package.manifest.id.clone(),
+        content: Content::read(&path, &package.manifest).unwrap(),
+    };
+    let root = resource_root(&android_base, std::slice::from_ref(&m), &scratch.join("cache")).unwrap();
+    assert_ne!(root, android_base);
+    let presets: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("worldgen/presets.json")).unwrap())
+            .unwrap();
+    for (preset, want) in [("minecraft:overworld", 39), ("minecraft:nether", 5)] {
+        let table = presets[preset]
+            .as_str()
+            .unwrap_or_else(|| panic!("{preset}: no synthesized table"));
+        let source = MultiNoiseBiomeSource::from_quantized_json(table).unwrap();
+        let mut found: Vec<&str> = source
+            .parameters()
+            .entries()
+            .iter()
+            .map(|(_, biome)| biome.as_str())
+            .filter(|b| b.starts_with("biomes_unseen:"))
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        assert_eq!(found.len(), want, "{preset}");
+        // Vanilla survived the synthesis: plains is still in the table.
+        if preset == "minecraft:overworld" {
+            assert!(
+                source
+                    .parameters()
+                    .entries()
+                    .iter()
+                    .any(|(_, b)| b.as_str() == "minecraft:plains"),
+                "vanilla biomes lost in synthesis"
+            );
+        }
+        println!(
+            "android-shaped root {preset}: {} Biomes Unseen biome(s) placed without a base presets.json",
+            found.len()
+        );
+    }
+    let _ = fs::remove_dir_all(&scratch);
+}

@@ -90,6 +90,18 @@ pub fn source_volume(i: usize) -> f32 {
     }
 }
 
+/// One saved replay on the Volt Replay page: the game fills these
+/// (it can read the replay files; this crate cannot).
+#[derive(Clone, Debug)]
+pub struct ReplayListEntry {
+    /// The server address or world the session was recorded on.
+    pub title: String,
+    /// Duration, player name and recording date, as one grey line.
+    pub line: String,
+    /// The `.vrpl` file to play.
+    pub path: std::path::PathBuf,
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     /// Degrees, 30..=110 (options.txt stores (fov - 70) / 40).
@@ -204,6 +216,14 @@ pub struct Settings {
     /// The packs in `shaderpacks/`, listed when the Shader Packs page opens; the pick is
     /// `horizon.shader_pack`.
     pub shader_packs: Vec<crate::shader_pack_list::Entry>,
+    /// The replays in this instance's `replays/` folder, listed when the
+    /// Volt Replay page opens (`Event::ListReplays`); `Act::WatchReplay`
+    /// plays one without leaving the game.
+    pub replays: Vec<ReplayListEntry>,
+    /// The picked `shaders/` pack's options while its Shader Options page is open.
+    pub shader_options: Option<crate::shader_options::ShaderOptions>,
+    /// Saved Volt Waypoints (`volt-waypoints.json`).
+    pub volt_waypoints: crate::volt_features::WaypointStore,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -221,7 +241,10 @@ impl Default for Settings {
             // Vanilla's default, as for an options.txt without the key: a
             // capped frame rate leaves the cores idle when VSync is off.
             max_fps: 120,
-            vsync: true,
+            // Phones present through SurfaceFlinger: Fifo there is a hard
+            // cap at the panel's refresh, so Android starts with VSync off
+            // (the Max Framerate option still paces the CPU side).
+            vsync: !cfg!(target_os = "android"),
             fullscreen: false,
             smooth_lighting: true,
             clouds: "true".into(),
@@ -289,6 +312,9 @@ impl Default for Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            replays: Vec::new(),
+            shader_options: None,
+            volt_waypoints: Default::default(),
         }
     }
 }
@@ -345,6 +371,10 @@ impl Settings {
             .parent()
             .map(crate::mod_list::ModList::load)
             .unwrap_or_default();
+        let volt_waypoints = path
+            .parent()
+            .map(crate::volt_features::WaypointStore::load)
+            .unwrap_or_default();
         let keypad = crate::keypad::Settings::load(&path.with_file_name("horizon-keypad.json"));
         let touch = crate::touch::Settings::load_from(&path.with_file_name("horizon-touch.json"));
         let settings = match fs::read(path) {
@@ -355,6 +385,7 @@ impl Settings {
                 keypad,
                 extras,
                 mods,
+                volt_waypoints,
                 ..Self::parse(&String::from_utf8_lossy(&bytes))
             },
             Err(_) => Self {
@@ -364,6 +395,7 @@ impl Settings {
                 keypad,
                 extras,
                 mods,
+                volt_waypoints,
                 ..Self::default()
             },
         };
@@ -479,6 +511,9 @@ impl Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
+            replays: Vec::new(),
+            shader_options: None,
+            volt_waypoints: Default::default(),
             auto_jump: f.bool("autoJump"),
             language: f.string("lang"),
             force_unicode: f.bool("forceUnicodeFont"),
@@ -645,6 +680,7 @@ impl Settings {
             controller: self.controller.clone(),
             extras: self.extras.clone(),
             mods: self.mods.clone(),
+            volt_waypoints: self.volt_waypoints.clone(),
             ..Self::from_file(file)
         })
     }
@@ -663,6 +699,7 @@ impl Settings {
             let _ = self.touch.save_to(&dir.join("horizon-touch.json"));
             self.extras.save(dir);
             self.mods.save(dir);
+            self.volt_waypoints.save(dir);
         }
     }
     /// Volume of a sound source (master excluded).
@@ -813,6 +850,7 @@ pub enum Opt {
     AndroidInputMode,
     TouchSwapJumpSneak,
     TouchAutoSprint,
+    TouchJoystick,
     PadEnabled,
     PadVibration,
     PadAdaptiveTriggers,
@@ -845,12 +883,23 @@ pub enum Opt {
     TextureFiltering,
     /// `Options.maxAnisotropyBit`.
     MaxAnisotropy,
-    /// Item-frame model rendering and distance (`horizon-graphics.txt`).
-    ItemFramesEnabled,
-    ItemFramesDistance,
-    /// Displayed item/map rendering and distance (`horizon-graphics.txt`).
-    FrameContentsEnabled,
-    FrameContentsDistance,
+    /// Volt Boost internal 3D resolution scaler (`25%..=200%`).
+    VoltResolutionScale,
+    /// Built-in Controls Studio touch layout preset switcher.
+    TouchPreset,
+    /// Volt Shaders customization sliders:
+    VoltShaderWindSpeed,
+    VoltShaderWindStrength,
+    VoltShaderShadowRichness,
+    VoltShaderTorchIntensity,
+    VoltShaderEmissiveGlow,
+    VoltShaderWaterReflection,
+    VoltShaderSunsetGlow,
+    VoltShaderVibrance,
+    VoltShaderSaturation,
+    VoltShaderContrast,
+    VoltShaderExposure,
+    VoltShaderWarmth,
 }
 
 #[cfg(test)]

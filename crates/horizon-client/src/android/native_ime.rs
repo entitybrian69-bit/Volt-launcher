@@ -2,14 +2,14 @@
 //! No project Java classes or cross-thread View operations are required.
 use jni::{
     JNIEnv, JavaVM,
-    objects::{GlobalRef, JObject, JValue},
+    objects::{GlobalRef, JObject, JString, JValue},
 };
 use std::{
     collections::VecDeque,
     io::{Read, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, Ordering},
     },
 };
@@ -25,6 +25,7 @@ unsafe extern "C" {
         callback: Option<unsafe extern "C" fn(i32, i32, *mut std::ffi::c_void) -> i32>,
         data: *mut std::ffi::c_void,
     ) -> i32;
+    fn ALooper_removeFd(looper: *mut std::ffi::c_void, fd: i32) -> i32;
 }
 enum Command {
     Show(String),
@@ -34,6 +35,8 @@ enum Command {
     Bounds,
     ImportDocument,
     Screen(bool, bool),
+    KeepAwake(bool),
+    ClickSound,
 }
 struct Ui {
     vm: JavaVM,
@@ -50,13 +53,23 @@ struct Ui {
     ready: AtomicBool,
     bounds_pending: AtomicBool,
     bottom: AtomicI32,
+    visible_bounds: Mutex<[i32; 4]>,
     failed: AtomicBool,
     keyboard_request: Mutex<Option<std::time::Instant>>,
     last_bounds: Mutex<Option<std::time::Instant>>,
+    last_screen: Mutex<Option<(bool, bool)>>,
+    last_keep_awake: Mutex<Option<bool>>,
+    last_click: Mutex<Option<std::time::Instant>>,
     avoid_cutout: AtomicBool,
     immersive: AtomicBool,
 }
-static UI: OnceLock<Arc<Ui>> = OnceLock::new();
+static UI: Mutex<Option<Arc<Ui>>> = Mutex::new(None);
+
+fn current_ui() -> Option<Arc<Ui>> {
+    UI.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
 
 /// Must run during NativeActivity onCreate, on the Java UI thread.
 ///
@@ -67,11 +80,45 @@ pub unsafe fn initialize(
     vm: *mut jni::sys::JavaVM,
     activity: jni::sys::jobject,
 ) -> Result<(), String> {
-    if UI.get().is_some() {
-        return Ok(());
-    }
     let vm = unsafe { JavaVM::from_raw(vm) }.map_err(|e| e.to_string())?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    if let Some(existing) = current_ui() {
+        let same = env
+            .with_local_frame(4, |env| -> jni::errors::Result<bool> {
+                let incoming = unsafe { JObject::from_raw(activity) };
+                let same = env.is_same_object(&existing.activity, &incoming)?;
+                let _ = incoming.into_raw();
+                Ok(same)
+            })
+            .unwrap_or(false);
+        if same && !existing.failed.load(Ordering::Acquire) {
+            *existing
+                .last_screen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *existing
+                .last_keep_awake
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *existing
+                .last_bounds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            return Ok(());
+        }
+        existing.failed.store(true, Ordering::Release);
+        let looper = unsafe { ALooper_forThread() };
+        if !looper.is_null() {
+            let old_fd = existing
+                .reader
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_raw_fd();
+            unsafe {
+                let _ = ALooper_removeFd(looper, old_fd);
+            }
+        }
+    }
     let (edit, input, native, activity) = env
         .with_local_frame(32, |env| -> jni::errors::Result<_> {
             let activity = unsafe { JObject::from_raw(activity) };
@@ -161,9 +208,13 @@ pub unsafe fn initialize(
         ready: AtomicBool::new(false),
         bounds_pending: AtomicBool::new(false),
         bottom: AtomicI32::new(0),
+        visible_bounds: Mutex::new([0; 4]),
         failed: AtomicBool::new(false),
         keyboard_request: Mutex::new(None),
         last_bounds: Mutex::new(None),
+        last_screen: Mutex::new(None),
+        last_keep_awake: Mutex::new(None),
+        last_click: Mutex::new(None),
         avoid_cutout: AtomicBool::new(false),
         immersive: AtomicBool::new(true),
     });
@@ -182,17 +233,34 @@ pub unsafe fn initialize(
         drop(unsafe { Arc::from_raw(data.cast::<Ui>()) });
         return Err("Cannot register Android UI input channel".into());
     }
-    // The callback reference and these global JNI refs live for the activity's
-    // process lifetime, not per edit. Activity shutdown exits that process.
-    UI.set(ui).ok();
+    *UI.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ui);
     Ok(())
 }
 impl Ui {
     fn enqueue(&self, c: Command) {
-        self.commands
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push_back(c);
+        if self.failed.load(Ordering::Acquire) {
+            return;
+        }
+        {
+            let mut q = self
+                .commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if q.len() >= 64 {
+                // Drop stale duplicate Poll/Bounds/ClickSound entries if the UI looper falls behind.
+                q.retain(|existing| {
+                    !matches!(
+                        existing,
+                        Command::Bounds | Command::Poll | Command::ClickSound
+                    )
+                });
+                if q.len() >= 64 {
+                    return;
+                }
+            }
+            q.push_back(c);
+        }
         let _ = self
             .writer
             .lock()
@@ -421,12 +489,17 @@ impl Ui {
                 let token = env
                     .call_method(&self.edit, "getWindowToken", "()Landroid/os/IBinder;", &[])?
                     .l()?;
-                env.call_method(
-                    &self.input,
-                    "hideSoftInputFromWindow",
-                    "(Landroid/os/IBinder;I)Z",
-                    &[JValue::Object(&token), JValue::Int(0)],
-                )?;
+                if !token.is_null() {
+                    let _ = env.call_method(
+                        &self.input,
+                        "hideSoftInputFromWindow",
+                        "(Landroid/os/IBinder;I)Z",
+                        &[JValue::Object(&token), JValue::Int(0)],
+                    );
+                    if env.exception_check().unwrap_or(false) {
+                        let _ = env.exception_clear();
+                    }
+                }
                 env.call_method(&self.edit, "clearFocus", "()V", &[])?;
                 env.call_method(&self.edit, "setFocusable", "(Z)V", &[JValue::Bool(0)])?;
                 env.call_method(&self.native, "requestFocus", "()Z", &[])?;
@@ -464,8 +537,42 @@ impl Ui {
                 )?;
                 let mut window_origin = [0; 2];
                 env.get_int_array_region(location, 0, &mut window_origin)?;
+                let mut visible = [
+                    env.get_field(&rect, "left", "I")?.i()? - window_origin[0],
+                    env.get_field(&rect, "top", "I")?.i()? - window_origin[1],
+                    env.get_field(&rect, "right", "I")?.i()? - window_origin[0],
+                    env.get_field(&rect, "bottom", "I")?.i()? - window_origin[1],
+                ];
+                // Android 11+ can display transient system bars over an immersive
+                // window without changing its visible display frame. Use *visible*
+                // status and navigation insets for launcher layout only.
+                let bars = (|| -> jni::errors::Result<()> {
+                    let sdk = env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?.i()?;
+                    if sdk < 30 { return Ok(()); }
+                    let root = env.call_method(&self.native, "getRootWindowInsets",
+                        "()Landroid/view/WindowInsets;", &[])?.l()?;
+                    if root.is_null() { return Ok(()); }
+                    let insets = env.call_method(&root, "getInsets", "(I)Landroid/graphics/Insets;",
+                        &[JValue::Int(3)])?.l()?; // statusBars | navigationBars
+                    if insets.is_null() { return Ok(()); }
+                    let mut edge = [0; 4];
+                    for (i, field) in ["left", "top", "right", "bottom"].into_iter().enumerate() {
+                        edge[i] = env.get_field(&insets, field, "I")?.i()?.max(0);
+                    }
+                    let resources = env.call_method(&self.activity, "getResources", "()Landroid/content/res/Resources;", &[])?.l()?;
+                    let metrics = env.call_method(resources, "getDisplayMetrics", "()Landroid/util/DisplayMetrics;", &[])?.l()?;
+                    let width = env.get_field(&metrics, "widthPixels", "I")?.i()?;
+                    let height = env.get_field(&metrics, "heightPixels", "I")?.i()?;
+                    visible[0] = visible[0].max(edge[0] - window_origin[0]);
+                    visible[1] = visible[1].max(edge[1] - window_origin[1]);
+                    visible[2] = visible[2].min(width - edge[2] - window_origin[0]);
+                    visible[3] = visible[3].min(height - edge[3] - window_origin[1]);
+                    Ok(())
+                })();
+                if bars.is_err() { let _ = env.exception_clear(); }
+                *self.visible_bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = visible;
                 self.bottom.store(
-                    (env.get_field(rect, "bottom", "I")?.i()? - window_origin[1]).max(0),
+                    (env.get_field(&rect, "bottom", "I")?.i()? - window_origin[1]).max(0),
                     Ordering::Release,
                 );
                 let mut safe = [0; 4];
@@ -591,6 +698,21 @@ impl Ui {
                     &[],
                 )?;
             }
+            Command::KeepAwake(awake) => {
+                let _ = env.call_method(
+                    &self.native,
+                    "setKeepScreenOn",
+                    "(Z)V",
+                    &[JValue::Bool(u8::from(awake))],
+                );
+                let _ = env.exception_clear();
+            }
+            Command::ClickSound => {
+                // SoundEffectConstants.CLICK = 0; uses Android's lightweight UI feedback
+                // without opening a separate AAudio stream in the launcher.
+                let _ = env.call_method(&self.native, "playSoundEffect", "(I)V", &[JValue::Int(0)]);
+                let _ = env.exception_clear();
+            }
         }
         Ok(())
     }
@@ -625,13 +747,18 @@ fn callback_inner(ui: &Ui) -> i32 {
     match ui.vm.attach_current_thread() {
         Ok(mut env) => {
             for c in commands {
-                if let Err(e) = env.with_local_frame(16, |env| ui.apply(env, c)) {
+                let res = env.with_local_frame(64, |env| {
+                    let out = ui.apply(env, c);
+                    if out.is_err() {
+                        let _ = env.exception_clear();
+                    }
+                    out
+                });
+                if let Err(e) = res {
                     let _ = env.exception_clear();
-                    log::error!("IME command: {e}");
-                    ui.failed.store(true, Ordering::Release);
-                    ui.active.store(false, Ordering::Release);
-                    winit::platform::android::set_native_text_input_active(false);
-                    return 0;
+                    log::warn!("IME command failed transiently: {e}");
+                    ui.bounds_pending.store(false, Ordering::Release);
+                    ui.polling.store(false, Ordering::Release);
                 }
             }
         }
@@ -646,11 +773,14 @@ fn callback_inner(ui: &Ui) -> i32 {
     1
 }
 pub fn show(text: &str) -> bool {
-    if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         winit::platform::android::set_native_text_input_active(true);
         // Do not diff an earlier editor buffer while Show is queued on the UI thread.
         ui.ready.store(false, Ordering::Release);
         ui.active.store(true, Ordering::Release);
+        *ui.last_bounds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         ui.enqueue(Command::Show(text.into()));
         true
     } else {
@@ -659,13 +789,17 @@ pub fn show(text: &str) -> bool {
 }
 pub fn hide() {
     winit::platform::android::set_native_text_input_active(false);
-    if let Some(ui) = UI.get() {
-        ui.active.store(false, Ordering::Release);
-        ui.enqueue(Command::Hide)
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        if ui.active.swap(false, Ordering::AcqRel) {
+            *ui.last_bounds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            ui.enqueue(Command::Hide);
+        }
     }
 }
 pub fn text() -> Option<String> {
-    let ui = UI.get()?;
+    let ui = current_ui()?;
     if !ui.active.load(Ordering::Acquire) || !ui.ready.load(Ordering::Acquire) {
         return None;
     }
@@ -682,7 +816,7 @@ pub fn text() -> Option<String> {
 
 /// View operations, including pointer capture, belong to the Java UI thread.
 pub fn capture_mouse(capture: bool) -> bool {
-    if let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
         ui.enqueue(Command::Capture(capture));
         true
     } else {
@@ -691,9 +825,27 @@ pub fn capture_mouse(capture: bool) -> bool {
 }
 
 /// Launcher-only safe bounds; View geometry is read on the Android UI thread.
+/// Throttled so rapid touch events and 60-120 Hz redraws never flood the UI looper.
 pub fn viewport_bottom() -> Option<u32> {
-    let ui = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
-    if !ui.bounds_pending.swap(true, Ordering::AcqRel) {
+    let ui = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
+    let min_interval = if ui.active.load(Ordering::Relaxed) {
+        std::time::Duration::from_millis(60)
+    } else {
+        std::time::Duration::from_millis(250)
+    };
+    let should_request = {
+        let mut last = ui
+            .last_bounds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.is_none_or(|t| t.elapsed() >= min_interval) {
+            *last = Some(std::time::Instant::now());
+            true
+        } else {
+            false
+        }
+    };
+    if should_request && !ui.bounds_pending.swap(true, Ordering::AcqRel) {
         ui.enqueue(Command::Bounds);
     }
     let bottom = ui.bottom.load(Ordering::Acquire);
@@ -703,21 +855,166 @@ pub fn viewport_bottom() -> Option<u32> {
             .round() as u32
     })
 }
+/// Visible window bounds in renderer pixels. Unlike the shared game viewport,
+/// these also follow temporarily visible system bars while the launcher is open.
+pub fn launcher_visible_bounds() -> Option<[u32; 4]> {
+    let _ = viewport_bottom(); // schedules a throttled UI-thread bounds refresh
+    let ui = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire))?;
+    let bounds = *ui.visible_bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if bounds[2] <= bounds[0] || bounds[3] <= bounds[1] {
+        return None;
+    }
+    let origin = winit::platform::android::native_content_origin();
+    let scale = winit::platform::android::native_input_scale();
+    Some(std::array::from_fn(|i| {
+        let axis = i % 2;
+        ((bounds[i] - origin[axis] as i32).max(0) as f64 * scale[axis]).round() as u32
+    }))
+}
+
 pub fn pick_document() -> bool {
-    let Some(ui) = UI.get().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
+    let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) else {
         return false;
     };
     ui.enqueue(Command::ImportDocument);
     true
 }
 
+pub fn device_supported_abis() -> Vec<String> {
+    if let Some(ui) = current_ui()
+        && let Ok(mut env) = ui.vm.attach_current_thread()
+    {
+        let fetched = env.with_local_frame(16, |env| -> jni::errors::Result<String> {
+            let out = (|| -> jni::errors::Result<String> {
+                let cls = env.get_object_class(&ui.activity)?;
+                let ret = env
+                    .call_static_method(cls, "supportedAbis", "()Ljava/lang/String;", &[])?
+                    .l()?;
+                if ret.is_null() {
+                    return Ok(String::new());
+                }
+                Ok(env.get_string(&JString::from(ret))?.into())
+            })();
+            if out.is_err() {
+                let _ = env.exception_clear();
+            }
+            out
+        });
+        if let Ok(csv) = fetched {
+            let list: Vec<String> = csv
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            if !list.is_empty() {
+                return list;
+            }
+        } else {
+            let _ = env.exception_clear();
+        }
+    }
+    vec![if cfg!(target_arch = "aarch64") {
+        "arm64-v8a".into()
+    } else if cfg!(target_arch = "x86_64") {
+        "x86_64".into()
+    } else if cfg!(target_arch = "x86") {
+        "x86".into()
+    } else {
+        "armeabi-v7a".into()
+    }]
+}
+
+pub fn app_version_name() -> String {
+    if let Some(ui) = current_ui()
+        && let Ok(mut env) = ui.vm.attach_current_thread()
+    {
+        let fetched = env.with_local_frame(16, |env| -> jni::errors::Result<String> {
+            let out = (|| -> jni::errors::Result<String> {
+                let ret = env
+                    .call_method(&ui.activity, "appVersionName", "()Ljava/lang/String;", &[])?
+                    .l()?;
+                if ret.is_null() {
+                    return Ok(String::new());
+                }
+                Ok(env.get_string(&JString::from(ret))?.into())
+            })();
+            if out.is_err() {
+                let _ = env.exception_clear();
+            }
+            out
+        });
+        if let Ok(ver) = fetched
+            && !ver.trim().is_empty()
+        {
+            return ver;
+        }
+        let _ = env.exception_clear();
+    }
+    "1.0.0".into()
+}
+
+pub fn play_click_sound() {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        let allow = {
+            let mut last = ui
+                .last_click
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(65)) {
+                false
+            } else {
+                *last = Some(std::time::Instant::now());
+                true
+            }
+        };
+        if allow {
+            ui.enqueue(Command::ClickSound);
+        }
+    }
+}
+
+pub fn set_keep_screen_awake(awake: bool) {
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        let changed = {
+            let mut last = ui
+                .last_keep_awake
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *last == Some(awake) {
+                false
+            } else {
+                *last = Some(awake);
+                true
+            }
+        };
+        if changed {
+            ui.enqueue(Command::KeepAwake(awake));
+        }
+    }
+}
+
 pub fn configure_screen(immersive: bool, avoid_cutout: bool) {
-    if let Some(ui) = UI.get() {
-        ui.enqueue(Command::Screen(immersive, avoid_cutout));
+    if let Some(ui) = current_ui().filter(|ui| !ui.failed.load(Ordering::Acquire)) {
+        let changed = {
+            let mut last = ui
+                .last_screen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *last == Some((immersive, avoid_cutout)) {
+                false
+            } else {
+                *last = Some((immersive, avoid_cutout));
+                true
+            }
+        };
+        if changed {
+            ui.enqueue(Command::Screen(immersive, avoid_cutout));
+        }
     }
 }
 pub fn refresh_bounds() {
-    if let Some(ui) = UI.get().filter(|ui| {
+    if let Some(ui) = current_ui().filter(|ui| {
         ui.avoid_cutout.load(Ordering::Acquire) || !ui.immersive.load(Ordering::Acquire)
     }) {
         let mut last = ui

@@ -1,0 +1,1744 @@
+name: Android APK
+
+on:
+  push:
+    branches:
+      - android
+      - 'arena/**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - android
+  workflow_dispatch:
+    inputs:
+      abis:
+        description: 'Target ABIs to build'
+        type: choice
+        options:
+          - arm64-v8a,armeabi-v7a
+          - arm64-v8a
+          - armeabi-v7a
+          - all
+          - arm64-v8a,x86_64
+          - x86_64
+          - x86
+        default: arm64-v8a,armeabi-v7a
+      profile:
+        description: 'Rust compilation profile'
+        type: choice
+        options:
+          - release
+          - fast
+        default: release
+      publish_release:
+        description: 'Create or update a GitHub Release with built APKs'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  plan:
+    name: Plan build targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      profile: ${{ steps.targets.outputs.profile }}
+      publish_release: ${{ steps.targets.outputs.publish_release }}
+      multi_abi: ${{ steps.targets.outputs.multi_abi }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Compute build matrix
+        id: targets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          INPUT_ABIS: ${{ inputs.abis }}
+          INPUT_PROFILE: ${{ inputs.profile }}
+          INPUT_PUBLISH: ${{ inputs.publish_release }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          targets = {
+              "arm64-v8a": "aarch64-linux-android",
+              "armeabi-v7a": "armv7-linux-androideabi",
+              "x86_64": "x86_64-linux-android",
+              "x86": "i686-linux-android",
+          }
+
+          event = os.environ["EVENT_NAME"]
+          ref = os.environ["REF_NAME"]
+          raw_abis = os.environ.get("INPUT_ABIS", "").strip()
+          profile = os.environ.get("INPUT_PROFILE", "").strip() or "release"
+          input_publish = os.environ.get("INPUT_PUBLISH", "").strip().lower() == "true"
+
+          if ref.startswith("refs/tags/v") or raw_abis == "all":
+              selected = list(targets.keys())
+          elif event == "workflow_dispatch" and raw_abis:
+              selected = [abi.strip() for abi in raw_abis.split(",") if abi.strip()]
+          else:
+              # Starling/Horizon-Android parity: ship all four ABIs so
+              # emulators, ChromeOS and x86 handhelds install natively.
+              selected = ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]
+
+          unknown = [abi for abi in selected if abi not in targets]
+          if unknown:
+              raise SystemExit(f"Unsupported ABI(s): {unknown}")
+
+          include = [{"abi": abi, "target": targets[abi]} for abi in selected]
+          publish_release = (event == "push") or ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and input_publish)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"matrix={json.dumps({'include': include})}\n")
+              out.write(f"profile={profile}\n")
+              out.write(f"publish_release={'true' if publish_release else 'false'}\n")
+              out.write(f"multi_abi={'true' if len(include) > 1 else 'false'}\n")
+          PY
+      - name: Validate Volt Shaders WGSL & Shader API
+        run: cargo test -p horizon-shader-api
+
+  worldgen-test:
+    name: Worldgen mod tests (host)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: worldgen-test-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Climate and Biomes Unseen preset-table tests
+        run: |
+          set -u +e -o pipefail
+          rustup show active-toolchain
+          cargo --version
+          cargo test -p horizon-client --lib --no-default-features -- \
+            climate_entry_strips_keys_and_quantizes \
+            biomes_unseen_hmod_biomes_reach_the_preset_tables \
+            biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries \
+            biomes_unseen_hmod_passes_android_import_validation \
+            content_files \
+            nea::tests \
+            player_gestures::tests \
+            subtle_effects::tests \
+            hand_sway_to_world_matches_the_inline_first_person_product \
+            --nocapture 2>&1 | tee worldgen-test.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            # Logs are not downloadable from every network: surface the
+            # failure as annotations readable through the checks API.
+            python3 - <<'PY'
+          lines = open("worldgen-test.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::error title={title}::{msg or '(empty)'}")
+          emit("cargo-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
+          emit("log-tail", lines[-35:])
+          PY
+            exit "$status"
+          fi
+      - name: Tolerant .hmod loader tests (horizon-mods)
+        run: |
+          set -u +e -o pipefail
+          cargo test -p horizon-mods --lib --no-default-features -- \
+            --nocapture 2>&1 | tee horizon-mods-test.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("horizon-mods-test.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::error title={title}::{msg or '(empty)'}")
+          emit("horizon-mods-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
+          emit("horizon-mods-log-tail", lines[-35:])
+          PY
+            exit "$status"
+          fi
+      - name: Verify the 44 Biomes Unseen biomes reached the preset tables
+        run: |
+          set -euo pipefail
+          grep -F "minecraft:overworld: 39 Biomes Unseen biome(s) registered in the multi-noise preset table" worldgen-test.log
+          grep -F "minecraft:nether: 5 Biomes Unseen biome(s) registered in the multi-noise preset table" worldgen-test.log
+          count=$(grep -c "  biomes_unseen:" worldgen-test.log)
+          echo "listed biome ids: $count"
+          test "$count" -eq 44
+          grep -F "assets: 176 blockstates, 609 models, 193 item definitions, 217 textures, 206 lang keys verified" worldgen-test.log
+          grep -F "creative inventory: 193 Biomes Unseen item(s) join the category and search tabs" worldgen-test.log
+          grep -F "android import validation: biomes_unseen.hmod accepted as a Mods package" worldgen-test.log
+          # Publish the proof lines as an annotation readable through the
+          # checks API (job logs are not downloadable from every network).
+          python3 - <<'PY'
+          lines = [l for l in open("worldgen-test.log", encoding="utf-8", errors="replace").read().splitlines()
+                   if "registered in the multi-noise preset table" in l or l.startswith("  biomes_unseen:")]
+          msg = "%0A".join(l.replace("%", "%25") for l in lines)[:3800]
+          print(f"::notice title=biomes-unseen-proof::{msg}")
+          PY
+
+  runtime-proof:
+    name: Runtime proof (real root, live client)
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Cache the full prepared root
+        id: full-root-cache
+        uses: actions/cache@v4
+        with:
+          path: .local/horizon-client
+          key: full-root-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_prepare.py') }}
+
+      - name: Set up Java 25 for resource preparation
+        if: steps.full-root-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: runtime-proof-cargo-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Prepare the full game root (the same files a device prepares)
+        if: steps.full-root-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: .local/prepare-target
+        run: |
+          rustup show active-toolchain
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          sys.path.insert(0, "tools")
+          import lab
+
+          lock = json.loads(Path("research-lock.json").read_text(encoding="utf-8"))["minecraft"]
+          version = lock["version"]
+          pinned_sha1 = lock["manifest_sha1"]
+          pinned_url = f"https://piston-meta.mojang.com/v1/packages/{pinned_sha1}/{version}.json"
+          lab.download(pinned_url, Path(f".local/minecraft/{version}/manifest.json"), pinned_sha1)
+
+          cmd = [sys.executable, "tools/android_prepare.py"]
+          if os.environ.get("JAVA_HOME"):
+              cmd += ["--java-home", os.environ["JAVA_HOME"]]
+          subprocess.run(cmd, check=True)
+          root = Path(".local/horizon-client") / version
+          assert (root / "horizon-resources.json").is_file(), "preparation produced no root"
+          print(f"Prepared full root at {root}", flush=True)
+          PY
+
+      - name: Full-root tests - resource_root, registry, /give ids, worldgen, creative
+        run: |
+          set -u +e -o pipefail
+          rustup show active-toolchain
+          cargo test -p horizon-client --lib --no-default-features -- \
+            biomes_unseen_full_root_runtime \
+            biomes_unseen_android_shaped_root_places_biomes \
+            subtle_effects_burst_in_the_live_animate_tick \
+            --ignored --nocapture 2>&1 | tee runtime-proof.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("runtime-proof.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::error title={title}::{msg or '(empty)'}")
+          emit("full-root-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
+          emit("full-root-log-tail", lines[-35:])
+          PY
+            exit "$status"
+          fi
+
+      - name: Verify the full-root proof lines
+        run: |
+          set -euo pipefail
+          grep -F "full root minecraft:overworld: 39 Biomes Unseen biome(s) in the live preset table" runtime-proof.log
+          grep -F "full root minecraft:nether: 5 Biomes Unseen biome(s) in the live preset table" runtime-proof.log
+          grep -F "full root creative: 193 Biomes Unseen item(s) in the export" runtime-proof.log
+          grep -F "full root runtime: resource_root, registry, /give ids, GeneratorData and creative all verified over the real prepared root" runtime-proof.log
+          grep -F "android-shaped root minecraft:overworld: 39 Biomes Unseen biome(s) placed without a base presets.json" runtime-proof.log
+          grep -F "android-shaped root minecraft:nether: 5 Biomes Unseen biome(s) placed without a base presets.json" runtime-proof.log
+          grep -F "live animate_tick: Subtle Effects spawns visible bursts on the real render path" runtime-proof.log
+          grep -E "live animate_tick: subtle effects off 0/0/[0-9]+ on [0-9]+/[0-9]+/[0-9]+" runtime-proof.log
+
+      - name: Build the client and horizon-ctl for the live run
+        run: |
+          set -u +e -o pipefail
+          # Default features link ALSA and udev on Linux.
+          for i in 1 2 3 4; do
+            if [ "$i" -gt 1 ]; then
+              # The Azure apt mirror intermittently fails DNS on hosted
+              # runners; fall back to the canonical archive and retry.
+              sudo find /etc/apt -name 'apt-mirrors.txt' -o -name '*.list' -o -name '*.sources' 2>/dev/null \
+                | xargs -r sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' || true
+              sleep 15
+            fi
+            sudo apt-get update 2>&1 | tail -n 2
+            sudo apt-get install -y --no-install-recommends --fix-missing pkg-config libasound2-dev libudev-dev 2>&1 | tee apt-install.log | tail -n 3
+            pkg-config --exists alsa && break
+            echo "apt attempt $i did not deliver alsa.pc"
+          done
+          if ! pkg-config --exists alsa; then
+            tail=$(tail -c 1200 apt-install.log 2>/dev/null | tr '\n' ' ' | sed 's/%/%25/g')
+            echo "::error title=ALSA dev install failed::${tail:-apt produced no log}"
+            dpkg -l | grep -i asound || true
+            apt-cache policy libasound2-dev pkg-config || true
+            exit 1
+          fi
+          cargo build --locked --profile fast -p horizon-client --bins 2>&1 | tee client-build.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("client-build.log", encoding="utf-8", errors="replace").read().splitlines()
+          errs = [i for i, l in enumerate(lines) if l.startswith("error")]
+          chosen = []
+          for i in errs[:6]:
+              chosen.extend(lines[i : i + 12])
+          msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+          print(f"::error title=client build failed::{msg or '(no error lines found)'}")
+          PY
+          fi
+          exit "$status"
+
+      - name: Live client - /locate and /give in a running world
+        run: |
+          set -u +e -o pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends mesa-vulkan-drivers xvfb libxkbcommon-x11-0 libxkbcommon0
+          xvfb-run -a python3 tools/biomes_e2e.py --bin-dir target/fast 2>&1 | tee biomes-e2e.log
+          status=$?
+          python3 - <<'PY'
+          lines = open("biomes-e2e.log", encoding="utf-8", errors="replace").read().splitlines()
+          proof = [l for l in lines if l.startswith(("E2E PROOF", "E2E PASS", "E2E FAIL"))]
+          msg = "%0A".join(l.replace("%", "%25")[:400] for l in proof)[:3800]
+          kind = "notice" if any(l.startswith("E2E PASS") for l in proof) else "error"
+          print(f"::{kind} title=live-client-proof::{msg or '(no proof lines)'}")
+          if kind == "error":
+              tail = "%0A".join(l.replace("%", "%25")[:400] for l in lines[-35:])[:3800]
+              print(f"::error title=live-client-log-tail::{tail}")
+          PY
+          exit "$status"
+
+      - name: Verify the live-client proof lines
+        run: |
+          set -euo pipefail
+          grep -F "E2E PROOF locate:" biomes-e2e.log
+          grep -F "E2E PROOF give:" biomes-e2e.log
+          grep -F "E2E PROOF report: volt-mods-report.txt lists 176 blocks, 193 creative items, 39+5 placed biomes and the opened world" biomes-e2e.log
+          grep -F "E2E PASS: the running game locates biomes_unseen:bayou and gives biomes_unseen:cherry_planks" biomes-e2e.log
+
+      - name: Volt Shaders executed-value proof (every profile on lavapipe)
+        run: |
+          set -u +e -o pipefail
+          cargo test --locked --profile fast -p horizon-client-render --test volt_shader_exec -- \
+            --include-ignored --nocapture 2>&1 | tee volt-exec.log
+          status=$?
+          python3 - <<'PY'
+          lines = open("volt-exec.log", encoding="utf-8", errors="replace").read().splitlines()
+          def emit(kind, title, chosen):
+              msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
+              print(f"::{kind} title={title}::{msg or '(empty)'}")
+          grades = [l for l in lines if "VOLT EXEC" in l and ("grade" in l or "PASS" in l or "adapter" in l)]
+          emit("notice", "volt-exec-grades", grades[:30])
+          stats = [l for l in lines if l.startswith("VOLT EXEC ") and "Material" in l]
+          emit("notice", "volt-exec-material", stats[:30])
+          sky = [l for l in lines if l.startswith("VOLT EXEC ") and "Sky" in l]
+          emit("notice", "volt-exec-sky", sky[:30])
+          emit("notice", "volt-exec-material-2", stats[30:60])
+          emit("notice", "volt-exec-sky-2", sky[30:60])
+          PY
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          lines = open("volt-exec.log", encoding="utf-8", errors="replace").read().splitlines()
+          chosen = [l for l in lines if l.lstrip().startswith(("panicked", "assertion", "thread", "error", "FAILED"))][:25]
+          msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen + lines[-20:])[:3800]
+          print(f"::error title=volt-exec-failure::{msg or '(empty)'}")
+          PY
+            exit "$status"
+          fi
+          grep -F "VOLT EXEC PASS:" volt-exec.log
+
+  prepare:
+    name: Prepare engine tables
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Cache generated engine tables
+        id: tables-cache
+        uses: actions/cache@v4
+        with:
+          path: .local/horizon-client-tables
+          key: engine-tables-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_build.py', 'tools/android_prepare.py') }}
+
+      - name: Set up Java 25 for resource preparation
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Ensure Rust toolchain for horizon-prepare
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        run: rustup show active-toolchain
+
+      - name: Generate allowlisted Horizon engine tables
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: .local/prepare-target
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+
+          sys.path.insert(0, "tools")
+          import android_build
+          import lab
+
+          lock = json.loads(Path("research-lock.json").read_text(encoding="utf-8"))["minecraft"]
+          version = lock["version"]
+          pinned_sha1 = lock["manifest_sha1"]
+          pinned_url = f"https://piston-meta.mojang.com/v1/packages/{pinned_sha1}/{version}.json"
+          lab.download(pinned_url, Path(f".local/minecraft/{version}/manifest.json"), pinned_sha1)
+
+          cmd = [sys.executable, "tools/android_prepare.py"]
+          if os.environ.get("JAVA_HOME"):
+              cmd += ["--java-home", os.environ["JAVA_HOME"]]
+          subprocess.run(cmd, check=True)
+
+          src = Path(".local/horizon-client") / version
+          root_dst = Path(".local/horizon-client-tables")
+          dst = root_dst / version
+          if dst.exists():
+              shutil.rmtree(dst)
+          root_dst.mkdir(parents=True, exist_ok=True)
+          (root_dst / "VERSION.txt").write_text(f"{version}\n", encoding="utf-8")
+
+          copied = 0
+          for path in sorted(src.rglob("*")):
+              if not path.is_file():
+                  continue
+              rel = path.relative_to(src).as_posix()
+              if android_build.generated_engine_file(rel):
+                  target = dst / rel
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(path, target)
+                  copied += 1
+
+          if not (dst / "horizon-resources.json").is_file() or not (dst / "worldgen/blocks/structure-blocks.json").is_file():
+              raise SystemExit("Missing required generated engine tables after preparation")
+          print(f"Prepared {copied} allowlisted generated table files for Minecraft {version}", flush=True)
+          PY
+
+      - name: Upload generated engine tables for APK jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: _internal-engine-tables
+          path: .local/horizon-client-tables
+          if-no-files-found: error
+          retention-days: 1
+
+  # Weave the pinned official registry mods (JEI, Horizon Physics) into the
+  # engine library on a disposable no-secrets runner. Native bundles and
+  # Cargo build scripts are code: this job has read-only permissions and no
+  # keystore; the signing job only verifies and packages its attested output
+  # and never executes mod code.
+  weave:
+    name: Weave registry mods (${{ matrix.abi }}, no secrets)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      REGISTRY_REV: 63daa89bcbdcb80282c29970d743d6d00918a6ce
+      # Every probe-green registry mod woven into release APKs, as
+      # id=file; the release tag is the file name without .hnmod.
+      WEAVE_SET: |
+        jei=jei-0.1.0.hnmod
+        horizon_physics=horizon_physics-0.15.1.hnmod
+        jade=jade-26.3.5.hnmod
+        veinminer=veinminer-0.3.2.hnmod
+        appleskin=appleskin-1.0.0.hnmod
+        status_effect_hud=status_effect_hud-1.0.0.hnmod
+        toggle_sprint=toggle_sprint-1.0.0.hnmod
+        inventory_profiles=inventory_profiles-1.0.0.hnmod
+        shulker_peek=shulker_peek-0.1.0.hnmod
+        mousetricks=mousetricks-0.2.0.hnmod
+        itemnew=itemnew-0.1.1.hnmod
+        eatinganimation=eatinganimation-0.1.0.hnmod
+        enchantmenthints=enchantmenthints-0.1.0.hnmod
+        right_click_crops=right_click_crops-1.0.0.hnmod
+        smartf3=smartf3-0.1.0.hnmod
+        armor_status=armor_status-1.0.0.hnmod
+        crosshair_indicator=crosshair_indicator-1.0.0.hnmod
+        hitbox_plus=hitbox_plus-1.3.0.hnmod
+        invisible_frames=invisible_frames-0.1.1.hnmod
+        freelook=freelook-0.3.1.hnmod
+        worldedit=worldedit-1.2.1.hnmod
+        horizonmatica=horizonmatica-0.1.1.hnmod
+        visuality_horizon=visuality_horizon-1.0.2.hnmod
+        held_item_info=held_item_info-0.1.0.hnmod
+        carryblock=carryblock-0.1.2.hnmod
+        chatheads=chatheads-0.1.0.hnmod
+        fast_items=fast_items-0.1.0.hnmod
+        customhud=customhud-1.6.0.hnmod
+        coords_hud=coords_hud-2.0.0.hnmod
+        biomecompass=biomecompass-0.2.2.hnmod
+        skins_3d=skins_3d-1.1.0.hnmod
+        accurate_block_placement=accurate_block_placement-1.0.0.hnmod
+        armorhud=armorhud-1.0.0.hnmod
+        lookat=lookat-0.2.1.hnmod
+        blockscope=blockscope-0.3.0.hnmod
+        elytratrails=elytratrails-0.1.2.hnmod
+      # Reviewed bundles committed under tools/native_mods/vendored/ and
+      # rebuilt deterministically by pack_vendored.py; they run the same
+      # verified_extract + mixin-compiler checks as the registry set.
+      VENDORED_SET: |
+        punchy=punchy-rust-0.1.3.hnmod
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+          - abi: armeabi-v7a
+            target: armv7-linux-androideabi
+          - abi: x86_64
+            target: x86_64-linux-android
+          - abi: x86
+            target: i686-linux-android
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install signature verification dependency
+        run: python3 -m pip install cryptography
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.target }}"
+      - name: Fetch pinned registry snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/registry"
+          curl --retry 3 -fsSL "https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/$REGISTRY_REV" | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+      - name: Pack vendored bundles and install their entries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bundle"
+          python3 tools/native_mods/pack_vendored.py \
+            --bundles "$RUNNER_TEMP/bundle" --registry "$RUNNER_TEMP/registry"
+      - name: Download published bundles and verify against the registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bundle"
+          # GitHub's release downloads intermittently answer 503 for single
+          # assets; integrity is checked below, so retry hard with backoff
+          # instead of failing the whole build on one flaky response.
+          while IFS='=' read -r mod_id file; do
+            [ -n "$mod_id" ] || continue
+            tag="${file%.hnmod}"
+            url="https://github.com/horizon-rust/horizon-mods/releases/download/$tag/$file"
+            ok=0
+            for attempt in 1 2 3 4 5 6; do
+              if curl --retry 5 --retry-delay 5 --retry-all-errors -fsSL \
+                  -o "$RUNNER_TEMP/bundle/$file" "$url"; then
+                ok=1
+                break
+              fi
+              echo "attempt $attempt failed for $file; backing off" >&2
+              sleep $((attempt * 10))
+            done
+            if [ "$ok" != 1 ]; then
+              echo "download failed after all retries: $url" >&2
+              exit 22
+            fi
+          done <<< "$WEAVE_SET"
+          python3 - <<'PYCODE'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools/native_mods')
+          import compat
+          temp = Path(os.environ['RUNNER_TEMP'])
+          registry = temp / 'registry'
+          revs = {}
+          pairs = [line.split('=', 1)
+                   for line in (os.environ['WEAVE_SET'] + '\n' + os.environ.get('VENDORED_SET', '')).split()
+                   if '=' in line]
+          for mod_id, file in pairs:
+              entry = compat.read_entry(registry, mod_id)
+              data = compat.verified_extract(temp / 'bundle' / file, entry,
+                                             temp / 'extract-check' / mod_id, registry)
+              revs[mod_id] = data['meta']['mixins']
+              if not compat.REV.fullmatch(revs[mod_id]):
+                  raise SystemExit(f'{mod_id}: bundle pins an invalid mixins revision')
+              print(f"{mod_id}: verified, pins mixins {revs[mod_id]}")
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f"JEI_MIXINS={revs['jei']}\n")
+              env.write(f"PHYS_MIXINS={revs['horizon_physics']}\n")
+              env.write(f"COMMON_MIXINS={revs['fast_items']}\n")
+          PYCODE
+      - name: Install the pinned mixin compiler
+        run: |
+          # The mods inject shared hook points (native_mods), which must be
+          # woven in ONE compiler pass; sequential passes fail because the
+          # first mod's woven macros make the hook body opaque to the second
+          # compiler. Fast Items' pin drives the whole set: it is the newest
+          # consumer, and its MODIFY_VARIABLE locals need the compiler's
+          # closure-tolerant store scan; every other pin is older and its
+          # manifest is rebound (--force-common-mixins records the rebinds).
+          cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
+            --rev "$COMMON_MIXINS" \
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
+      - name: Weave and build the engine library
+        run: |
+          set -euo pipefail
+          MOD_ARGS=()
+          while IFS='=' read -r mod_id file; do
+            [ -n "$mod_id" ] || continue
+            MOD_ARGS+=(--mod "$mod_id=$RUNNER_TEMP/bundle/$file")
+          done <<< "$WEAVE_SET"
+          while IFS='=' read -r mod_id file; do
+            [ -n "$mod_id" ] || continue
+            MOD_ARGS+=(--mod "$mod_id=$RUNNER_TEMP/bundle/$file")
+          done <<< "$VENDORED_SET"
+          python3 tools/native_mods/build_set.py \
+            --registry "$RUNNER_TEMP/registry" \
+            "${MOD_ARGS[@]}" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
+            --mixins-revision "$COMMON_MIXINS" \
+            --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
+            --trust-native-code --experimental-raw-targets --force-common-mixins
+      - name: Show failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'woven-result'
+          text = '\n'.join(f'{name}:\n' + (root / name).read_text(errors='replace')[-2800:]
+                           for name in ('report.json', 'apply.log', 'build.log') if (root / name).is_file())
+          if text:
+              safe = text[-3500:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print('::error title=Native weave failed::' + safe)
+          PYCODE
+      - name: Upload woven engine library for packaging
+        uses: actions/upload-artifact@v4
+        with:
+          name: _internal-woven-engine-${{ matrix.abi }}
+          path: ${{ runner.temp }}/woven-result/
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: Build APK (${{ matrix.abi }})
+    needs: [plan, prepare, weave]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      HORIZON_TELEMETRY_URL: "off"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Download generated engine tables
+        uses: actions/download-artifact@v4
+        with:
+          name: _internal-engine-tables
+          path: .local/horizon-client
+
+      - name: Verify downloaded engine tables
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          version = json.loads(Path("research-lock.json").read_text(encoding="utf-8"))["minecraft"]["version"]
+          root = Path(".local/horizon-client") / version
+          assert (root / "horizon-resources.json").is_file(), f"Missing {root / 'horizon-resources.json'}"
+          assert (root / "worldgen/blocks/structure-blocks.json").is_file(), f"Missing {root / 'worldgen/blocks/structure-blocks.json'}"
+          PY
+
+      - name: Set up Java 17 for Android SDK and Gradle
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Rust toolchain and Android target
+        run: rustup target add "${{ matrix.target }}"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-apk-${{ matrix.abi }}-${{ needs.plan.outputs.profile }}
+          cache-on-failure: true
+
+      - name: Run touch control and Volt settings unit tests
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys
+          cmds = [
+              ["cargo", "test", "-p", "horizon-theme", "--lib", "glass::"],
+              ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
+              ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
+              ["cargo", "test", "-p", "horizon-client-input", "--lib", "keybinds"],
+              ["cargo", "test", "-p", "horizon-mods", "--features", "index", "--lib", "index::"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "bundled_native"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "translating_ui_subtree_also_moves_depth_scissors"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_mods"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_settings_ui"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_qol"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
+              ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
+          ]
+          for cmd in cmds:
+              proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              sys.stdout.write(proc.stdout)
+              sys.stdout.flush()
+              if proc.returncode != 0:
+                  relevant = "\n".join(
+                      l for l in proc.stdout.splitlines()
+                      if not l.lstrip().startswith(("Compiling ", "Downloading ", "Downloaded "))
+                  )
+                  tail = relevant[-3500:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"\n::error title=Unit test failed ({' '.join(cmd)})::{tail}")
+                  sys.exit(proc.returncode)
+          PY
+          rustc --edition 2024 --test crates/horizon-client/src/game/official_zoom.rs -o "$RUNNER_TEMP/official-zoom-tests"
+          "$RUNNER_TEMP/official-zoom-tests"
+          for mod in fps_overlay keystrokes minimap; do
+            rustc --edition 2024 --test "crates/horizon-client/src/game/official_${mod}.rs" -o "$RUNNER_TEMP/official-${mod}-tests"
+            "$RUNNER_TEMP/official-${mod}-tests"
+          done
+
+      - name: Cache Gradle 8.14 distribution
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/gradle-8.14
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-8.14-caches-v1-${{ runner.os }}-${{ hashFiles('packaging/android/settings.gradle') }}
+          restore-keys: |
+            gradle-8.14-caches-v1-${{ runner.os }}-
+            gradle-8.14-bin-v1
+
+      - name: Install Android SDK components and Gradle 8.14
+        run: |
+          sudo chown -R "$USER:$USER" "$ANDROID_HOME" || true
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+          (yes || true) | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+
+          sdk = Path(os.environ["ANDROID_HOME"])
+          for sub in ("build-tools", "ndk"):
+              folder = sdk / sub
+              if not folder.is_dir():
+                  continue
+              for entry in list(folder.iterdir()):
+                  if not re.fullmatch(r"\d+(?:\.\d+)*", entry.name):
+                      print(f"Removing non-numeric SDK entry {entry}", flush=True)
+                      if entry.is_dir() and not entry.is_symlink():
+                          shutil.rmtree(entry, ignore_errors=True)
+                      else:
+                          entry.unlink(missing_ok=True)
+          PY
+
+          if [ ! -x "$HOME/.cache/gradle-8.14/gradle-8.14/bin/gradle" ]; then
+            mkdir -p "$HOME/.cache/gradle-8.14"
+            curl -fsSL https://services.gradle.org/distributions/gradle-8.14-bin.zip -o "$RUNNER_TEMP/gradle-8.14-bin.zip"
+            unzip -q -o "$RUNNER_TEMP/gradle-8.14-bin.zip" -d "$HOME/.cache/gradle-8.14"
+            rm -f "$RUNNER_TEMP/gradle-8.14-bin.zip"
+          fi
+
+      - name: Restore or derive persistent signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          ks_path = Path(".local/android/debug.keystore")
+          ks_path.parent.mkdir(parents=True, exist_ok=True)
+          ks_path.unlink(missing_ok=True)
+          keytool = Path(os.environ["JAVA_HOME"]) / "bin/keytool"
+
+          raw_b64 = os.environ.get("ANDROID_KEYSTORE_BASE64", "").strip()
+          if raw_b64:
+              ks_path.write_bytes(base64.b64decode(raw_b64))
+          else:
+              SMALL_PRIMES = [
+                  p for p in range(3, 2000, 2)
+                  if all(p % d for d in range(3, int(p ** 0.5) + 1, 2))
+              ]
+
+              def is_probable_prime(n: int) -> bool:
+                  for p in SMALL_PRIMES:
+                      if n % p == 0:
+                          return n == p
+                  d = n - 1
+                  r = (d & -d).bit_length() - 1
+                  d >>= r
+                  for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+                      x = pow(a, d, n)
+                      if x == 1 or x == n - 1:
+                          continue
+                      for _ in range(r - 1):
+                          x = pow(x, 2, n)
+                          if x == n - 1:
+                              break
+                      else:
+                          return False
+                  return True
+
+              def derive_prime(seed: bytes, bits: int = 1024, e: int = 65537) -> int:
+                  counter = 0
+                  blocks = bits // 256
+                  while True:
+                      buf = b"".join(
+                          hashlib.sha256(seed + counter.to_bytes(4, "big") + i.to_bytes(2, "big")).digest()
+                          for i in range(blocks)
+                      )
+                      counter += 1
+                      cand = int.from_bytes(buf, "big")
+                      cand |= (1 << (bits - 1)) | (1 << (bits - 2)) | 1
+                      if (cand - 1) % e != 0 and is_probable_prime(cand):
+                          return cand
+
+              def der_len(n: int) -> bytes:
+                  if n < 0x80:
+                      return bytes([n])
+                  b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+                  return bytes([0x80 | len(b)]) + b
+
+              def der_tlv(tag: int, body: bytes) -> bytes:
+                  return bytes([tag]) + der_len(len(body)) + body
+
+              def der_int(v: int) -> bytes:
+                  b = v.to_bytes(max(1, (v.bit_length() + 7) // 8), "big")
+                  if b[0] & 0x80:
+                      b = b"\x00" + b
+                  return der_tlv(0x02, b)
+
+              def der_seq(*items: bytes) -> bytes:
+                  return der_tlv(0x30, b"".join(items))
+
+              def der_oid(oid: bytes) -> bytes:
+                  return der_tlv(0x06, oid)
+
+              def der_bitstr(b: bytes) -> bytes:
+                  return der_tlv(0x03, b"\x00" + b)
+
+              repo = os.environ.get("SIGNING_REPO", "entitybrian69-bit/Volt-launcher")
+              e = 65537
+              p = derive_prime(f"volt-rsa-p-v1:{repo}".encode(), 1024, e)
+              q = derive_prime(f"volt-rsa-q-v1:{repo}".encode(), 1024, e)
+              if p < q:
+                  p, q = q, p
+              n = p * q
+              phi = (p - 1) * (q - 1)
+              d = pow(e, -1, phi)
+              dp = d % (p - 1)
+              dq = d % (q - 1)
+              qi = pow(q, -1, p)
+
+              rsa_priv = der_seq(
+                  der_int(0), der_int(n), der_int(e), der_int(d),
+                  der_int(p), der_int(q), der_int(dp), der_int(dq), der_int(qi),
+              )
+              rsa_oid = der_seq(der_oid(bytes.fromhex("2a864886f70d010101")), b"\x05\x00")
+              pkcs8_der = der_seq(der_int(0), rsa_oid, der_tlv(0x04, rsa_priv))
+              spki = der_seq(rsa_oid, der_bitstr(der_seq(der_int(n), der_int(e))))
+
+              sha256_rsa = der_seq(der_oid(bytes.fromhex("2a864886f70d01010b")), b"\x05\x00")
+              name = der_seq(der_tlv(0x31, der_seq(
+                  der_oid(bytes.fromhex("550403")),
+                  der_tlv(0x0c, b"Volt Launcher"),
+              )))
+              validity = der_seq(
+                  der_tlv(0x17, b"250101000000Z"),
+                  der_tlv(0x18, b"20550101000000Z"),
+              )
+              tbs = der_seq(
+                  der_tlv(0xa0, der_int(2)),
+                  der_int(1),
+                  sha256_rsa,
+                  name,
+                  validity,
+                  name,
+                  spki,
+              )
+              digest_info = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(tbs).digest()
+              em = b"\x00\x01" + (b"\xff" * (256 - 3 - len(digest_info))) + b"\x00" + digest_info
+              sig_bytes = pow(int.from_bytes(em, "big"), d, n).to_bytes(256, "big")
+              cert_der = der_seq(tbs, sha256_rsa, der_bitstr(sig_bytes))
+
+              with tempfile.TemporaryDirectory() as tmp:
+                  t = Path(tmp)
+                  (t / "key.der").write_bytes(pkcs8_der)
+                  (t / "cert.der").write_bytes(cert_der)
+                  subprocess.run(["openssl", "pkey", "-inform", "DER", "-in", str(t / "key.der"), "-out", str(t / "key.pem")], check=True)
+                  subprocess.run(["openssl", "x509", "-inform", "DER", "-in", str(t / "cert.der"), "-out", str(t / "cert.pem")], check=True)
+                  subprocess.run([
+                      "openssl", "pkcs12", "-export",
+                      "-inkey", str(t / "key.pem"),
+                      "-in", str(t / "cert.pem"),
+                      "-name", "androiddebugkey",
+                      "-passout", "pass:android",
+                      "-out", str(t / "stage.p12"),
+                  ], check=True)
+                  subprocess.run([
+                      str(keytool), "-importkeystore",
+                      "-srckeystore", str(t / "stage.p12"),
+                      "-srcstoretype", "PKCS12",
+                      "-srcstorepass", "android",
+                      "-destkeystore", str(ks_path),
+                      "-deststoretype", "PKCS12",
+                      "-deststorepass", "android",
+                      "-noprompt",
+                  ], check=True)
+
+              print("Persistent signing certificate SHA-256:", hashlib.sha256(cert_der).hexdigest(), flush=True)
+
+          subprocess.run([
+              str(keytool), "-list",
+              "-keystore", str(ks_path),
+              "-storepass", "android",
+              "-alias", "androiddebugkey",
+          ], check=True)
+          PY
+
+      - name: Download woven engine library (pinned registry mods)
+        if: ${{ (matrix.abi == 'arm64-v8a' || matrix.abi == 'armeabi-v7a') && needs.plan.outputs.profile == 'release' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: _internal-woven-engine-${{ matrix.abi }}
+          path: ${{ runner.temp }}/woven
+
+      - name: Verify woven engine library before packaging
+        if: ${{ (matrix.abi == 'arm64-v8a' || matrix.abi == 'armeabi-v7a') && needs.plan.outputs.profile == 'release' }}
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY_VERIFY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "woven"
+          report = json.loads((root / "report.json").read_text(encoding="utf-8"))
+          assert report["status"] == "library_built", f"woven build status: {report['status']}"
+          assert report["volt_commit"] == os.environ["EXPECTED_COMMIT"], (
+              f"woven library built from {report['volt_commit']}, expected {os.environ['EXPECTED_COMMIT']}")
+          mods = {(m["id"], m["version"], m["sha256"]) for m in report["mods"]}
+          expected = {
+              ("jei", "0.1.0",
+               "c5590e0d4618d435fc0c56abcc9cdabf253be694710068a3dd4643ac25466b5b"),
+              ("horizon_physics", "0.15.1",
+               "d7cf1201f0a47a852aa1a4c9684ef9e658ec3c86852104d44716d05f11281ca3"),
+              ("jade", "26.3.5",
+               "676a129f55db075284313a39ff4387674c426ebd9be04a8830ffb8955281c7ec"),
+              ("veinminer", "0.3.2",
+               "31a4249da1b35972ae8b34201373c86352f4adc2f5cb3e015749d1fbfecf00a0"),
+              ("appleskin", "1.0.0",
+               "3c25b916f74f47faf40070a8654c546d15cb79ac3947f140e257f4cb041aeb96"),
+              ("status_effect_hud", "1.0.0",
+               "afa30125bb8b402892f1719e550b66d4eb4d7264895f71bb9c98a4caf5c7b432"),
+              ("toggle_sprint", "1.0.0",
+               "b2a4190f9c19adbceae4a639342b7630bfc3047339eabf57673b7807db5edc6a"),
+              ("inventory_profiles", "1.0.0",
+               "1e5d1c75d05230172820b5bc016d7d3ac792adf473de7dbfb84394d8b795a633"),
+              ("shulker_peek", "0.1.0",
+               "e4e33cb698d91042b2ed2f93a1c935f279d16d83988115d53c0f33530cabeab5"),
+              ("mousetricks", "0.2.0",
+               "48c60955371963f8e320a9efbe8285bb276d255c29178a8a021e7e2b47535cbe"),
+              ("itemnew", "0.1.1",
+               "cdc68c9911736703ebc4b8b81895a719edd74ba9d08fe01ddb34fe09b8d490e9"),
+              ("eatinganimation", "0.1.0",
+               "07ef4fde3ebbc4f132aab593b12187bce15e1a46689ab40bd3067c685aca85b9"),
+              ("enchantmenthints", "0.1.0",
+               "6f1b80a7c22e02b086d5eea2ed6f7c5481b3e40d6a974bf9e382a3df4a2de9df"),
+              ("right_click_crops", "1.0.0",
+               "681ce896c50dd041132900e7bbab71167f133b3f3862f86e8b1a0cac52754b97"),
+              ("smartf3", "0.1.0",
+               "666fc77a12411c8b525dca3d3d478595e760b73c48b62b936fb6026419547929"),
+              ("armor_status", "1.0.0",
+               "82c8672fa2c43d7946a26a560fd56fdd8f34beecf4bcb459c2d508b3d09eeee6"),
+              ("crosshair_indicator", "1.0.0",
+               "96beba1f7c94fca492b552fb12af0d20047dc1799f0801607841d56b12786226"),
+              ("hitbox_plus", "1.3.0",
+               "8d1b95e7461e38fc40994b35a82c1f753a58e9751ce27af1dc101a4717dba8a4"),
+              ("invisible_frames", "0.1.1",
+               "76128b48ce5c826007379c85634b934ae6bad51c134fbaead7c46b36fecd9274"),
+              ("freelook", "0.3.1",
+               "9c0c92ce9f0fc8e7bc1bd34349e26d42b32b8abd2c7a09ec710936f9b6ce9aaf"),
+              ("worldedit", "1.2.1",
+               "b2bb3019ecd4d5392644c54c70a87d6c3277538a6e18d0c311f3a051f7d2f015"),
+              ("horizonmatica", "0.1.1",
+               "2ddc562dd2ea0f9a76a47eb761c64c803def68a8c81b92cb5d15ec26c5d432aa"),
+              ("visuality_horizon", "1.0.2",
+               "b764f15a062e44b27c55f478b2d02e163bfb01c3d8e222fcd6d83bcc66f19a0d"),
+              ("held_item_info", "0.1.0",
+               "37a11d98f0afabe37f8ffa9982dc710ad2985817db6b5e094d807c24d30a6a6a"),
+              ("carryblock", "0.1.2",
+               "9a6ebd26f640a477815862eb36846fe3289046d0f4c06ef3a815f463ca9a3701"),
+              ("chatheads", "0.1.0",
+               "c20605c24e29a762b9aea85cba1b0cc7955955a40a031efae70a5b01e4e79df4"),
+              ("fast_items", "0.1.0",
+               "c3acd8adfeac6450c3a13b5172c8abb298cb3ceb355dfc539b4bdd653ef15502"),
+              ("customhud", "1.6.0",
+               "ab255d3c722b40f4d068a762857d6c027c11381308bfe23196e2974307814a7f"),
+              ("coords_hud", "2.0.0",
+               "432376fad3062b3517e274d3b8c0d0b52fc5d6de2aee20a0b340c8cab5a8cf08"),
+              ("biomecompass", "0.2.2",
+               "d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5"),
+              ("skins_3d", "1.1.0",
+               "ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602"),
+              ("accurate_block_placement", "1.0.0",
+               "e631745f6d267360de6eb51995ee995bf1ab3d64393d287b7b93c332b85939ce"),
+              ("armorhud", "1.0.0",
+               "8bd85e1584f307201bce5de2e60466d603b61d4807803d4ebc02772b4f6b704b"),
+              ("lookat", "0.2.1",
+               "6c15726116825b5955984223d0e1bccd5d18375005af243a061b2ba2b9139f33"),
+              ("blockscope", "0.3.0",
+               "ba4a1c887ab26a2a9189c671cbdbea3ce2ed212a6e3d32f1fffaa60386198358"),
+              ("elytratrails", "0.1.2",
+               "ad6758f1ff0fa1b50750764bf2eb1f78ea94af8ecc84d75a7cc6ec5dcffb31a6"),
+              # Vendored, not registry-published: packed deterministically by
+              # tools/native_mods/pack_vendored.py from the committed source
+              # tree; the sha256 is also pinned in vendored/punchy.toml.
+              ("punchy", "0.1.3",
+               "4c9c75be020e311acfbb5389dd538486f65981651660d15aebaa57cbc79b41e7"),
+          }
+          assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
+          library = root / "libhorizon_android.so"
+          digest = hashlib.sha256(library.read_bytes()).hexdigest()
+          assert digest == report["library_sha256"], "library hash differs from the weave report"
+          print(f"Woven engine library verified: {digest}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"WOVEN_LIB={library}\n")
+          PY_VERIFY
+
+      - name: Compile native Rust library (${{ matrix.abi }})
+        if: ${{ !((matrix.abi == 'arm64-v8a' || matrix.abi == 'armeabi-v7a') && needs.plan.outputs.profile == 'release') }}
+        env:
+          ABI: ${{ matrix.abi }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
+        run: |
+          python3 - <<'PY'
+          from collections import deque
+          import os
+          import subprocess
+          import sys
+
+          cmd = [
+              sys.executable, "tools/android_build.py",
+              "--abi", os.environ["ABI"],
+              "--public",
+              "--profile", os.environ["PROFILE"],
+              "--rust-only",
+              "--sdk", os.environ["ANDROID_HOME"],
+              "--java-home", os.environ["JAVA_HOME"],
+              "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
+          ]
+          tail = deque(maxlen=80)
+          err_lines = []
+          in_err = 0
+          proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+          for line in proc.stdout:
+              sys.stdout.write(line)
+              sys.stdout.flush()
+              stripped = line.rstrip("\r\n")
+              tail.append(stripped)
+              if stripped.startswith("error"):
+                  in_err = 12
+              if in_err > 0 and len(err_lines) < 220:
+                  err_lines.append(stripped)
+                  in_err -= 1
+          rc = proc.wait()
+          if rc != 0:
+              combined = err_lines + ["--- tail ---"] + list(tail) if err_lines else list(tail)
+              escaped = "\n".join(combined).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Rust compile failed (exit {rc})::{escaped}", flush=True)
+              raise SystemExit(rc)
+          PY
+
+      - name: Package, sign, verify and audit public APK (${{ matrix.abi }})
+        env:
+          ABI: ${{ matrix.abi }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
+          RUN_NUMBER: ${{ github.run_number }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          python3 - <<'PY'
+          from collections import deque
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import time
+
+          env = dict(os.environ)
+          abi = os.environ["ABI"]
+          abi_offset = 1 if abi == "arm64-v8a" else 0
+          version_code = 280000 + int(os.environ.get("RUN_NUMBER", "1")) * 2 + abi_offset
+          env["VOLT_VERSION_CODE"] = str(version_code)
+          env["ORG_GRADLE_PROJECT_versionCode"] = str(version_code)
+          gradle_user_dir = Path.home() / ".gradle"
+          init_d = gradle_user_dir / "init.d"
+          init_d.mkdir(parents=True, exist_ok=True)
+          (gradle_user_dir / "gradle.properties").write_text(
+              "\n".join([
+                  f"versionCode={version_code}",
+                  "org.gradle.internal.http.connectionTimeout=120000",
+                  "org.gradle.internal.http.socketTimeout=120000",
+                  "org.gradle.internal.repository.max.tentatives=6",
+                  "org.gradle.internal.repository.initial.backoff=2000",
+                  "",
+              ]),
+              encoding="utf-8",
+          )
+          (init_d / "maven-mirror.gradle").write_text(
+              "\n".join([
+                  "beforeSettings { settings ->",
+                  "    settings.pluginManagement.repositories {",
+                  "        google()",
+                  "        maven { url = uri('https://maven-central.storage-download.googleapis.com/maven2/') }",
+                  "    }",
+                  "    settings.dependencyResolutionManagement.repositories {",
+                  "        google()",
+                  "        maven { url = uri('https://maven-central.storage-download.googleapis.com/maven2/') }",
+                  "    }",
+                  "}",
+                  "",
+              ]),
+              encoding="utf-8",
+          )
+          print(f"Building Volt Launcher with monotonic versionCode={version_code}", flush=True)
+
+          # Branch pushes feed the rolling `debug` release as a SEPARATE app
+          # (ae.net.Voltlauncher.debug): it installs beside the stable launcher
+          # and can never overwrite it. Only `v*` tags build the stable id.
+          is_tag = os.environ.get("IS_TAG", "false").lower() == "true"
+          app_id = "ae.net.Voltlauncher" if is_tag else "ae.net.Voltlauncher.debug"
+          print(f"Packaging applicationId={app_id} (tag build: {is_tag})", flush=True)
+          cmd = [
+              sys.executable, "tools/android_build.py",
+              "--abi", os.environ["ABI"],
+              "--public",
+              "--profile", os.environ["PROFILE"],
+              "--app-id", app_id,
+              "--sdk", os.environ["ANDROID_HOME"],
+              "--java-home", os.environ["JAVA_HOME"],
+              "--gradle", os.path.expanduser("~/.cache/gradle-8.14/gradle-8.14/bin/gradle"),
+          ]
+          if os.environ.get("WOVEN_LIB"):
+              # Attested no-secrets artifact with the pinned registry mods
+              # woven in; packaging must not compile over it.
+              cmd += ["--prebuilt-library", os.environ["WOVEN_LIB"]]
+          rc = 1
+          tail = deque(maxlen=40)
+          for attempt in range(1, 4):
+              tail.clear()
+              proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
+              for line in proc.stdout:
+                  sys.stdout.write(line)
+                  sys.stdout.flush()
+                  tail.append(line.rstrip("\r\n"))
+              rc = proc.wait()
+              if rc == 0:
+                  break
+              print(f"Attempt {attempt}/3 exited with {rc}; retrying after backoff...", flush=True)
+              time.sleep(attempt * 10)
+          if rc != 0:
+              escaped = "\n".join(tail).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=APK package/audit failed (exit {rc})::{escaped}", flush=True)
+              raise SystemExit(rc)
+          PY
+
+      - name: Stage APK release bundle
+        id: stage
+        env:
+          ABI: ${{ matrix.abi }}
+          RUN_NUMBER: ${{ github.run_number }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          import traceback
+          import zipfile
+
+          def run_checked(cmd):
+              proc = subprocess.run(cmd, capture_output=True, text=True)
+              if proc.returncode != 0:
+                  raise RuntimeError(
+                      f"Command {cmd[0]} exited {proc.returncode}:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+                  )
+              return proc.stdout
+
+          try:
+              abi = os.environ["ABI"]
+              run_num = int(os.environ.get("RUN_NUMBER", "1"))
+              abi_offset = 1 if abi == "arm64-v8a" else 0
+              expected_vc = 280000 + run_num * 2 + abi_offset
+              is_tag = os.environ.get("IS_TAG", "false").lower() == "true"
+              app_id = "ae.net.Voltlauncher" if is_tag else "ae.net.Voltlauncher.debug"
+              min_sdk = 27 if abi in ("armeabi-v7a", "x86") else 28
+
+              gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
+              version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
+              src_apk = Path(".local/android/apk") / abi / "horizon-android-public.apk"
+              if not src_apk.is_file():
+                  raise RuntimeError(f"Expected built APK at {src_apk}")
+
+              sdk = Path(os.environ["ANDROID_HOME"])
+              build_tools = max(
+                  (sdk / "build-tools").iterdir(),
+                  key=lambda p: tuple(int(v) for v in p.name.split(".")),
+              )
+              zipalign = build_tools / "zipalign"
+              aapt2 = build_tools / "aapt2"
+              apksigner_jar = build_tools / "lib/apksigner.jar"
+              java = Path(os.environ["JAVA_HOME"]) / "bin/java"
+              keystore = Path(".local/android/debug.keystore")
+
+              dist = Path(".local/android/dist") / abi
+              dist.mkdir(parents=True, exist_ok=True)
+              apk_name = f"Volt-Launcher-{version}-{abi}.apk"
+              dst_apk = dist / apk_name
+
+              def entry_order(info):
+                  fn = info.filename
+                  if fn == "AndroidManifest.xml":
+                      return (0, fn)
+                  if fn == "resources.arsc":
+                      return (1, fn)
+                  if fn.startswith("classes") and fn.endswith(".dex"):
+                      return (2, fn)
+                  if fn.startswith("res/"):
+                      return (3, fn)
+                  if fn.startswith("assets/"):
+                      return (4, fn)
+                  if fn.startswith("lib/"):
+                      return (5, fn)
+                  return (6, fn)
+
+              with tempfile.TemporaryDirectory() as tmp:
+                  t = Path(tmp)
+                  unsigned_apk = t / "unsigned.apk"
+                  aligned_apk = t / "aligned.apk"
+                  with zipfile.ZipFile(src_apk, "r") as zin, zipfile.ZipFile(unsigned_apk, "w") as zout:
+                      for info in sorted(zin.infolist(), key=entry_order):
+                          if info.is_dir():
+                              continue
+                          upper = info.filename.upper()
+                          if upper.startswith("META-INF/") and (
+                              upper == "META-INF/MANIFEST.MF"
+                              or upper.endswith((".SF", ".RSA", ".DSA", ".EC"))
+                              or upper.startswith("META-INF/COM/ANDROID/BUILD/")
+                              or upper == "META-INF/VERSION-CONTROL-INFO.TEXTPROTO"
+                          ):
+                              continue
+                          raw = zin.read(info.filename)
+                          must_store = (
+                              info.filename == "resources.arsc"
+                              or (info.filename.startswith("lib/") and info.filename.endswith(".so"))
+                          )
+                          ctype = zipfile.ZIP_STORED if must_store else info.compress_type
+                          ni = zipfile.ZipInfo(filename=info.filename, date_time=(2025, 1, 1, 0, 0, 0))
+                          ni.compress_type = ctype
+                          ni.external_attr = 0o644 << 16
+                          ni.create_system = 3
+                          zout.writestr(ni, raw, compress_type=ctype)
+
+                  run_checked([str(zipalign), "-P", "16", "-f", "4", str(unsigned_apk), str(aligned_apk)])
+                  run_checked([
+                      str(java), "-jar", str(apksigner_jar), "sign",
+                      "--ks", str(keystore),
+                      "--ks-type", "PKCS12",
+                      "--ks-pass", "pass:android",
+                      "--ks-key-alias", "androiddebugkey",
+                      "--key-pass", "pass:android",
+                      "--min-sdk-version", "21",
+                      "--v1-signing-enabled", "true",
+                      "--v2-signing-enabled", "true",
+                      "--v3-signing-enabled", "false",
+                      "--v4-signing-enabled", "false",
+                      "--out", str(dst_apk),
+                      str(aligned_apk),
+                  ])
+
+              run_checked([str(zipalign), "-c", "-P", "16", "4", str(dst_apk)])
+              run_checked([str(zipalign), "-c", "4", str(dst_apk)])
+              sig_out = run_checked([
+                  str(java), "-jar", str(apksigner_jar), "verify",
+                  "--min-sdk-version", "21",
+                  "--max-sdk-version", "35",
+                  "--verbose", "--print-certs",
+                  str(dst_apk),
+              ])
+              print(sig_out, flush=True)
+              for scheme in (
+                  "Verified using v1 scheme (JAR signing): true",
+                  "Verified using v2 scheme (APK Signature Scheme v2): true",
+                  "Verified using v3 scheme (APK Signature Scheme v3): false",
+              ):
+                  if scheme not in sig_out:
+                      raise RuntimeError(f"Unexpected APK signature scheme state: {scheme}\n{sig_out}")
+
+              run_checked([
+                  str(java), "-jar", str(apksigner_jar), "verify",
+                  "--min-sdk-version", str(min_sdk),
+                  "--max-sdk-version", "35",
+                  "--verbose",
+                  str(dst_apk),
+              ])
+
+              badging = run_checked([str(aapt2), "dump", "badging", str(dst_apk)])
+              pkg_line = badging.splitlines()[0] if badging.splitlines() else ""
+              if f"package: name='{app_id}'" not in pkg_line:
+                  raise RuntimeError(f"APK package mismatch: expected {app_id} ({pkg_line})")
+              vc_match = re.search(r"versionCode='(\d+)'", pkg_line)
+              vn_match = re.search(r"versionName='([^']+)'", pkg_line)
+              actual_vc = int(vc_match.group(1)) if vc_match else -1
+              actual_vn = vn_match.group(1) if vn_match else ""
+              if actual_vc != expected_vc:
+                  raise RuntimeError(f"APK versionCode mismatch: expected {expected_vc}, got {actual_vc} ({pkg_line})")
+              if actual_vn != version:
+                  raise RuntimeError(f"APK versionName mismatch: expected {version}, got {actual_vn} ({pkg_line})")
+
+              run_checked([sys.executable, "tools/check_android_release.py", str(dst_apk), "--aapt2", str(aapt2), "--public", "--app-id", app_id])
+              with zipfile.ZipFile(dst_apk, "r") as zverify:
+                  bad_entry = zverify.testzip()
+                  if bad_entry is not None:
+                      raise RuntimeError(f"Corrupted ZIP entry in staged APK: {bad_entry}")
+
+              shutil.copy2("LICENSE", dist / "LICENSE.txt")
+              shutil.copy2("THIRD_PARTY_NOTICES.md", dist / "THIRD_PARTY_NOTICES.md")
+
+              sha256 = hashlib.sha256(dst_apk.read_bytes()).hexdigest()
+              size_bytes = dst_apk.stat().st_size
+              size_mib = size_bytes / (1024 * 1024)
+              (dist / "SHA256SUMS.txt").write_text(f"{sha256}  {apk_name}\n", encoding="utf-8")
+
+              cert_match = re.search(r"SHA-256 digest:\s*([0-9a-fA-F]+)", sig_out)
+              cert_sha = cert_match.group(1).lower() if cert_match else "unknown"
+              notice_msg = (
+                  f"apk={apk_name} pkg={pkg_line} zipalign16=OK v1=true v2=true v3=false "
+                  f"cert_sha256={cert_sha} bytes={size_bytes} sha256={sha256}"
+              )
+              print(f"\n::notice title=APK Verified::{notice_msg}\n", flush=True)
+
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+                  out.write(f"version={version}\n")
+                  out.write(f"apk_name={apk_name}\n")
+                  out.write(f"sha256={sha256}\n")
+                  out.write(f"size_mib={size_mib:.2f}\n")
+
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write(f"### Built `{apk_name}` (`{app_id}`)\n\n")
+                  summary.write(f"- **Package ID:** `{app_id}`\n")
+                  summary.write(f"- **ABI:** `{abi}`\n")
+                  summary.write(f"- **Version:** `{version}` (`versionCode={actual_vc}`)\n")
+                  summary.write(f"- **Signatures:** `v1 + v2` (`zipalign -P 16 4` verified, 16 KB page-ready)\n")
+                  summary.write(f"- **Cert SHA-256:** `{cert_sha}`\n")
+                  summary.write(f"- **Size:** `{size_mib:.2f} MiB` (`{size_bytes}` bytes)\n")
+                  summary.write(f"- **SHA-256:** `{sha256}`\n")
+          except BaseException:
+              tb = traceback.format_exc()
+              sys.stderr.write(tb)
+              escaped = tb.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"\n::error title=Stage APK failed::{escaped}\n", flush=True)
+              raise SystemExit(1)
+          PY
+
+      - name: Verify live Android upgrade over v0.7.6-build.939d02a (${{ matrix.abi }})
+        if: matrix.abi == 'arm64-v8a'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_NAME: ${{ steps.stage.outputs.apk_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import tempfile
+          import time
+          import traceback
+
+          def esc(s: str) -> str:
+              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+          sdk = Path(os.environ["ANDROID_HOME"])
+          adb = str(sdk / "platform-tools/adb")
+          new_apk = Path(".local/android/dist/arm64-v8a") / os.environ["APK_NAME"]
+          # Debug-channel builds are a separate app (ae.net.Voltlauncher.debug):
+          # the in-place upgrade over the stable baseline only applies to tags.
+          is_tag = os.environ.get("IS_TAG", "false").lower() == "true"
+          app_id = "ae.net.Voltlauncher" if is_tag else "ae.net.Voltlauncher.debug"
+          tmp = Path(tempfile.mkdtemp())
+          emu = None
+          elog = None
+          try:
+              old_apk = None
+              if is_tag:
+                  old_dir = tmp / "old"
+                  old_dir.mkdir()
+                  dl = subprocess.run(
+                      ["gh", "release", "download", "v0.7.6-build.939d02a", "-p", "*.apk", "-D", str(old_dir)],
+                      capture_output=True, text=True,
+                  )
+                  old_apk = next(old_dir.glob("*.apk"), None) if dl.returncode == 0 else None
+
+              sdkmgr = str(sdk / "cmdline-tools/latest/bin/sdkmanager")
+              if not Path(sdkmgr).is_file():
+                  sdkmgr = shutil.which("sdkmanager") or str(next(sdk.glob("cmdline-tools/*/bin/sdkmanager")))
+              avdmgr = str(Path(sdkmgr).with_name("avdmanager"))
+              subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=False)
+              avd_home = tmp / "avd"
+              avd_home.mkdir()
+              env = dict(os.environ)
+              env["ANDROID_SDK_ROOT"] = str(sdk)
+              env["ANDROID_AVD_HOME"] = str(avd_home)
+              subprocess.run(
+                  f"(yes || true) | '{sdkmgr}' 'platform-tools' 'emulator' 'system-images;android-34;google_apis;x86_64' >/dev/null 2>&1",
+                  shell=True, check=True, env=env,
+              )
+              subprocess.run(
+                  f"echo no | '{avdmgr}' create avd -f -n verify34 -p '{avd_home / 'verify34.avd'}' -k 'system-images;android-34;google_apis;x86_64' >/dev/null 2>&1",
+                  shell=True, check=True, env=env,
+              )
+              emu_log = tmp / "emu.log"
+              elog = open(emu_log, "w")
+              emu = subprocess.Popen(
+                  [
+                      str(sdk / "emulator/emulator"), "-avd", "verify34",
+                      "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot",
+                      "-gpu", "swiftshader_indirect", "-memory", "2048",
+                  ],
+                  stdout=elog, stderr=subprocess.STDOUT, env=env,
+              )
+              subprocess.run([adb, "start-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+              for _ in range(90):
+                  if emu.poll() is not None:
+                      elog.flush()
+                      raise RuntimeError(f"Emulator exited ({emu.returncode}):\n{emu_log.read_text()[-2000:]}")
+                  if subprocess.run([adb, "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True).stdout.strip() == "1":
+                      break
+                  time.sleep(2)
+              else:
+                  elog.flush()
+                  raise RuntimeError("Emulator boot timeout")
+
+              for _ in range(30):
+                  if subprocess.run([adb, "shell", "pm", "path", "android"], capture_output=True, text=True).stdout.strip().startswith("package:"):
+                      break
+                  time.sleep(1)
+
+              notes = []
+              if old_apk is not None:
+                  r_old = subprocess.run([adb, "install", str(old_apk)], capture_output=True, text=True)
+                  if r_old.returncode != 0:
+                      raise RuntimeError(f"Install of baseline 939d02a failed: {r_old.stdout} {r_old.stderr}")
+                  notes.append("baseline_939d02a=Success")
+
+              r_new = subprocess.run([adb, "install", "-r", str(new_apk)], capture_output=True, text=True)
+              if r_new.returncode != 0:
+                  raise RuntimeError(f"Install of {new_apk.name} ({app_id}) failed: {r_new.stdout} {r_new.stderr}")
+              notes.append(f"{'upgrade' if is_tag else 'install'}_{new_apk.name}=Success")
+
+              subprocess.run([adb, "logcat", "-c"], check=False)
+              launch = subprocess.run(
+                  [adb, "shell", "am", "start", "-W", "-n", f"{app_id}/com.google.androidgamesdk.GameActivity"],
+                  capture_output=True, text=True,
+              )
+              time.sleep(2)
+              crash_lc = subprocess.run([adb, "logcat", "-d", "-s", "AndroidRuntime:E"], capture_output=True, text=True).stdout
+              if "UnsatisfiedLinkError" in crash_lc or "ClassNotFoundException" in crash_lc:
+                  raise RuntimeError(f"Runtime crash after upgrade:\n{crash_lc}")
+              notes.append(f"launch_rc={launch.returncode}")
+              # Keep a visual debugging artifact, separate from release APKs.
+              # It is not a pixel-parity or physical-device test.
+              time.sleep(10)
+              shot = subprocess.run([adb, "exec-out", "screencap", "-p"], capture_output=True)
+              if shot.returncode == 0 and shot.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+                  visual = Path(".local/android/launcher-preview")
+                  visual.mkdir(parents=True, exist_ok=True)
+                  (visual / "launcher.png").write_bytes(shot.stdout)
+              print(f"\n::notice title=Live Upgrade Verified::{esc(' | '.join(notes))}\n", flush=True)
+          except BaseException:
+              tb = traceback.format_exc()
+              print(f"\n::error title=Live Upgrade Check Failed::{esc(tb[:2500])}\n", flush=True)
+              raise SystemExit(1)
+          finally:
+              if emu is not None:
+                  emu.kill()
+                  emu.wait(timeout=10)
+              if elog is not None:
+                  elog.close()
+              subprocess.run([adb, "kill-server"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+          PY
+
+      - name: Upload launcher preview for visual review
+        if: matrix.abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-emulator-preview
+          path: .local/android/launcher-preview/launcher.png
+          if-no-files-found: warn
+
+      - name: Upload APK artifact (${{ matrix.abi }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: Volt-Launcher-${{ steps.stage.outputs.version }}-${{ matrix.abi }}
+          path: .local/android/dist/${{ matrix.abi }}/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    if: needs.plan.outputs.publish_release == 'true'
+    needs: [plan, build, worldgen-test, runtime-proof]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Download built APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Volt-Launcher-*
+          path: .local/android/release-collect
+          merge-multiple: true
+
+      - name: Assemble release attachments and checksums
+        id: bundle
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          SHA_SHORT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import zipfile
+
+          collect = Path(".local/android/release-collect")
+          apks = sorted(collect.glob("Volt-Launcher-*.apk"))
+          if not apks:
+              raise SystemExit("No APKs found to publish")
+
+          for p in apks:
+              if p.stat().st_size < 10 * 1024 * 1024:
+                  raise SystemExit(f"APK {p.name} unexpectedly small ({p.stat().st_size} bytes)")
+              with zipfile.ZipFile(p, "r") as zf:
+                  bad = zf.testzip()
+                  if bad is not None:
+                      raise SystemExit(f"APK {p.name} failed CRC check at {bad}")
+
+          gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
+          version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
+
+          is_tag = os.environ["IS_TAG"].lower() == "true"
+          if not is_tag:
+              # Testing builds publish to the single rolling `debug` release:
+              # constant asset names, so nothing stale survives a version bump.
+              renamed = []
+              for p in apks:
+                  q = p.with_name(p.name.replace(f"Volt-Launcher-{version}-", "Volt-Launcher-debug-"))
+                  p.rename(q)
+                  renamed.append(q)
+              apks = renamed
+
+          # The Biomes Unseen content mod ships beside the APKs: the same
+          # .hmod the worldgen-test job verifies (docs/biomes_unseen/).
+          hmod = Path("crates/horizon-client/testdata/biomes_unseen.hmod")
+          with zipfile.ZipFile(hmod, "r") as zf:
+              if zf.testzip() is not None:
+                  raise SystemExit("biomes_unseen.hmod failed CRC check")
+          target = collect / "biomes_unseen.hmod"
+          target.write_bytes(hmod.read_bytes())
+
+          summed = apks + [target]
+          sums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in summed)
+          (collect / "SHA256SUMS.txt").write_text(sums, encoding="utf-8")
+
+          # Full releases come only from `v*` tags; everything else refreshes
+          # the single rolling `debug` release. No pre-releases, ever.
+          tag = os.environ["REF_NAME"] if is_tag else "debug"
+          title = (
+              f"Volt Launcher {tag}"
+              if is_tag
+              else f"Volt Launcher Debug Build ({version} @ {os.environ['SHA_SHORT'][:7]})"
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"tag={tag}\n")
+              out.write(f"title={title}\n")
+              out.write(f"channel={'stable' if is_tag else 'debug'}\n")
+          PY
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bundle.outputs.tag }}
+          TITLE: ${{ steps.bundle.outputs.title }}
+          CHANNEL: ${{ steps.bundle.outputs.channel }}
+        run: |
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          if [ "$CHANNEL" = "stable" ] && [ -f "docs/RELEASE-NOTES-$TAG.md" ]; then
+            # Full tagged releases ship hand-written notes (also shown verbatim
+            # by the in-app update popup's What's New list).
+            cp "docs/RELEASE-NOTES-$TAG.md" "$NOTES_FILE"
+          else
+          cat > "$NOTES_FILE" <<'EOF'
+          ### Debug build — for testing only
+
+          Rolling testing build, replaced on every push. Not a release:
+          install the APK for your device to test the newest changes. Stable
+          downloads live on the latest `v*` release.
+
+          This build is a **separate app** (`ae.net.Voltlauncher.debug`, shown
+          as "Volt Debug"): it installs next to the stable Volt Launcher and
+          never replaces it. Your stable install, worlds and settings are
+          untouched; the debug app keeps its own data.
+
+          This APK includes selected native Volt features inspired by third-party mods.
+          The catalog does **not** implement all original mods, their complete settings
+          screens, or all keybindings. Most entries still use placeholder icons.
+          Original icons are included for AppleSkin, Armor HUD, Low Fire, Mod Menu,
+          ShulkerBoxTooltip, Language Reload, FastQuit, BetterF3, Better Ping Display,
+          Controlling, Mouse Tweaks, No Fog, FerriteCore, Dynamic FPS, BadOptimizations,
+          Screenshot to Clipboard, Chat Heads, and Better Clouds; see THIRD_PARTY_NOTICES.md.
+
+          **Biomes Unseen** (`biomes_unseen.hmod`, attached): 44 data-driven biomes
+          (39 Overworld, 5 Nether), 176 blocks and 29 items. The APK does not bundle
+          it. Install on Android: copy the asset link above, open Volt Launcher >
+          Mods, paste the HTTPS URL and tap Import .hmod; then enable Biomes Unseen
+          in Installed (or the game's Options > Mods) and create a new world.
+          EOF
+          sed -i 's/^          //' "$NOTES_FILE"
+          printf '\nBuilt from commit `%s`.\n' "${GITHUB_SHA::7}" >> "$NOTES_FILE"
+          fi
+          if [ "$CHANNEL" = "debug" ]; then
+            # One rolling debug release: delete and recreate so no stale
+            # assets or tag ever linger. Never marked pre-release, never
+            # marked Latest — the newest v* release keeps that spot.
+            gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+            sleep 5
+            gh release create "$TAG" \
+              .local/android/release-collect/Volt-Launcher-*.apk \
+              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/SHA256SUMS.txt \
+              .local/android/release-collect/LICENSE.txt \
+              .local/android/release-collect/THIRD_PARTY_NOTICES.md \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --target "$GITHUB_SHA" \
+              --latest=false
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              .local/android/release-collect/Volt-Launcher-*.apk \
+              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/SHA256SUMS.txt \
+              .local/android/release-collect/LICENSE.txt \
+              .local/android/release-collect/THIRD_PARTY_NOTICES.md \
+              --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$TAG" \
+              .local/android/release-collect/Volt-Launcher-*.apk \
+              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/SHA256SUMS.txt \
+              .local/android/release-collect/LICENSE.txt \
+              .local/android/release-collect/THIRD_PARTY_NOTICES.md \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE"
+          fi

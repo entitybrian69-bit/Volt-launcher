@@ -445,6 +445,7 @@ impl VanillaTerrain {
         let terrain = Arc::downgrade(self);
         let spawned = std::thread::Builder::new()
             .name("Ring search".into())
+            .stack_size(4 * 1024 * 1024)
             .spawn(move || {
                 horizon_threads::idle_current();
                 loop {

@@ -1026,15 +1026,26 @@ const TAG_BUNDLES: [&str; 2] = ["block-tags.json", "worldgen/block_tags.json"];
 const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// Worldgen registries a content mod may add to, and the bundle the
 /// worldgen loader reads each from (id → the file's text): what structure
-/// mods hold. Biomes, noise and density functions change the terrain and
-/// are not read from mods.
-const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
+/// mods hold. Noise and density functions change the terrain shape and
+/// are not read from mods, but a mod may register its own biomes
+/// (`worldgen/biome/<name>.json`, the vanilla biome codec shape). A biome
+/// file may also carry `horizon:climate` (see `ClimateEntry`): the
+/// multi-noise parameter ranges at which the biome is placed, and
+/// `horizon:dimension` (`minecraft:overworld` by default, or
+/// `minecraft:the_nether`). Both keys are stripped before the biome joins
+/// the bundle, and the climate ranges are appended (quantized, as
+/// `GeneratorData`'s preset tables are) to that dimension's preset in
+/// `presets.json` when the root is built, so a data-only `.hmod` biome
+/// generates on PC and Android alike with no native code.
+const WORLDGEN_BUNDLES: [(&str, &str); 8] = [
     ("structure", "worldgen/structures.json"),
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
     ("processor_list", "worldgen/processor_lists.json"),
     ("configured_feature", "worldgen/features.json"),
+    ("feature", "worldgen/features.json"),
     ("placed_feature", "worldgen/placed_features.json"),
+    ("biome", "worldgen/biomes.json"),
 ];
 
 /// The registry of `command-registries.json` that each bundle's ids join,
@@ -1059,6 +1070,217 @@ const COMMAND_REGISTRIES: [(&str, &str); 6] = [
         "minecraft:worldgen/placed_feature",
     ),
 ];
+
+/// One mod biome's placement in a dimension's multi-noise preset, from
+/// its `horizon:climate` object: each of the six climate fields is a
+/// `[min, max]` pair (or one number for a point), plus an `offset`.
+struct ClimateEntry {
+    preset: String,
+    biome: String,
+    coordinates: Vec<(f64, f64)>,
+    offset: f64,
+}
+impl ClimateEntry {
+    /// Reads and strips `horizon:climate`/`horizon:dimension` from a mod
+    /// biome's text. `Ok(None)`: no climate keys (the biome registers but
+    /// is placed by nothing, as a datapack biome nobody lists is).
+    fn take(id: &str, text: &str) -> Result<Option<(Self, String)>> {
+        if !text.contains("horizon:climate") && !text.contains("horizon:dimension") {
+            return Ok(None);
+        }
+        let mut doc: J = serde_json::from_str(text).map_err(|e| format!("{id}: {e}"))?;
+        let dim = match doc.get("horizon:dimension") {
+            Some(J::Str(d)) => d.clone(),
+            _ => "minecraft:overworld".to_owned(),
+        };
+        // The multi-noise parameter lists are registered as
+        // `minecraft:overworld` and `minecraft:nether` (NOT `the_nether`;
+        // `biome_source/codec.rs` names the built-in preset holders), so
+        // the nether DIMENSION maps to the `minecraft:nether` TABLE.
+        let preset = match dim.as_str() {
+            "minecraft:overworld" => dim.clone(),
+            "minecraft:the_nether" => "minecraft:nether".to_owned(),
+            other => return Err(format!("{id}: horizon:dimension {other:?} has no multi-noise preset").into()),
+        };
+        let Some(climate) = doc.get("horizon:climate").cloned() else {
+            return Ok(None);
+        };
+        let num = |v: &J| match v { J::Num(n) => n.as_f64().filter(|n| n.is_finite() && (-2.0..=2.0).contains(n)), _ => None };
+        let mut coordinates = Vec::new();
+        for key in ["temperature", "humidity", "continentalness", "erosion", "depth", "weirdness"] {
+            let range = match climate.get(key) {
+                Some(J::Arr(a)) if a.len() == 2 => (num(&a[0]), num(&a[1])),
+                Some(v) => (num(v), num(v)),
+                None => (Some(-2.0), Some(2.0)),
+            };
+            let (Some(lo), Some(hi)) = range else {
+                return Err(format!("{id}: horizon:climate.{key}: not a [min, max] pair in -2..=2").into());
+            };
+            if lo > hi {
+                return Err(format!("{id}: horizon:climate.{key}: min {lo} > max {hi}").into());
+            }
+            coordinates.push((lo, hi));
+        }
+        let offset = match climate.get("offset") { Some(v) => num(v), None => Some(0.0) }
+            .ok_or_else(|| format!("{id}: horizon:climate.offset: not a number in -2..=2"))?;
+        if let J::Obj(fields) = &mut doc {
+            fields.retain(|(k, _)| k != "horizon:climate" && k != "horizon:dimension");
+        }
+        Ok(Some((Self { preset, biome: id.to_owned(), coordinates, offset },
+                 serde_json::to_string(&doc)?)))
+    }
+    /// This entry in the quantized preset-table shape
+    /// (`[{"coordinates":[[min,max];6],"offset":long,"biome":id}]`),
+    /// quantized as vanilla's `quantizeCoord` (`(v * 10_000.0) as i64`,
+    /// `horizon_world::worldgen::climate::quantize`).
+    fn quantized(&self) -> J {
+        let q = |v: f64| J::Num(((v as f32 * 10_000.0) as i64).into());
+        J::Obj(vec![
+            ("coordinates".into(), J::Arr(self.coordinates.iter()
+                .map(|(lo, hi)| J::Arr(vec![q(*lo), q(*hi)])).collect())),
+            ("offset".into(), q(self.offset)),
+            ("biome".into(), J::Str(self.biome.clone())),
+        ])
+    }
+}
+
+/// One preset's quantized table text with mod biomes' climate entries
+/// appended at the end: an added biome wins only where its ranges are the
+/// closest match, as a datapack's appended entries do.
+fn append_climates(text: &str, preset: &str, entries: &[&ClimateEntry]) -> Result<String> {
+    let mut table: J =
+        serde_json::from_str(text).map_err(|e| format!("presets.json {preset}: {e}"))?;
+    let J::Arr(list) = &mut table else {
+        return Err(format!("presets.json {preset}: not a biome parameter list").into());
+    };
+    list.extend(entries.iter().map(|e| e.quantized()));
+    Ok(serde_json::to_string(&table)?)
+}
+
+/// The client's creative inventory export (`crate::creative::Creative::load`
+/// reads it from the root): [`build`] adds every mod item so the creative
+/// screens offer them.
+const CREATIVE: &str = "creative-inventory.json";
+
+/// The item id leading a `creative-inventory.json` stack string
+/// (`minecraft:oak_planks`, possibly followed by SNBT components).
+fn stack_item(snbt: &str) -> &str {
+    let end = snbt
+        .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "_.:/-".contains(c)))
+        .unwrap_or(snbt.len());
+    &snbt[..end]
+}
+
+/// Mod items join the creative inventory export: each appears in every
+/// CATEGORY tab holding its vanilla template item, right after it, and in
+/// the SEARCH tab (after the template, or appended when the template is
+/// not listed) under its id-derived name. `entries` are `(mod item id,
+/// vanilla template item id)` in registry order. The per-item arrays a
+/// SEARCH tab carries (`lines`, `tags`) and every tab's
+/// `permissions_only` indices stay aligned with the items.
+fn append_creative(doc: &mut J, entries: &[(String, String)]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let Some(J::Arr(tabs)) = doc.get_mut("tabs") else {
+        return vec![format!("{CREATIVE}: no tabs; mod items not added")];
+    };
+    let mut in_category: BTreeSet<usize> = BTreeSet::new();
+    let mut in_search: BTreeSet<usize> = BTreeSet::new();
+    for tab in tabs.iter_mut() {
+        let kind = match tab.get("type") {
+            Some(J::Str(s)) => s.clone(),
+            _ => continue,
+        };
+        if kind != "CATEGORY" && kind != "SEARCH" {
+            continue;
+        }
+        let search = kind == "SEARCH";
+        let Some(J::Arr(items)) = tab.get("items") else {
+            continue;
+        };
+        let old: Vec<String> = items
+            .iter()
+            .map(|v| match v {
+                J::Str(s) => stack_item(s).to_owned(),
+                _ => String::new(),
+            })
+            .collect();
+        // The new item list: Ok(old index) kept, Err(entry index) inserted.
+        let mut slots: Vec<std::result::Result<usize, usize>> = Vec::new();
+        for (i, id) in old.iter().enumerate() {
+            slots.push(Ok(i));
+            // Only the template's first listing takes the mod items.
+            if id.is_empty() || old[..i].contains(id) {
+                continue;
+            }
+            for (k, (_, from)) in entries.iter().enumerate() {
+                if from == id {
+                    slots.push(Err(k));
+                    (if search { &mut in_search } else { &mut in_category }).insert(k);
+                }
+            }
+        }
+        if search {
+            for (k, (to, _)) in entries.iter().enumerate() {
+                if in_search.insert(k) {
+                    slots.push(Err(k));
+                    warnings.push(format!(
+                        "{CREATIVE}: {to}: its template is not in the search tab; appended at its end"
+                    ));
+                }
+            }
+        }
+        if slots.len() == old.len() {
+            continue;
+        }
+        // Rebuild the arrays that align with the items.
+        let name = |k: usize| {
+            let (to, _) = &entries[k];
+            to.split(':').next_back().unwrap_or(to).replace('_', " ")
+        };
+        for key in ["items", "lines", "tags"] {
+            let Some(J::Arr(a)) = tab.get_mut(key) else {
+                continue;
+            };
+            if key != "items" && a.len() != old.len() {
+                continue;
+            }
+            let mut rebuilt = Vec::with_capacity(slots.len());
+            for slot in &slots {
+                rebuilt.push(match (key, slot) {
+                    (_, Ok(i)) => a[*i].clone(),
+                    ("items", Err(k)) => J::Str(entries[*k].0.clone()),
+                    ("lines", Err(k)) => J::Arr(vec![J::Str(name(*k))]),
+                    (_, Err(_)) => J::Arr(Vec::new()),
+                });
+            }
+            *a = rebuilt;
+        }
+        // The operator-only indices move with the items they point at.
+        let position: BTreeMap<usize, usize> = slots
+            .iter()
+            .enumerate()
+            .filter_map(|(new, slot)| slot.ok().map(|old| (old, new)))
+            .collect();
+        if let Some(J::Arr(only)) = tab.get_mut("permissions_only") {
+            for v in only.iter_mut() {
+                if let J::Num(n) = v
+                    && let Some(old_index) = n.as_u64()
+                    && let Some(new_index) = position.get(&(old_index as usize))
+                {
+                    *n = (*new_index as u64).into();
+                }
+            }
+        }
+    }
+    for (k, (to, from)) in entries.iter().enumerate() {
+        if !in_category.contains(&k) {
+            warnings.push(format!(
+                "{CREATIVE}: {to}: template {from} is in no category tab; search only"
+            ));
+        }
+    }
+    warnings
+}
 
 /// A mod file that adds to a worldgen bundle: (bundle, id).
 fn worldgen_entry(file: &str) -> Option<(&'static str, String)> {
@@ -1457,6 +1679,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     let mut tags: BTreeMap<String, TagMerge> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
+    let mut climates: Vec<ClimateEntry> = Vec::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     for m in mods {
         let declarations = format!("data/{}/horizon/", m.id);
@@ -1481,6 +1704,12 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                     let entries = worldgen.entry(bundle).or_default();
                     match Addition::read(bundle, &text).map_err(|e| format!("{file}: {e}"))? {
                         Some(addition) => additions.entry(bundle).or_default().push(addition),
+                        None if bundle == "worldgen/biomes.json" => {
+                            match ClimateEntry::take(&id, &text).map_err(|e| format!("{file}: {e}"))? {
+                                Some((entry, stripped)) => { climates.push(entry); entries.push((id, stripped)); }
+                                None => entries.push((id, text)),
+                            }
+                        }
                         None => entries.push((id, text)),
                     }
                 } else if let Some(template) = file
@@ -1563,6 +1792,10 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     // what mods add to sets and pools, in mod and file order.
     for (bundle, entries) in &worldgen {
         if !base.join(bundle).exists() {
+            warnings.push(format!(
+                "{bundle} is not in the base: {} mod entr(y/ies) dropped",
+                entries.len()
+            ));
             continue;
         }
         let mut doc = read_json(&base.join(bundle))?;
@@ -1575,6 +1808,93 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 .map_err(|e| format!("{bundle}: {e}"))?;
         }
         overlay.write(bundle, &serde_json::to_vec(&doc)?)?;
+    }
+    // Mod biomes' climate ranges go at the end of their dimension's
+    // multi-noise preset table: an added biome wins only where its ranges
+    // are the closest match, as a datapack's appended entries do. The
+    // tables live in the worldgen bundle (`GeneratorData::load` reads
+    // `<root>/worldgen/presets.json`).
+    const PRESETS: &str = "worldgen/presets.json";
+    if !climates.is_empty() {
+        // Roots without the quantized tables ship only the data-generator
+        // reports (the public Android APK bundles `worldgen/biome_parameters/
+        // {overworld,nether}.json`, never `worldgen/presets.json`; the
+        // generator quantizes the reports itself at load). Synthesize the
+        // bundle here with the generator's own quantizer: once the overlay
+        // holds `presets.json`, `GeneratorData::load_with` prefers it and
+        // the appended mod biomes reach the device's worlds too.
+        let mut doc = if base.join(PRESETS).exists() {
+            read_json(&base.join(PRESETS))?
+        } else {
+            let mut doc = J::Obj(Vec::new());
+            for dir in [
+                base.join("worldgen/biome_parameters"),
+                base.join("biome-parameters"),
+            ] {
+                let Ok(read) = fs::read_dir(&dir) else { continue };
+                let mut reports: Vec<std::path::PathBuf> =
+                    read.flatten().map(|e| e.path()).collect();
+                reports.sort();
+                for path in reports {
+                    let Some(stem) = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .filter(|_| path.extension().is_some_and(|e| e == "json"))
+                    else {
+                        continue;
+                    };
+                    let id = format!("minecraft:{stem}");
+                    if doc.get(&id).is_some() {
+                        continue;
+                    }
+                    let table =
+                        horizon_world::worldgen::generator::quantize_biome_parameter_report(
+                            &fs::read_to_string(&path)?,
+                        )
+                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    doc.set(&id, J::Str(table));
+                }
+            }
+            doc
+        };
+        let mut by_preset: BTreeMap<&str, Vec<&ClimateEntry>> = BTreeMap::new();
+        for entry in &climates { by_preset.entry(&entry.preset).or_default().push(entry); }
+        let mut patched = false;
+        for (preset, entries) in by_preset {
+            let Some(J::Str(text)) = doc.get(preset) else {
+                warnings.push(format!(
+                    "{preset}: no multi-noise table in the base (neither {PRESETS} nor a \
+                     biome_parameters report): {} mod biome(s) stay unplaced",
+                    entries.len()
+                ));
+                continue;
+            };
+            let table = append_climates(text, preset, &entries)?;
+            doc.set(preset, J::Str(table));
+            patched = true;
+        }
+        if patched {
+            overlay.write(PRESETS, &serde_json::to_vec(&doc)?)?;
+        }
+    }
+    // Mod items join the creative screens: each next to its vanilla
+    // template item (`crate::creative::Creative::load` reads the export
+    // from the root).
+    if !plan.items.is_empty() {
+        if base.join(CREATIVE).exists() {
+            let mut doc = read_json(&base.join(CREATIVE))?;
+            let entries: Vec<(String, String)> = plan
+                .items
+                .iter()
+                .map(|i| (i.rename.to.clone(), i.rename.from.clone()))
+                .collect();
+            warnings.extend(append_creative(&mut doc, &entries));
+            overlay.write(CREATIVE, &serde_json::to_vec(&doc)?)?;
+        } else {
+            warnings.push(format!(
+                "{CREATIVE} is not in the base: mod items stay out of the creative screens"
+            ));
+        }
     }
     // The commands suggest ids from `command-registries.json`: add the
     // structures, pools, sets and features the mods bring.
@@ -1671,6 +1991,78 @@ pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<P
 
 /// In a root built by [`build`]: its warnings, one per line.
 const WARNINGS: &str = "horizon-mod-content-warnings.txt";
+
+/// The plain-text report `game/mods.rs::content_root` writes beside
+/// `options.txt` at startup (and again on a pack reload, and when a world
+/// opens): what each content mod actually loaded, with the reason when one
+/// was skipped or refused. The launcher's Installed page shows the per-mod
+/// lines; the player can send the file when something looks wrong.
+pub const REPORT_FILE: &str = "volt-mods-report.txt";
+
+/// A built root's warnings, for the report (empty when the root is the
+/// plain base or holds none).
+pub fn root_warnings(root: &Path) -> Vec<String> {
+    fs::read_to_string(root.join(WARNINGS))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// How many distinct `<ns>:` ids of `namespaces` a built root's creative
+/// export lists: the items [`build`] added to the category and search tabs.
+pub fn creative_count(root: &Path, namespaces: &[String]) -> usize {
+    let Ok(text) = fs::read_to_string(root.join(CREATIVE)) else {
+        return 0;
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    for ns in namespaces {
+        let needle = format!("\"{ns}:");
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find(&needle) {
+            let tail = &rest[i + 1..];
+            let end = tail.find('"').unwrap_or(tail.len());
+            if let Some(id) = tail[..end].split_whitespace().next() {
+                ids.insert(id.to_owned());
+            }
+            rest = &rest[i + needle.len()..];
+        }
+    }
+    ids.len()
+}
+
+/// Per multi-noise preset table, how many placed entries of `namespaces` a
+/// built root holds: the biomes a new world can actually generate.
+pub fn placed_biomes(root: &Path, namespaces: &[String]) -> Vec<(String, usize)> {
+    let Ok(text) = fs::read_to_string(root.join("worldgen/presets.json")) else {
+        return Vec::new();
+    };
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&text) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (preset, table) in map {
+        let Some(table) = table.as_str() else { continue };
+        let Ok(serde_json::Value::Array(entries)) = serde_json::from_str(table) else {
+            continue;
+        };
+        let n = entries
+            .iter()
+            .filter(|e| {
+                e["biome"].as_str().is_some_and(|b| {
+                    namespaces
+                        .iter()
+                        .any(|ns| b.starts_with(&format!("{ns}:")))
+                })
+            })
+            .count();
+        if n > 0 {
+            out.push((preset, n));
+        }
+    }
+    out
+}
 
 /// In a root built by [`resource_root`]: what it was built from.
 const STAMP: &str = "horizon-mod-content.stamp";

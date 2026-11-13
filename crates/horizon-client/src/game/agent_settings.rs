@@ -130,7 +130,7 @@ impl Game<'_> {
         let config = serde_json::json!({ "mcpServers": { "horizon-game": {
             "command": ctl, "args": ["--socket", socket, "mcp"] } } });
         format!(
-            "Horizon agent control (this computer only)\nSocket: {}\nTry it: \"{}\" --socket \"{}\" state\nMCP config:\n{}\n",
+            "Volt agent control (this computer only)\nSocket: {}\nTry it: \"{}\" --socket \"{}\" state\nMCP config:\n{}\n",
             socket.display(),
             ctl.display(),
             socket.display(),

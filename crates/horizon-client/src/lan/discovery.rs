@@ -80,6 +80,7 @@ impl Pinger {
         let message = ping_string(&motd, port);
         let thread = std::thread::Builder::new()
             .name("horizon-lan-ping".into())
+            .stack_size(2 * 1024 * 1024)
             .spawn(move || {
                 let target = SocketAddr::V4(SocketAddrV4::new(GROUP, PORT));
                 while !flag.load(Ordering::Relaxed) {
@@ -138,6 +139,7 @@ impl Scanner {
             let (games, stop) = (games.clone(), stop.clone());
             let _ = std::thread::Builder::new()
                 .name("horizon-lan-scan".into())
+                .stack_size(2 * 1024 * 1024)
                 .spawn(move || listen(socket, games, stop));
         }
         Self {

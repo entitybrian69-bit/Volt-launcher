@@ -849,6 +849,10 @@ fn login_and_configure(
     )?;
     let mut info = ClientInformation::new(10);
     let mut brand = String::from("vanilla");
+    // Horizon clients that present vanilla's brand (anti-bot plugins on
+    // public servers refuse unknown brands) say what they are with an
+    // explicit empty hello on the mod-message channel instead.
+    let mut horizon_hello = false;
     let known_pack = loop {
         let (id, payload) = c.recv().map_err(e)?;
         match decode_config(id, &payload).map_err(e)? {
@@ -858,13 +862,19 @@ fn login_and_configure(
                     .string(32767)
                     .unwrap_or(brand);
             }
+            cfg::Serverbound::CustomPayload(p)
+                if p.channel == horizon_protocol::mod_net::CHANNEL =>
+            {
+                horizon_hello = true;
+            }
             cfg::Serverbound::SelectKnownPacks(p) => break p.packs == vec![core.clone()],
             _ => {}
         }
     };
+    let is_horizon = brand == "horizon" || horizon_hello;
     // horizon-clients-only: the brand the client sent ("vanilla" when it sent
     // none) must be Horizon's.
-    if shared.config.horizon_clients_only && brand != "horizon" {
+    if shared.config.horizon_clients_only && !is_horizon {
         let text = super::HORIZON_CLIENTS_ONLY_REASON;
         let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(text));
         let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
@@ -879,7 +889,7 @@ fn login_and_configure(
     }
     // A Horizon client hears that this server runs its mods' quiet commands
     // (horizon_protocol::quiet); a vanilla one is told nothing.
-    if brand == "horizon" {
+    if is_horizon {
         send(
             c,
             cfg::Clientbound::CustomPayload(cfg::CustomPayload {
@@ -896,7 +906,7 @@ fn login_and_configure(
             }),
         )?;
     }
-    if brand == "horizon"
+    if is_horizon
         && let Some(hash) = sync.content_identity
     {
         send(
@@ -966,7 +976,10 @@ fn login_and_configure(
         name: name.to_owned(),
         properties,
         info,
-        brand,
+        // Normalized: a Horizon client that joined under vanilla's brand
+        // (with the hello above) counts as "horizon" everywhere downstream
+        // (native_net's per-player mod messages check it).
+        brand: if is_horizon { "horizon".into() } else { brand },
     }))
 }
 

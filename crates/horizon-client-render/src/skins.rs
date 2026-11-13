@@ -24,11 +24,25 @@ pub struct Textures {
     pub signed: bool,
 }
 
-/// The `getTexture` endpoint's valid URIs from Minecraft services discovery.
-pub const TEXTURE_URIS: [&str; 2] = [
+/// The `getTexture` endpoint's valid URIs from Minecraft services discovery
+/// plus Ely.by skin/cape CDNs for Ely.by & CustomSkinLoader support.
+pub const TEXTURE_URIS: [&str; 12] = [
     "https://textures.minecraft.net/texture/{textureId}",
     "http://textures.minecraft.net/texture/{textureId}",
+    "https://textures.ely.by/skins/{textureId}",
+    "http://textures.ely.by/skins/{textureId}",
+    "https://ely.by/storage/skins/{textureId}",
+    "http://ely.by/storage/skins/{textureId}",
+    "https://ely.by/storage/capes/{textureId}",
+    "http://ely.by/storage/capes/{textureId}",
+    "https://skinsystem.ely.by/skins/{textureId}",
+    "http://skinsystem.ely.by/skins/{textureId}",
+    "https://skinsystem.ely.by/capes/{textureId}",
+    "http://skinsystem.ely.by/capes/{textureId}",
 ];
+
+/// Custom payload channel for peer-to-peer custom skin & cape sync between Volt clients/LAN.
+pub const VOLT_SKIN_CHANNEL: &str = "volt:skin";
 
 /// `java.util.Base64.getDecoder().decode`.
 pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
@@ -307,14 +321,54 @@ impl Resolver {
             return Resolve::Done(None);
         }
         let (key, send) = (key.clone(), self.send.clone());
-        std::thread::spawn(move || {
-            let resolved = crate::auth::discovery()
-                .ok()
-                .and_then(|doc| resolve_profile(&key, &doc));
-            let _ = send.send((key, resolved));
-        });
+        let _ = std::thread::Builder::new()
+            .name("skin-resolve".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let mut resolved = crate::auth::discovery()
+                    .ok()
+                    .and_then(|doc| resolve_profile(&key, &doc));
+                if resolved.is_none()
+                    && let NameOrId::Name(name) = &key
+                {
+                    resolved = resolve_ely_profile_by_name(name);
+                }
+                let _ = send.send((key, resolved));
+            });
         Resolve::Pending
     }
+}
+
+/// Resolve a player's skin & cape from Ely.by's public skin system (`skinsystem.ely.by`).
+pub fn resolve_ely_profile_by_name(name: &str) -> Option<ResolvedProfile> {
+    if !valid_player_name(name) {
+        return None;
+    }
+    let encoded_name: String = name
+        .bytes()
+        .filter(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        .map(char::from)
+        .collect();
+    if encoded_name.is_empty() {
+        return None;
+    }
+    let body = http_get(&format!("https://skinsystem.ely.by/textures/{encoded_name}"))
+        .or_else(|| http_get(&format!("http://skinsystem.ely.by/textures/{encoded_name}")))?;
+    let tex_obj: serde_json::Value = serde_json::from_slice(&body).ok()?;
+    if !tex_obj.is_object() || tex_obj.as_object().is_none_or(|o| o.is_empty()) {
+        return None;
+    }
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let payload = serde_json::json!({
+        "profileName": encoded_name,
+        "textures": tex_obj,
+    });
+    let b64 = STANDARD.encode(payload.to_string().as_bytes());
+    Some(ResolvedProfile {
+        id: horizon_protocol::crypto::offline_uuid(&encoded_name),
+        name: encoded_name,
+        properties: vec![("textures".into(), b64, None)],
+    })
 }
 
 /// `ResolvableProfile` (an item's `minecraft:profile` component, a skull's
@@ -489,21 +543,117 @@ pub fn cape(textures: &Textures) -> Option<String> {
         .map(|hash| cape_location(&hash))
 }
 
-/// A cape in a 64x64 skin slot: the 64x32 picture (or the older 22x17,
-/// which has the same layout) in its top half. Vanilla draws a cape of any
-/// size; a larger one is scaled down to 64x32 here.
+/// A cape in a 64x64 skin slot: the 64x32 picture (or the older 22x17 /
+/// OptiFine 46x22*2^k / front-only 10x16*k crop) in its top half. Also
+/// accepts an already-normalized 64x64 slot (transparent rows 32..64)
+/// idempotently so re-decoding a saved cape never squashes it vertically.
 pub fn process_cape(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     let (w, h) = (width as usize, height as usize);
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
         return None;
     }
     let mut img = vec![0u8; 64 * 64 * 4];
-    let (fit_w, fit_h) = if w <= 64 && h <= 32 { (w, h) } else { (64, 32) };
-    for y in 0..fit_h {
-        for x in 0..fit_w {
-            let (sx, sy) = (x * w / fit_w, y * h / fit_h);
-            let (s, d) = ((sy * w + sx) * 4, (y * 64 + x) * 4);
-            img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+
+    // 1. Square 1:1 canvas (e.g. 64x64 or 128x128 slot buffer) whose bottom half is transparent:
+    // treat the top w x (h/2) half as the actual 2:1 cape sheet so re-decoding is idempotent.
+    let eff_h = if w == h && h >= 64 && h.is_multiple_of(2) {
+        let half = h / 2;
+        let bottom_blank = rgba[half * w * 4..h * w * 4]
+            .chunks_exact(4)
+            .all(|px| px[3] == 0);
+        if bottom_blank { half } else { h }
+    } else {
+        h
+    };
+
+    // 2. Front-only cape crop (10x16, 20x32, 40x64, ... exact 5:8 aspect ratio).
+    if w * 16 == eff_h * 10 {
+        for fy in 0..16usize {
+            for fx in 0..10usize {
+                let (sx, sy) = (fx * w / 10, fy * eff_h / 16);
+                let s = (sy * w + sx) * 4;
+                let px = [rgba[s], rgba[s + 1], rgba[s + 2], rgba[s + 3]];
+                let d = ((1 + fy) * 64 + (1 + fx)) * 4;
+                img[d..d + 4].copy_from_slice(&px);
+                // Darkened inner back face (12..22, 1..17)
+                let bd = ((1 + fy) * 64 + (12 + (9 - fx))) * 4;
+                img[bd..bd + 4].copy_from_slice(&[
+                    (px[0] as u16 * 58 / 100) as u8,
+                    (px[1] as u16 * 58 / 100) as u8,
+                    (px[2] as u16 * 58 / 100) as u8,
+                    px[3],
+                ]);
+            }
+            // 1px left & right thickness edges
+            let left_s = ((1 + fy) * 64 + 1) * 4;
+            let right_s = ((1 + fy) * 64 + 10) * 4;
+            let left_px = [img[left_s], img[left_s + 1], img[left_s + 2], img[left_s + 3]];
+            let right_px = [
+                img[right_s],
+                img[right_s + 1],
+                img[right_s + 2],
+                img[right_s + 3],
+            ];
+            let ld = ((1 + fy) * 64) * 4;
+            let rd = ((1 + fy) * 64 + 11) * 4;
+            img[ld..ld + 4].copy_from_slice(&left_px);
+            img[rd..rd + 4].copy_from_slice(&right_px);
+        }
+        for fx in 0..10usize {
+            let top_s = (64 + (1 + fx)) * 4;
+            let bot_s = (16 * 64 + (1 + fx)) * 4;
+            let top_px = [img[top_s], img[top_s + 1], img[top_s + 2], img[top_s + 3]];
+            let bot_px = [img[bot_s], img[bot_s + 1], img[bot_s + 2], img[bot_s + 3]];
+            let td = (1 + fx) * 4;
+            let btd = (11 + fx) * 4;
+            img[td..td + 4].copy_from_slice(&top_px);
+            img[btd..btd + 4].copy_from_slice(&bot_px);
+        }
+        return Some(img);
+    }
+
+    // 3. Direct 1:1 copy for <= 64x32 sheets (22x17 legacy, 46x22 OptiFine, 64x32 Mojang).
+    if w <= 64 && eff_h <= 32 {
+        for y in 0..eff_h {
+            for x in 0..w {
+                let (s, d) = ((y * w + x) * 4, (y * 64 + x) * 4);
+                img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
+        }
+        return Some(img);
+    }
+
+    // 4. Scaled tight 22x17 cuboid net (44x34, 88x68, ...).
+    if w * 17 == eff_h * 22 {
+        for y in 0..17usize {
+            for x in 0..22usize {
+                let (sx, sy) = (x * w / 22, y * eff_h / 17);
+                let (s, d) = ((sy * w + sx) * 4, (y * 64 + x) * 4);
+                img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
+        }
+        return Some(img);
+    }
+
+    // 5. Standard 2:1 HD sheet (128x64, 256x128, 512x256, 1024x512) or OptiFine 64x32*2^k sheet (92x44, 184x88, ...).
+    let (sheet_w, sheet_h) = if w == eff_h * 2 {
+        (w, eff_h)
+    } else {
+        let mut sw = 64usize;
+        let mut sh = 32usize;
+        while sw < w || sh < eff_h {
+            sw *= 2;
+            sh *= 2;
+        }
+        (sw, sh)
+    };
+    for y in 0..32usize {
+        for x in 0..64usize {
+            let (sx, sy) = (x * sheet_w / 64, y * sheet_h / 32);
+            if sx < w && sy < eff_h {
+                let (s, d) = ((sy * w + sx) * 4, (y * 64 + x) * 4);
+                img[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
         }
     }
     Some(img)
@@ -546,6 +696,140 @@ fn read_offline_skin(path: &std::path::Path, model: &str) -> Result<(Vec<u8>, bo
     let (w, h, rgba) = crate::hud::decode_bytes(&bytes).map_err(|e| e.to_string())?;
     let skin = process_legacy_skin(w, h, &rgba).ok_or("not a 64x64 or 64x32 skin")?;
     Ok((skin, model == "slim"))
+}
+
+/// Reloadable runtime override for Android / in-process launches so changing
+/// offline skins, capes, or server-sync settings in Volt Launcher takes effect
+/// on every launch without restarting the process.
+pub struct OfflineRuntime {
+    pub generation: u64,
+    pub skin: Option<(Vec<u8>, bool)>,
+    pub cape: Option<Vec<u8>>,
+    pub raw_skin_png: Option<Vec<u8>>,
+    pub raw_cape_png: Option<Vec<u8>>,
+    pub server_sync_cmd: Option<String>,
+}
+
+static OFFLINE_RT: std::sync::RwLock<Option<OfflineRuntime>> = std::sync::RwLock::new(None);
+static OFFLINE_GEN_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(2);
+
+pub fn clear_offline_runtime() {
+    if let Ok(mut guard) = OFFLINE_RT.write() {
+        *guard = None;
+    }
+}
+
+pub fn set_offline_runtime(
+    skin_png_path: Option<&std::path::Path>,
+    slim: bool,
+    cape_png_path: Option<&std::path::Path>,
+    server_sync_cmd: Option<String>,
+) {
+    let raw_skin_png = skin_png_path.and_then(|p| std::fs::read(p).ok());
+    let skin = raw_skin_png.as_ref().and_then(|bytes| {
+        let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
+        Some((process_legacy_skin(w, h, &rgba)?, slim))
+    });
+    let raw_cape_png = cape_png_path.and_then(|p| std::fs::read(p).ok());
+    let cape = raw_cape_png.as_ref().and_then(|bytes| {
+        let (w, h, rgba) = crate::hud::decode_bytes(bytes).ok()?;
+        process_cape(w, h, &rgba)
+    });
+    let generation = OFFLINE_GEN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut guard) = OFFLINE_RT.write() {
+        *guard = Some(OfflineRuntime {
+            generation,
+            skin,
+            cape,
+            raw_skin_png: raw_skin_png.filter(|b| b.len() <= 20 * 1024),
+            raw_cape_png: raw_cape_png.filter(|b| b.len() <= 12 * 1024),
+            server_sync_cmd,
+        });
+    }
+}
+
+pub fn current_offline_skin() -> Option<(Vec<u8>, bool, u64)> {
+    if let Ok(guard) = OFFLINE_RT.read()
+        && let Some(rt) = guard.as_ref()
+    {
+        return rt
+            .skin
+            .as_ref()
+            .map(|(rgba, slim)| (rgba.clone(), *slim, rt.generation));
+    }
+    offline_skin().map(|(rgba, slim)| (rgba.clone(), *slim, 1))
+}
+
+pub fn current_offline_cape() -> Option<(Vec<u8>, u64)> {
+    if let Ok(guard) = OFFLINE_RT.read()
+        && let Some(rt) = guard.as_ref()
+    {
+        return rt.cape.as_ref().map(|rgba| (rgba.clone(), rt.generation));
+    }
+    offline_cape().map(|rgba| (rgba.to_vec(), 1))
+}
+
+pub fn current_server_sync_cmd() -> Option<String> {
+    OFFLINE_RT
+        .read()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|rt| rt.server_sync_cmd.clone()))
+}
+
+pub fn build_volt_skin_packet(uuid: u128) -> Option<Vec<u8>> {
+    let guard = OFFLINE_RT.read().ok()?;
+    let rt = guard.as_ref()?;
+    if rt.raw_skin_png.is_none() && rt.raw_cape_png.is_none() {
+        return None;
+    }
+    let slim = rt.skin.as_ref().is_some_and(|(_, s)| *s);
+    let skin_bytes = rt.raw_skin_png.as_deref().unwrap_or(&[]);
+    let cape_bytes = rt.raw_cape_png.as_deref().unwrap_or(&[]);
+    let total = 4 + 16 + 1 + 4 + skin_bytes.len() + 4 + cape_bytes.len();
+    if total > 28_672 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"VSK\x01");
+    out.extend_from_slice(&uuid.to_be_bytes());
+    out.push(u8::from(slim));
+    out.extend_from_slice(&(skin_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(skin_bytes);
+    out.extend_from_slice(&(cape_bytes.len() as u32).to_be_bytes());
+    out.extend_from_slice(cape_bytes);
+    Some(out)
+}
+
+pub fn parse_volt_skin_packet(
+    data: &[u8],
+) -> Option<(u128, Option<(Vec<u8>, bool)>, Option<Vec<u8>>)> {
+    if data.len() < 29 || data.len() > 28_672 || &data[..4] != b"VSK\x01" {
+        return None;
+    }
+    let uuid = u128::from_be_bytes(data[4..20].try_into().ok()?);
+    let slim = data[20] & 1 != 0;
+    let skin_len = u32::from_be_bytes(data[21..25].try_into().ok()?) as usize;
+    let cape_pos = 25usize.checked_add(skin_len)?;
+    if cape_pos + 4 > data.len() {
+        return None;
+    }
+    let cape_len = u32::from_be_bytes(data[cape_pos..cape_pos + 4].try_into().ok()?) as usize;
+    if cape_pos.checked_add(4)?.checked_add(cape_len)? != data.len() {
+        return None;
+    }
+    let skin = if skin_len > 0 {
+        let (w, h, rgba) = crate::hud::decode_bytes(&data[25..cape_pos]).ok()?;
+        Some((process_legacy_skin(w, h, &rgba)?, slim))
+    } else {
+        None
+    };
+    let cape = if cape_len > 0 {
+        let (w, h, rgba) = crate::hud::decode_bytes(&data[cape_pos + 4..]).ok()?;
+        process_cape(w, h, &rgba)
+    } else {
+        None
+    };
+    Some((uuid, skin, cape))
 }
 
 /// The signed-in account's own profile properties (`Minecraft.profileFuture`:
@@ -693,6 +977,12 @@ pub struct Downloader {
 /// without end; the disk cache holds everything it drops.
 const MAX_SKIN_IMAGES: usize = 1024;
 impl Downloader {
+    /// The decoded 64×64 RGBA image an atlas location holds, when it is
+    /// still in memory (3D skin layers builds its geometry from it, and the
+    /// disk cache backs whatever was dropped).
+    pub fn image(&self, location: &str) -> Option<&[u8]> {
+        self.images.get(location).map(Vec::as_slice)
+    }
     pub fn new(root: std::path::PathBuf) -> Self {
         let (send, done) = std::sync::mpsc::channel();
         Self {
@@ -737,22 +1027,25 @@ impl Downloader {
             .join(if digest.len() > 2 { &digest[..2] } else { "xx" })
             .join(&digest);
         let (url, send) = (url.to_owned(), self.send.clone());
-        std::thread::spawn(move || {
-            let bytes = std::fs::read(&file).ok().or_else(|| {
-                let body = http_get(&url)?;
-                let _ = std::fs::create_dir_all(file.parent()?);
-                let _ = std::fs::write(&file, &body);
-                Some(body)
-            });
-            let image = bytes
-                .and_then(|b| crate::hud::decode_bytes(&b).ok())
-                .and_then(|(w, h, rgba)| match kind {
-                    Kind::Skin => process_legacy_skin(w, h, &rgba),
-                    Kind::Cape => process_cape(w, h, &rgba),
-                    Kind::Elytra => Some(rgba),
+        let _ = std::thread::Builder::new()
+            .name("skin-download".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                let bytes = std::fs::read(&file).ok().or_else(|| {
+                    let body = http_get(&url)?;
+                    let _ = std::fs::create_dir_all(file.parent()?);
+                    let _ = std::fs::write(&file, &body);
+                    Some(body)
                 });
-            let _ = send.send((key, image));
-        });
+                let image = bytes
+                    .and_then(|b| crate::hud::decode_bytes(&b).ok())
+                    .and_then(|(w, h, rgba)| match kind {
+                        Kind::Skin => process_legacy_skin(w, h, &rgba),
+                        Kind::Cape => process_cape(w, h, &rgba),
+                        Kind::Elytra => Some(rgba),
+                    });
+                let _ = send.send((key, image));
+            });
         Download::Pending
     }
     /// Keeps a decoded skin for `again`, dropping the oldest past the bound.

@@ -7,12 +7,8 @@
 //! frame is asked for only when something on screen changes (a cloud moves one texel, a group of
 //! stars steps to its next brightness): a few frames a second. The sky stands still under reduced
 //! motion, and stops 10 s after the window loses focus ([`motion`]).
-//!
-//! The dark-glass look retires all of that for a flat, still backdrop ([`Sky::render`]): the art
-//! below stays only as data its own tests still check, unused by the window.
-#![allow(dead_code)]
 use crate::art::bake;
-use gpui::{div, prelude::*, px, rgb, Div, RenderImage};
+use gpui::{div, img, prelude::*, px, rgb, Div, RenderImage};
 use horizon_theme::night::Night;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -264,27 +260,141 @@ pub struct Sky {
 }
 
 impl Sky {
-    /// The chosen dark-glass look: a still, flat backdrop (`page`), never a sky, a gradient or a
-    /// moving sprite. Kept as a method (and `Sky` kept as a type) so the window's render loop and
-    /// `free_replaced` don't need to change; it never asks for another frame.
+    /// The sky for a window of `w` by `h` logical pixels, and how long until it next changes
+    /// (`None`: it stands still until something else redraws the window).
     pub fn render(
         &mut self,
         n: &Night,
-        (_w, _h): (f32, f32),
-        _scale: f32,
-        _focused: bool,
-        _now: Instant,
+        (w, h): (f32, f32),
+        scale: f32,
+        focused: bool,
+        now: Instant,
     ) -> (Div, Option<Duration>) {
-        let backdrop = div()
+        if focused {
+            self.unfocused = None;
+        } else {
+            self.unfocused.get_or_insert(now);
+        }
+        let run = match motion() {
+            Motion::Still => false,
+            Motion::InFront => self.unfocused.is_none_or(|since| now - since < UNFOCUSED),
+            Motion::Always => true,
+        };
+        self.clock.set(run, now);
+        let t = self.clock.at(now).as_secs_f32();
+        let layers = self.layers(n.dark, scale);
+        let snap = |v: f32| (v * scale).round() / scale;
+        let art = if n.dark { &NIGHT_ART } else { &DAWN_ART };
+
+        let mut sky = div()
             .absolute()
             .top_0()
             .left_0()
             .size_full()
-            .bg(rgb(n.page));
-        (backdrop, None)
+            .overflow_hidden();
+        for (top, height, c) in bands(n, h) {
+            sky = sky.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .w_full()
+                    .top(px(top))
+                    .h(px(height))
+                    .bg(rgb(c)),
+            );
+        }
+        for (g, period) in STAR_PERIODS.iter().enumerate() {
+            let level = STAR_LEVELS[step(t, *period, g)];
+            let mut group = div().absolute().top_0().left_0().size_full().opacity(level);
+            for star in stars().iter().filter(|s| s.group == g) {
+                let (x, y) = (star.x * TEXEL, star.y * h * 0.5);
+                if x >= w {
+                    continue;
+                }
+                let size = if star.big { TEXEL / 2. } else { TEXEL / 4. };
+                group = group.child(
+                    div()
+                        .absolute()
+                        .left(px(snap(x)))
+                        .top(px(snap(y)))
+                        .size(px(size.max(1. / scale)))
+                        .bg(rgb(art.star)),
+                );
+            }
+            sky = sky.child(group);
+        }
+        for (layer, image) in CLOUDS.iter().zip(&layers.clouds) {
+            let strip = layer.period as f32 * TEXEL;
+            let shift = (t * layer.speed).floor() * TEXEL % strip;
+            let top = snap(h * layer.top);
+            let mut x = -shift;
+            while x < w {
+                sky = sky.child(
+                    img(image.clone())
+                        .absolute()
+                        .left(px(x))
+                        .top(px(top))
+                        .w(px(strip))
+                        .h(px(CLOUD_ROWS as f32 * TEXEL)),
+                );
+                x += strip;
+            }
+        }
+        let foot = h;
+        let sun_w = (SUN_RADIUS * 2) as f32 * LAND;
+        sky = sky.child(
+            img(layers.sun.clone())
+                .absolute()
+                .left(px(snap(w * SUN_X - sun_w / 2.)))
+                .top(px(foot - (SUN_RISE + SUN_RADIUS) as f32 * LAND))
+                .w(px(sun_w))
+                .h(px(SUN_RADIUS as f32 * LAND)),
+        );
+        for (line, image, lift) in [(&FAR, &layers.far, 2.), (&NEAR, &layers.near, 0.)] {
+            let period = line.runs.iter().map(|r| r.0).sum::<usize>() as f32 * LAND;
+            let top = foot - (line.rows as f32 + lift) * LAND;
+            // The far line starts half a period in, so the two never repeat in step.
+            let mut x = if lift > 0. { -period / 2. } else { 0. };
+            while x < w {
+                sky = sky.child(
+                    img(image.clone())
+                        .absolute()
+                        .left(px(x))
+                        .top(px(top))
+                        .w(px(period))
+                        .h(px(line.rows as f32 * LAND)),
+                );
+                x += period;
+            }
+            if lift > 0. {
+                sky = sky.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .w_full()
+                        .top(px(foot - lift * LAND))
+                        .h(px(lift * LAND))
+                        .bg(rgb(art.far)),
+                );
+            }
+        }
+
+        let next = self.clock.running.is_some().then(|| {
+            let clouds = CLOUDS.iter().map(|l| until_next(t * l.speed) / l.speed);
+            let stars = STAR_PERIODS.iter().enumerate().map(|(g, p)| {
+                let quarter = p / STAR_LEVELS.len() as f32;
+                until_next(t / quarter + g as f32) * quarter
+            });
+            let mut soonest = clouds.chain(stars).fold(f32::MAX, f32::min);
+            if let (Some(since), Motion::InFront) = (self.unfocused, motion()) {
+                soonest = soonest.min((UNFOCUSED - (now - since)).as_secs_f32());
+            }
+            // A little after the change, so the frame's clock is surely past it.
+            Duration::from_secs_f32(soonest.max(0.) + 0.005)
+        });
+        (sky, next)
     }
 
-    #[allow(dead_code)]
     fn layers(&mut self, dark: bool, scale: f32) -> &Layers {
         let key = (dark, (scale * 100.).round() as u32);
         if !matches!(&self.baked, Some((k, _)) if *k == key) {
@@ -574,13 +684,21 @@ mod tests {
     }
 
     #[test]
-    fn the_flat_backdrop_never_asks_for_another_frame() {
+    fn frames_come_only_when_something_moves() {
         assert!((until_next(0.) - 1.).abs() < 1e-6);
         let mut sky = Sky::default();
         let now = Instant::now();
-        for (focused, at) in [(true, now), (false, now + UNFOCUSED)] {
-            let (_, next) = sky.render(&NIGHT, (1280., 800.), 2., focused, at);
-            assert_eq!(next, None, "the dark-glass backdrop is still");
+        let (_, next) = sky.render(&NIGHT, (1280., 800.), 2., true, now);
+        if motion() != Motion::Still {
+            let next = next.expect("a moving sky asks for its next frame");
+            assert!(next <= Duration::from_secs(1), "{next:?}");
         }
+        // Unfocused for longer than UNFOCUSED: no more frames.
+        if motion() != Motion::InFront {
+            return;
+        }
+        sky.render(&NIGHT, (1280., 800.), 2., false, now);
+        let (_, next) = sky.render(&NIGHT, (1280., 800.), 2., false, now + UNFOCUSED);
+        assert_eq!(next, None);
     }
 }

@@ -11,33 +11,67 @@ pub(super) fn reveal(scroll: f32, row: [f32; 4], view: [f32; 3]) -> f32 {
     };
     (scroll + adjustment).clamp(0.0, maximum.max(0.0))
 }
-pub(super) struct Drag {
+/// Restrict a touch target to the visible vertical list viewport.
+pub(super) fn clip_target_y(rect: [f32; 4], top: f32, bottom: f32) -> Option<[f32; 4]> {
+    let y0 = rect[1].max(top);
+    let y1 = (rect[1] + rect[3]).min(bottom);
+    (y1 > y0 && rect[2] > 0.0).then_some([rect[0], y0, rect[2], y1 - y0])
+}
+
+pub(crate) struct Drag {
+    pub(crate) pointer_id: Option<u64>,
     origin: [f64; 2],
+    previous_x: f64,
     previous_y: f64,
-    pub(super) moved: bool,
+    pub(crate) moved: bool,
 }
 
 impl Drag {
-    pub(super) fn new(x: f64, y: f64) -> Self {
+    pub(crate) fn new(x: f64, y: f64) -> Self {
         Self {
+            pointer_id: None,
             origin: [x, y],
+            previous_x: x,
             previous_y: y,
             moved: false,
         }
     }
 
-    pub(super) fn origin_y(&self) -> f64 {
+    pub(crate) fn with_id(id: u64, x: f64, y: f64) -> Self {
+        Self {
+            pointer_id: Some(id),
+            origin: [x, y],
+            previous_x: x,
+            previous_y: y,
+            moved: false,
+        }
+    }
+
+    pub(crate) fn origin_y(&self) -> f64 {
         self.origin[1]
     }
 
-    pub(super) fn update(&mut self, x: f64, y: f64, density: f64) -> f32 {
+    pub(crate) fn origin_xy(&self) -> [f64; 2] {
+        self.origin
+    }
+
+    pub(crate) fn update(&mut self, x: f64, y: f64, density: f64) -> f32 {
+        let (_, dy) = self.update_xy(x, y, density);
+        dy
+    }
+
+    pub(crate) fn update_xy(&mut self, x: f64, y: f64, density: f64) -> (f32, f32) {
         let density = density.max(0.01);
         self.moved |= (x - self.origin[0]).hypot(y - self.origin[1]) > 12.0 * density;
         let delta = if self.moved {
-            ((self.previous_y - y) / density) as f32
+            (
+                ((x - self.previous_x) / density) as f32,
+                ((self.previous_y - y) / density) as f32,
+            )
         } else {
-            0.0
+            (0.0, 0.0)
         };
+        self.previous_x = x;
         self.previous_y = y;
         delta
     }
@@ -65,6 +99,16 @@ mod tests {
             reveal(490.0, [0.0, 700.0, 100.0, 60.0], [100.0, 400.0, 500.0]),
             500.0
         );
+    }
+
+    #[test]
+    fn clipped_touch_targets_never_reach_outside_the_list() {
+        assert_eq!(clip_target_y([10.0, 80.0, 30.0, 40.0], 100.0, 200.0),
+            Some([10.0, 100.0, 30.0, 20.0]));
+        assert_eq!(clip_target_y([10.0, 180.0, 30.0, 40.0], 100.0, 200.0),
+            Some([10.0, 180.0, 30.0, 20.0]));
+        assert_eq!(clip_target_y([10.0, 40.0, 30.0, 40.0], 100.0, 200.0), None);
+        assert_eq!(clip_target_y([10.0, 200.0, 30.0, 40.0], 100.0, 200.0), None);
     }
 
     #[test]

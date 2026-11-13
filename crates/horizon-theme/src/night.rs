@@ -1,9 +1,7 @@
-//! The launcher's dark-glass look ("Night" in `docs/design-system.md`): a still black backdrop,
-//! frosted glass plates (white lifted off the page at a low opacity, a 1 px white stroke) for
-//! everything that needs one, no colour anywhere — the main action, focus ring and progress are
-//! all plain white or grey — and Bricolage Grotesque (SIL OFL 1.1,
-//! `fonts/OFL-BricolageGrotesque.txt`). Light players get the same glass inverted ([`DAWN`]). The
-//! game's menus don't use it.
+//! The launcher's night look ("Night" in `docs/design-system.md`): a pixel night sky that turns to
+//! a sunset at the bottom, plates over it only where text needs them, one violet for the main
+//! action, focus and progress, and Bricolage Grotesque (SIL OFL 1.1, `fonts/OFL-BricolageGrotesque.txt`).
+//! Light players get the same look at dawn ([`DAWN`]). The game's menus don't use it.
 use crate::{step, Blocks, Step, Web};
 
 /// The UI family (optical size 14: Regular, Medium, SemiBold, Bold) and the display family
@@ -36,11 +34,7 @@ pub const TYPE: [Step; 4] = [DISPLAY, TITLE, UI, CAPTION];
 /// vanishes on a pale fill and reads as notches on a thin ring. Pills are [`crate::RADIUS_PILL`],
 /// for chips only.
 pub const PIXEL_CORNER: f32 = 4.;
-/// Dark-glass pills: buttons, tabs, chips and badges round all the way (half their height), so
-/// they always read as a capsule, never a rounded rectangle.
-pub const RADIUS_CONTROL: f32 = 999.;
-/// Cards, dialogs and the sidebar's own plate: a soft 24 px glass corner.
-pub const RADIUS_CARD: f32 = 24.;
+pub const RADIUS_CONTROL: f32 = 8.;
 /// The main action (Play) is taller than the other controls.
 pub const PLAY: f32 = 56.;
 
@@ -80,52 +74,49 @@ pub struct Night {
 }
 
 pub const NIGHT: Night = Night {
-    // Pure black to a barely-there charcoal: a still backdrop, never a visible gradient.
-    sky: [0x000000, 0x020202, 0x050505, 0x080808, 0x0b0b0b, 0x0e0e0e],
-    page: 0x000000,
-    side: 0x050505,
-    // Frosted glass: white lifted off the page at a low opacity, never a tinted colour.
-    card: 0xffffff,
-    card_alpha: 0.06,
-    card_hi: 0xffffff,
-    card_hi_alpha: 0.10,
-    stroke: 0xffffff,
+    sky: [0x07061a, 0x140f38, 0x2a1656, 0x5b2a78, 0xb0477d, 0xf08a5d],
+    page: 0x0e0b26,
+    side: 0x0a0820,
+    card: 0x15112e,
+    card_alpha: 0.84,
+    card_hi: 0x231c4a,
+    card_hi_alpha: 0.90,
+    stroke: 0xb9acff,
     stroke_alpha: 0.12,
-    rule_alpha: 0.08,
-    ink: 0xf2f2f2,
-    ink_soft: 0xc2c2c2,
-    muted: 0x9a9a9a,
-    // No hue anywhere: the one action is a plain white pill, its label near-black.
-    accent: 0xffffff,
-    accent_hi: 0xffffff,
-    on_accent: 0x0a0a0a,
-    success: 0xd8d8d8,
-    warn: 0xbdbdbd,
-    danger: 0xf5f5f5,
+    rule_alpha: 0.10,
+    ink: 0xf4f2ff,
+    ink_soft: 0xcfc9ea,
+    muted: 0xa59fc6,
+    accent: 0x7656fa,
+    accent_hi: 0xa08cff,
+    on_accent: 0xffffff,
+    success: 0x5fd39a,
+    warn: 0xf5b45a,
+    danger: 0xff8a78,
     dark: true,
 };
 
-/// The light appearance: the same monochrome glass, inverted (charcoal panels on a pale page).
+/// The light appearance: the same sky at dawn, pale blue to peach, with the night's violet.
 pub const DAWN: Night = Night {
-    sky: [0xf4f4f4, 0xf2f2f2, 0xf0f0f0, 0xeeeeee, 0xececec, 0xeaeaea],
-    page: 0xf4f4f4,
-    side: 0xeeeeee,
-    card: 0xffffff,
-    card_alpha: 0.85,
+    sky: [0xc9d3f2, 0xdcd8f3, 0xead5ec, 0xf5d3d8, 0xf9d6bd, 0xfbe4c6],
+    page: 0xe9e6f6,
+    side: 0xe1ddf1,
+    card: 0xfdfcff,
+    card_alpha: 0.86,
     card_hi: 0xffffff,
-    card_hi_alpha: 0.95,
-    stroke: 0x000000,
+    card_hi_alpha: 0.94,
+    stroke: 0x3b2f78,
     stroke_alpha: 0.12,
-    rule_alpha: 0.08,
-    ink: 0x161616,
-    ink_soft: 0x3f3f3f,
-    muted: 0x5c5c5c,
-    accent: 0x161616,
-    accent_hi: 0x161616,
+    rule_alpha: 0.10,
+    ink: 0x1b1530,
+    ink_soft: 0x3b3354,
+    muted: 0x585071,
+    accent: 0x5b3fd6,
+    accent_hi: 0x5333c9,
     on_accent: 0xffffff,
-    success: 0x3f3f3f,
-    warn: 0x3f3f3f,
-    danger: 0x161616,
+    success: 0x136336,
+    warn: 0x7a4f00,
+    danger: 0xa3301d,
     dark: false,
 };
 

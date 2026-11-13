@@ -9,6 +9,7 @@ const EPSILON: f64 = 1.0e-5;
 pub struct Culler {
     pub camera: [f64; 3],
     remaining: Cell<usize>,
+    section_cache: std::cell::RefCell<std::collections::HashMap<(i32, i32, i32), bool>>,
 }
 
 impl Culler {
@@ -16,7 +17,17 @@ impl Culler {
         Self {
             camera,
             remaining: Cell::new(budget),
+            section_cache: std::cell::RefCell::new(std::collections::HashMap::with_capacity(64)),
         }
+    }
+
+    pub fn cached_section(&self, section: (i32, i32, i32), compute: impl FnOnce() -> bool) -> bool {
+        if let Some(&v) = self.section_cache.borrow().get(&section) {
+            return v;
+        }
+        let v = compute();
+        self.section_cache.borrow_mut().insert(section, v);
+        v
     }
 
     /// Remove only this entity's completed camera-relative mesh when hidden.

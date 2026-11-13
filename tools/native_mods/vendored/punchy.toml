@@ -1,0 +1,35 @@
+# Vendored registry entry for the Punchy native-mod port. The bundle is not
+# in the pinned horizon-mods registry snapshot; its reviewed source tree is
+# committed under vendored/punchy/ and pack_vendored.py rebuilds the exact
+# archive this entry pins. Everything else (hashing, ZIP safety, revocation,
+# hook checks, the mixin compiler's AST matching) runs the ordinary pipeline.
+#
+# Provenance: mods/official/punchy of github.com/CihuyAkz/horizon-android-more-mods
+# (branch `android`, fetched 2026-11-09), itself the integration of the Punchy
+# author's `punchy-rust-0.1.3.hnmod`. The engine crate carries the Punchy
+# custom license (all rights reserved) in mixins/punchy/engine/LICENSE-Punchy;
+# the glue carries the Horizon MIT license. See THIRD_PARTY_NOTICES.md.
+#
+# Local changes vs. upstream (0.1.3): the player-facing "speed" setting is
+# stored in Punchy's own units where 1.0 = normal pace (the engine scale
+# keeps 5.5 = normal internally; runtime.rs maps once at the boundary), so
+# swings and the inverse-scaled use/hold clips both land on the intended
+# pace at 1.0. The settings page also gains Punchy's hand viewmodel rows
+# (per-hand size and sideways/height/distance offsets, applied as a
+# view-space transform over the published pose deltas). Also, the
+# engine's dev-only JAR-oracle helpers
+# (`resources::member`/`load`, two tests reading the original Punchy JAR)
+# and their `zip` dependency are removed - `zip` is not in this fork's
+# Cargo.lock and the runtime path uses only the embedded JSON data.
+id = "punchy"
+kind = "native-mod"
+name = "Punchy"
+license = "LicenseRef-Punchy-Custom AND MIT"
+source = "https://github.com/CihuyAkz/horizon-android-more-mods"
+
+[[versions]]
+version = "0.1.3"
+game = "26.3"
+file = "punchy-rust-0.1.3.hnmod"
+published = "2026-11-09"
+sha256 = "4c9c75be020e311acfbb5389dd538486f65981651660d15aebaa57cbc79b41e7"

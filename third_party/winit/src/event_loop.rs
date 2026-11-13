@@ -121,13 +121,20 @@ impl<T> EventLoopBuilder<T> {
 
         // Certain platforms accept a mutable reference in their API.
         #[allow(clippy::unnecessary_mut_passed)]
+        let event_loop = match platform_impl::EventLoop::new(&mut self.platform_specific) {
+            Ok(event_loop) => event_loop,
+            Err(err) => {
+                EVENT_LOOP_CREATED.store(false, Ordering::Relaxed);
+                return Err(err);
+            }
+        };
         Ok(EventLoop {
-            event_loop: platform_impl::EventLoop::new(&mut self.platform_specific)?,
+            event_loop,
             _marker: PhantomData,
         })
     }
 
-    #[cfg(web_platform)]
+    #[cfg(any(web_platform, android_platform))]
     pub(crate) fn allow_event_loop_recreation() {
         EVENT_LOOP_CREATED.store(false, Ordering::Relaxed);
     }

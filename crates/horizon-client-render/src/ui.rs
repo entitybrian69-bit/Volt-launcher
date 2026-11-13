@@ -390,6 +390,20 @@ pub fn slider(
     value: f32,
     hover: bool,
     active: bool,
+) {
+    slider_dragging(batch, atlas, x, y, w, label, value, hover, active, false);
+}
+/// `slider` while it may be held: the track outlines during the drag.
+pub fn slider_dragging(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    x: f32,
+    y: f32,
+    w: f32,
+    label: &Text,
+    value: f32,
+    hover: bool,
+    active: bool,
     dragging: bool,
 ) {
     let kind = crate::widgets::Kind::Slider {
