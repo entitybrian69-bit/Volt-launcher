@@ -127,7 +127,6 @@ pub(crate) enum Action {
     ViewScreenshot(usize),
     ViewWorld(usize),
     CloseViewer,
-    DeleteWorld(String),
     Import(horizon_client::content_files::Kind),
     OpenFolder(horizon_client::content_files::Kind),
     ToggleSection(usize),
