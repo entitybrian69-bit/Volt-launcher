@@ -1,6 +1,5 @@
 name: Check log
 on:
-  workflow_dispatch:
   push:
     branches: [android]
 jobs:
@@ -12,10 +11,10 @@ jobs:
         with:
           toolchain: 1.95.0
       - name: Cargo check
-        run: cargo check -p horizon-android --message-format=human 2>&1 | tee /tmp/check.log || true
-      - name: Upload to release
+        run: |
+          cargo check -p horizon-android 2>&1 | tee /tmp/check.log || true
+          cat /tmp/check.log
+          # create issue with log
+          gh issue create --title "cargo check log $(date -u +%T)" --body "$(head -c 65000 /tmp/check.log)" || true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view check-log >/dev/null 2>&1 || gh release create check-log --title "check log" --notes "check" --latest=false
-          gh release upload check-log /tmp/check.log --clobber
