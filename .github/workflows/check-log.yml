@@ -16,12 +16,20 @@ jobs:
           toolchain: 1.95.0
           targets: aarch64-linux-android
       - name: Install deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+          ls /usr/lib/x86_64-linux-gnu/pkgconfig/alsa.pc 2>&1 | tee /tmp/dbg.log
+          pkg-config --modversion alsa 2>&1 | tee -a /tmp/dbg.log
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" | tee -a /tmp/dbg.log
+          cat /tmp/dbg.log
       - name: Cargo check android
         run: |
           export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH
-          pkg-config --modversion alsa
-          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee /tmp/check.log || true
+          echo "cargo PKG_CONFIG_PATH=$PKG_CONFIG_PATH" | tee /tmp/check.log
+          ls $PKG_CONFIG_PATH 2>&1 | head | tee -a /tmp/check.log
+          pkg-config --modversion alsa 2>&1 | tee -a /tmp/check.log
+          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee -a /tmp/check.log || true
           cat /tmp/check.log
       - name: Commit log to branch
         run: |
