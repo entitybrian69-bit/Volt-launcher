@@ -17,8 +17,7 @@ jobs:
           targets: aarch64-linux-android
       - name: Cargo check android
         run: |
-          cargo check -p horizon-android --target aarch64-linux-android --no-default-features 2>&1 | tee /tmp/check.log || true
-          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee -a /tmp/check.log || true
+          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
       - name: Commit log to branch
         run: |
