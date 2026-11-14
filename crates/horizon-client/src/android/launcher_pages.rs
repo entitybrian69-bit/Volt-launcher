@@ -2274,7 +2274,7 @@ impl DrawCtx<'_> {
                 let body = [cx, tab_y+44.0, cw, ch - (tab_y+44.0 - cy) - 48.0];
                 // Error banner for Horizon failures
                 if let Some((src,id)) = self.catalog.failed.as_ref() {
-                    if *src==proj.source && id==&proj.id {
+                    if *src==proj.source && id.as_str()==proj.id.as_str() {
                         let msg = if self.catalog.status.is_empty() { "Download failed – check connection or try again.".to_owned() } else { self.catalog.status.clone() };
                         ui.rounded(body[0], body[1], body[2], 36.0, 10.0, theme::CARD());
                         ui.border(body[0], body[1], body[2], 36.0, 10.0, hex(0xff4444, 80));
@@ -2309,11 +2309,11 @@ impl DrawCtx<'_> {
                 } else {
                     // Download tab
                     let btn = [body[0]+14.0, body[1]+ (if self.catalog.failed.is_some(){40.0}else{0.0}) + 12.0, 200.0, 44.0];
-                    let downloading = self.catalog.downloading.as_ref().is_some_and(|(s,id)| *s==proj.source && id==&proj.id);
+                    let downloading = self.catalog.downloading.as_ref().is_some_and(|(s,id)| *s==proj.source && id.as_str()==proj.id.as_str());
                     if downloading {
                         ui.rounded(btn[0], btn[1], btn[2], btn[3], 10.0, theme::GLASS());
                         draw_centered_text(ui, Face::LauncherMedium, 13.0, btn, theme::MUTED(), "Downloading…");
-                    } else if self.catalog.failed.as_ref().is_some_and(|(s,id)| *s==proj.source && id==&proj.id) {
+                    } else if self.catalog.failed.as_ref().is_some_and(|(s,id)| *s==proj.source && id.as_str()==proj.id.as_str()) {
                         styled_button(ui, self.targets, btn, "Retry download", Action::Install(idx), BtnStyle::Primary, true);
                         // Show error explicitly
                         let err = if self.catalog.status.is_empty() { "Horizon download failed – no downloadable ZIP or checksum error." } else { &self.catalog.status };
