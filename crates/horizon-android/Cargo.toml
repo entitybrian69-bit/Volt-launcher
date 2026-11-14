@@ -10,9 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 horizon-client-input = { path = "../horizon-client-input" }
-# Native physics mixins woven into game/*.rs call horizon_client_render
-# directly; this crate compiles those sources, so it needs the direct dep.
-horizon-client-render = { path = "../horizon-client-render", default-features = false }
 horizon-anticheat = { path = "../horizon-anticheat" }
 horizon-client = { path = "../horizon-client", default-features = false }
 android_logger = "0.15"
