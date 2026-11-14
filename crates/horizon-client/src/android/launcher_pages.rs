@@ -41,16 +41,16 @@ pub(crate) mod theme {
     /// polished silver, whatever accent color Classic is set to.
     fn accent() -> u32 { if liquid() { return hex(0xdfe4ec, 255); } hex(look().glass.accent, 255) }
     fn choose(dark_value: u32, light_value: u32) -> u32 { if dark() { dark_value } else { light_value } }
-    pub fn BG() -> u32 { if liquid() { return hex(0x060709, 255); } choose(hex(0x0c0e13,255), hex(0xedf1f0,255)) }
-    pub fn BACKDROP() -> u32 { if liquid() { return hex(0x04060c, 225); } hex(0x070a1a, 215) }
-    pub fn RAIL() -> u32 { if liquid() { return hex(0x0c0e13, 172); } choose(hex(0x15181f,205), hex(0xfcfdfd,225)) }
-    pub fn CARD() -> u32 { if liquid() { return hex(0x11141b, 172); } choose(hex(0x1a1d25,215), hex(0xfcfdfd,230)) }
-    pub fn CARD_INNER() -> u32 { if liquid() { return hex(0x191d26, 188); } choose(hex(0x272c36,225), hex(0xe7ecea,245)) }
-    pub fn HOVER() -> u32 { if liquid() { return hex(0x272d3a, 212); } choose(hex(0x343a46,235), hex(0xd8e0dd,245)) }
+    pub fn BG() -> u32 { if liquid() { return hex(0x000000, 255); } choose(hex(0x0c0e13,255), hex(0xedf1f0,255)) }
+    pub fn BACKDROP() -> u32 { if liquid() { return hex(0x000000, 240); } hex(0x070a1a, 215) }
+    pub fn RAIL() -> u32 { if liquid() { return hex(0x0a0a0c, 155); } choose(hex(0x15181f,205), hex(0xfcfdfd,225)) }
+    pub fn CARD() -> u32 { if liquid() { return hex(0x0c0c0e, 148); } choose(hex(0x1a1d25,215), hex(0xfcfdfd,230)) }
+    pub fn CARD_INNER() -> u32 { if liquid() { return hex(0x121214, 165); } choose(hex(0x272c36,225), hex(0xe7ecea,245)) }
+    pub fn HOVER() -> u32 { if liquid() { return hex(0x1e1e22, 190); } choose(hex(0x343a46,235), hex(0xd8e0dd,245)) }
     pub fn HERO_BG() -> u32 { CARD() }
     pub fn HERO_GLOW() -> u32 { lerp(CARD(), accent(), 0.22) }
     pub fn HERO_GLOW_SOFT() -> u32 { lerp(CARD(), accent(), 0.12) }
-    pub fn BORDER() -> u32 { if liquid() { return hex(0xffffff, 34); } choose(hex(0xffffff,30), hex(0x3c4a44,34)) }
+    pub fn BORDER() -> u32 { if liquid() { return hex(0xffffff, 18); } choose(hex(0xffffff,30), hex(0x3c4a44,34)) }
     pub fn BORDER_CRIMSON() -> u32 { lerp(BORDER(), accent(), 0.32) }
     pub fn CRIMSON() -> u32 { accent() }
     pub fn CRIMSON_BRIGHT() -> u32 {
@@ -75,10 +75,9 @@ pub(crate) mod theme {
     pub fn STATUS_BAD() -> u32 { choose(hex(0xf87171,255), hex(0xb91c1c,255)) }
     pub fn GLASS() -> u32 {
         if liquid() {
-            // Near-clear smoked crystal; a cool silver shimmer published by
-            // the moonlight scene rolls softly through every panel.
+            // Pure black glass: OLED true black, very low opacity, no silver
             let e = ember();
-            return lerp(hex(0x0c0e13, 150), hex(0x1b1f28, 160), 0.5 * e);
+            return lerp(hex(0x070709, 92), hex(0x101012, 105), 0.5 * e);
         }
         if !dark() { return hex(0xffffff, 214); }
         // Neutral smoked glass per the chosen reference, faintly tinted by
@@ -88,8 +87,8 @@ pub(crate) mod theme {
             hex(glass.plate, 202)
         }, 0.18)
     }
-    pub fn GLASS_INNER() -> u32 { if liquid() { return hex(0xffffff, (13.0 + 9.0 * ember()) as u8); } choose(hex(0xffffff,14), hex(0x101a14,12)) }
-    pub fn GLASS_BORDER() -> u32 { if liquid() { let e = ember(); return lerp(hex(0xffffff, (44.0 + 30.0 * e) as u8), hex(0xdfe6f2, 96), 0.45 * e); } choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
+    pub fn GLASS_INNER() -> u32 { if liquid() { return hex(0xffffff, (7.0 + 6.0 * ember()) as u8); } choose(hex(0xffffff,14), hex(0x101a14,12)) }
+    pub fn GLASS_BORDER() -> u32 { if liquid() { let e = ember(); return lerp(hex(0xffffff, (20.0 + 14.0 * e) as u8), hex(0x9aa0ae, 38), 0.45 * e); } choose(hex(0xffffff,36), hex(0x3c4a44,30)) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -762,10 +761,9 @@ fn draw_moonlight_scene(ui: &mut Ui, w: f32, h: f32, phase: f32) {
     .clamp(0.0, 1.0);
     theme::set_ember(shimmer);
 
-    // Night sky: pure black up high, the faintest blue-grey toward the
-    // ridge line — dark with depth, never flat.
+    // Black glassy OLED: true black throughout, almost no gradient – pure OLED
     let stops: [(f32, u32); 4] =
-        [(0.0, 0x020304), (0.5, 0x050608), (0.8, 0x090a0e), (1.0, 0x0c0d11)];
+        [(0.0, 0x000000), (0.5, 0x000000), (0.8, 0x010102), (1.0, 0x020203)];
     let rows = 20;
     for row in 0..rows {
         let ty = row as f32 / (rows - 1) as f32;
@@ -1145,38 +1143,14 @@ impl DrawCtx<'_> {
     /// centred pill dock (Home · Instances · Browse · Settings) and round
     /// Discord / Files buttons on the right. Targets are pushed before any
     /// page content so the shell always wins its taps.
-    fn draw_shell(&mut self, ui: &mut Ui, w: f32, h: f32, account_status: &str) {
-        let bar_h = 62.0;
-        let by = h - bar_h - 12.0;
-        // Account chip, clamped so it can never run under the centred dock
-        // (six items now: Packs and Shaders download pages joined it).
-        let dock_item = if w >= 1100.0 { 88.0 } else { 76.0 };
-        let dock_left = (w - (dock_item * 7.0 + 20.0)) * 0.5;
-        let chip_w = 200.0_f32.min(w * 0.26).min(dock_left - 26.0).max(120.0);
-        let chip = [6.0, by, chip_w, bar_h];
-        ui.rounded(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS());
-        ui.border(chip[0], chip[1], chip[2], chip[3], bar_h * 0.5, theme::GLASS_BORDER());
-        ui.rounded(chip[0] + 8.0, chip[1] + 8.0, bar_h - 16.0, bar_h - 16.0,
-            (bar_h - 16.0) * 0.5, theme::CARD_INNER());
-        let (name, badge) = account_status.split_once(" • ")
-            .map(|(n, b)| (n.to_owned(), b.to_owned()))
-            .unwrap_or_else(|| (account_status.to_owned(), "Offline".to_owned()));
-        let initial = name.chars().next().map(|c| c.to_ascii_uppercase()).unwrap_or('V');
-        draw_centered_text(ui, Face::LauncherMedium, 17.0,
-            [chip[0] + 8.0, chip[1] + 8.0, bar_h - 16.0, bar_h - 16.0],
-            theme::CRIMSON_BRIGHT(), &initial.to_string());
-        let text_x = chip[0] + bar_h + 2.0;
-        let name = ui.fit_text(Face::LauncherMedium, 14.0, &name, chip_w - bar_h - 16.0);
-        ui.text(Face::LauncherMedium, 14.0, text_x, chip[1] + 12.0, theme::TEXT(), &name);
-        let badge = ui.fit_text(Face::LauncherRegular, 11.5, &badge, chip_w - bar_h - 16.0);
-        ui.text(Face::LauncherRegular, 11.5, text_x, chip[1] + 33.0, theme::CRIMSON_BRIGHT(), &badge);
-        self.targets.push((chip, Action::Page(Page::Account)));
-        // Centred dock, now with direct Packs and Shaders download pages.
-        let item_w = dock_item;
-        let dock_w = item_w * 7.0 + 20.0;
-        let dock = [(w - dock_w) * 0.5, by, dock_w, bar_h];
-        ui.rounded(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS());
-        ui.border(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS_BORDER());
+    fn draw_shell(&mut self, ui: &mut Ui, w: f32, h: f32, _account_status: &str) {
+        // Black Glassy: far-left vertical rail instead of bottom dock
+        let bar_w = 78.0;
+        let bar_x = 8.0;
+        let bar_y = 12.0;
+        let bar_h = h - 24.0;
+        ui.rounded(bar_x, bar_y, bar_w, bar_h, 18.0, theme::GLASS());
+        ui.border(bar_x, bar_y, bar_w, bar_h, 18.0, theme::GLASS_BORDER());
         let items: [(&str, Page, Action); 7] = [
             ("Home", Page::Play, Action::Page(Page::Play)),
             ("Instances", Page::Installed, Action::Profile),
@@ -1186,8 +1160,14 @@ impl DrawCtx<'_> {
             ("Controls", Page::Controls, Action::Page(Page::Controls)),
             ("Settings", Page::Settings, Action::Page(Page::Settings)),
         ];
+        // Vertical centering: 7 items, 64px each + 8px gap = 504px total, centered
+        let item_h = 62.0;
+        let gap = 6.0;
+        let total = items.len() as f32 * item_h + (items.len() as f32 - 1.0) * gap;
+        let start_y = bar_y + (bar_h - total) * 0.5;
         for (i, (label, icon, action)) in items.iter().enumerate() {
-            let rect = [dock[0] + 10.0 + i as f32 * item_w, dock[1] + 5.0, item_w - 4.0, bar_h - 10.0];
+            let y = start_y + i as f32 * (item_h + gap);
+            let rect = [bar_x + 6.0, y, bar_w - 12.0, item_h];
             let active = match i {
                 0 => self.catalog.page == Page::Play,
                 1 => false,
@@ -1198,50 +1178,20 @@ impl DrawCtx<'_> {
                 _ => matches!(self.catalog.page, Page::Settings | Page::VoltSettings),
             };
             if active {
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], (bar_h - 10.0) * 0.5, theme::CRIMSON_BADGE());
+                // Black glassy active: subtle inner glow, not white badge
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 14.0, theme::HOVER());
+                ui.border(rect[0], rect[1], rect[2], rect[3], 14.0, theme::BORDER());
+                // Active left accent line
+                ui.rounded(rect[0] - 1.0, rect[1] + 12.0, 2.5, rect[3] - 24.0, 1.2, theme::TEXT());
             }
-            let col = if active { theme::CRIMSON_BRIGHT() } else { theme::MUTED() };
-            draw_page_icon(ui, *icon, rect[0] + rect[2] * 0.5, rect[1] + 17.0, col);
-            draw_centered_text(ui, Face::LauncherMedium, 10.5,
-                [rect[0], rect[1] + 28.0, rect[2], 18.0],
-                if active { theme::TEXT() } else { theme::MUTED() }, label);
+            let col = if active { theme::TEXT() } else { theme::MUTED() };
+            // Icon centered top, label below – vertical stack
+            draw_page_icon(ui, *icon, rect[0] + rect[2] * 0.5, rect[1] + 18.0, col);
+            draw_centered_text(ui, Face::LauncherMedium, 10.0,
+                [rect[0], rect[1] + 30.0, rect[2], 18.0],
+                if active { theme::TEXT() } else { theme::DIM() }, label);
             self.targets.push((rect, *action));
         }
-        // Round Discord and Files buttons.
-        let fab = bar_h - 6.0;
-        let discord = [w - 6.0 - fab * 2.0 - 10.0, by + 3.0, fab, fab];
-        // Liquid Glass stays strictly monochrome, so the Discord button is
-        // silver glass there instead of brand blue.
-        let discord_bg = if theme::liquid() { theme::GLASS() }
-            else { horizon_client::ui_theme::color::hex(0x5865f2, 255) };
-        ui.rounded(discord[0], discord[1], discord[2], discord[3], fab * 0.5, discord_bg);
-        if theme::liquid() {
-            ui.border(discord[0], discord[1], discord[2], discord[3], fab * 0.5,
-                theme::GLASS_BORDER());
-        }
-        draw_discord_icon(ui, discord[0] + fab * 0.5, discord[1] + fab * 0.5, theme::TEXT(), discord_bg);
-        self.targets.push((discord, Action::Discord));
-        let files = [w - 6.0 - fab, by + 3.0, fab, fab];
-        ui.rounded(files[0], files[1], files[2], files[3], fab * 0.5, theme::GLASS());
-        ui.border(files[0], files[1], files[2], files[3], fab * 0.5, theme::GLASS_BORDER());
-        let (fx, fy) = (files[0] + fab * 0.5, files[1] + fab * 0.5);
-        ui.rounded(fx - 1.6, fy - 9.0, 3.2, 12.0, 1.6, theme::MUTED());
-        {
-            let white = ui.atlas_ref().white;
-            let uv = [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5];
-            let color = theme::MUTED();
-            let points = [
-                [ui.to_batch(fx - 6.0), ui.to_batch(fy + 1.0)],
-                [ui.to_batch(fx + 6.0), ui.to_batch(fy + 1.0)],
-                [ui.to_batch(fx), ui.to_batch(fy + 8.0)],
-            ];
-            for pos in points {
-                ui.batch_mut().vertices.push(horizon_client::hud::HudVertex {
-                    pos, uv, color, depth: 0.0, glint_uv: [0.0, 0.0],
-                });
-            }
-        }
-        self.targets.push((files, Action::Page(Page::Installed)));
     }
 
     #[allow(dead_code)]
@@ -1562,46 +1512,14 @@ impl DrawCtx<'_> {
             self.targets.push((rect, *action));
         }
 
-        // ---- Floating icon dock, bottom centre ----
-        let bar_h = if compact { 54.0 } else { 60.0 };
-        let item_w = if compact { 58.0 } else { 68.0 };
-        let dock_items: [(Page, Action); 6] = [
-            (Page::Play, Action::Page(Page::Play)),
-            (Page::Mods, Action::Page(Page::Mods)),
-            (Page::Shaders, Action::Page(Page::Shaders)),
-            (Page::Controls, Action::Page(Page::Controls)),
-            (Page::Settings, Action::Page(Page::Settings)),
-            (Page::Account, Action::Page(Page::Account)),
-        ];
-        let dock_w = item_w * dock_items.len() as f32 + 20.0;
-        let dock = [ax + (w - dock_w) * 0.5, ay + h - m - bar_h, dock_w, bar_h];
-        ui.rounded(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS());
-        ui.border(dock[0], dock[1], dock[2], dock[3], bar_h * 0.5, theme::GLASS_BORDER());
-        for (i, (page, action)) in dock_items.iter().enumerate() {
-            let rect = [dock[0] + 10.0 + i as f32 * item_w, dock[1] + 4.0,
-                item_w, bar_h - 8.0];
-            let active = i == 0;
-            let cx = rect[0] + rect[2] * 0.5;
-            let cy = rect[1] + rect[3] * 0.5 - 2.0;
-            if active {
-                // The active icon glows white, with the little dot beneath.
-                ui.rounded(cx - 17.0, cy - 17.0, 34.0, 34.0, 17.0,
-                    hex(0xffffff, (22.0 + 16.0 * shimmer) as u8));
-                ui.rounded(cx - 2.0, rect[1] + rect[3] - 7.0, 4.0, 4.0, 2.0,
-                    hex(0xf2f5fa, 235));
-            }
-            draw_page_icon(ui, *page, cx, cy,
-                if active { hex(0xffffff, 255) } else { hex(0xc9cfdb, 185) });
-            self.targets.push((rect, *action));
-        }
+        // Black glassy home is center-focused: no floating bottom dock (navigation is far-left rail)
+        let _bar_h = if compact { 54.0 } else { 60.0 };
 
-        // ---- The hero: one enormous chrome-rimmed glass PLAY pill ----
+        // ---- The hero: center-focused black glass PLAY pill ----
         let play_h = if compact { 68.0 } else { 82.0 };
-        let py0 = dock[1] - play_h - (if compact { 14.0 } else { 22.0 });
-        // On short screens the pill rises next to the Worlds/Servers cards;
-        // narrow it there so chrome never collides with glass.
-        let cards_bottom = chip[1] + chip_h + 14.0 + 2.0 * (card_h + 10.0);
-        let play_w = if compact || py0 < cards_bottom + 4.0 { 236.0 } else { 300.0 };
+        // Center-focused: slightly above geometric center for cinematic balance
+        let py0 = ay + (h - play_h) * 0.5 - (if compact { 8.0 } else { 16.0 });
+        let play_w = if compact { 236.0 } else { 320.0 };
         let px0 = ax + (w - play_w) * 0.5;
         let slab = [px0, py0, play_w, play_h];
         if installing {
@@ -1623,26 +1541,26 @@ impl DrawCtx<'_> {
                 hex(0xf2f5fa, 255));
         } else {
             let v_start = ui.batch_mut().vertices.len();
-            // Soft white aura breathing with the moon shimmer.
-            let halo = 6.0 + 5.0 * shimmer;
+            // Black glassy: subtle dark aura, no white chrome
+            let halo = 4.0 + 3.0 * shimmer;
             ui.rounded(slab[0] - halo, slab[1] - halo, slab[2] + 2.0 * halo,
                 slab[3] + 2.0 * halo, (play_h + 2.0 * halo) * 0.5,
-                hex(0xdfe6f2, (14.0 + 14.0 * shimmer) as u8));
-            // Clear glass body.
-            ui.rounded(slab[0], slab[1], slab[2], slab[3], play_h * 0.5, theme::GLASS());
-            // Chrome rim: a bright outer ring and a quieter inner one.
+                hex(0x111114, (10.0 + 10.0 * shimmer) as u8));
+            // Pure black glass body – OLED true black
+            ui.rounded(slab[0], slab[1], slab[2], slab[3], play_h * 0.5, theme::CARD());
+            // Black glass rim: very subtle highlight, not white chrome
             ui.border(slab[0], slab[1], slab[2], slab[3], play_h * 0.5,
-                hex(0xffffff, (150.0 + 70.0 * shimmer) as u8));
-            ui.border(slab[0] + 2.5, slab[1] + 2.5, slab[2] - 5.0, slab[3] - 5.0,
-                (play_h - 5.0) * 0.5, hex(0xffffff, 46));
-            // Glossy highlight sweeping the top of the capsule.
+                hex(0xffffff, (22.0 + 12.0 * shimmer) as u8));
+            ui.border(slab[0] + 2.0, slab[1] + 2.0, slab[2] - 4.0, slab[3] - 4.0,
+                (play_h - 4.0) * 0.5, hex(0xffffff, 12));
+            // Subtle inner highlight – dark, not white
             ui.rounded(slab[0] + play_h * 0.28, slab[1] + 5.0,
-                slab[2] - play_h * 0.56, play_h * 0.34, play_h * 0.17,
-                hex(0xffffff, 34));
+                slab[2] - play_h * 0.56, play_h * 0.28, play_h * 0.14,
+                hex(0xffffff, 10));
             let label = if installed { "PLAY" }
                 else if self.error.is_some() { "RETRY" } else { "DOWNLOAD" };
             let font = if compact { 24.0 } else { 28.0 };
-            draw_centered_text(ui, Face::Display, font, slab, hex(0xffffff, 255), label);
+            draw_centered_text(ui, Face::Display, font, slab, theme::TEXT(), label);
             press_scale(ui, v_start, slab, Action::Play);
             self.targets.insert(0, (slab, Action::Play));
         }
@@ -1655,7 +1573,7 @@ impl DrawCtx<'_> {
                 theme::STATUS_BAD(), &e);
         }
 
-        // ---- Quiet utility chips, bottom-left, aligned with the dock ----
+        // ---- Quiet utility chips, bottom-left (black glassy, no dock alignment) ----
         let chips: [(&str, Action); 5] = [
             ("Replays", Action::HomeTab(HomeTab::Replays)),
             ("Shots", Action::HomeTab(HomeTab::Screenshots)),
@@ -1664,35 +1582,31 @@ impl DrawCtx<'_> {
             ("Packs", Action::Page(Page::Packs)),
         ];
         let chip_small_h = 26.0;
-        let avail = (dock[0] - ax - m - 10.0).max(0.0);
-        if avail >= 70.0 {
-            let mut cy = dock[1] + bar_h - chip_small_h;
-            for (label, action) in chips.iter().rev() {
-                let cw = (ui.measure(Face::LauncherMedium, 11.0, label) + 22.0).min(avail);
-                let rect = [ax + m, cy, cw, chip_small_h];
-                if rect[1] < chip[1] + chip_h + 60.0 { break; }
-                ui.rounded(rect[0], rect[1], rect[2], rect[3], chip_small_h * 0.5,
-                    theme::GLASS());
-                ui.border(rect[0], rect[1], rect[2], rect[3], chip_small_h * 0.5,
-                    hex(0xffffff, 26));
-                draw_centered_text(ui, Face::LauncherMedium, 11.0, rect,
-                    hex(0xc9cfdb, 200), label);
-                self.targets.push((rect, *action));
-                cy -= chip_small_h + 6.0;
-            }
+        let avail = (w * 0.22).clamp(90.0, 140.0);
+        let base_y = ay + h - m - chip_small_h;
+        let mut cy = base_y;
+        for (label, action) in chips.iter().rev() {
+            let cw = (ui.measure(Face::LauncherMedium, 11.0, label) + 22.0).min(avail);
+            let rect = [ax + m, cy, cw, chip_small_h];
+            if rect[1] < chip[1] + chip_h + 44.0 { break; }
+            ui.rounded(rect[0], rect[1], rect[2], rect[3], chip_small_h * 0.5,
+                theme::GLASS());
+            ui.border(rect[0], rect[1], rect[2], rect[3], chip_small_h * 0.5,
+                theme::GLASS_BORDER());
+            draw_centered_text(ui, Face::LauncherMedium, 11.0, rect,
+                theme::DIM(), label);
+            self.targets.push((rect, *action));
+            cy -= chip_small_h + 6.0;
         }
 
-        // Help lives on the Discord: a round glass button right of the dock.
-        let fab = bar_h - 10.0;
-        let help_x = dock[0] + dock_w + 12.0;
-        if help_x + fab <= ax + w - m {
-            let help = [help_x, dock[1] + 5.0, fab, fab];
-            ui.rounded(help[0], help[1], help[2], help[3], fab * 0.5, theme::GLASS());
-            ui.border(help[0], help[1], help[2], help[3], fab * 0.5, theme::GLASS_BORDER());
-            draw_headset_icon(ui, help[0] + fab * 0.5, help[1] + fab * 0.5,
-                hex(0xe8ecf4, 230));
-            self.targets.push((help, Action::Discord));
-        }
+        // Help: Discord glass button bottom-right, black glassy
+        let fab = 50.0;
+        let help = [ax + w - m - fab, ay + h - m - fab, fab, fab];
+        ui.rounded(help[0], help[1], help[2], help[3], fab * 0.5, theme::GLASS());
+        ui.border(help[0], help[1], help[2], help[3], fab * 0.5, theme::GLASS_BORDER());
+        draw_headset_icon(ui, help[0] + fab * 0.5, help[1] + fab * 0.5,
+            theme::MUTED());
+        self.targets.push((help, Action::Discord));
     }
 
     /// The lobby home: the player's 3D character takes centre stage over
@@ -5947,7 +5861,9 @@ impl Launcher {
                 [6.0, 102.0, (w - 12.0).max(120.0), (h - 148.0).max(120.0)]
             } else {
                 ctx.draw_shell(&mut ui, w, h, &account_status);
-                [6.0, 14.0, (w - 12.0).max(240.0), (h - 102.0).max(120.0)]
+                // Black glassy far-left rail: reserve left gutter instead of bottom
+                let left = 94.0;
+                [left, 12.0, (w - left - 8.0).max(240.0), (h - 24.0).max(120.0)]
             };
 
             page_v_start = ui.batch_mut().vertices.len();
