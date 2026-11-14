@@ -306,15 +306,22 @@ pub struct Catalog {
     pub sections: [bool; 3],
     pub pending_delete: Option<LocalItem>,
     downloaded: Vec<(browser::SourceId, String)>,
-    downloading: Option<(browser::SourceId, String)>,
+    pub downloading: Option<(browser::SourceId, String)>,
     progress: Arc<Mutex<f32>>,
-    failed: Option<(browser::SourceId, String)>,
+    pub failed: Option<(browser::SourceId, String)>,
     pub page: Page,
     pub query: String,
     pub results: Vec<Project>,
     pub results_born: std::time::Instant,
     pub status: String,
     pub offset: usize,
+    /// Detail page for packs/shaders: Some(index) shows About/Screenshots/Download
+    pub detail_index: Option<usize>,
+    pub detail_tab: u8,
+    /// Fullscreen photo viewer: screenshot filename index
+    pub viewer_shot: Option<usize>,
+    /// Fullscreen world thumbnail index (virtual)
+    pub viewer_world: Option<usize>,
     /// The next finished search APPENDS to `results` (the grid's
     /// continuous scroll fetched another page) instead of replacing them.
     pub append_next: bool,
@@ -392,6 +399,10 @@ impl Catalog {
             offset: 0,
             append_next: false,
             scroll: 0.0,
+            detail_index: None,
+            detail_tab: 0,
+            viewer_shot: None,
+            viewer_world: None,
             bundled_disabled: std::collections::BTreeSet::new(),
             mods_query: String::new(),
             mods_sort: 0,
