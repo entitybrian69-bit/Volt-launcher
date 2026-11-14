@@ -16,21 +16,14 @@ jobs:
           toolchain: 1.95.0
           targets: aarch64-linux-android
       - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
-          ls /usr/lib/x86_64-linux-gnu/pkgconfig/alsa.pc 2>&1 | tee /tmp/dbg.log
-          pkg-config --modversion alsa 2>&1 | tee -a /tmp/dbg.log
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" | tee -a /tmp/dbg.log
-          cat /tmp/dbg.log
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Cargo check android
         run: |
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH
-          echo "cargo PKG_CONFIG_PATH=$PKG_CONFIG_PATH" | tee /tmp/check.log
-          ls $PKG_CONFIG_PATH 2>&1 | head | tee -a /tmp/check.log
-          pkg-config --modversion alsa 2>&1 | tee -a /tmp/check.log
-          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee -a /tmp/check.log || true
+          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
+        env:
+          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+          ALSA_NO_PKG_CONFIG: 1
       - name: Commit log to branch
         run: |
           git config user.name "volt-bot"
