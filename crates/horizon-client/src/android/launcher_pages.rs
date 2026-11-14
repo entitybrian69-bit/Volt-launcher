@@ -1453,33 +1453,62 @@ impl DrawCtx<'_> {
         let m = if compact { 12.0 } else { 18.0 };
         let shimmer = theme::ember();
 
-        // ---- Brand, top-left: V logo + VOLT, playtime whispered under it ----
-        ui.volt_logo(ax + m, ay + m, 34.0, 34.0);
-        ui.text(Face::Display, 21.0, ax + m + 44.0, ay + m + 4.0, hex(0xf2f4f8, 255), "VOLT");
-        let secs = self.catalog.config.play_seconds;
-        let time = if secs == 0 { "0 h".to_owned() }
-            else if secs < 3600 { format!("{} min", (secs / 60).max(1)) }
-            else { format!("{} h", secs / 3600) };
-        ui.text(Face::LauncherRegular, 10.5, ax + m + 44.0, ay + m + 26.0, theme::DIM(),
-            &format!("26.3 · {time} played"));
+        // ---- Far-left rail: all navigation (dashboard) ----
+        let rail_w = 78.0;
+        let rail_x = ax + 8.0;
+        let rail_y = ay + 12.0;
+        let rail_h = h - 24.0;
+        ui.rounded(rail_x, rail_y, rail_w, rail_h, 18.0, theme::GLASS());
+        ui.border(rail_x, rail_y, rail_w, rail_h, 18.0, theme::GLASS_BORDER());
+        let nav: [(&str, Page, Action); 7] = [
+            ("Home", Page::Play, Action::Page(Page::Play)),
+            ("Instances", Page::Installed, Action::Profile),
+            ("Browse", Page::Mods, Action::Page(Page::Mods)),
+            ("Packs", Page::Packs, Action::Page(Page::Packs)),
+            ("Shaders", Page::Shaders, Action::Page(Page::Shaders)),
+            ("Controls", Page::Controls, Action::Page(Page::Controls)),
+            ("Settings", Page::Settings, Action::Page(Page::Settings)),
+        ];
+        let item_h = 62.0;
+        let gap = 6.0;
+        let total = nav.len() as f32 * item_h + (nav.len() as f32 - 1.0) * gap;
+        let start_y = rail_y + (rail_h - total) * 0.5;
+        for (i, (label, page, action)) in nav.iter().enumerate() {
+            let y = start_y + i as f32 * (item_h + gap);
+            let rect = [rail_x + 6.0, y, rail_w - 12.0, item_h];
+            let active = *page == Page::Play;
+            if active {
+                ui.rounded(rect[0], rect[1], rect[2], rect[3], 14.0, theme::HOVER());
+                ui.border(rect[0], rect[1], rect[2], rect[3], 14.0, theme::BORDER());
+                ui.rounded(rect[0] - 1.0, rect[1] + 12.0, 2.5, rect[3] - 24.0, 1.2, theme::TEXT());
+            }
+            let col = if active { theme::TEXT() } else { theme::MUTED() };
+            draw_page_icon(ui, *page, rect[0] + rect[2] * 0.5, rect[1] + 18.0, col);
+            draw_centered_text(ui, Face::LauncherMedium, 10.0, [rect[0], rect[1] + 30.0, rect[2], 18.0], if active { theme::TEXT() } else { theme::DIM() }, label);
+            self.targets.push((rect, *action));
+        }
 
-        // ---- Account chip, top-right ----
-        let (name, badge) = account_status.split_once(" • ")
-            .map(|(n, b)| (n.to_owned(), b.to_owned()))
-            .unwrap_or_else(|| (account_status.to_owned(), "Offline".to_owned()));
+        // ---- Brand, top-left (shifted right of rail) ----
+        let brand_x = rail_x + rail_w + 16.0;
+        ui.volt_logo(brand_x, ay + m, 34.0, 34.0);
+        ui.text(Face::Display, 21.0, brand_x + 44.0, ay + m + 4.0, hex(0xf2f4f8, 255), "VOLT");
+        let secs = self.catalog.config.play_seconds;
+        let time = if secs == 0 { "0 h".to_owned() } else if secs < 3600 { format!("{} min", (secs / 60).max(1)) } else { format!("{} h", secs / 3600) };
+        ui.text(Face::LauncherRegular, 10.5, brand_x + 44.0, ay + m + 26.0, theme::DIM(), &format!("26.3 · {time} played"));
+
+        // ---- Account chip, top-right: skin head + name -> Account page ----
+        let (name, badge) = account_status.split_once(" • ").map(|(n,b)| (n.to_owned(), b.to_owned())).unwrap_or_else(|| (account_status.to_owned(), "Offline".to_owned()));
         let chip_h = 44.0;
-        let chip_w = (ui.measure(Face::LauncherMedium, 13.5, &name) + chip_h + 26.0)
-            .min(w * 0.30)
-            .max(132.0);
+        let chip_w = (ui.measure(Face::LauncherMedium, 13.5, &name) + chip_h + 26.0).min(w * 0.30).max(132.0);
         let chip = [ax + w - m - chip_w, ay + m, chip_w, chip_h];
         ui.rounded(chip[0], chip[1], chip[2], chip[3], chip_h * 0.5, theme::GLASS());
         ui.border(chip[0], chip[1], chip[2], chip[3], chip_h * 0.5, theme::GLASS_BORDER());
-        ui.rounded(chip[0] + 6.0, chip[1] + 6.0, chip_h - 12.0, chip_h - 12.0,
-            (chip_h - 12.0) * 0.5, theme::GLASS_INNER());
+        // Skin head avatar (small dark glass square with initial fallback, will show skin texture when available)
+        ui.rounded(chip[0] + 6.0, chip[1] + 6.0, chip_h - 12.0, chip_h - 12.0, (chip_h - 12.0) * 0.5, theme::CARD_INNER());
         let initial = name.chars().next().map(|c| c.to_ascii_uppercase()).unwrap_or('V');
-        draw_centered_text(ui, Face::LauncherMedium, 15.0,
-            [chip[0] + 6.0, chip[1] + 6.0, chip_h - 12.0, chip_h - 12.0],
-            hex(0xf2f4f8, 255), &initial.to_string());
+        draw_centered_text(ui, Face::LauncherMedium, 15.0, [chip[0] + 6.0, chip[1] + 6.0, chip_h - 12.0, chip_h - 12.0], hex(0xf2f4f8, 255), &initial.to_string());
+        // Try to overlay tiny skin head if we have a custom skin texture (future: replace initial with head crop)
+        // For now the slot is ready for skin_preview::draw_player_3d head crop.
         let text_x = chip[0] + chip_h + 4.0;
         let name_fit = ui.fit_text(Face::LauncherMedium, 13.5, &name, chip_w - chip_h - 16.0);
         ui.text(Face::LauncherMedium, 13.5, text_x, chip[1] + 7.0, theme::TEXT(), &name_fit);
@@ -1487,41 +1516,29 @@ impl DrawCtx<'_> {
         ui.text(Face::LauncherRegular, 10.5, text_x, chip[1] + 25.0, theme::DIM(), &badge_fit);
         self.targets.push((chip, Action::Page(Page::Account)));
 
-        // ---- Right column: Worlds / Servers glass cards ----
-        let card_w = (w * 0.28).clamp(196.0, 260.0);
-        let card_h = if compact { 50.0 } else { 58.0 };
-        let card_x = ax + w - m - card_w;
-        let cards: [(&str, &str, u8, Action); 2] = [
-            ("Worlds", "EXPLORE", 0, Action::HomeTab(HomeTab::Worlds)),
-            ("Servers", "JOIN", 1, Action::HomeTab(HomeTab::Multiplayer)),
-        ];
-        for (i, (title, sub, glyph, action)) in cards.iter().enumerate() {
-            let rect = [card_x, chip[1] + chip_h + 14.0 + i as f32 * (card_h + 10.0),
-                card_w, card_h];
-            let v_start = ui.batch_mut().vertices.len();
-            ui.rounded(rect[0], rect[1], rect[2], rect[3], 16.0, theme::GLASS());
-            ui.border(rect[0], rect[1], rect[2], rect[3], 16.0, theme::GLASS_BORDER());
-            let icon = [rect[0] + 9.0, rect[1] + (card_h - 34.0) * 0.5, 34.0, 34.0];
-            ui.rounded(icon[0], icon[1], icon[2], icon[3], 10.0, theme::GLASS_INNER());
-            draw_tile_icon(ui, *glyph, icon[0] + 17.0, icon[1] + 17.0, hex(0xe8ecf4, 255));
-            ui.text(Face::LauncherMedium, 14.5, rect[0] + 52.0, rect[1] + 9.0,
-                theme::TEXT(), title);
-            ui.text(Face::LauncherRegular, 9.5, rect[0] + 52.0, rect[1] + 30.0,
-                theme::DIM(), sub);
-            press_scale(ui, v_start, rect, *action);
-            self.targets.push((rect, *action));
-        }
+        // Dashboard: Worlds/Servers removed per request — clean center-focus only
 
         // Black glassy home is center-focused: no floating bottom dock (navigation is far-left rail)
         let _bar_h = if compact { 54.0 } else { 60.0 };
 
-        // ---- The hero: center-focused black glass PLAY pill ----
+        // ---- The hero: center-focused black glass PLAY pill with 3D player above ----
         let play_h = if compact { 68.0 } else { 82.0 };
-        // Center-focused: slightly above geometric center for cinematic balance
-        let py0 = ay + (h - play_h) * 0.5 - (if compact { 8.0 } else { 16.0 });
+        // Play sits slightly below center; 3D character will sit directly above it
+        let py0 = ay + (h - play_h) * 0.5 + (if compact { 12.0 } else { 24.0 });
         let play_w = if compact { 236.0 } else { 320.0 };
         let px0 = ax + (w - play_w) * 0.5;
         let slab = [px0, py0, play_w, play_h];
+        // ---- 3D player character above Play (dashboard spec) ----
+        let char_w = (w * 0.26).clamp(150.0, 260.0);
+        let char_h = (h * 0.40).clamp(160.0, 300.0).min((py0 - (ay + m + 56.0)).max(100.0));
+        if char_h >= 100.0 {
+            let char_x = ax + (w - char_w) * 0.5;
+            let char_y = (py0 - char_h - 18.0).max(ay + m + 52.0);
+            let char_rect = [char_x, char_y, char_w, char_h];
+            let default_uuid = self.volt_accounts.active().map(|a| a.uuid_u128()).unwrap_or(0);
+            crate::skin_preview::draw_player_3d(ui, char_rect, self.preview_yaw, self.preview_pitch, self.idle_phase, self.preview_vel_yaw, 2, 3, self.volt_accounts.active_skin_preview(), self.volt_accounts.active_cape_preview(), default_uuid);
+            *self.preview_rect = Some(char_rect);
+        }
         if installing {
             ui.rounded(slab[0], slab[1], slab[2], slab[3], play_h * 0.5, theme::GLASS());
             ui.border(slab[0], slab[1], slab[2], slab[3], play_h * 0.5,
@@ -2097,7 +2114,7 @@ impl DrawCtx<'_> {
             Page::Shaders => "Horizon catalog / native .hshader & experimental ZIP support",
             _ => "Modrinth & CurseForge verified resource packs / enable in Installed",
         };
-        let origins: &[Origin] = if page == Page::Packs {
+        let _origins: &[Origin] = if page == Page::Packs {
             &[Origin::Modrinth, Origin::CurseForge, Origin::Both]
         } else {
             &[
@@ -2107,83 +2124,29 @@ impl DrawCtx<'_> {
                 Origin::Both,
             ]
         };
-        let active_origin = match page {
+        let _active_origin = match page {
             Page::Mods => self.catalog.config.mod_source,
             Page::Shaders => self.catalog.config.shader_source,
             _ => self.catalog.config.pack_source,
         };
-        let origin_action = |o: Origin| match page {
+        let _origin_action = |o: Origin| match page {
             Page::Mods => Action::ModSource(o),
             Page::Shaders => Action::ShaderSource(o),
             _ => Action::PackSource(o),
         };
 
-        // Top header row with Modrinth | CurseForge | Both platform selector!
+        // Black glassy: clean header — title + hint only, no origin loader pills (Forge/Fabric/All/Installed/Popular removed)
         if !compact {
             ui.text(Face::LauncherMedium, 24.0, cx, cy, theme::TEXT(), title);
             let acc_w = 186.0;
-            let tab_item_w = if origins.len() == 4 { 84.0 } else { 88.0 };
-            let seg_w = 8.0 + origins.len() as f32 * tab_item_w;
-            let hint_max = (cw - acc_w - seg_w - 32.0).max(120.0);
+            let hint_max = (cw - acc_w - 32.0).max(120.0);
             let fitted_hint = ui.fit_text(Face::LauncherRegular, 13.0, hint, hint_max);
             ui.text(Face::LauncherRegular, 13.0, cx, cy + 30.0, theme::MUTED(), &fitted_hint);
-
-            draw_account_chip(
-                ui,
-                self.targets,
-                [cx + cw - acc_w, cy + 4.0, acc_w, 38.0],
-                account_status,
-                self.login.signed_in,
-            );
-
-            let seg_x = cx + cw - acc_w - seg_w - 10.0;
-            ui.rounded(seg_x, cy + 4.0, seg_w, 38.0, 10.0, theme::CARD());
-            ui.border(seg_x, cy + 4.0, seg_w, 38.0, 10.0, theme::BORDER());
-            for (idx, &origin) in origins.iter().enumerate() {
-                let ox = seg_x + 4.0 + idx as f32 * tab_item_w;
-                let orect = [ox + 1.0, cy + 8.0, tab_item_w - 2.0, 30.0];
-                let is_on = active_origin == origin;
-                if is_on {
-                    ui.rounded(orect[0], orect[1], orect[2], orect[3], 7.0, theme::CRIMSON_BADGE());
-                    ui.border(orect[0], orect[1], orect[2], orect[3], 7.0, theme::CRIMSON());
-                }
-                draw_centered_text(
-                    ui,
-                    Face::LauncherMedium,
-                    12.5,
-                    orect,
-                    if is_on { theme::ON_CRIMSON() } else { theme::MUTED() },
-                    origin.label(),
-                );
-                self.targets.push((orect, origin_action(origin)));
-            }
+            draw_account_chip(ui, self.targets, [cx + cw - acc_w, cy + 4.0, acc_w, 38.0], account_status, self.login.signed_in);
+            // origin selector removed per request
         } else {
             ui.text(Face::LauncherMedium, 18.0, cx, cy, theme::TEXT(), title);
-            let seg_y = cy + 26.0;
-            ui.rounded(cx, seg_y, cw, 34.0, 9.0, theme::CARD());
-            ui.border(cx, seg_y, cw, 34.0, 9.0, theme::BORDER());
-            let tab_item_w = (cw - 8.0) / origins.len() as f32;
-            for (idx, &origin) in origins.iter().enumerate() {
-                let orect = [
-                    cx + 4.0 + idx as f32 * tab_item_w + 1.0,
-                    seg_y + 3.0,
-                    tab_item_w - 2.0,
-                    28.0,
-                ];
-                let is_on = active_origin == origin;
-                if is_on {
-                    ui.rounded(orect[0], orect[1], orect[2], orect[3], 6.5, theme::CRIMSON());
-                }
-                draw_centered_text(
-                    ui,
-                    Face::LauncherMedium,
-                    12.0,
-                    orect,
-                    if is_on { theme::ON_CRIMSON() } else { theme::MUTED() },
-                    origin.label(),
-                );
-                self.targets.push((orect, origin_action(origin)));
-            }
+            // compact origin selector removed — black glassy clean header
         }
 
         // Unified Command Toolbar Card (Search + Search CTA + Open folder + Import file)
