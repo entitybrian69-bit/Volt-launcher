@@ -5,6 +5,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: dtolnay/rust-toolchain@master
@@ -14,7 +16,10 @@ jobs:
         run: |
           cargo check -p horizon-android 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
-          # gist upload
-          gh gist create /tmp/check.log --public --desc "check log $(date -u +%T)" || true
+      - name: Publish check log
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view check-log >/dev/null 2>&1 || gh release create check-log --title "check log" --notes "check" --latest=false
+          gh release upload check-log /tmp/check.log --clobber
+          echo "uploaded"
