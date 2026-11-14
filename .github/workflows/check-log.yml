@@ -14,10 +14,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Cargo check android
         run: |
           cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
+          # also check horizon-client to see real errors
+          cargo check -p horizon-client 2>&1 | tee -a /tmp/check.log || true
       - name: Commit log to branch
         run: |
           git config user.name "volt-bot"
