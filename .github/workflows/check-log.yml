@@ -18,8 +18,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Cargo check android
         run: |
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
-          export ALSA_NO_PKG_CONFIG=1
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH
+          pkg-config --modversion alsa
           cargo check -p horizon-client 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
       - name: Commit log to branch
