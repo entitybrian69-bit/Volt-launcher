@@ -2309,11 +2309,11 @@ impl DrawCtx<'_> {
                 } else {
                     // Download tab
                     let btn = [body[0]+14.0, body[1]+ (if self.catalog.failed.is_some(){40.0}else{0.0}) + 12.0, 200.0, 44.0];
-                    let downloading = self.catalog.downloading.is_some_and(|(s,id)| s==proj.source && id==proj.id);
+                    let downloading = self.catalog.downloading.as_ref().is_some_and(|(s,id)| *s==proj.source && id==&proj.id);
                     if downloading {
                         ui.rounded(btn[0], btn[1], btn[2], btn[3], 10.0, theme::GLASS());
                         draw_centered_text(ui, Face::LauncherMedium, 13.0, btn, theme::MUTED(), "Downloading…");
-                    } else if self.catalog.failed.is_some_and(|(s,id)| s==proj.source && id==proj.id) {
+                    } else if self.catalog.failed.as_ref().is_some_and(|(s,id)| *s==proj.source && id==&proj.id) {
                         styled_button(ui, self.targets, btn, "Retry download", Action::Install(idx), BtnStyle::Primary, true);
                         // Show error explicitly
                         let err = if self.catalog.status.is_empty() { "Horizon download failed – no downloadable ZIP or checksum error." } else { &self.catalog.status };
