@@ -2273,8 +2273,8 @@ impl DrawCtx<'_> {
                 }
                 let body = [cx, tab_y+44.0, cw, ch - (tab_y+44.0 - cy) - 48.0];
                 // Error banner for Horizon failures
-                if let Some((src,id)) = &self.catalog.failed.clone() {
-                    if *src==proj.source && *id==proj.id {
+                if let Some((src,id)) = self.catalog.failed.as_ref() {
+                    if *src==proj.source && id==&proj.id {
                         let msg = if self.catalog.status.is_empty() { "Download failed – check connection or try again.".to_owned() } else { self.catalog.status.clone() };
                         ui.rounded(body[0], body[1], body[2], 36.0, 10.0, theme::CARD());
                         ui.border(body[0], body[1], body[2], 36.0, 10.0, hex(0xff4444, 80));
