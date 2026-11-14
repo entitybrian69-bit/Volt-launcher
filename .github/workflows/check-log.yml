@@ -12,18 +12,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.95.0
-      - name: Install deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Cargo check
         run: |
-          cargo check -p horizon-android --message-format=human 2>&1 | tee /tmp/check.log || true
+          cargo check -p horizon-client 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
       - name: Commit log to branch
         run: |
           git config user.name "volt-bot"
           git config user.email "volt@bot.local"
           git checkout -B check-log-branch
-          mkdir -p /tmp/commit
           cp /tmp/check.log check.log
           git add check.log
           git commit -m "check log $(date -u +%T)" || true
