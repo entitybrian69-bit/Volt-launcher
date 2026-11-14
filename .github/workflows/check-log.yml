@@ -18,11 +18,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Cargo check android
         run: |
-          pkg-config --modversion alsa || echo "alsa not found after install"
-          ls /usr/lib/x86_64-linux-gnu/pkgconfig/alsa.pc || echo "no alsa.pc1"
-          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee /tmp/check.log || true
+          pkg-config --modversion alsa 2>&1 | tee /tmp/check.log
+          ls /usr/lib/x86_64-linux-gnu/pkgconfig/alsa.pc 2>&1 | tee -a /tmp/check.log
+          ls /usr/lib/pkgconfig/alsa.pc 2>&1 | tee -a /tmp/check.log
+          cargo check -p horizon-android --target aarch64-linux-android 2>&1 | tee -a /tmp/check.log || true
           cat /tmp/check.log
-          echo "=== horizon-client ==="
+          echo "=== horizon-client ===" | tee -a /tmp/check.log
           cargo check -p horizon-client 2>&1 | tee -a /tmp/check.log || true
       - name: Commit log to branch
         run: |
