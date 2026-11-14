@@ -16,10 +16,20 @@ jobs:
         run: |
           cargo check -p horizon-android 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
-      - name: Publish check log
-        env:
-          GH_TOKEN: ${{ github.token }}
+          mkdir -p /tmp/out
+          cp /tmp/check.log /tmp/out/check.log
+          echo "=== cargo check done ==="
+      - uses: actions/upload-artifact@v4
+        with:
+          name: check-log
+          path: /tmp/out/check.log
+      - name: Commit log to branch
         run: |
-          gh release view check-log >/dev/null 2>&1 || gh release create check-log --title "check log" --notes "check" --latest=false
-          gh release upload check-log /tmp/check.log --clobber
-          echo "uploaded"
+          git config user.name "volt-bot"
+          git config user.email "volt@bot.local"
+          git checkout -B check-log-branch
+          mkdir -p /tmp/commit
+          cp /tmp/check.log check.log
+          git add check.log
+          git commit -m "check log $(date -u +%T)" || true
+          git push origin check-log-branch --force
