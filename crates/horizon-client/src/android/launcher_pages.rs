@@ -1166,9 +1166,8 @@ impl DrawCtx<'_> {
             ("Controls", Page::Controls, Action::Page(Page::Controls)),
             ("Settings", Page::Settings, Action::Page(Page::Settings)),
         ];
-        // Vertical centering: 7 items, 64px each + 8px gap = 504px total, centered
-        let item_h = 62.0;
-        let gap = 6.0;
+        // Adaptive spacing to avoid cramped look on short screens (user feedback)
+        let (item_h, gap) = if bar_h < 560.0 { (48.0, 4.0) } else if bar_h < 700.0 { (54.0, 5.0) } else { (62.0, 6.0) };
         let total = items.len() as f32 * item_h + (items.len() as f32 - 1.0) * gap;
         let start_y = bar_y + (bar_h - total) * 0.5;
         for (i, (label, icon, action)) in items.iter().enumerate() {
@@ -1624,8 +1623,7 @@ impl DrawCtx<'_> {
             ("Shots", HomeTab::Screenshots, Action::HomeTab(HomeTab::Screenshots)),
             ("Replays", HomeTab::Replays, Action::HomeTab(HomeTab::Replays)),
         ];
-        let r_item_h = 68.0;
-        let r_gap = 8.0;
+        let (r_item_h, r_gap) = if r_rail_h < 520.0 { (54.0, 6.0) } else { (68.0, 8.0) };
         let r_total = r_item_h * right_nav.len() as f32 + r_gap * (right_nav.len() as f32 - 1.0);
         let r_start = r_rail_y + (r_rail_h - r_total) * 0.5;
         for (i, (label, _tab, action)) in right_nav.iter().enumerate() {
@@ -2272,14 +2270,19 @@ impl DrawCtx<'_> {
                     self.targets.push((r, Action::DetailTab(i as u8)));
                 }
                 let body = [cx, tab_y+44.0, cw, ch - (tab_y+44.0 - cy) - 48.0];
-                // Error banner for Horizon failures
-                if let Some((src,id)) = self.catalog.failed.as_ref() {
-                    if *src==proj.source && id.as_str()==proj.id.as_str() {
-                        let msg = if self.catalog.status.is_empty() { "Download failed – check connection or try again.".to_owned() } else { self.catalog.status.clone() };
-                        ui.rounded(body[0], body[1], body[2], 36.0, 10.0, theme::CARD());
-                        ui.border(body[0], body[1], body[2], 36.0, 10.0, hex(0xff4444, 80));
-                        ui.text(Face::LauncherMedium, 12.0, body[0]+12.0, body[1]+10.0, hex(0xff6b6b,255), &ui.fit_text(Face::LauncherMedium, 12.0, &msg, body[2]-24.0));
-                    }
+                // Error banner for Horizon failures — also show when status contains failure text even if failed not set (e.g. Horizon "no compatible build")
+                let show_horizon_error = if let Some((src,id)) = self.catalog.failed.as_ref() {
+                    *src==proj.source && id.as_str()==proj.id.as_str()
+                } else {
+                    // status-driven fallback: last download for this project failed with message
+                    let low = self.catalog.status.to_lowercase();
+                    (low.contains("failed") || low.contains("no compatible") || low.contains("not available") || low.contains("could not")) && !self.catalog.status.is_empty()
+                };
+                if show_horizon_error {
+                    let msg = if self.catalog.status.is_empty() { "Download failed – check connection or try again.".to_owned() } else { self.catalog.status.clone() };
+                    ui.rounded(body[0], body[1], body[2], 36.0, 10.0, theme::CARD());
+                    ui.border(body[0], body[1], body[2], 36.0, 10.0, hex(0xff4444, 80));
+                    ui.text(Face::LauncherMedium, 12.0, body[0]+12.0, body[1]+10.0, hex(0xff6b6b,255), &ui.fit_text(Face::LauncherMedium, 12.0, &msg, body[2]-24.0));
                 }
                 if self.catalog.detail_tab==0 {
                     ui.rounded(body[0], body[1]+ (if self.catalog.failed.is_some(){40.0}else{0.0}), body[2], 140.0, 12.0, theme::CARD());

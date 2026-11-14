@@ -97,7 +97,7 @@ jobs:
               raise SystemExit(f"Unsupported ABI(s): {unknown}")
 
           include = [{"abi": abi, "target": targets[abi]} for abi in selected]
-          publish_release = (event == "push") or ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and input_publish)
+          publish_release = ref.startswith("refs/tags/v") or (event == "workflow_dispatch" and input_publish)
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
               out.write(f"matrix={json.dumps({'include': include})}\n")
