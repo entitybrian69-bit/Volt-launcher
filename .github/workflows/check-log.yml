@@ -14,7 +14,7 @@ jobs:
         run: |
           cargo check -p horizon-android 2>&1 | tee /tmp/check.log || true
           cat /tmp/check.log
-          # create issue with log
-          gh issue create --title "cargo check log $(date -u +%T)" --body "$(head -c 65000 /tmp/check.log)" || true
+          # gist upload
+          gh gist create /tmp/check.log --public --desc "check log $(date -u +%T)" || true
         env:
           GH_TOKEN: ${{ github.token }}
