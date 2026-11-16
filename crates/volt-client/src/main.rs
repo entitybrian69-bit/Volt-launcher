@@ -10,7 +10,7 @@ static ALLOCATOR: volt_threads::Allocator = volt_threads::Allocator;
 /// The mod API level this game serves, kept in the program for the launcher
 /// to read without running it (`volt_mods::api_level::MARK`). `main`
 /// reads it, so the linker keeps it.
-static MOD_API_LEVEL: [u8; 27] = volt_mods::api_level::MARK;
+static MOD_API_LEVEL: [u8; volt_mods::api_level::MARK.len()] = volt_mods::api_level::MARK;
 
 fn main() {
     volt_threads::configure_allocator();

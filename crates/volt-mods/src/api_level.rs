@@ -65,10 +65,11 @@ pub const FUNCTIONS: [(&str, u32); 46] = [
 /// What the game's program carries so the launcher can read its level
 /// without running it: `volt-mod-api-level:0001;` (four digits). A
 /// program from before the mark serves level 0.
-pub const MARK: [u8; 27] = {
+pub const MARK: [u8; b"volt-mod-api-level:0000;".len()] = {
     let mut mark = *b"volt-mod-api-level:0000;";
     let mut level = LEVEL;
-    let mut i = 25;
+    // The four digits sit just before the ';'.
+    let mut i = DIGITS_END;
     while level > 0 {
         mark[i] = b'0' + (level % 10) as u8;
         level /= 10;
@@ -77,13 +78,22 @@ pub const MARK: [u8; 27] = {
     mark
 };
 
+/// Where the mark's prefix ends: the four digits follow it, then `;`.
+const DIGITS_START: usize = b"volt-mod-api-level:".len();
+const DIGITS_END: usize = DIGITS_START + 3;
+
 /// The level a program's bytes carry in their [`MARK`], if any.
 pub fn read_mark(program: &[u8]) -> Option<u32> {
-    let prefix = &MARK[..22];
+    let prefix = &MARK[..DIGITS_START];
     program
         .windows(MARK.len())
-        .filter(|w| w.starts_with(prefix) && w[26] == b';')
-        .find_map(|w| std::str::from_utf8(&w[22..26]).ok()?.parse().ok())
+        .filter(|w| w.starts_with(prefix) && w[MARK.len() - 1] == b';')
+        .find_map(|w| {
+            std::str::from_utf8(&w[DIGITS_START..=DIGITS_END])
+                .ok()?
+                .parse()
+                .ok()
+        })
 }
 
 /// A function's level; None for one this Volt doesn't have.
@@ -175,7 +185,7 @@ mod tests {
     #[test]
     fn the_mark_carries_the_level() {
         assert_eq!(read_mark(&MARK), Some(LEVEL));
-        let mut program = b"\0\x7fELF volt-mod-api-level: volt-mod-api-level:".to_vec();
+        let mut program = b"\0\x7fELF volt-mod-api-level:".to_vec();
         program.extend_from_slice(&MARK);
         program.extend_from_slice(b"\0rest");
         assert_eq!(read_mark(&program), Some(LEVEL));
