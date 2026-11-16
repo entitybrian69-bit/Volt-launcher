@@ -2,7 +2,7 @@
 
 What another launcher (Prism Launcher, MultiMC, ATLauncher, Modrinth App, HMCL or your own) needs to start Volt:
 the options `volt-client` takes, how it hands over an account, and how it ends. `volt-launcher` is the
-reference implementation. Proposed in volt-rust/volt#3545.
+reference implementation. Proposed in horizon-rust/horizon#3545.
 
 ## Overview
 

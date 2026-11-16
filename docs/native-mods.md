@@ -1,10 +1,10 @@
 # Native mods (experimental)
 
 Native mods are **mixin bundles** that change the game's own Rust source before it is compiled, with
-[volt-mixins](https://github.com/volt-rust/volt-mixins) (MIT, by levzzz5154, made for Volt). A bundle
+[volt-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Volt). A bundle
 is a `volt-mixin.toml` and a few `.rs` helpers that hook into named functions of the game (HEAD, BEFORE_CALL,
 RETURN, MODIFY_ARG, OVERWRITE...; the tool's README lists them). A port such as Veinminer is three HEAD hooks and
-one module. Start a mod from [volt-native-mod-template](https://github.com/volt-rust/volt-native-mod-template).
+one module. Start a mod from [volt-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template).
 
 Native mods are native code with the player's rights, not sandboxed. The launcher turns them on only when the player
 installs one (after a notice) and builds them only behind a red warning; the registry lists one only after a review (its later releases are checked by machine); and
@@ -33,7 +33,7 @@ on any Volt whose version is the one it needs or a later one. Its `volt` is then
 pin, else on the installed version's commit (the game the player plays), after checking that commit's
 `NATIVE_HOOKS_API` (read from GitHub) is at least the mod's; when it isn't and nothing pins, it builds on the commit the
 mod was tested on. In its own copy of the mod it sets `volt_revision` to the commit it builds on. Volt's
-own native mods (Zoom, FPS counter, Keystrokes, Minimap; volt-rust/volt-mods, `native/<name>/`) are made this way, so any of them build together
+own native mods (Zoom, FPS counter, Keystrokes, Minimap; horizon-rust/horizon-mods, `native/<name>/`) are made this way, so any of them build together
 with no re-release for each Nightly.
 
 API 2 adds the item panel beside container screens and its recipe pages (`native_panel_items`,
@@ -344,7 +344,7 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
   shows a warning in red before every build: the mods run with full access to the computer, and their ids and
   versions. The Mods page says who made each one, and "Not made or endorsed by the Volt project" for any mod not
   Volt's own.
-- **The registry** (volt-rust/volt-mods) lists them as their own kind, `native-mod`, only after a maintainer
+- **The registry** (horizon-rust/horizon-mods) lists them as their own kind, `native-mod`, only after a maintainer
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hnmod` asset is a version once the bundle passes the registry's checks, with no further
   review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hnmod` contains `.rs` and `.toml` files and may contain data files under
@@ -356,7 +356,7 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
   player's `.vmod`; removing the mod removes both.
 - **Isolation of data.** Native mods run only in the instance built for them, with its own worlds, options and logs.
 - What this does not do: sandbox the compiled game. volt-mixins' checks stop mistakes, not a malicious helper
-  ([security notes](https://github.com/volt-rust/volt-mixins/blob/main/docs/security.md)).
+  ([security notes](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/security.md)).
 
 ## Multiplayer
 

@@ -28,14 +28,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "roadmap" / "roadmap.toml"
 OUTPUT = ROOT / "ROADMAP.md"
-# What the website's hub reads from main at build time (volt-rust/volt-site), and serves at /data/roadmap.json
+# What the website's hub reads from main at build time (horizon-rust/horizon-site), and serves at /data/roadmap.json
 # for Kira and others.
 SITE_DATA = ROOT / "roadmap" / "roadmap.json"
 # The journal's weekly summaries, one file per ISO week: roadmap/journal/2026-43.md (roadmap/README.md).
 JOURNAL = ROOT / "roadmap" / "journal"
 WEEK = re.compile(r"(\d{4})-(\d{2})\.md$")
-REPO = "volt-rust/volt"
-SITE = "https://playvolt.dev/hub"
+REPO = "horizon-rust/horizon"
+SITE = "https://playhorizon.dev/hub"
 
 STATUSES = {
     "now": "Now",
@@ -59,7 +59,7 @@ ITEM_KEYS = {"id", "title", "status", "area", "plain", "dev", "links", "focus", 
 ISSUE = re.compile(r"#(\d+)$")
 ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*$")
 LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")  # a GitHub login
-# An item is the anchor playvolt.dev/hub#<id>: it can't take the name of a tab, a section or a heading.
+# An item is the anchor playhorizon.dev/hub#<id>: it can't take the name of a tab, a section or a heading.
 RESERVED = {"main", "overview", "roadmap", "board", "journal", "contribute", "report", "suggest", "contributors",
             "hub-data", *STATUSES}
 RESERVED_PREFIXES = ("h-", "tab-", "col-", "week-", "journal-")
@@ -219,7 +219,7 @@ def render(data):
         "What is being done on Volt, what comes next and where you can help. There are no dates: things are"
         " Now, Next or Later. Each item is said in plain words, with the technical picture folded under it."
         f" The same roadmap, with a Simple / Technical switch, the board, the journal and how to help, is on"
-        f" [playvolt.dev/hub]({SITE}). Pull requests carry the `roadmap:<id>` label of their item.",
+        f" [playhorizon.dev/hub]({SITE}). Pull requests carry the `roadmap:<id>` label of their item.",
         "",
         "## At a glance",
         "",
@@ -406,7 +406,7 @@ def online_problems(data, states, now):
 
 def family(paths):
     """Which releases carry a change: the launcher's, the website (deployed when merged) or the game's. The site
-    left this repository on 2026-10-26 (volt-rust/volt-site), so only older pull requests are website-only;
+    left this repository on 2026-10-26 (horizon-rust/horizon-site), so only older pull requests are website-only;
     an item the site alone ships takes shipped_in = "website" by hand."""
     if paths and all(path.startswith("launcher/") for path in paths):
         return "launcher"

@@ -131,7 +131,7 @@ fn refuses_broken_indexes() {
     assert!(e.contains("https"), "{e}");
     // A local test registry may list files on disk; the published one may not.
     let local = text.replace(
-        "https://github.com/volt-rust/volt-mods/releases/download/coords_hud-0.1.0/",
+        "https://github.com/horizon-rust/horizon-mods/releases/download/coords_hud-0.1.0/",
         "file:///tmp/",
     );
     assert!(Index::parse(&local).unwrap_err().contains("https"));
@@ -254,6 +254,6 @@ fn shader_packs_pass_the_game_s_own_check() {
         not_a_pack.contains(volt_shader_api::MANIFEST),
         "{not_a_pack}"
     );
-    assert_eq!(Kind::Shader.extension(), Some("hshader"));
+    assert_eq!(Kind::Shader.extension(), Some("vshader"));
     assert!(open(&Kind::Shader).is_ok());
 }

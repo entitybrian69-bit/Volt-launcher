@@ -158,7 +158,7 @@ Unsure? Add `needs-proof`: it costs a few hours, a broken release costs more.
 `parity` becomes required once it has run green on pull requests for a while (a week without a false failure):
 
 ```sh
-gh api -X POST repos/volt-rust/volt/branches/main/protection/required_status_checks/contexts -f 'contexts[]=parity / parity'
+gh api -X POST repos/horizon-rust/horizon/branches/main/protection/required_status_checks/contexts -f 'contexts[]=parity / parity'
 ```
 
 A skipped `parity` (a fork's pull request without the label) counts as passed, so requiring it never blocks a
@@ -564,4 +564,4 @@ Releases ship often, so nothing they leave behind may grow without bound.
   stops its own harnesses on SIGTERM and SIGHUP (a cancelled job), so these come only from a SIGKILL or a harness run
   by hand. Runner builds go through the machine's sccache (`tools/ci/runner-env.sh`), so what it removes
   comes back from the cache. Update the copy after changing the script:
-  `ssh macmini 'curl -fsSL https://raw.githubusercontent.com/volt-rust/volt/main/tools/ci/runner-gc.sh -o ~/.actions-runners/runner-gc.sh'`.
+  `ssh macmini 'curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/tools/ci/runner-gc.sh -o ~/.actions-runners/runner-gc.sh'`.

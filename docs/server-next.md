@@ -9,7 +9,7 @@ vanilla Java clients welcome and vanilla's rules kept exactly. Two bars:
    harnesses (each one runs the real 26.3 jars and Volt on the same inputs and compares the results).
 
 All of it lives in this repo. Single player's integrated server, LAN, `--dedicated` and the
-`volt-server` supervisor run the same server code (section 3). volt-rust/volt-server is only a
+`volt-server` supervisor run the same server code (section 3). horizon-rust/horizon-server is only a
 download home, for people who want a standalone server.
 
 Contents: the measured baseline (section 1), the targets (2), where the work goes (3), the design of each part
@@ -167,7 +167,7 @@ already the same binary.
   [server.md](server.md) §3) stays the server engine and the harnesses' server. With `VOLT_SERIAL_TICK` it is also the serial
   reference every parallel phase is compared against (4.3).
 - **`volt-server`** (the supervisor) stays the program owners run.
-- **volt-rust/volt-server** holds no code. Its releases repack the engine and the supervisor, built from
+- **horizon-rust/horizon-server** holds no code. Its releases repack the engine and the supervisor, built from
   this repo's tags, for people who only want a standalone server (W8).
 
 ## 4. Ticking on more cores
@@ -407,7 +407,7 @@ negotiation, so a Volt client still plays on every vanilla server.
 | W5 | **Saving off the tick thread** | no autosave spike in p99 | bench with an autosave window |
 | W6 | **Fast path**: hello, `chunk-zstd`, `entity-batch`, `far-terrain` | −50 % bytes for Volt clients | per-capability harness |
 | W7 | **Operations**: metrics endpoint (Prometheus text, loopback/tailnet only), scheduled restarts | the official server's checklist (9.2) | an hour-long soak with 100 bots |
-| W8 | **Downloads**: a workflow in volt-rust/volt-server repacks the engine and supervisor from this repo's release tags | one archive per OS, the same checksums as volt's release | the release |
+| W8 | **Downloads**: a workflow in horizon-rust/horizon-server repacks the engine and supervisor from this repo's release tags | one archive per OS, the same checksums as volt's release | the release |
 | W9 | **Plugin API**: server-side mods on `volt-mods`, with events, commands, permissions and a scheduler, on the server hooks (#3706, #3878). Led by levzzz5154, who leads modding; roadmap item `server-mods` | a plugin can do what bunchy7s asks for, measured per-tick cost under 0.1 ms with no plugin loaded | mod harness on the integrated server and `--dedicated` |
 
 W0 comes first: without a bench that repeats within 5 %, no tick PR can show its gain. W1, W2 and W4 can run

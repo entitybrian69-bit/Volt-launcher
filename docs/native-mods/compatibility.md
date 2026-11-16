@@ -10,7 +10,7 @@ implement dynamic loading or arbitrary mod combinations.
 ## Registry snapshot
 
 `volt-registry-78853c19.json` lists the 72 native entries at the pinned
-[volt-mods commit 78853c19a6d48640ef500f3c8ff8988923576f3f](https://github.com/volt-rust/volt-mods/tree/78853c19a6d48640ef500f3c8ff8988923576f3f).
+[volt-mods commit 78853c19a6d48640ef500f3c8ff8988923576f3f](https://github.com/horizon-rust/horizon-mods/tree/78853c19a6d48640ef500f3c8ff8988923576f3f).
 The inventory baseline labels all 144 ABI entries `not_checked`: inventory
 alone validates metadata only, not bundles, compilation, runtime, accessibility,
 safety or licenses. See the separately recorded probe result below. The

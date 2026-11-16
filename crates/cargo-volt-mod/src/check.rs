@@ -120,11 +120,13 @@ impl Report {
 /// The kind a file's extension says.
 pub fn kind_of(path: &Path) -> Option<Kind> {
     match path.extension()?.to_str()? {
-        "hmod" => Some(Kind::Mod),
+        "vmod" => Some(Kind::Mod),
+        // Native mods keep the registry's extension: it is the name the release
+        // assets are published and downloaded under (.hnmod), not a Volt-side choice.
         "hnmod" => Some(Kind::NativeMod),
-        "hpack" => Some(Kind::Modpack),
+        "vpack" => Some(Kind::Modpack),
         "zip" => Some(Kind::ResourcePack),
-        "hshader" => Some(Kind::Shader),
+        "vshader" => Some(Kind::Shader),
         _ => None,
     }
 }

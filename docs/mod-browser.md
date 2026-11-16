@@ -171,7 +171,7 @@ volt-launcher mods remove faithful-32x
 ## Sources
 
 **Volt's registry.** Content mods (`.vmod`), native mods (`.hnmod`), modpacks (`.vpack`), resource packs and shader packs (`.vshader`) made for Volt, reviewed as pull requests in
-[volt-rust/volt-mods](https://github.com/volt-rust/volt-mods) ([api/mod-index.md](api/mod-index.md)). The
+[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) ([api/mod-index.md](api/mod-index.md)). The
 launcher reads its `index.json` (`browser/volt.rs`; `VOLT_MOD_INDEX=<file or https address>` reads a test
 registry instead, whose files may then be on disk) at most every ten minutes, and keeps the last copy in
 `mod-browser/volt-index.json`. Before a result is installed it shows whether its files are signed and, for a mod,

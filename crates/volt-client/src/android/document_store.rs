@@ -135,7 +135,7 @@ fn row(home: &Path, id: &str) -> io::Result<Value> {
     } else {
         match doc.path.extension().and_then(|s| s.to_str()) {
             Some("jsonl") => "application/x-ndjson",
-            Some("zip" | "hmod" | "hshader") => "application/zip",
+            Some("zip" | "vmod" | "vshader") => "application/zip",
             Some("png") => "image/png",
             Some("jpg" | "jpeg") => "image/jpeg",
             Some("mp4") => "video/mp4",

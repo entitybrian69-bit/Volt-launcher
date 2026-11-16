@@ -58,7 +58,7 @@ fn native_registry_entries_are_mods_that_say_they_run_native_code() {
 fn only_volts_own_projects_go_without_the_not_endorsed_line() {
     let mut p = sample().projects[0].clone();
     p.authors = vec!["Volt".into()];
-    p.source = "https://github.com/volt-rust/volt-mod-zoom".into();
+    p.source = "https://github.com/horizon-rust/horizon-mod-zoom".into();
     assert!(official(&p));
     p.source = "https://github.com/someone/volt-mod-zoom".into();
     assert!(!official(&p), "the name alone doesn't make it official");
@@ -96,7 +96,7 @@ fn searches_by_kind_and_words() {
     assert_eq!(order, [("zoom", 12_345), ("coords_hud", 80)]);
     let p = hud(&index);
     assert_eq!(p.support(), super::super::Support::Works);
-    assert_eq!(p.page, "https://playvolt.dev/mods/coords_hud");
+    assert_eq!(p.page, "https://playhorizon.dev/mods/coords_hud");
 }
 
 #[test]
@@ -306,6 +306,6 @@ fn ratings_keep_only_what_is_well_formed() {
     assert!(parse_ratings(r#"{"projects": []}"#).is_empty());
     assert_eq!(
         rate_url("zoom"),
-        "https://playvolt.dev/api/mods/auth/login?back=/mods/zoom"
+        "https://playhorizon.dev/api/mods/auth/login?back=/mods/zoom"
     );
 }

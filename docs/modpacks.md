@@ -772,7 +772,7 @@ budget allows:
   harness, [native-mods.md](native-mods.md), the ports of its dependencies, and the mod's public
   documentation. Never its code: the agent doesn't decompile, read or quote it.
 - **Output:** a native mod, a volt-mixins bundle started from
-  [volt-native-mod-template](https://github.com/volt-rust/volt-native-mod-template), and its `.hnmod`.
+  [volt-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template), and its `.hnmod`.
 - **Loop:** write → build → run the harness → read the differences → fix, until the harness
   passes or the agent reports what blocks it. Usually that is a place in the game's code the
   mixins can't reach yet, which becomes an issue ("needs a scheduled-tick hook point"), the way version ports

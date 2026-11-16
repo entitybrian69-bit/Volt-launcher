@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 const OPTIONS: &str = "options.txt";
 const GRAPHICS: &str = "volt-graphics.txt";
 const SHADER_MANIFEST: &str = "volt-shaders.toml";
-const SHADER_PACKAGE: &str = "hshader";
+const SHADER_PACKAGE: &str = "vshader";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {

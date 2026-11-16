@@ -452,7 +452,7 @@ fn stage(request: Request, mut input: std::fs::File, name: String) -> Result<()>
             let pack = volt_shader_api::Pack::read(&staged)?;
             volt_shader_api::check(&pack).map_err(|e| format!("Invalid shader pack: {e:?}"))?;
             let mut path = PathBuf::from(name);
-            path.set_extension("hshader");
+            path.set_extension("vshader");
             path.to_string_lossy().into_owned()
         } else {
             name

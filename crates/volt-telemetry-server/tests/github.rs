@@ -35,7 +35,7 @@ fn a_report_reads_as_the_template() {
     assert!(
         issue
             .body
-            .contains("Reported on playvolt.dev by **steve**")
+            .contains("Reported on playhorizon.dev by **steve**")
     );
     assert_eq!(issue.labels, ["bug", "from-website"]);
 }

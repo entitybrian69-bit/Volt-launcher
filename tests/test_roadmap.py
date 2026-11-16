@@ -123,7 +123,7 @@ class Rules(unittest.TestCase):
                                                                            shipped_in="soon")))
 
     def test_links_are_issues_urls_or_repository_paths(self):
-        self.assertEqual(self.problems(links=["#4", "https://playvolt.dev", "docs/benchmark.md"]), [])
+        self.assertEqual(self.problems(links=["#4", "https://playhorizon.dev", "docs/benchmark.md"]), [])
         self.assertTrue(any("link" in p for p in self.problems(links=["docs/nothing-here.md"])))
         self.assertTrue(any("link" in p for p in self.problems(links=["http://example.com"])))
 
@@ -160,7 +160,7 @@ class Rules(unittest.TestCase):
     def test_owner_and_tracking_issue_are_shown(self):
         data = tomllib.loads(SAMPLE)
         self.assertIn("Owner: [some-dev](https://github.com/some-dev) · Tracking: "
-                      "[#20](https://github.com/volt-rust/volt/issues/20)", roadmap.render(data))
+                      "[#20](https://github.com/horizon-rust/horizon/issues/20)", roadmap.render(data))
         site = json.loads(roadmap.site_data(data))
         self.assertEqual((site["items"][0]["owner"], site["items"][0]["issue"]), ("some-dev", "#20"))
 
@@ -182,9 +182,9 @@ class Render(unittest.TestCase):
         self.assertIn("## Recently shipped", text)
         self.assertNotIn("## Later", text)
         self.assertIn("- **Fast**: Faster.", text)
-        self.assertIn("Multiply, not divide ([#10](https://github.com/volt-rust/volt/issues/10)).", text)
+        self.assertIn("Multiply, not divide ([#10](https://github.com/horizon-rust/horizon/issues/10)).", text)
         # A link the technical text already gives isn't repeated; the others are listed after it.
-        self.assertIn("More: [#12](https://github.com/volt-rust/volt/issues/12)", text)
+        self.assertIn("More: [#12](https://github.com/horizon-rust/horizon/issues/12)", text)
         self.assertIn("- **Old** (v0.2.1): Done.", text)
 
 

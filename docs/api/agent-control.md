@@ -2,7 +2,7 @@
 
 How a program drives a running game: an AI agent through MCP, a script through `volt-ctl`, a test through the
 control socket. Design and inventory: [agent-control.md](../agent-control.md); for players:
-[playvolt.dev/docs/agents](https://playvolt.dev/docs/agents).
+[playhorizon.dev/docs/agents](https://playhorizon.dev/docs/agents).
 
 ## Overview
 

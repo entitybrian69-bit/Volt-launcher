@@ -65,7 +65,7 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/volt-telemetry-serve
 
 Other top-level folders: `tools/` (harnesses and dev scripts), `tests/` (Python unit tests: `python3 -m
 unittest discover -s tests`), `mods/volt/src/test/java/dev/voltlabs/parity/` (Java oracles),
-`docs/`, `.github/workflows/`. The website (playvolt.dev) is the private volt-rust/volt-site: its build
+`docs/`, `.github/workflows/`. The website (playhorizon.dev) is the private horizon-rust/horizon-site: its build
 reads `README.md`, `launcher/links.json`, `docs/api/`, `roadmap/roadmap.json` and `crates/volt-theme/tokens.css` from main.
 
 ## Build and test fast

@@ -1,5 +1,5 @@
 //! Native mods (docs/native-mods.md), experimental and off by default: mixin bundles that
-//! levzzz5154's volt-mixins (MIT, <https://github.com/volt-rust/volt-mixins>) applies to
+//! levzzz5154's volt-mixins (MIT, <https://github.com/horizon-rust/horizon-mixins>) applies to
 //! Volt's source, which the launcher then compiles into a game of its own with its portable Rust
 //! ([`rust_toolchain`]). Unlike `.vmod` mods they are not sandboxed: their code runs with the
 //! player's rights.
@@ -28,7 +28,7 @@ pub const INSTANCE: &str = "native-mods";
 const NAME: &str = "Native mods";
 const PREFIX: &str = "native-";
 /// volt-mixins, for bundles that don't name the revision they were tested with.
-const MIXINS_GIT: &str = "https://github.com/volt-rust/volt-mixins";
+const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = "3f99a5c60dfa311cc365524c44ae2fd799bfa1de";
 /// The profile and features of the release's own game (game-build.yml).
 const PROFILE: &str = "release";
@@ -783,7 +783,7 @@ pub fn build(
         |b| b.mixins.as_ref(),
         || Ok(MIXINS_REV.into()),
         Some(MIXINS_REV),
-        |r| committed("volt-rust/volt-mixins", r),
+        |r| committed("horizon-rust/horizon-mixins", r),
     )?;
     let version = version_for(&revision, &mixins, &mods)?;
     if !backend::installed().contains(&version) {

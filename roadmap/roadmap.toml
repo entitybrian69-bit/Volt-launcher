@@ -1,4 +1,4 @@
-# Volt's roadmap: the one source of truth for ROADMAP.md, playvolt.dev/roadmap and Kira's answers.
+# Volt's roadmap: the one source of truth for ROADMAP.md, playhorizon.dev/roadmap and Kira's answers.
 # Edit this file, then run `python3 tools/roadmap.py build`. How to keep it current: roadmap/README.md.
 #
 # No dates, ever: an item is Now, Next or Later. Each item says the same thing twice: `plain` for players
@@ -368,7 +368,7 @@ dev = """Partly done: an opt-in 60 FPS cap with fewer workers on battery, Far De
 animated textures on the GPU (both shipped). Left: measured targets and fixes per class of machine (memory \
 use, worker counts, startup) on a Steam Deck, old Intel and Apple Silicon Macs and 8 GB computers, reported \
 on the Benchmarks page."""
-links = ["docs/benchmark.md", "https://playvolt.dev/docs/performance"]
+links = ["docs/benchmark.md", "https://playhorizon.dev/docs/performance"]
 
 [[item]]
 id = "upscaling"
@@ -1010,9 +1010,9 @@ plain = """You can port a mod to Volt with your own AI agent on your own compute
 you the tools, but provides no hosted agents."""
 dev = """A player runs their own agent locally with `volt-ctl` and the MCP servers (docs/agent-control.md), `cargo \
 volt-mod`, `volt-port-pack` and the parity harnesses as the check. Volt writes the guide \
-(playvolt.dev/docs/agents, docs/modpacks.md) and runs no agents, accounts or keys for players. The No AI \
+(playhorizon.dev/docs/agents, docs/modpacks.md) and runs no agents, accounts or keys for players. The No AI \
 switch turns all of it off."""
-links = ["https://playvolt.dev/docs/agents", "docs/modpacks.md", "docs/agent-control.md"]
+links = ["https://playhorizon.dev/docs/agents", "docs/modpacks.md", "docs/agent-control.md"]
 
 [[item]]
 id = "x-account"
@@ -1094,9 +1094,9 @@ area = "performance"
 plain = """Run Volt's built-in benchmark and share the report: every new computer makes the performance work \
 more accurate. No coding needed."""
 dev = """`volt-launcher play --arg=--benchmark --arg=standard` writes a JSON report; `volt-launcher data \
-benchmark <report>` shows what would be sent and uploads it (playvolt.dev/docs/performance). Results from three \
+benchmark <report>` shows what would be sent and uploads it (playhorizon.dev/docs/performance). Results from three \
 installs with the same hardware appear on the Benchmarks page. Example: #1711."""
-links = ["https://playvolt.dev/docs/performance", "#1711"]
+links = ["https://playhorizon.dev/docs/performance", "#1711"]
 
 [[item]]
 id = "end-city-banners"

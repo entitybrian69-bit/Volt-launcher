@@ -41,7 +41,7 @@ fn hub(config: Config) -> Hub {
             labels: issue.labels.clone(),
         });
         Ok(format!(
-            "https://github.com/volt-rust/volt/issues/{}",
+            "https://github.com/horizon-rust/horizon/issues/{}",
             1000 + opened.len()
         ))
     });
@@ -151,7 +151,7 @@ async fn a_report_becomes_an_issue_in_the_bug_template() {
     assert_eq!(code, StatusCode::CREATED);
     assert_eq!(
         body["issue"],
-        "https://github.com/volt-rust/volt/issues/1001"
+        "https://github.com/horizon-rust/horizon/issues/1001"
     );
     let issue = hub.github.opened.lock().unwrap().remove(0);
     assert_eq!(issue.title, "Water is black on AMD");
@@ -162,7 +162,7 @@ async fn a_report_becomes_an_issue_in_the_bug_template() {
         "> **What I expected:**\n> Blue water, as in vanilla",
         "> **Volt version:** v0.2.57",
         "> **OS, CPU, GPU:** Windows 11, Ryzen 5 5600, RX 6600",
-        "Reported on playvolt.dev",
+        "Reported on playhorizon.dev",
     ] {
         assert!(issue.body.contains(line), "{line}\n---\n{}", issue.body);
     }
@@ -314,7 +314,7 @@ async fn the_website_may_post_from_the_browser() {
     let res = router(hub.app.clone())
         .oneshot(
             Request::options("/hub/report")
-                .header("origin", "https://playvolt.dev")
+                .header("origin", "https://playhorizon.dev")
                 .header("access-control-request-method", "POST")
                 .body(Body::empty())
                 .unwrap(),
@@ -325,7 +325,7 @@ async fn the_website_may_post_from_the_browser() {
     let header = |name: &str| res.headers()[name].to_str().unwrap().to_owned();
     assert_eq!(
         header("access-control-allow-origin"),
-        "https://playvolt.dev"
+        "https://playhorizon.dev"
     );
     assert_eq!(header("access-control-allow-methods"), "POST");
     assert_eq!(header("access-control-allow-headers"), "content-type");

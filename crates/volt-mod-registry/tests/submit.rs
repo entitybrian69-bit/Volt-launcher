@@ -20,7 +20,7 @@ use std::{
 };
 use tower::ServiceExt;
 
-const PUBLIC: &str = "https://playvolt.test";
+const PUBLIC: &str = "https://playhorizon.test";
 const HMOD_SHA: &str = "e1135345692f6dd8fd4c51920151944b82333e17049c9bb7d756f27b8deefc53";
 
 #[derive(Default)]
@@ -236,7 +236,7 @@ impl Client {
             "/mods" | "/mods/zoom" => back,
             _ => "/mods/submit",
         };
-        assert_eq!(location, Some(format!("https://playvolt.test{page}")));
+        assert_eq!(location, Some(format!("https://playhorizon.test{page}")));
         let (status, me, _) = self.send(self.get("/api/mods/me")).await;
         assert_eq!(status, StatusCode::OK);
         me["csrf"].as_str().unwrap().to_owned()

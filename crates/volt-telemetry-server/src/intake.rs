@@ -1,4 +1,4 @@
-//! What players send from the hub (playvolt.dev/hub) for the maintainers: bug reports.
+//! What players send from the hub (playhorizon.dev/hub) for the maintainers: bug reports.
 //! roadmap/README.md documents it for Kira and the website.
 //!
 //! - `POST /hub/report`: a bug report, opened at once as a GitHub issue (labels `bug`, `from-website`) in

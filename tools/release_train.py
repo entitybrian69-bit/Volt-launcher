@@ -42,7 +42,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = os.environ.get("GITHUB_REPOSITORY", "volt-rust/volt")
+REPO = os.environ.get("GITHUB_REPOSITORY", "horizon-rust/horizon")
 # The maintainer, left out of the notes' thanks (the repository's owner is the volt-rust organization).
 MAINTAINER = "ludovic111"
 # Releases ship in batches, so players get a few releases a day rather than one per merge: BATCH player-facing pull
@@ -82,14 +82,14 @@ LAUNCHER_IGNORED = ["launcher/links.json", "launcher/docs/", "launcher/tests/"]
 # A game release is GitHub's latest (servers and install.sh follow it), so it is the first release people land on:
 # its notes open with the way to the launcher (#1647). Raw HTML on one line, which GitHub shows and every launcher's
 # notes view and one-line summary skip (pulldown-cmark's HTML events), so launchers never tell players to get
-# themselves. The site's Releases page leaves it out too. Player notes always name volt-rust/volt, even when CI on a fork sets GITHUB_REPOSITORY to that fork.
-PLAYERS = ('<h3>Want to play? Download the <a href="https://playvolt.dev">Volt launcher</a>, not the files '
+# themselves. The site's Releases page leaves it out too. Player notes always name horizon-rust/horizon, even when CI on a fork sets GITHUB_REPOSITORY to that fork.
+PLAYERS = ('<h3>Want to play? Download the <a href="https://playhorizon.dev">Volt launcher</a>, not the files '
            'below</h3><p>It installs this version and keeps it up to date. It is also on GitHub: <a href="'
-           'https://github.com/volt-rust/volt/releases?q=launcher&amp;expanded=true">the launcher releases</a>. You need your '
+           'https://github.com/horizon-rust/horizon/releases?q=launcher&amp;expanded=true">the launcher releases</a>. You need your '
            "own copy of Minecraft: Java Edition. The files below are what the launcher installs, and the dedicated "
            "server for people who host one.</p>")
 LAUNCHER_FOOTER = ("Your launcher updates itself. New here? Download the archive for your system below, extract it, "
-                   "and run `volt-launcher`. Website: https://playvolt.dev")
+                   "and run `volt-launcher`. Website: https://playhorizon.dev")
 DISCLAIMER = "Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft."
 # An open issue with this label holds every game release (docs/release-flow.md). Only people who can triage the
 # repository can add it, and the issue's text is never read: its author could edit it afterwards.

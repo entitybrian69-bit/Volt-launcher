@@ -11,7 +11,7 @@ weave pipeline); everything else a user can download at runtime is data
 
 1. **Platform reality.** An `.hnmod` is Rust source compiled against a
    specific engine revision (upstream documents the format at
-   playvolt.dev/mods: "compiled-in, Java never runs"). There is no
+   playhorizon.dev/mods: "compiled-in, Java never runs"). There is no
    stable ABI to dlopen against, and Android has no compiler on device.
 2. **Security.** Executing downloaded native code would void every
    guarantee the content validators give (`docs/COMPAT-AUDIT.md` §2) and

@@ -1,7 +1,7 @@
 # The roadmap
 
 `roadmap.toml` is the one source of the roadmap. `tools/roadmap.py build` turns it into
-[ROADMAP.md](../ROADMAP.md); the website's hub (playvolt.dev/hub) and Kira read the same items. The work
+[ROADMAP.md](../ROADMAP.md); the website's hub (playhorizon.dev/hub) and Kira read the same items. The work
 board stays the task-level view (every issue and pull request); the roadmap is the overview, and each pull
 request carries the `roadmap:<id>` label of the item it moves.
 
@@ -69,8 +69,8 @@ or when the file breaks a rule; `python3 tools/roadmap.py check --offline` runs 
 
 ## The journal
 
-The hub's Journal tab and `https://playvolt.dev/data/journal.json` are built with each deploy of the website
-(`src/hub.js` in volt-rust/volt-site). The tab shows every game and launcher release with its notes' changes, each placed under
+The hub's Journal tab and `https://playhorizon.dev/data/journal.json` are built with each deploy of the website
+(`src/hub.js` in horizon-rust/horizon-site). The tab shows every game and launcher release with its notes' changes, each placed under
 the roadmap item it moves (the pull request's `roadmap:<id>` label, else the item that links it), the merged pull
 requests no release has yet, and the weekly summaries above.
 
@@ -78,28 +78,28 @@ requests no release has yet, and the weekly summaries above.
 merged pull request, release, shipped item and weekly summary, newest first, the latest 300.
 
 ```json
-{ "format": "volt-journal", "version": 2, "generated": "…", "url": "https://playvolt.dev/hub#journal",
+{ "format": "volt-journal", "version": 2, "generated": "…", "url": "https://playhorizon.dev/hub#journal",
   "entries": [
     { "id": "pr-1788", "kind": "merge", "date": "…", "title": "the pull request's title", "url": "…",
       "number": 1788, "item": "discord-presence", "item_title": "Discord Rich Presence" },
     { "id": "release-v0.2.57", "kind": "release", "date": "…", "title": "…", "plain": "one line", "url": "…",
       "tag": "v0.2.57" },
     { "id": "shipped-server-resource-packs", "kind": "shipped", "date": "the release's", "title": "…",
-      "plain": "…", "url": "https://playvolt.dev/hub#server-resource-packs", "item": "…", "item_title": "…",
+      "plain": "…", "url": "https://playhorizon.dev/hub#server-resource-packs", "item": "…", "item_title": "…",
       "shipped_in": "v0.2.48", "post": "at most 240 characters", "announce": false },
     { "id": "weekly-2026-43", "kind": "weekly", "date": "the week's last second", "title": "…", "plain": "…",
-      "dev": "…", "url": "https://playvolt.dev/hub#week-2026-43" } ] }
+      "dev": "…", "url": "https://playhorizon.dev/hub#week-2026-43" } ] }
 ```
 
 - An `id` never changes: readers post each one once. `merge` entries are the pull requests players see (no
   `skip-release` label), plus any that moves a roadmap item; `item` is absent when none does.
 - `announce: true` (the item's `announce` key) asks Kira to post the shipped item on X too, with `post`.
-- `https://playvolt.dev/data/roadmap.json` is `roadmap.toml` as JSON (`areas`, `items` with every key above,
-  `overview`, the weekly summaries); an item's page is `https://playvolt.dev/hub#<id>`.
+- `https://playhorizon.dev/data/roadmap.json` is `roadmap.toml` as JSON (`areas`, `items` with every key above,
+  `overview`, the weekly summaries); an item's page is `https://playhorizon.dev/hub#<id>`.
 
 ## The intake: votes and bug reports
 
-The hub's forms and vote buttons talk to the telemetry server (`https://telemetry.playvolt.dev`,
+The hub's forms and vote buttons talk to the telemetry server (`https://telemetry.playhorizon.dev`,
 `crates/volt-telemetry-server`, `src/hub.rs` and `src/intake.rs`; its README lists the limits and settings).
 Kira uses the same endpoints, so a bug goes the same way from the site and from Discord.
 
@@ -110,7 +110,7 @@ Kira uses the same endpoints, so a bug goes the same way from the site and from 
 | `POST /hub/report` | `{"title", "did", "happened", "expected", "version"?, "system", "name"?}` | 201 `{"id", "issue": "<GitHub URL>"}`; 202 `{"id", "issue": null}` when GitHub was down (opened later) |
 
 - A report becomes an issue at once, labels `bug` and `from-website`, in the `#volt-bugs` template (What I did,
-  What happened, What I expected, Volt version, OS, CPU, GPU) with "Reported on playvolt.dev". Every field
+  What happened, What I expected, Volt version, OS, CPU, GPU) with "Reported on playhorizon.dev". Every field
   but the version and the name is required; mentions, `#123` references and HTML in people's text are made inert.
 - Errors are `{"error": "…"}`: 400 names the field (`"did: 3 to 2000 characters"`), 429 means too many from that
   address, 503 a full day or reports turned off (no GitHub token on the server).

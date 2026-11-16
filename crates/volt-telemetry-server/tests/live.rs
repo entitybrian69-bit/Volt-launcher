@@ -59,7 +59,7 @@ async fn count(app: &Arc<App>) -> Count {
     assert_eq!(headers[header::CONTENT_TYPE], "application/json");
     assert_eq!(
         headers[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-        "https://playvolt.dev"
+        "https://playhorizon.dev"
     );
     serde_json::from_str(&body).unwrap()
 }

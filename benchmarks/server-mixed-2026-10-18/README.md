@@ -103,7 +103,7 @@ the Nix store, so the run set `LD_LIBRARY_PATH` to them (see #898).
 
 ## Reproduce
 
-    curl -fsSL https://raw.githubusercontent.com/volt-rust/volt/main/packaging/server/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.sh | sh
     volt-prepare --prepare --server-jar /path/to/server.jar      # your own copy
     cargo build --release -p volt-bots                            # on the machine that runs the bots
     # in a checkout whose .local/minecraft holds the pinned vanilla jars (tools/lab.py prepare):

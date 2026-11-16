@@ -30,9 +30,9 @@ jobs:
       fail-fast: false
       matrix:
         abi: [arm64-v8a, armeabi-v7a]
-        mod: [jei, jade, veinminer, volt_physics, appleskin, status_effect_hud,
+        mod: [jei, jade, veinminer, horizon_physics, appleskin, status_effect_hud,
               toggle_sprint, inventory_profiles, shulker_peek, mousetricks, itemnew,
-              worldedit, voltmatica, visuality_volt, eatinganimation,
+              worldedit, horizonmatica, visuality_horizon, eatinganimation,
               enchantmenthints, held_item_info, right_click_crops,
               carryblock, chatheads, smartf3, fast_items, armor_status, customhud,
               coords_hud, crosshair_indicator, hitbox_plus, biomecompass,
@@ -55,9 +55,9 @@ jobs:
             file: veinminer-0.3.2.hnmod
             tag: veinminer-0.3.2
             raw_targets: "--experimental-raw-targets"
-          - mod: volt_physics
-            file: volt_physics-0.15.1.hnmod
-            tag: volt_physics-0.15.1
+          - mod: horizon_physics
+            file: horizon_physics-0.15.1.hnmod
+            tag: horizon_physics-0.15.1
             raw_targets: "--experimental-raw-targets"
           - mod: appleskin
             file: appleskin-1.0.0.hnmod
@@ -91,13 +91,13 @@ jobs:
             file: worldedit-1.2.1.hnmod
             tag: worldedit-1.2.1
             raw_targets: "--experimental-raw-targets"
-          - mod: voltmatica
-            file: voltmatica-0.1.1.hnmod
-            tag: voltmatica-0.1.1
+          - mod: horizonmatica
+            file: horizonmatica-0.1.1.hnmod
+            tag: horizonmatica-0.1.1
             raw_targets: "--experimental-raw-targets"
-          - mod: visuality_volt
-            file: visuality_volt-1.0.2.hnmod
-            tag: visuality_volt-1.0.2
+          - mod: visuality_horizon
+            file: visuality_horizon-1.0.2.hnmod
+            tag: visuality_horizon-1.0.2
             raw_targets: "--experimental-raw-targets"
           - mod: eatinganimation
             file: eatinganimation-0.1.0.hnmod
@@ -223,14 +223,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/registry"
-          curl --retry 3 -fsSL https://codeload.github.com/volt-rust/volt-mods/tar.gz/63daa89bcbdcb80282c29970d743d6d00918a6ce | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+          curl --retry 3 -fsSL https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/63daa89bcbdcb80282c29970d743d6d00918a6ce | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
       - name: Download published bundle and verify against the registry
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bundle"
           curl --retry 3 -fsSL -o "$RUNNER_TEMP/bundle/${{ matrix.file }}" \
-            "https://github.com/volt-rust/volt-mods/releases/download/${{ matrix.tag }}/${{ matrix.file }}"
+            "https://github.com/horizon-rust/horizon-mods/releases/download/${{ matrix.tag }}/${{ matrix.file }}"
           python3 - <<'PYCODE'
           import json, os, sys
           from pathlib import Path
@@ -255,7 +255,7 @@ jobs:
           PROBE_FILE: ${{ matrix.file }}
       - name: Install the bundle's pinned mixin compiler
         run: |
-          cargo install --locked --git https://github.com/volt-rust/volt-mixins \
+          cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
             --rev "$PROBE_MIXINS" \
             --root "$RUNNER_TEMP/mixins-tool" volt-mixins-cli
       - name: Build reviewed source on disposable runner

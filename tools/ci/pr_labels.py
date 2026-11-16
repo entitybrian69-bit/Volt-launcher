@@ -72,7 +72,7 @@ AREAS = [
     ("ui", "Area: screens, menus, HUD, chat",
      r"^crates/volt-theme/|/title(?:\.rs$|/)|" + _GAME + r"(?:\w+_ui|\w+_screen|screens|screen_draw|ui|hud\w*"
      r"|chat|tab_list|startup_menu|options|sign_edit|books|containers)\.rs$"),
-    ("website", "Area: what playvolt.dev reads from this repository",
+    ("website", "Area: what playhorizon.dev reads from this repository",
      r"^docs/api/|^roadmap/|^README\.md$|^launcher/links\.json$"),
 ]
 AREA_RES = [(label, re.compile(paths)) for label, _, paths in AREAS]
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     if verb == "event" and not rest:
         sys.exit(event(Api(os.environ["REPO"])))
     if verb in ("create", "backfill") and rest in ([], ["--apply"]):
-        api, apply = Api(os.environ.get("REPO", "volt-rust/volt")), rest == ["--apply"]
+        api, apply = Api(os.environ.get("REPO", "horizon-rust/horizon")), rest == ["--apply"]
         for line in (create(api, apply) if verb == "create" else backfill(api, apply)):
             print(line)
         sys.exit(0)

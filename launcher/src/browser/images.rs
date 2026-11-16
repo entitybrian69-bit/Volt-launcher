@@ -23,7 +23,7 @@ const HOSTS: [&str; 10] = [
     "https://avatars.githubusercontent.com/",
     // Volt's registry's icons (its GitHub Pages), and the mirror kept at the address it had
     // before the repositories moved to the volt-rust organization.
-    "https://volt-rust.github.io/volt-mods/",
+    "https://horizon-rust.github.io/horizon-mods/",
     "https://ludovic111.github.io/volt-mods/",
 ];
 /// The most an image may weigh before decoding.

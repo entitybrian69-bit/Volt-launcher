@@ -1,5 +1,5 @@
 //! `cargo volt-mod registry build|review|check|list`: the registry repository's CI
-//! (`volt-rust/volt-mods`, docs/api/mod-index.md). Network-free: the
+//! (`horizon-rust/horizon-mods`, docs/api/mod-index.md). Network-free: the
 //! workflow downloads the files and publishes what this writes.
 use volt_mods::index::{
     FILE_HOST,
@@ -8,7 +8,7 @@ use volt_mods::index::{
 use std::path::Path;
 
 /// Where the registry's site is published (its icons).
-const SITE: &str = "https://volt-rust.github.io/volt-mods/";
+const SITE: &str = "https://horizon-rust.github.io/horizon-mods/";
 
 const USAGE: &str = "usage: cargo volt-mod registry build <checkout> --files <dir> --out <index.json> [--release <url>] [--site <url>] [--generated <time>]
        cargo volt-mod registry review <base checkout> <head checkout> --author <login> [--json]

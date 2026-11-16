@@ -307,13 +307,13 @@ To turn it on, on the Mac mini (as Ludovic, once approved):
 
 ```sh
 # 1. The label publish files issues under (once):
-gh label create version-port --repo volt-rust/volt --color 5319e7 \
+gh label create version-port --repo horizon-rust/horizon --color 5319e7 \
   --description "Work to port Volt to a new Minecraft release (tools/version_port.py publish)"
 # 2. The script, as a copy from main (it updates its own worktree, so it never runs from a checkout):
-curl -fsSL https://raw.githubusercontent.com/volt-rust/volt/main/tools/ci/version-port-daily.sh \
+curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/tools/ci/version-port-daily.sh \
   -o ~/code/volt-parity/version-port-daily.sh
 # 3. The agent:
-curl -fsSL https://raw.githubusercontent.com/volt-rust/volt/main/tools/ci/dev.volt.version-port.plist \
+curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/tools/ci/dev.volt.version-port.plist \
   | sed "s|@HOME@|$HOME|g" > ~/Library/LaunchAgents/dev.volt.version-port.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.volt.version-port.plist
 # A run now, to see it work (log: ~/Library/Logs/volt-version-port.log):

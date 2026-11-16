@@ -62,13 +62,13 @@ Never sent: account names or UUIDs, world names, server or LAN addresses, chat, 
 - `telemetry/outbox/` holds one JSON file per item, `<day>-<kind>-<random>.json`. It never holds more than 200 items or 2 MiB, and the oldest go first. `kept.json` counts today's items per kind against the caps above.
 - The launcher sends the outbox when it starts and when it closes. Items go as one JSON batch (`{"schema":1,"install_id":…,"items":[…]}`, up to 64 items and 1 MiB), compressed with zstd: `POST /v1/batch` with `Content-Encoding: zstd`. A day's perf summaries are under 2 KB on the wire.
 - After a failure the launcher waits a minute, doubling up to a day, and sends at most 8 batches a day. A batch the server refuses with a 4xx (not 429) is dropped.
-- The server is `https://telemetry.playvolt.dev` (`DEFAULT_ENDPOINT`), on Railway in the EU (`europe-west4`, Amsterdam). `VOLT_TELEMETRY_URL` names another one (a local server); `VOLT_TELEMETRY_URL=off` sends nothing at all, no ping either. Tests, CI and the benchmark and test harnesses set `off`.
+- The server is `https://telemetry.playhorizon.dev` (`DEFAULT_ENDPOINT`), on Railway in the EU (`europe-west4`, Amsterdam). `VOLT_TELEMETRY_URL` names another one (a local server); `VOLT_TELEMETRY_URL=off` sends nothing at all, no ping either. Tests, CI and the benchmark and test harnesses set `off`.
 - What is sent still depends on the switches: with every switch off nothing but the ping leaves, and the outbox stays empty.
 - `SCHEMA` versions the format. New optional fields keep it. A field that changes meaning or goes bumps it, and the server keeps reading the older ones.
 
 ## The "I'm playing" ping
 
-Ludovic decided on 2026-10-22 to count every player, with or without consent, and to tell them. The launcher's first-run question and Settings → Data collection show it as an "Always on" row next to the switches. Players who answered the question before the ping existed see the same text once on the Play page. The privacy page on playvolt.dev says the same.
+Ludovic decided on 2026-10-22 to count every player, with or without consent, and to tell them. The launcher's first-run question and Settings → Data collection show it as an "Always on" row next to the switches. Players who answered the question before the ping existed see the same text once on the Play page. The privacy page on playhorizon.dev says the same.
 
 While the game runs (not a dedicated server, a benchmark or a run that quits by itself), a thread of its own (`crates/volt-client/src/heartbeat.rs`) sends `POST /v1/live` once a minute. It also sends one at once when a world is opened to or closed from LAN or friends:
 
@@ -93,10 +93,10 @@ The launcher reads it when it opens and every minute after, and shows "N playing
 - `POST /v1/batch`
 - `DELETE /v1/installs/<install_id>`: deletes everything sent under that ID.
 - `GET /v1/aggregate`: the anonymous totals the website's results page reads. Its `breakdowns` split the play sessions of the period by hardware class (below), each class with its installs, sessions, hours and mean p50 and p99 frame times.
-- `GET /v1/benchmarks/summary`: players' benchmark uploads grouped by GPU, CPU, render distance and game for playvolt.dev/benchmarks. A group shows only with at least 3 different installs, and only its medians and counts: no install ID, day, OS version, driver, exact memory or screen. Uploads are never published one by one. Each group's `breakdowns` count its installs per hardware class.
+- `GET /v1/benchmarks/summary`: players' benchmark uploads grouped by GPU, CPU, render distance and game for playhorizon.dev/benchmarks. A group shows only with at least 3 different installs, and only its medians and counts: no install ID, day, OS version, driver, exact memory or screen. Uploads are never published one by one. Each group's `breakdowns` count its installs per hardware class.
 - `POST /v1/live` and `GET /v1/live`: the "I'm playing" ping and the live count.
 
-Public output never holds a raw hardware value, only these classes (`src/classes.rs`, the same in the website's `scripts/benchmarks.mjs`, volt-rust/volt-site), and a class is published only with at least 3 different installs:
+Public output never holds a raw hardware value, only these classes (`src/classes.rs`, the same in the website's `scripts/benchmarks.mjs`, horizon-rust/horizon-site), and a class is published only with at least 3 different installs:
 
 | Breakdown | Classes |
 |---|---|
@@ -108,4 +108,4 @@ Public output never holds a raw hardware value, only these classes (`src/classes
 
 The driver, OS version, clocks, screen and power are kept raw for the 180 days of retention, to explain a slow group, and never published.
 
-`crates/volt-telemetry-server` is the server, at `https://telemetry.playvolt.dev` on Railway (one SQLite file on a volume, region `europe-west4`). Its [README](../crates/volt-telemetry-server/README.md) covers storage (about 190 bytes per play session), retention (180 days of raw rows, anonymous daily totals kept), rate limits and hosting.
+`crates/volt-telemetry-server` is the server, at `https://telemetry.playhorizon.dev` on Railway (one SQLite file on a volume, region `europe-west4`). Its [README](../crates/volt-telemetry-server/README.md) covers storage (about 190 bytes per play session), retention (180 days of raw rows, anonymous daily totals kept), rate limits and hosting.

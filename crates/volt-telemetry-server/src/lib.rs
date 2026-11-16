@@ -84,7 +84,7 @@ impl Default for Config {
             requests_per_hour: 60.0,
             items_per_day: 100,
             trust_proxy: false,
-            allow_origin: "https://playvolt.dev".into(),
+            allow_origin: "https://playhorizon.dev".into(),
             live_per_hour: 600.0,
             live_window: volt_telemetry::live::WINDOW,
             live_max_sessions: 200_000,
@@ -93,7 +93,7 @@ impl Default for Config {
             hub_reports_per_day: 30,
             hub_keep_days: 90,
             github_token: None,
-            github_repo: "volt-rust/volt".into(),
+            github_repo: "horizon-rust/horizon".into(),
         }
     }
 }

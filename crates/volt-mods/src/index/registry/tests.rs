@@ -30,7 +30,7 @@ description = "`/where` puts them in chat, `/coords` hides or shows the panel."
 authors = ["Volt"]
 owners = ["ludovic111"]
 license = "MIT"
-source = "https://github.com/volt-rust/volt/tree/main/crates/volt-mod-sdk/examples/coords-hud"
+source = "https://github.com/horizon-rust/horizon/tree/main/crates/volt-mod-sdk/examples/coords-hud"
 icon = "icons/coords_hud.png"
 key = "RWTVtuGb/GRXcBf3Re5hzM07EzoStr2sLTJjghJia0xX15ULoZRFFZDb"
 
@@ -52,7 +52,7 @@ summary = "Coordinates and a calm render distance."
 authors = ["Volt"]
 owners = ["ludovic111"]
 license = "MIT"
-source = "https://github.com/volt-rust/volt-mods"
+source = "https://github.com/horizon-rust/horizon-mods"
 
 [[versions]]
 version = "1.0.0"
@@ -69,7 +69,7 @@ summary = "A post-processing pass over the world."
 authors = ["Volt"]
 owners = ["ludovic111"]
 license = "MIT"
-source = "https://github.com/volt-rust/volt-mods"
+source = "https://github.com/horizon-rust/horizon-mods"
 
 [[versions]]
 version = "1.0.0"
@@ -123,7 +123,7 @@ impl Scratch {
             registry: &repo,
             files: &files,
             release: super::super::FILE_HOST,
-            site: "https://volt-rust.github.io/volt-mods/",
+            site: "https://horizon-rust.github.io/horizon-mods/",
             generated: "2026-10-24T18:00:00Z".into(),
         })
     }

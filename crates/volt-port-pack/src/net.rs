@@ -323,7 +323,7 @@ mod tests {
         ] {
             assert!(local(host), "{host}");
         }
-        for host in ["playvolt.dev", "api.minecraftservices.com", "10.0.0.1"] {
+        for host in ["playhorizon.dev", "api.minecraftservices.com", "10.0.0.1"] {
             assert!(!local(host), "{host}");
         }
     }

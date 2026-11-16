@@ -3,7 +3,7 @@
 `volt-server` hosts a Minecraft Java Edition 26.3 server with Volt's own game as the engine: one native
 program, no Java, one settings file, a command line, and a web panel. Vanilla 26.3 clients and Volt clients
 can join it. This page covers what works on `main` today and says plainly what doesn't yet. The design and the
-plan are in [docs/server.md](https://github.com/volt-rust/volt/blob/main/docs/server.md).
+plan are in [docs/server.md](https://github.com/horizon-rust/horizon/blob/main/docs/server.md).
 
 ## Before you start
 
@@ -19,7 +19,7 @@ plan are in [docs/server.md](https://github.com/volt-rust/volt/blob/main/docs/se
   takes the account's UUID when someone owns that name, as vanilla does, and that player is then refused.
 - **Volt's own client can't sign in to a Microsoft account yet.** That needs an Azure app registration and
   Mojang's approval, which the project doesn't have
-  ([docs/microsoft-account.md](https://github.com/volt-rust/volt/blob/main/docs/microsoft-account.md)).
+  ([docs/microsoft-account.md](https://github.com/horizon-rust/horizon/blob/main/docs/microsoft-account.md)).
   Until then Volt players can join offline servers only (`online_mode = false`). An offline server never
   checks accounts: anyone who reaches it can join under any name. Keep it on your LAN or a tailnet
   (Tailscale, ZeroTier), or share it only with friends you trust.
@@ -44,13 +44,13 @@ plan are in [docs/server.md](https://github.com/volt-rust/volt/blob/main/docs/se
 Linux (x86-64) and macOS (Apple Silicon):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/volt-rust/volt/main/packaging/server/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.sh | sh
 ```
 
 Windows (x64), in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/volt-rust/volt/main/packaging/server/install.ps1 | iex
+irm https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.ps1 | iex
 ```
 
 The script downloads the current Volt Nightly for your computer from GitHub (the only build Volt ships;
@@ -242,7 +242,7 @@ To generate the world around spawn ahead of the players, Volt has its own `prege
 ([pregeneration](pregeneration.md)).
 To let only the Volt client join, set `volt-clients-only = true` under `[properties]` (off by default).
 Other clients are turned away while they connect with "This server is for the Volt client:
-playvolt.dev", and the console says which client it was. The check reads the brand a client names itself
+playhorizon.dev", and the console says which client it was. The check reads the brand a client names itself
 by (`minecraft:brand`), which any client can fake: it keeps out players who didn't install Volt, not
 cheaters. The server's own checks (reach, movement) are what protect it.
 
@@ -342,7 +342,7 @@ No image is published: build one from the repository. The image holds none of Mi
 folder you prepared (step 2) read-only.
 
 ```sh
-git clone https://github.com/volt-rust/volt && cd volt
+git clone https://github.com/horizon-rust/horizon && cd volt
 docker build -f packaging/server/Dockerfile -t volt-server .
 
 docker run -d --name volt -p 25565:25565 --stop-timeout 180 \
@@ -367,10 +367,10 @@ docker run -d --name volt -p 25565:25565 --stop-timeout 180 \
 ## 10. How fast is it
 
 The latest bot benchmark compares Volt with vanilla 26.3, Paper and Fabric + Lithium:
-[benchmarks/server-four-way-2026-10-19](https://github.com/volt-rust/volt/blob/main/benchmarks/server-four-way-2026-10-19/README.md).
+[benchmarks/server-four-way-2026-10-19](https://github.com/horizon-rust/horizon/blob/main/benchmarks/server-four-way-2026-10-19/README.md).
 It ran release v2026.10.19 on a 4-thread laptop CPU (i7-7500U), with 1 to 50 players walking, exploring and
 standing around spawn, the bots on another machine. All four servers did the same work. Earlier
-measurements are in [docs/server.md](https://github.com/volt-rust/volt/blob/main/docs/server.md). In
+measurements are in [docs/server.md](https://github.com/horizon-rust/horizon/blob/main/docs/server.md). In
 short:
 
 - **Memory:** 0.7 GB with one player and 1.1 GB with 50, against 3.4 to 4.5 GB for the Java servers
@@ -397,4 +397,4 @@ For more than 50 active players, give it more cores.
   open in your firewall. On a tailnet, use the server's tailnet address.
 - **It keeps restarting**: `volt-server status` shows the last crash and `volt-server logs -n 200` the log
   before it. Crash reports are in `crash-reports/`.
-- Report problems at <https://github.com/volt-rust/volt/issues>, with the end of the log.
+- Report problems at <https://github.com/horizon-rust/horizon/issues>, with the end of the log.

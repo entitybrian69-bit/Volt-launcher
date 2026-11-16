@@ -5,7 +5,7 @@
 use crate::ui_theme::{self, Face, Ui, color};
 
 /// The launcher's download page.
-pub const DOWNLOAD_URL: &str = "https://playvolt.dev";
+pub const DOWNLOAD_URL: &str = "https://playhorizon.dev";
 
 const TITLE: &str = "Start Volt from the launcher";
 const PARAGRAPHS: [&str; 3] = [
@@ -13,7 +13,7 @@ const PARAGRAPHS: [&str; 3] = [
      Minecraft's files, so it can't start.",
     "Volt needs your own copy of Minecraft: Java Edition. The launcher signs you in and \
      prepares the game files from it.",
-    "Download the launcher at playvolt.dev, then press Play there.",
+    "Download the launcher at playhorizon.dev, then press Play there.",
 ];
 const COLUMN: f32 = 560.0;
 const BUTTON_GAP: f32 = 12.0;

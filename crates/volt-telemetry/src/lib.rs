@@ -37,7 +37,7 @@ pub const CONSENT_VERSION: u32 = 2;
 /// The ingest server (`crates/volt-telemetry-server`, on Railway). `VOLT_TELEMETRY_URL`
 /// overrides it (a local server); `VOLT_TELEMETRY_URL=off` sends nothing at all, no ping
 /// either (tests and automated runs). What is sent still depends on the player's switches.
-pub const DEFAULT_ENDPOINT: &str = "https://telemetry.playvolt.dev";
+pub const DEFAULT_ENDPOINT: &str = "https://telemetry.playhorizon.dev";
 
 /// Where items are sent, if anywhere.
 pub fn endpoint() -> Option<String> {

@@ -9,10 +9,10 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-pub const REPO: &str = "volt-rust/volt";
-pub const README_URL: &str = "https://github.com/volt-rust/volt/blob/main/launcher/README.md";
+pub const REPO: &str = "horizon-rust/horizon";
+pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
-pub const AGENT_DOCS_URL: &str = "https://playvolt.dev/docs/agents";
+pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `VOLT_LAUNCHER_VERSION` from the
 /// tag it builds (no version-bump commits); other builds say Cargo.toml's.
 pub const VERSION: &str = version_or(option_env!("VOLT_LAUNCHER_VERSION"));
@@ -417,7 +417,7 @@ impl Default for Links {
         Self {
             discord: "https://discord.gg/HcTeMZxe5E".into(),
             sponsor: "https://github.com/sponsors/ludovic111".into(),
-            website: "https://playvolt.dev".into(),
+            website: "https://playhorizon.dev".into(),
         }
     }
 }
@@ -3998,10 +3998,10 @@ pub fn {f}("
         let defaults = Links::default();
         assert_eq!(defaults.discord, "https://discord.gg/HcTeMZxe5E");
         assert_eq!(defaults.sponsor, "https://github.com/sponsors/ludovic111");
-        assert_eq!(defaults.website, "https://playvolt.dev");
+        assert_eq!(defaults.website, "https://playhorizon.dev");
         // The file on main says the same thing as the defaults.
         let file = Links::parse(
-            r#"{"discord": "https://discord.gg/HcTeMZxe5E", "sponsor": "https://github.com/sponsors/ludovic111", "website": "https://playvolt.dev"}"#,
+            r#"{"discord": "https://discord.gg/HcTeMZxe5E", "sponsor": "https://github.com/sponsors/ludovic111", "website": "https://playhorizon.dev"}"#,
         );
         assert_eq!(file, defaults);
         // Unreadable or missing, offline included: the defaults.

@@ -32,7 +32,7 @@ pub const SWITCHES: [(Kind, &str, &str); 4] = [
     (
         Kind::Benchmark,
         "Benchmark uploads",
-        "The results of benchmarks you run, for the community results on playvolt.dev.",
+        "The results of benchmarks you run, for the community results on playhorizon.dev.",
     ),
 ];
 

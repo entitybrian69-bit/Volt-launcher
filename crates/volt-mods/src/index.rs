@@ -21,7 +21,7 @@ pub const SCHEMA: u32 = 1;
 /// The biggest file the registry takes (a `.vmod` with content, a `.vpack`).
 pub const MAX_FILE: u64 = 64 << 20;
 /// Where files may be downloaded from: the registry's release assets.
-pub const FILE_HOST: &str = "https://github.com/volt-rust/volt-mods/releases/download/";
+pub const FILE_HOST: &str = "https://github.com/horizon-rust/horizon-mods/releases/download/";
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Index {
@@ -70,9 +70,9 @@ impl Kind {
     /// The extension of its files; None for a kind this build doesn't know.
     pub fn extension(&self) -> Option<&'static str> {
         match self {
-            Kind::Mod => Some("hmod"),
+            Kind::Mod => Some("vmod"),
             Kind::NativeMod => Some("hnmod"),
-            Kind::Modpack => Some("hpack"),
+            Kind::Modpack => Some("vpack"),
             Kind::ResourcePack => Some("zip"),
             Kind::Shader => Some(volt_shader_api::EXTENSION),
             Kind::Other(_) => None,

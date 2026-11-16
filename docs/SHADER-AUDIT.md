@@ -1,6 +1,6 @@
 # Shader pipeline audit: this fork vs upstream
 
-Verified against the real upstream sources (github.com/volt-rust/volt
+Verified against the real upstream sources (github.com/horizon-rust/horizon
 and github.com/starling-client/starling) in November 2026 — not against the
 earlier assumption that upstream had removed packs pending a rewrite. That
 assumption was **wrong**: upstream's Shader API 0.2 is back, with pack
@@ -18,7 +18,7 @@ translate passes, `core_shader.rs` and `textures.rs`.
 | Native shader hook | `game/native_shaders.rs` | Shipped. |
 | Failure handling | render pipeline | A pack that fails to compile falls back to the default renderer; the client does not crash. |
 
-## Upstream (volt-rust/volt)
+## Upstream (horizon-rust/horizon)
 
 | Piece | Present upstream | Present here | Gap assessment |
 |---|---|---|---|

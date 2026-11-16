@@ -1,11 +1,11 @@
 # volt-telemetry-server
 
-This server receives what players choose to send (performance summaries, crash and bug reports, benchmark uploads: [docs/telemetry.md](../../docs/telemetry.md)) and stores it in one SQLite file. It serves anonymous totals to the website. It also keeps the live player count from the games' anonymous "I'm playing" pings, in memory only, and takes what players send from the hub (playvolt.dev/hub): votes and bug reports. It is one small Rust process, about 7 MB of memory when idle.
+This server receives what players choose to send (performance summaries, crash and bug reports, benchmark uploads: [docs/telemetry.md](../../docs/telemetry.md)) and stores it in one SQLite file. It serves anonymous totals to the website. It also keeps the live player count from the games' anonymous "I'm playing" pings, in memory only, and takes what players send from the hub (playhorizon.dev/hub): votes and bug reports. It is one small Rust process, about 7 MB of memory when idle.
 
     cargo run --release                     # in this folder: its own workspace, like the launcher's
     PORT=8080 VOLT_TELEMETRY_DB=/data/telemetry.sqlite3 volt-telemetry-server
 
-It runs at **https://telemetry.playvolt.dev** (`DEFAULT_ENDPOINT` in `crates/volt-telemetry`). The game and the launcher use it unless `VOLT_TELEMETRY_URL` names another server, or is `off` (tests and automated runs send nothing).
+It runs at **https://telemetry.playhorizon.dev** (`DEFAULT_ENDPOINT` in `crates/volt-telemetry`). The game and the launcher use it unless `VOLT_TELEMETRY_URL` names another server, or is `off` (tests and automated runs send nothing).
 
 ## Endpoints
 
@@ -19,7 +19,7 @@ It runs at **https://telemetry.playvolt.dev** (`DEFAULT_ENDPOINT` in `crates/vol
 | `GET /v1/live` | How many play now, rounded: `playing`, `lan`, `versions`, `platforms`. Made again at most every 15 seconds, with the same `Access-Control-Allow-Origin`. |
 | `POST /hub/vote` | `{"item": "<roadmap id>", "voter": "<the browser's random id>", "up": true}`: a 👍 on a roadmap item, one per voter; `"up": false` takes it back. Returns `{"item", "votes"}`. 400 for a bad id, 429 over the address's limit. |
 | `GET /hub/votes` | `{"votes": {"<item>": n}}`. Made again at most every minute. |
-| `POST /hub/report` | A bug report from the hub's form: `{"title", "did", "happened", "expected", "version"?, "system", "name"?}`. Opens a GitHub issue at once (labels `bug` and `from-website`, the `#volt-bugs` template, "Reported on playvolt.dev") and returns 201 `{"id", "issue": "<url>"}`. If GitHub fails: 202 `{"id", "issue": null}`, and the upkeep tries again for a week. The same report twice in a day returns the first one's issue. 400 for an empty or too long field, 429 over the address's limit, 503 past the day's cap or without `GITHUB_TOKEN`. |
+| `POST /hub/report` | A bug report from the hub's form: `{"title", "did", "happened", "expected", "version"?, "system", "name"?}`. Opens a GitHub issue at once (labels `bug` and `from-website`, the `#volt-bugs` template, "Reported on playhorizon.dev") and returns 201 `{"id", "issue": "<url>"}`. If GitHub fails: 202 `{"id", "issue": null}`, and the upkeep tries again for a week. The same report twice in a day returns the first one's issue. 400 for an empty or too long field, 429 over the address's limit, 503 past the day's cap or without `GITHUB_TOKEN`. |
 | `GET /healthz` | `ok` |
 
 The hub's posts take JSON from the website (`OPTIONS` preflights answer with its origin). A form's hidden `website` field filled in (a bot) gets 202 and is dropped.
@@ -28,7 +28,7 @@ The totals are grouped per version, OS, GPU vendor and render distance. Each gro
 
 ## Benchmarks summary
 
-`src/summary.rs` makes it with the same rules as the website's `scripts/benchmarks.mjs` (volt-rust/volt-site), which bakes the page's fallback copy; both are tested against the same fixtures (`tests/fixtures/benchmarks/` here, copied in the site's repository).
+`src/summary.rs` makes it with the same rules as the website's `scripts/benchmarks.mjs` (horizon-rust/horizon-site), which bakes the page's fallback copy; both are tested against the same fixtures (`tests/fixtures/benchmarks/` here, copied in the site's repository).
 
 - Only reports that compare: a version 1 `volt-benchmark-report` of the standard flight over the four scenes, VSync off, no frame cap, on screen, from Volt or plain vanilla, naming its GPU and CPU.
 - A group (GPU, CPU, render distance, game) is published only with **at least 3 different installs**. Each install counts once: the median of its runs, then the median across installs.
@@ -76,7 +76,7 @@ All are environment variables:
 - `VOLT_TELEMETRY_REQUESTS_PER_HOUR` per address (60, bursts of 6)
 - `VOLT_TELEMETRY_ITEMS_PER_DAY` per install (100)
 - `VOLT_TELEMETRY_TRUST_PROXY=1` behind a proxy (the client's address is then the proxy's `X-Real-IP`, else the last `X-Forwarded-For` entry; it is used only for the rate limits, in memory, and never stored or logged)
-- `VOLT_TELEMETRY_ALLOW_ORIGIN` (`https://playvolt.dev`)
+- `VOLT_TELEMETRY_ALLOW_ORIGIN` (`https://playhorizon.dev`)
 - `VOLT_TELEMETRY_LIVE_PER_HOUR` per address, pings and reads (600, bursts of 60: ten players behind one address)
 - `VOLT_TELEMETRY_LIVE_WINDOW_SECONDS` (120)
 - `VOLT_TELEMETRY_LIVE_MAX_SESSIONS` (200 000)
@@ -85,7 +85,7 @@ All are environment variables:
 - `VOLT_TELEMETRY_HUB_REPORTS_PER_DAY` from everyone (30): each opens an issue
 - `VOLT_TELEMETRY_HUB_KEEP_DAYS` (90)
 - `VOLT_TELEMETRY_GITHUB_TOKEN`: a fine-grained token with Issues read and write on the repository only (unset: `POST /hub/report` answers 503 and the form points to GitHub and Discord)
-- `VOLT_TELEMETRY_GITHUB_REPO` (`volt-rust/volt`)
+- `VOLT_TELEMETRY_GITHUB_REPO` (`horizon-rust/horizon`)
 
 ## Hosting
 
@@ -95,9 +95,9 @@ On Railway it is a service of the same project as the website:
 
 - Source: this repository, root directory `/` (the Dockerfile needs the shared crate), config file `/crates/volt-telemetry-server/railway.json` (Dockerfile build, health check `/healthz`, one replica in `europe-west4`, Amsterdam: one SQLite file can't be shared).
 - A volume mounted at `/data`. The Dockerfile already sets `VOLT_TELEMETRY_DB=/data/telemetry.sqlite3` and `VOLT_TELEMETRY_TRUST_PROXY=1`; Railway sets `PORT`.
-- The custom domain `telemetry.playvolt.dev`: a `CNAME` at Porkbun to the target Railway gives.
+- The custom domain `telemetry.playhorizon.dev`: a `CNAME` at Porkbun to the target Railway gives.
 
-Check it with `curl https://telemetry.playvolt.dev/healthz`.
+Check it with `curl https://telemetry.playhorizon.dev/healthz`.
 
 At Railway's prices (RAM $10/GB-month, CPU $20/vCPU-month, volumes $0.15/GB-month, egress $0.05/GB), one more service with a 1 GB volume uses about $0.35 a month:
 

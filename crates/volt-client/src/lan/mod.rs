@@ -140,7 +140,7 @@ pub struct NetLog {
 pub const VOLT_CLIENTS_ONLY: &str = "volt-clients-only";
 /// What another client is told.
 pub const VOLT_CLIENTS_ONLY_REASON: &str =
-    "This server is for the Volt client: playvolt.dev";
+    "This server is for the Volt client: playhorizon.dev";
 
 /// How the server side of the network behaves: an integrated server's LAN
 /// uses the defaults, a dedicated server takes them from server.properties.

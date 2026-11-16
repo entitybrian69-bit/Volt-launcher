@@ -514,7 +514,7 @@ pub fn find(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = read
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "hmod") || p.join(MANIFEST).is_file())
+        .filter(|p| p.extension().is_some_and(|e| e == "vmod") || p.join(MANIFEST).is_file())
         .collect();
     found.sort();
     found

@@ -67,7 +67,7 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase());
     match ext.as_deref() {
-        Some("hshader") => return Ok(Dropped::Pack(packs::Kind::Shader)),
+        Some("vshader") => return Ok(Dropped::Pack(packs::Kind::Shader)),
         Some("mrpack") => {
             let index = read_index(&mut open(file)?)?;
             let loaders = index["dependencies"]

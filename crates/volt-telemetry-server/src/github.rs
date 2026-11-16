@@ -94,7 +94,7 @@ pub fn issue(fields: &Map<String, Value>) -> Issue {
         .map(|n| format!(" by **{n}**"))
         .unwrap_or_default();
     let body = format!(
-        "{}\n\nReported on playvolt.dev{by}\n\n<sub>Opened by the bug form on playvolt.dev/hub. The reporter has this issue's link; they don't get GitHub notifications.</sub>",
+        "{}\n\nReported on playhorizon.dev{by}\n\n<sub>Opened by the bug form on playhorizon.dev/hub. The reporter has this issue's link; they don't get GitHub notifications.</sub>",
         quote(&text)
     );
     Issue {

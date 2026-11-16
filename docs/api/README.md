@@ -53,6 +53,6 @@ Every page has the same parts: **Overview** (what you can build), **Guide** (whe
 **Examples**, **Stability** (the level of each part, per [stability.md](stability.md)), **Changelog** and
 **Not there yet** (what is planned, so nobody builds on a guess).
 
-The website shows these pages at [playvolt.dev/docs/api](https://playvolt.dev/docs/api), built from this
-folder, and a summary for players and authors at [playvolt.dev/docs/apis](https://playvolt.dev/docs/apis)
-(in the website's repository, volt-rust/volt-site).
+The website shows these pages at [playhorizon.dev/docs/api](https://playhorizon.dev/docs/api), built from this
+folder, and a summary for players and authors at [playhorizon.dev/docs/apis](https://playhorizon.dev/docs/apis)
+(in the website's repository, horizon-rust/horizon-site).

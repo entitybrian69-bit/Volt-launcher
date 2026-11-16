@@ -5,9 +5,9 @@ everything is that **it plays exactly like vanilla**. This page is the short ver
 welcome on [Discord](https://discord.gg/HcTeMZxe5E).
 
 This repository holds the game and the launcher, plus the tools, tests and docs that build, check and release them.
-The website (playvolt.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives elsewhere.
+The website (playhorizon.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives elsewhere.
 
-**Where to start: [playvolt.dev/hub](https://playvolt.dev/hub).** It shows what is being done now and next
+**Where to start: [playhorizon.dev/hub](https://playhorizon.dev/hub).** It shows what is being done now and next
 ([ROADMAP.md](ROADMAP.md) in the repository), the work board, good first tasks, and the forms to report a bug or
 suggest something. A pull request for a roadmap item carries its `roadmap:<id>` label; ideas go to the suggestion
 queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
@@ -136,5 +136,5 @@ new pushes, we add it again.
 
 ## Talk to us
 
-[Discord](https://discord.gg/HcTeMZxe5E) for questions and ideas, [issues](https://github.com/volt-rust/volt/issues)
+[Discord](https://discord.gg/HcTeMZxe5E) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
 for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).

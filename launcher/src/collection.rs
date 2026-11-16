@@ -388,7 +388,7 @@ impl Launcher {
                     .max_w(px(600.))
                     .text_color(t.muted)
                     .child(tr(
-                        "Each switch is off unless you turn it on. What it sends is below it; the privacy page on playvolt.dev says how long it is kept.",
+                        "Each switch is off unless you turn it on. What it sends is below it; the privacy page on playhorizon.dev says how long it is kept.",
                     )),
             )
             .child(list)

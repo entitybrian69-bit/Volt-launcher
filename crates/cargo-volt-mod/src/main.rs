@@ -6,7 +6,7 @@
 //!   `assets/` and `data/`; a folder without `Cargo.toml` is content only.
 //! - `run [--game <volt-client>] [-- <game args>]`: build, then play with
 //!   the mod; run `build` again and the game reloads it.
-//! - `test [--debug] [--hmod <file>] [<name>]`: build, then run the mod's
+//! - `test [--debug] [--vmod <file>] [<name>]`: build, then run the mod's
 //!   `tests/*.toml` scripts in the sandbox, with no game.
 //! - `check <file> [--json]`: what the registry checks of a submission
 //!   (`.vmod`, `.vpack`, resource pack `.zip`), with a trial run for a mod.
@@ -25,7 +25,7 @@ use std::{
 };
 
 const TARGET: &str = "wasm32-unknown-unknown";
-const SDK_GIT: &str = "{ git = \"https://github.com/volt-rust/volt\" }";
+const SDK_GIT: &str = "{ git = \"https://github.com/horizon-rust/horizon\" }";
 
 fn main() -> ExitCode {
     // Cargo runs `cargo-volt-mod volt-mod <args>`.
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
         Some("test") => test(&args[1..]),
         Some("check") => check(&args[1..]),
         Some("registry") => registry::main(&args[1..]),
-        _ => Err("usage: cargo volt-mod new <path> [--template code|content] | build [--debug] | run [--game <volt-client>] [-- <game args>] | test [--debug] [--hmod <file>] [<name>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list".into()),
+        _ => Err("usage: cargo volt-mod new <path> [--template code|content] | build [--debug] | run [--game <volt-client>] [-- <game args>] | test [--debug] [--vmod <file>] [<name>] | check <file> [--kind <kind>] [--key <public key> --signature <file.minisig>] [--json] | registry build|review|check|list".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -204,7 +204,7 @@ fn build_in(root: &Path, release: bool) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.vmod", manifest.id));
     // Write then rename, so a running game never reads half a file.
-    let partial = path.with_extension("hmod.partial");
+    let partial = path.with_extension("vmod.partial");
     let bytes = Package::write_files(&manifest_text, wasm.as_deref(), &files)?;
     std::fs::write(&partial, bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&partial, &path).map_err(|e| e.to_string())?;
@@ -279,16 +279,16 @@ fn check(args: &[String]) -> Result<(), String> {
 }
 
 /// `test`: every `tests/*.toml` script (those whose name holds `<name>`)
-/// against the built mod, or the `.vmod` given with `--hmod`.
+/// against the built mod, or the `.vmod` given with `--vmod`.
 fn test(args: &[String]) -> Result<(), String> {
-    let hmod = match flag(args, "--hmod") {
+    let vmod = match flag(args, "--vmod") {
         Some(p) => PathBuf::from(p),
         None => build(!args.iter().any(|a| a == "--debug"))?,
     };
     let filter = args
         .iter()
         .enumerate()
-        .find(|(i, a)| !a.starts_with("--") && (*i == 0 || args[i - 1] != "--hmod"))
+        .find(|(i, a)| !a.starts_with("--") && (*i == 0 || args[i - 1] != "--vmod"))
         .map(|(_, a)| a.as_str());
     let mut scripts: Vec<PathBuf> = std::fs::read_dir("tests")
         .map_err(|e| {
@@ -307,7 +307,7 @@ fn test(args: &[String]) -> Result<(), String> {
     println!(
         "running {} scripts against {}",
         scripts.len(),
-        hmod.display()
+        vmod.display()
     );
     let mut failed = 0;
     for path in &scripts {
@@ -315,7 +315,7 @@ fn test(args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())
             .and_then(|text| Script::parse(&text))
             .and_then(|script| {
-                let mut game = TestGame::load(&hmod)?;
+                let mut game = TestGame::load(&vmod)?;
                 script.run(&mut game)?;
                 Ok(script.steps.len())
             });
@@ -397,18 +397,18 @@ mod tests {
         ];
         new(&new_args).unwrap();
         assert!(!path.join("Cargo.toml").exists());
-        let hmod = build_in(&path, true).unwrap();
-        assert_eq!(hmod, path.join("target/volt-mod/gems.vmod"));
-        let package = Package::read(&hmod).unwrap();
+        let vmod = build_in(&path, true).unwrap();
+        assert_eq!(vmod, path.join("target/volt-mod/gems.vmod"));
+        let package = Package::read(&vmod).unwrap();
         assert!(package.wasm.is_none());
-        let content = Content::read(&hmod, &package.manifest).unwrap();
+        let content = Content::read(&vmod, &package.manifest).unwrap();
         assert!(
             content
                 .files
                 .contains(&"data/gems/volt/block/glowing_amethyst.json".into())
         );
         assert_eq!(content.files.len(), 8, "{:?}", content.files);
-        let report = check::check(&hmod, check::kind_of(&hmod).unwrap(), None, None).unwrap();
+        let report = check::check(&vmod, check::kind_of(&vmod).unwrap(), None, None).unwrap();
         assert!(!report.code);
         assert!(
             report.text().contains("no code: content only"),

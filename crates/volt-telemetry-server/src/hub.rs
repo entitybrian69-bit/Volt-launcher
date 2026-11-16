@@ -1,4 +1,4 @@
-//! The hub's votes: a 👍 on a roadmap item at playvolt.dev/hub, and the helpers the hub's other
+//! The hub's votes: a 👍 on a roadmap item at playhorizon.dev/hub, and the helpers the hub's other
 //! endpoints (`intake`) share. roadmap/README.md documents them for Kira and the website.
 //!
 //! - `POST /hub/vote`: a 👍 on a roadmap item, one per browser (`voter`, a random id the page makes and

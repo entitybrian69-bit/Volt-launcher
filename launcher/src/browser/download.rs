@@ -50,7 +50,7 @@ pub(super) fn agent(url: &str) -> ureq::Agent {
     volt_port_pack::net::keep("browser", spec.as_deref(), |proxy| {
         let builder = ureq::AgentBuilder::new()
             .user_agent(&format!(
-                "volt-rust/volt volt-launcher/{} (github.com/volt-rust/volt)",
+                "horizon-rust/horizon volt-launcher/{} (github.com/horizon-rust/horizon)",
                 crate::backend::VERSION
             ))
             .timeout_connect(std::time::Duration::from_secs(15))

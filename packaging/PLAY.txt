@@ -12,7 +12,7 @@ Playing through the Volt launcher
   launcher to update, play or run a server.
 
 Downloaded this archive directly?
-  Get the launcher instead (Download at https://playvolt.dev); it signs
+  Get the launcher instead (Download at https://playhorizon.dev); it signs
   you in, prepares Volt from your own Minecraft: Java Edition and updates it.
 
   To prepare this folder by hand you need Minecraft Java Edition 26.3, played

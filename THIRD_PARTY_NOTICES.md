@@ -1293,7 +1293,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 ## Volt Zoom native mod 2.0.0
 
 `crates/volt-client/src/game/official_zoom.rs` is the runtime of Volt's
-[Zoom 2.0.0](https://github.com/volt-rust/volt-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native/zoom),
+[Zoom 2.0.0](https://github.com/horizon-rust/horizon-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native/zoom),
 by Ludovic Marie and the Volt contributors, under the MIT License. The full
 license is in `crates/volt-client/src/game/licenses/VOLT-ZOOM-MIT.txt`.
 Volt adds a profile-state reset, integrates its hooks, and provides profile
@@ -1328,14 +1328,14 @@ SOFTWARE.
 
 `crates/volt-client/src/game/official_{fps_overlay,keystrokes,minimap}.rs`
 contain the official Volt 2.0.0 runtimes from
-[commit 22c6f14ea60be2b17a642b44a2aff44a98e3733d](https://github.com/volt-rust/volt-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native),
+[commit 22c6f14ea60be2b17a642b44a2aff44a98e3733d](https://github.com/horizon-rust/horizon-mods/tree/22c6f14ea60be2b17a642b44a2aff44a98e3733d/native),
 by Ludovic Marie and the Volt contributors. The same MIT license printed
 above applies. Volt adds a per-profile state reset and Android integration.
 
 ## JEI for Volt native mod 0.1.0
 
 Release APKs weave the published registry bundle
-[`jei-0.1.0.hnmod`](https://github.com/volt-rust/volt-mods/releases/tag/jei-0.1.0)
+[`jei-0.1.0.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/jei-0.1.0)
 (SHA-256 `c5590e0d4618d435fc0c56abcc9cdabf253be694710068a3dd4643ac25466b5b`)
 into the engine library at build time. JEI for Volt is by enderliker
 ([source](https://github.com/enderliker/volt-jei)), under the MIT License
@@ -1346,7 +1346,7 @@ per profile in-game under Mods.
 ## Volt Physics native mod 0.15.1
 
 Release APKs weave the published registry bundle
-[`volt_physics-0.15.1.hnmod`](https://github.com/volt-rust/volt-mods/releases/tag/volt_physics-0.15.1)
+[`volt_physics-0.15.1.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/volt_physics-0.15.1)
 (SHA-256 `d7cf1201f0a47a852aa1a4c9684ef9e658ec3c86852104d44716d05f11281ca3`)
 into the engine library at build time. Volt Physics is by tariksabanuz
 ([source](https://github.com/tariksabanuz/PhysicsModVolt)), under the MIT
@@ -1358,7 +1358,7 @@ the player can turn the mod off per profile in-game under Mods.
 ## Jade native mod 26.3.5
 
 Release APKs weave the published registry bundle
-[`jade-26.3.5.hnmod`](https://github.com/volt-rust/volt-mods/releases/tag/jade-26.3.5)
+[`jade-26.3.5.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/jade-26.3.5)
 (SHA-256 `676a129f55db075284313a39ff4387674c426ebd9be04a8830ffb8955281c7ec`)
 into the engine library at build time. Jade for Volt is by Joeypc6
 ([source](https://github.com/Joeypc6/Jade-Volt)), an unofficial Rust port
@@ -1376,7 +1376,7 @@ under Mods.
 ## Veinminer native mod 0.3.2
 
 Release APKs weave the published registry bundle
-[`veinminer-0.3.2.hnmod`](https://github.com/volt-rust/volt-mods/releases/tag/veinminer-0.3.2)
+[`veinminer-0.3.2.hnmod`](https://github.com/horizon-rust/horizon-mods/releases/tag/veinminer-0.3.2)
 (SHA-256 `31a4249da1b35972ae8b34201373c86352f4adc2f5cb3e015749d1fbfecf00a0`)
 into the engine library at build time. Veinminer for Volt is by
 levzzz5154 ([source](https://github.com/levzzz5154/volt-veinminer)),
@@ -1395,45 +1395,45 @@ printed above, copyright their listed authors). The weave happens on a
 no-secrets CI runner and each mod can be turned off per profile in-game
 under Mods.
 
-- **appleskin 1.0.0** by soufi — [appleskin-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/appleskin-1.0.0), SHA-256 `3c25b916f74f47faf40070a8654c546d15cb79ac3947f140e257f4cb041aeb96`, [source](https://github.com/soufied/AppleSkin-Volt)
-- **status_effect_hud 1.0.0** by CayMac — [status_effect_hud-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/status_effect_hud-1.0.0), SHA-256 `afa30125bb8b402892f1719e550b66d4eb4d7264895f71bb9c98a4caf5c7b432`, [source](https://github.com/CayMac97/status-effect-hud)
-- **toggle_sprint 1.0.0** by CayMac — [toggle_sprint-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/toggle_sprint-1.0.0), SHA-256 `b2a4190f9c19adbceae4a639342b7630bfc3047339eabf57673b7807db5edc6a`, [source](https://github.com/CayMac97/toggle-sprint)
-- **inventory_profiles 1.0.0** by CayMac — [inventory_profiles-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/inventory_profiles-1.0.0), SHA-256 `1e5d1c75d05230172820b5bc016d7d3ac792adf473de7dbfb84394d8b795a633`, [source](https://github.com/CayMac97/inventory-profiles)
-- **shulker_peek 0.1.0** by vstxx — [shulker_peek-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/shulker_peek-0.1.0), SHA-256 `e4e33cb698d91042b2ed2f93a1c935f279d16d83988115d53c0f33530cabeab5`, [source](https://github.com/vstxx/shulkerpeek)
-- **mousetricks 0.2.0** by d3grando — [mousetricks-0.2.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/mousetricks-0.2.0), SHA-256 `48c60955371963f8e320a9efbe8285bb276d255c29178a8a021e7e2b47535cbe`, [source](https://github.com/d3grando/mousetricks)
-- **itemnew 0.1.1** by d3grando — [itemnew-0.1.1.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/itemnew-0.1.1), SHA-256 `cdc68c9911736703ebc4b8b81895a719edd74ba9d08fe01ddb34fe09b8d490e9`, [source](https://github.com/d3grando/itemnew)
-- **eatinganimation 0.1.0** by soufi — [eatinganimation-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/eatinganimation-0.1.0), SHA-256 `07ef4fde3ebbc4f132aab593b12187bce15e1a46689ab40bd3067c685aca85b9`, [source](https://github.com/soufied/EatingAnimation-Volt)
-- **enchantmenthints 0.1.0** by d3grando — [enchantmenthints-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/enchantmenthints-0.1.0), SHA-256 `6f1b80a7c22e02b086d5eea2ed6f7c5481b3e40d6a974bf9e382a3df4a2de9df`, [source](https://github.com/d3grando/enchantmenthints)
-- **light_overlay 1.0.0** by CayMac — [light_overlay-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/light_overlay-1.0.0), SHA-256 `b4aeb56b13d9c73df267a1dc7b1f588f4db39bfd55f7beaef97a014fffb5b076`, [source](https://github.com/CayMac97/light-overlay)
-- **right_click_crops 1.0.0** by AyanoKaito — [right_click_crops-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/right_click_crops-1.0.0), SHA-256 `681ce896c50dd041132900e7bbab71167f133b3f3862f86e8b1a0cac52754b97`, [source](https://github.com/AyanoKaito/volt-right-click-crops)
-- **smartf3 0.1.0** by d3grando — [smartf3-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/smartf3-0.1.0), SHA-256 `666fc77a12411c8b525dca3d3d478595e760b73c48b62b936fb6026419547929`, [source](https://github.com/d3grando/smartf3)
-- **armor_status 1.0.0** by CayMac — [armor_status-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/armor_status-1.0.0), SHA-256 `82c8672fa2c43d7946a26a560fd56fdd8f34beecf4bcb459c2d508b3d09eeee6`, [source](https://github.com/CayMac97/armor-status)
-- **crosshair_indicator 1.0.0** by CayMac — [crosshair_indicator-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/crosshair_indicator-1.0.0), SHA-256 `96beba1f7c94fca492b552fb12af0d20047dc1799f0801607841d56b12786226`, [source](https://github.com/CayMac97/crosshair-indicator)
-- **hitbox_plus 1.3.0** by taxtii, itzglecni — [hitbox_plus-1.3.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/hitbox_plus-1.3.0), SHA-256 `8d1b95e7461e38fc40994b35a82c1f753a58e9751ce27af1dc101a4717dba8a4`, [source](https://github.com/taxtii/hitbox_plus)
-- **invisible_frames 0.1.1** by AltMugen — [invisible_frames-0.1.1.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/invisible_frames-0.1.1), SHA-256 `76128b48ce5c826007379c85634b934ae6bad51c134fbaead7c46b36fecd9274`, [source](https://github.com/AltMugen/volt-invisible-frames)
-- **freelook 0.3.1** by Krzysix17 — [freelook-0.3.1.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/freelook-0.3.1), SHA-256 `9c0c92ce9f0fc8e7bc1bd34349e26d42b32b8abd2c7a09ec710936f9b6ce9aaf`, [source](https://github.com/Krzysix17/volt-freelook)
-- **worldedit 1.2.1** by _cykoo_ — [worldedit-1.2.1.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/worldedit-1.2.1), SHA-256 `b2bb3019ecd4d5392644c54c70a87d6c3277538a6e18d0c311f3a051f7d2f015`, [source](https://github.com/XnotCykoX/WorldEdit-Volt)
-- **voltmatica 0.1.1** by keksi2k — [voltmatica-0.1.1.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/voltmatica-0.1.1), SHA-256 `2ddc562dd2ea0f9a76a47eb761c64c803def68a8c81b92cb5d15ec26c5d432aa`, [source](https://github.com/keksi2k/voltmatica)
-- **visuality_volt 1.0.2** by BenjiSyS — [visuality_volt-1.0.2.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/visuality_volt-1.0.2), SHA-256 `b764f15a062e44b27c55f478b2d02e163bfb01c3d8e222fcd6d83bcc66f19a0d`, [source](https://github.com/BenjiSyS/visuality-volt)
-- **held_item_info 0.1.0** by AltMugen — [held_item_info-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/held_item_info-0.1.0), SHA-256 `37a11d98f0afabe37f8ffa9982dc710ad2985817db6b5e094d807c24d30a6a6a`, [source](https://github.com/AltMugen/volt-held-item-info)
-- **carryblock 0.1.2** by d3grando — [carryblock-0.1.2.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/carryblock-0.1.2), SHA-256 `9a6ebd26f640a477815862eb36846fe3289046d0f4c06ef3a815f463ca9a3701`, [source](https://github.com/d3grando/carryblock)
-- **chatheads 0.1.0** by Domanffe — [chatheads-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/chatheads-0.1.0), SHA-256 `c20605c24e29a762b9aea85cba1b0cc7955955a40a031efae70a5b01e4e79df4`, [source](https://github.com/Domanffe/chatheads)
-- **fast_items 0.1.0** by Lyvt — [fast_items-0.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/fast_items-0.1.0), SHA-256 `c3acd8adfeac6450c3a13b5172c8abb298cb3ceb355dfc539b4bdd653ef15502`, [source](https://github.com/Lyvt-Dev/FastItems-for-Volt)
-- **customhud 1.6.0** by SCARABOCCHIO100 — [customhud-1.6.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/customhud-1.6.0), SHA-256 `ab255d3c722b40f4d068a762857d6c027c11381308bfe23196e2974307814a7f`, [source](https://github.com/sonoFrangu/CustomHUD-Volt)
-- **coords_hud 2.0.0** by Volt — [coords_hud-2.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/coords_hud-2.0.0), SHA-256 `432376fad3062b3517e274d3b8c0d0b52fc5d6de2aee20a0b340c8cab5a8cf08`, [source](https://github.com/volt-rust/volt-mods/tree/main/native/coords-hud)
-- **biomecompass 0.2.2** by d3grando — [biomecompass-0.2.2.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/biomecompass-0.2.2), SHA-256 `d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5`, [source](https://github.com/d3grando/biomecompass)
-- **skins_3d 1.1.0** by _idom_ (MIT) — [skins_3d-1.1.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/skins_3d-1.1.0), SHA-256 `ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602`, [source](https://github.com/umbx-dot/volt-3d-skins)
-- **armorhud 1.0.0** by Thomas9950 (MIT) — [armorhud-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/armorhud-1.0.0), SHA-256 `8bd85e1584f307201bce5de2e60466d603b61d4807803d4ebc02772b4f6b704b`, [source](https://github.com/Thomas-Slot/volt-armor-hud)
-- **lookat 0.2.1** by d3grando (MIT) — [lookat-0.2.1.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/lookat-0.2.1), SHA-256 `6c15726116825b5955984223d0e1bccd5d18375005af243a061b2ba2b9139f33`, [source](https://github.com/d3grando/lookat)
-- **blockscope 0.3.0** by Domanffe (MIT) — [blockscope-0.3.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/blockscope-0.3.0), SHA-256 `ba4a1c887ab26a2a9189c671cbdbea3ce2ed212a6e3d32f1fffaa60386198358`, [source](https://github.com/Domanffe/blockscope)
-- **elytratrails 0.1.2** by soufi (MIT) — [elytratrails-0.1.2.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/elytratrails-0.1.2), SHA-256 `ad6758f1ff0fa1b50750764bf2eb1f78ea94af8ecc84d75a7cc6ec5dcffb31a6`, [source](https://github.com/soufied/ElytraTrails-Volt)
+- **appleskin 1.0.0** by soufi — [appleskin-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/appleskin-1.0.0), SHA-256 `3c25b916f74f47faf40070a8654c546d15cb79ac3947f140e257f4cb041aeb96`, [source](https://github.com/soufied/AppleSkin-Volt)
+- **status_effect_hud 1.0.0** by CayMac — [status_effect_hud-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/status_effect_hud-1.0.0), SHA-256 `afa30125bb8b402892f1719e550b66d4eb4d7264895f71bb9c98a4caf5c7b432`, [source](https://github.com/CayMac97/status-effect-hud)
+- **toggle_sprint 1.0.0** by CayMac — [toggle_sprint-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/toggle_sprint-1.0.0), SHA-256 `b2a4190f9c19adbceae4a639342b7630bfc3047339eabf57673b7807db5edc6a`, [source](https://github.com/CayMac97/toggle-sprint)
+- **inventory_profiles 1.0.0** by CayMac — [inventory_profiles-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/inventory_profiles-1.0.0), SHA-256 `1e5d1c75d05230172820b5bc016d7d3ac792adf473de7dbfb84394d8b795a633`, [source](https://github.com/CayMac97/inventory-profiles)
+- **shulker_peek 0.1.0** by vstxx — [shulker_peek-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/shulker_peek-0.1.0), SHA-256 `e4e33cb698d91042b2ed2f93a1c935f279d16d83988115d53c0f33530cabeab5`, [source](https://github.com/vstxx/shulkerpeek)
+- **mousetricks 0.2.0** by d3grando — [mousetricks-0.2.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/mousetricks-0.2.0), SHA-256 `48c60955371963f8e320a9efbe8285bb276d255c29178a8a021e7e2b47535cbe`, [source](https://github.com/d3grando/mousetricks)
+- **itemnew 0.1.1** by d3grando — [itemnew-0.1.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/itemnew-0.1.1), SHA-256 `cdc68c9911736703ebc4b8b81895a719edd74ba9d08fe01ddb34fe09b8d490e9`, [source](https://github.com/d3grando/itemnew)
+- **eatinganimation 0.1.0** by soufi — [eatinganimation-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/eatinganimation-0.1.0), SHA-256 `07ef4fde3ebbc4f132aab593b12187bce15e1a46689ab40bd3067c685aca85b9`, [source](https://github.com/soufied/EatingAnimation-Volt)
+- **enchantmenthints 0.1.0** by d3grando — [enchantmenthints-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/enchantmenthints-0.1.0), SHA-256 `6f1b80a7c22e02b086d5eea2ed6f7c5481b3e40d6a974bf9e382a3df4a2de9df`, [source](https://github.com/d3grando/enchantmenthints)
+- **light_overlay 1.0.0** by CayMac — [light_overlay-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/light_overlay-1.0.0), SHA-256 `b4aeb56b13d9c73df267a1dc7b1f588f4db39bfd55f7beaef97a014fffb5b076`, [source](https://github.com/CayMac97/light-overlay)
+- **right_click_crops 1.0.0** by AyanoKaito — [right_click_crops-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/right_click_crops-1.0.0), SHA-256 `681ce896c50dd041132900e7bbab71167f133b3f3862f86e8b1a0cac52754b97`, [source](https://github.com/AyanoKaito/volt-right-click-crops)
+- **smartf3 0.1.0** by d3grando — [smartf3-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/smartf3-0.1.0), SHA-256 `666fc77a12411c8b525dca3d3d478595e760b73c48b62b936fb6026419547929`, [source](https://github.com/d3grando/smartf3)
+- **armor_status 1.0.0** by CayMac — [armor_status-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/armor_status-1.0.0), SHA-256 `82c8672fa2c43d7946a26a560fd56fdd8f34beecf4bcb459c2d508b3d09eeee6`, [source](https://github.com/CayMac97/armor-status)
+- **crosshair_indicator 1.0.0** by CayMac — [crosshair_indicator-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/crosshair_indicator-1.0.0), SHA-256 `96beba1f7c94fca492b552fb12af0d20047dc1799f0801607841d56b12786226`, [source](https://github.com/CayMac97/crosshair-indicator)
+- **hitbox_plus 1.3.0** by taxtii, itzglecni — [hitbox_plus-1.3.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/hitbox_plus-1.3.0), SHA-256 `8d1b95e7461e38fc40994b35a82c1f753a58e9751ce27af1dc101a4717dba8a4`, [source](https://github.com/taxtii/hitbox_plus)
+- **invisible_frames 0.1.1** by AltMugen — [invisible_frames-0.1.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/invisible_frames-0.1.1), SHA-256 `76128b48ce5c826007379c85634b934ae6bad51c134fbaead7c46b36fecd9274`, [source](https://github.com/AltMugen/volt-invisible-frames)
+- **freelook 0.3.1** by Krzysix17 — [freelook-0.3.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/freelook-0.3.1), SHA-256 `9c0c92ce9f0fc8e7bc1bd34349e26d42b32b8abd2c7a09ec710936f9b6ce9aaf`, [source](https://github.com/Krzysix17/volt-freelook)
+- **worldedit 1.2.1** by _cykoo_ — [worldedit-1.2.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/worldedit-1.2.1), SHA-256 `b2bb3019ecd4d5392644c54c70a87d6c3277538a6e18d0c311f3a051f7d2f015`, [source](https://github.com/XnotCykoX/WorldEdit-Volt)
+- **voltmatica 0.1.1** by keksi2k — [voltmatica-0.1.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/voltmatica-0.1.1), SHA-256 `2ddc562dd2ea0f9a76a47eb761c64c803def68a8c81b92cb5d15ec26c5d432aa`, [source](https://github.com/keksi2k/voltmatica)
+- **visuality_volt 1.0.2** by BenjiSyS — [visuality_volt-1.0.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/visuality_volt-1.0.2), SHA-256 `b764f15a062e44b27c55f478b2d02e163bfb01c3d8e222fcd6d83bcc66f19a0d`, [source](https://github.com/BenjiSyS/visuality-volt)
+- **held_item_info 0.1.0** by AltMugen — [held_item_info-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/held_item_info-0.1.0), SHA-256 `37a11d98f0afabe37f8ffa9982dc710ad2985817db6b5e094d807c24d30a6a6a`, [source](https://github.com/AltMugen/volt-held-item-info)
+- **carryblock 0.1.2** by d3grando — [carryblock-0.1.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/carryblock-0.1.2), SHA-256 `9a6ebd26f640a477815862eb36846fe3289046d0f4c06ef3a815f463ca9a3701`, [source](https://github.com/d3grando/carryblock)
+- **chatheads 0.1.0** by Domanffe — [chatheads-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/chatheads-0.1.0), SHA-256 `c20605c24e29a762b9aea85cba1b0cc7955955a40a031efae70a5b01e4e79df4`, [source](https://github.com/Domanffe/chatheads)
+- **fast_items 0.1.0** by Lyvt — [fast_items-0.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/fast_items-0.1.0), SHA-256 `c3acd8adfeac6450c3a13b5172c8abb298cb3ceb355dfc539b4bdd653ef15502`, [source](https://github.com/Lyvt-Dev/FastItems-for-Volt)
+- **customhud 1.6.0** by SCARABOCCHIO100 — [customhud-1.6.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/customhud-1.6.0), SHA-256 `ab255d3c722b40f4d068a762857d6c027c11381308bfe23196e2974307814a7f`, [source](https://github.com/sonoFrangu/CustomHUD-Volt)
+- **coords_hud 2.0.0** by Volt — [coords_hud-2.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/coords_hud-2.0.0), SHA-256 `432376fad3062b3517e274d3b8c0d0b52fc5d6de2aee20a0b340c8cab5a8cf08`, [source](https://github.com/horizon-rust/horizon-mods/tree/main/native/coords-hud)
+- **biomecompass 0.2.2** by d3grando — [biomecompass-0.2.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/biomecompass-0.2.2), SHA-256 `d9a4aedcf22318774e1ac6bed6f1e00aca13a38c8dc3426d5a7800e4d8c61bf5`, [source](https://github.com/d3grando/biomecompass)
+- **skins_3d 1.1.0** by _idom_ (MIT) — [skins_3d-1.1.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/skins_3d-1.1.0), SHA-256 `ac9f20ea771f2abb25976c06d320883016b13a984075522ecc07323b48994602`, [source](https://github.com/umbx-dot/volt-3d-skins)
+- **armorhud 1.0.0** by Thomas9950 (MIT) — [armorhud-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/armorhud-1.0.0), SHA-256 `8bd85e1584f307201bce5de2e60466d603b61d4807803d4ebc02772b4f6b704b`, [source](https://github.com/Thomas-Slot/volt-armor-hud)
+- **lookat 0.2.1** by d3grando (MIT) — [lookat-0.2.1.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/lookat-0.2.1), SHA-256 `6c15726116825b5955984223d0e1bccd5d18375005af243a061b2ba2b9139f33`, [source](https://github.com/d3grando/lookat)
+- **blockscope 0.3.0** by Domanffe (MIT) — [blockscope-0.3.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/blockscope-0.3.0), SHA-256 `ba4a1c887ab26a2a9189c671cbdbea3ce2ed212a6e3d32f1fffaa60386198358`, [source](https://github.com/Domanffe/blockscope)
+- **elytratrails 0.1.2** by soufi (MIT) — [elytratrails-0.1.2.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/elytratrails-0.1.2), SHA-256 `ad6758f1ff0fa1b50750764bf2eb1f78ea94af8ecc84d75a7cc6ec5dcffb31a6`, [source](https://github.com/soufied/ElytraTrails-Volt)
 
 ## Accurate Block Placement woven native mod 1.0.0
 
 Volt Launcher weaves the `accurate_block_placement` native mod into the
 Android client the same way as the other woven registry mods, pinned by
 SHA-256 `e631745f6d267360de6eb51995ee995bf1ab3d64393d287b7b93c332b85939ce`
-([accurate_block_placement-1.0.0.hnmod](https://github.com/volt-rust/volt-mods/releases/tag/accurate_block_placement-1.0.0),
+([accurate_block_placement-1.0.0.hnmod](https://github.com/horizon-rust/horizon-mods/releases/tag/accurate_block_placement-1.0.0),
 [source](https://github.com/Lutziano888/volt-accurate-block-placement)).
 It is Lutziano888's MIT-licensed Volt port of Accurate Block Placement:
 Reborn (MIT) by Clayborn, Flourick, schwar and KadTheHunter. No upstream
