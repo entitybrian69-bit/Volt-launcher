@@ -1495,7 +1495,7 @@ fn climate_entry_strips_keys_and_quantizes() {
 /// preset tables parse back through the same `from_quantized_json` the
 /// world generator runs on `worldgen/presets.json`.
 #[test]
-fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
+fn biomes_unseen_vmod_biomes_reach_the_preset_tables() {
     use volt_mods::{Content, Package};
     use volt_world::worldgen::biome::MultiNoiseBiomeSource;
     use volt_world::worldgen::biome_temperature::BiomeTemperatureSettings;
@@ -1594,7 +1594,7 @@ fn biomes_unseen_hmod_biomes_reach_the_preset_tables() {
 /// name — and `append_creative` places every item in the creative
 /// category and search tabs next to its vanilla template.
 #[test]
-fn biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries() {
+fn biomes_unseen_vmod_ships_textures_models_lang_and_creative_entries() {
     use volt_assets::item_model::ClientItem;
     use volt_mods::{Content, Package};
     use serde_json::Value;
@@ -1806,7 +1806,7 @@ fn biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries() {
 /// shipped Biomes Unseen content mod: manifest at the ZIP root plus
 /// content, no `mod.wasm` required for a content-only `.vmod`.
 #[test]
-fn biomes_unseen_hmod_passes_android_import_validation() {
+fn biomes_unseen_vmod_passes_android_import_validation() {
     use crate::content_files::{Kind, validate};
     use std::path::Path;
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/biomes_unseen.vmod");

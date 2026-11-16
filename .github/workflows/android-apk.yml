@@ -157,9 +157,9 @@ jobs:
           cargo --version
           cargo test -p volt-client --lib --no-default-features -- \
             climate_entry_strips_keys_and_quantizes \
-            biomes_unseen_hmod_biomes_reach_the_preset_tables \
-            biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries \
-            biomes_unseen_hmod_passes_android_import_validation \
+            biomes_unseen_vmod_biomes_reach_the_preset_tables \
+            biomes_unseen_vmod_ships_textures_models_lang_and_creative_entries \
+            biomes_unseen_vmod_passes_android_import_validation \
             content_files \
             nea::tests \
             player_gestures::tests \

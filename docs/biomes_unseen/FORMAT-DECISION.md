@@ -99,4 +99,4 @@ the multi-noise preset tables (39 `minecraft:overworld`, 5
 every block and item carrying a blockstate/model/texture chain, an
 `items/<name>.json` client item definition the engine decoder accepts, an
 English name, and a seat in the creative category and search tabs
-(`biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries`).
+(`biomes_unseen_vmod_ships_textures_models_lang_and_creative_entries`).
