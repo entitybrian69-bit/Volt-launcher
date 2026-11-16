@@ -78,8 +78,12 @@ pub fn log_path() -> PathBuf {
     root().join("build.log")
 }
 
-const MANIFEST: &str = "volt-mixin.toml";
+/// The names a mixin manifest can carry: this tree writes the first, a bundle
+/// the registry published uses the second. Both mean the same file.
+const MANIFESTS: [&str; 2] = ["volt-mixin.toml", "horizon-mixin.toml"];
+const MANIFEST: &str = MANIFESTS[0];
 /// A registry download's manifest (`.hnmod`, `volt_mods::index::native`), beside `mixins/<id>/`.
+const NATIVE_MANIFESTS: [&str; 2] = volt_mods::index::native::MANIFEST_ALIASES;
 const NATIVE_MANIFEST: &str = volt_mods::index::native::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hnmod`, each on or
 /// off in `volt-mods.txt` like any mod.
@@ -162,20 +166,31 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
 }
 
 pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
-    if dir.join(MANIFEST).is_file() {
-        return bundle(dir, None).map(Some);
+    if let Some(name) = MANIFESTS.iter().find(|n| dir.join(n).is_file()) {
+        return bundle(dir, None, name).map(Some);
     }
-    let path = dir.join(NATIVE_MANIFEST);
-    if !path.is_file() {
+    let path = NATIVE_MANIFESTS
+        .iter()
+        .map(|n| dir.join(n))
+        .find(|p| p.is_file());
+    let Some(path) = path else {
         return Ok(None);
-    }
+    };
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let native_json: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let field = |name: &str| native_json[name].as_str().map(str::to_owned);
     let id = field("id").ok_or_else(|| format!("{} has no id.", path.display()))?;
-    let found = bundle(&dir.join("mixins").join(&id), field("mixins"))?;
-    match (&found.volt, field("volt")) {
+    let mixins_dir = dir.join("mixins").join(&id);
+    let mixin_name = MANIFESTS
+        .iter()
+        .find(|n| mixins_dir.join(n).is_file())
+        .copied()
+        .unwrap_or(MANIFESTS[0]);
+    let found = bundle(&mixins_dir, field("mixins"), mixin_name)?;
+    // A published bundle names the engine revision `horizon`.
+    let native_revision = field("volt").or_else(|| field("horizon"));
+    match (&found.volt, native_revision) {
         (Some(pinned), Some(native)) if *pinned != native => Err(format!(
             "{id}: {NATIVE_MANIFEST} pins Volt {native}, its {MANIFEST} {pinned}."
         )),
@@ -189,8 +204,8 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
     }
 }
 
-fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
-    let path = dir.join(MANIFEST);
+fn bundle(dir: &Path, mixins: Option<String>, manifest: &str) -> Result<Bundle, String> {
+    let path = dir.join(manifest);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let value: toml::Table = text
         .parse()
@@ -209,7 +224,9 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
         id: need("id")?,
         version: need("version")?,
         dir: dir.to_owned(),
-        volt: field("compatibility", "volt_revision"),
+        // Published manifests say `horizon_revision`; this tree's say `volt_revision`.
+        volt: field("compatibility", "volt_revision")
+            .or_else(|| field("compatibility", "horizon_revision")),
         mixins,
         hooks: None,
     })
@@ -419,13 +436,25 @@ fn with_hooks(
 /// A bundle that names a hook points' version builds on another revision than the one it was
 /// tested on: its `volt_revision` (which volt-mixins checks) becomes the build's.
 fn repin(bundle: &Bundle, revision: &str) -> Result<(), String> {
-    let path = bundle.dir.join(MANIFEST);
+    let path = MANIFESTS
+        .iter()
+        .map(|n| bundle.dir.join(n))
+        .find(|p| p.is_file())
+        .ok_or_else(|| format!("{} holds no {MANIFEST}.", bundle.dir.display()))?;
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut value: toml::Table = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
     if let Some(toml::Value::Table(compat)) = value.get_mut("compatibility") {
-        compat.insert("volt_revision".into(), revision.into());
+        // Overwrite the key the manifest actually carries: a published bundle
+        // says `horizon_revision`, and adding `volt_revision` beside it would
+        // leave two revisions in one file.
+        let key = if compat.contains_key("horizon_revision") {
+            "horizon_revision"
+        } else {
+            "volt_revision"
+        };
+        compat.insert(key.into(), revision.into());
     }
     let text = toml::to_string(&value).map_err(|e| e.to_string())?;
     fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
@@ -1385,7 +1414,7 @@ mod tests {
             (Some(1), Some(A))
         );
         repin(&found[0], B).unwrap();
-        let again = bundle(&found[0].dir, None).unwrap();
+        let again = bundle(&found[0].dir, None, MANIFESTS[0]).unwrap();
         assert_eq!(
             (again.id.as_str(), again.volt.as_deref()),
             ("zoom", Some(B))

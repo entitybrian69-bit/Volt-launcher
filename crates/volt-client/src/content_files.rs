@@ -106,7 +106,9 @@ pub fn validate(
             return Err("Expanded archive exceeds 512 MiB".into());
         }
         pack |= raw == "pack.mcmeta";
-        native_shader |= raw == "volt-shaders.toml";
+        // A shader pack built before the rename names its manifest the old
+        // way; both name the same file, so either marks a native shader pack.
+        native_shader |= raw == "volt-shaders.toml" || raw == "horizon-shaders.toml";
         // `shaders/` at the root, or — like OptiFine, Iris and the pack
         // loader — inside one wrapping folder (`Pack-1.0/shaders/...`).
         let in_shaders = raw.strip_prefix("shaders/").is_some()

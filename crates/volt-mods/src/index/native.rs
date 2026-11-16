@@ -3,7 +3,13 @@ use super::{Facts, valid_id};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
+/// What this tree writes. A published bundle names the same file the way the
+/// registry always has, so the reader accepts either (see [`MANIFEST_ALIASES`]).
 pub const MANIFEST: &str = "volt-native.json";
+/// The names a bundle's native manifest can carry, this tree's first.
+pub const MANIFEST_ALIASES: [&str; 2] = ["volt-native.json", "horizon-native.json"];
+/// The names a bundle's mixin manifest can carry, this tree's first.
+pub const MIXIN_MANIFEST_ALIASES: [&str; 2] = ["volt-mixin.toml", "horizon-mixin.toml"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -12,7 +18,9 @@ pub struct Manifest {
     pub id: String,
     pub version: String,
     pub game: String,
-    /// Exact source revisions tested together, never mutable tags.
+    /// Exact source revisions tested together, never mutable tags. A published
+    /// bundle spells this `horizon`; [`Manifest::revision`] reads either.
+    #[serde(alias = "horizon")]
     pub volt: String,
     pub mixins: String,
     /// The version of Volt's native hook points (`game/native_hooks.rs`,
@@ -110,13 +118,16 @@ impl Bundle {
                 return Err("duplicate native bundle path".into());
             }
         }
-        let manifest: Manifest =
-            serde_json::from_slice(files.get(MANIFEST).ok_or("missing volt-native.json")?)
-                .map_err(|e| e.to_string())?;
+        let manifest_name = MANIFEST_ALIASES
+            .iter()
+            .find(|n| files.contains_key(**n))
+            .ok_or("missing native manifest")?;
+        let manifest: Manifest = serde_json::from_slice(&files[*manifest_name])
+            .map_err(|e| e.to_string())?;
         manifest.check()?;
         let prefix = format!("mixins/{}/", manifest.id);
         let data_prefix = format!("{prefix}data/");
-        for name in files.keys().filter(|n| n.as_str() != MANIFEST) {
+        for name in files.keys().filter(|n| !MANIFEST_ALIASES.contains(&n.as_str())) {
             if !name.starts_with(&prefix)
                 || !(name.ends_with(".rs")
                     || name.ends_with(".toml")
@@ -125,9 +136,14 @@ impl Bundle {
                 return Err(format!("unexpected native source: {name}"));
             }
         }
+        let mixin_name = MIXIN_MANIFEST_ALIASES
+            .iter()
+            .map(|n| format!("{prefix}{n}"))
+            .find(|n| files.contains_key(n))
+            .ok_or("missing mixin manifest")?;
         let source = files
-            .get(&format!("{prefix}volt-mixin.toml"))
-            .ok_or("missing volt-mixin.toml")?;
+            .get(&mixin_name)
+            .ok_or("missing mixin manifest")?;
         let source: toml::Value =
             toml::from_str(std::str::from_utf8(source).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
