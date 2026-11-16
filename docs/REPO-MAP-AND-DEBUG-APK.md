@@ -298,3 +298,22 @@ out by reading: the login hello carries the correct offline UUID
 known-packs entry; chat answers go out as a plain `serverbound_chat_message`
 with `signature: None`. To pin it down rather than guess again, the next step
 needs the exact kick text plus the client brand the server sees.
+
+### PR #5 merged -> public APK links (2026-11-16)
+Merged into `android` as `653febd`. The `android` push build published the
+rolling `debug` release (never pre-release, never Latest), so the APKs are now
+plain public download URLs - no sign-in, no click-through:
+
+```
+https://github.com/entitybrian69-bit/Volt-launcher/releases/download/debug/Volt-Launcher-debug-arm64-v8a.apk
+https://github.com/entitybrian69-bit/Volt-launcher/releases/download/debug/Volt-Launcher-debug-armeabi-v7a.apk
+https://github.com/entitybrian69-bit/Volt-launcher/releases/download/debug/Volt-Launcher-debug-x86_64.apk
+https://github.com/entitybrian69-bit/Volt-launcher/releases/download/debug/Volt-Launcher-debug-x86.apk
+```
+arm64 73 339 683 B, armeabi-v7a 51 409 701 B. Both verified to answer 302 to
+`release-assets.githubusercontent.com` for an anonymous client, which is the
+public path (artifact URLs, by contrast, bounce to a 404 sign-in wall).
+
+This is the path to use for any future "give me the APK" request: merging to
+`android` publishes; a session branch alone never can, and `workflow_dispatch`
+is unavailable to the agent token (403).
