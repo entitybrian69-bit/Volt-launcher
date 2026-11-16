@@ -622,9 +622,24 @@ jobs:
               sleep $((attempt * 10))
             done
             if [ "$ok" != 1 ]; then
+              # The release redirect answers 403/503 under load; the API serves
+              # the same bytes by asset id, so try that before giving up.
+              echo "$file: release URL failed, trying the API" >&2
+              api="https://api.github.com/repos/horizon-rust/horizon-mods/releases/tags/$tag"
+              asset=$(curl -fsSL --max-time 30 "$api" \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["assets"][0]["id"])' 2>/dev/null) || asset=""
+              if [ -n "$asset" ]; then
+                curl -fsSL --max-time 120 -H 'Accept: application/octet-stream' \
+                  -o "$RUNNER_TEMP/bundle/$file" \
+                  "https://api.github.com/repos/horizon-rust/horizon-mods/releases/assets/$asset" && ok=1
+              fi
+            fi
+            if [ "$ok" != 1 ]; then
               echo "download failed after all retries: $url" >&2
+              curl -sS -o /dev/null -D - "$url" 2>&1 | head -20 >&2 || true
               exit 22
             fi
+            echo "downloaded $file ($(stat -c%s "$RUNNER_TEMP/bundle/$file") bytes)"
           done <<< "$WEAVE_SET"
           python3 - <<'PYCODE'
           import os, sys
