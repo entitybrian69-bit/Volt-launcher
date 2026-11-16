@@ -5,7 +5,7 @@ rewrites it; the test fails when it drifts). The API's design and pack format: [
 
 A stage is a function your WGSL defines, with the signature below; Volt puts the prelude (these structs, the
 resources and helpers) before your files and calls the function from its own pass. Your files declare no
-bindings and no entry points, and no names starting with `volt_`.
+bindings and no entry points, and no names starting with `volt_api_`.
 
 ## Stages
 

@@ -2,7 +2,7 @@
 //! function gives the lit colour of each point of a block's surface, before the alpha test and
 //! fog. Terrain still draws with Volt's meshes, culling and draw lists; only its pipelines
 //! change. Their shader is the pack's stage (`CheckedStage::source`), then a copy of
-//! terrain.wgsl's terrain section whose names all take a `volt_terrain_` prefix
+//! terrain.wgsl's terrain section whose names all take a `volt_api_terrain_` prefix
 //! (`wgsl_prefix.rs`), then entries that hand the pack what vanilla's `fs_solid` and
 //! `fs_translucent` combine: the texture, the vertex tint, the light levels and the lightmap's
 //! colour. They read the terrain's group 0, the flat draws' group 1 where those run, and the
@@ -13,19 +13,19 @@ use volt_shader_api::{check::CheckedStage, stages::GROUP};
 use super::native_post::{NativeFrame, present_constants};
 use super::wgsl_prefix::{TERRAIN, prefixed, section};
 
-const PREFIX: &str = "volt_terrain_";
+const PREFIX: &str = "volt_api_terrain_";
 
 /// The entries around the pack's `material`: vanilla's vertex work without the lightmap
 /// product, then the material, the alpha test and fog as `fs_solid` and `fs_translucent` do.
 const ENTRIES: &str = "
-@group(3) @binding(1) var<uniform> volt_terrain_layer_kinds: array<vec4<u32>, 256>;
-override volt_terrain_volt_pack: bool = false;
-override volt_terrain_wave_plants: bool = false;
-override volt_terrain_wave_leaves: bool = false;
-override volt_terrain_wave_water: bool = false;
-override volt_terrain_storm_wind: bool = false;
-override volt_terrain_wind_speed: f32 = 1.0;
-override volt_terrain_wind_strength: f32 = 1.0;
+@group(3) @binding(1) var<uniform> volt_api_terrain_layer_kinds: array<vec4<u32>, 256>;
+override volt_api_terrain_volt_pack: bool = false;
+override volt_api_terrain_wave_plants: bool = false;
+override volt_api_terrain_wave_leaves: bool = false;
+override volt_api_terrain_wave_water: bool = false;
+override volt_api_terrain_storm_wind: bool = false;
+override volt_api_terrain_wind_speed: f32 = 1.0;
+override volt_api_terrain_wind_strength: f32 = 1.0;
 
 struct VoltMaterialOut {
     @builtin(position) clip: vec4<f32>,
@@ -43,7 +43,7 @@ fn volt_material_layer_kind(raw_layer: u32) -> u32 {
     if idx >= 8192u {
         return 0u;
     }
-    let packed4 = volt_terrain_layer_kinds[idx >> 5u];
+    let packed4 = volt_api_terrain_layer_kinds[idx >> 5u];
     let comp = (idx >> 3u) & 3u;
     var word = packed4.x;
     if comp == 1u {
@@ -59,7 +59,7 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
     light: vec2<u32>, origin: vec3<f32>) -> VoltMaterialOut {
     var pos = position + origin;
     var mat_tag = 1.0;
-    if volt_terrain_volt_pack {
+    if volt_api_terrain_volt_pack {
         let kind = volt_material_layer_kind(layer);
         let emission = 15u - (u32(round(color.a * 255.0)) & 15u);
         if kind == 5u || kind == 6u {
@@ -80,11 +80,11 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
             if dist_fade > 0.001 {
                 let cam_mod = frame.camera_position - floor(frame.camera_position * (1.0 / 64.0)) * 64.0;
                 let wp = pos + cam_mod;
-                let storm = select(1.0, 1.0 + frame.rain * 0.45 + frame.thunder * 0.40, volt_terrain_storm_wind);
-                let rate = select(1.0, 1.30, volt_terrain_storm_wind && frame.rain > 0.2);
-                let t = frame.time * volt_terrain_wind_speed * rate;
-                let amp = volt_terrain_wind_strength * storm * dist_fade;
-                if kind == 1u && volt_terrain_wave_leaves {
+                let storm = select(1.0, 1.0 + frame.rain * 0.45 + frame.thunder * 0.40, volt_api_terrain_storm_wind);
+                let rate = select(1.0, 1.30, volt_api_terrain_storm_wind && frame.rain > 0.2);
+                let t = frame.time * volt_api_terrain_wind_speed * rate;
+                let amp = volt_api_terrain_wind_strength * storm * dist_fade;
+                if kind == 1u && volt_api_terrain_wave_leaves {
                     let px = wp.x * 0.7853982 + wp.y * 0.5890486 + wp.z * 0.3926991;
                     let pz = wp.z * 0.7853982 - wp.x * 0.3926991 + wp.y * 0.4908739;
                     let gust = 0.75 + 0.25 * sin(t * 0.7 + (wp.x + wp.z) * 0.0981748);
@@ -92,7 +92,7 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
                     pos.x += sin(t * 2.1 + px) * s;
                     pos.y += cos(t * 1.7 + px + pz) * (s * 0.35);
                     pos.z += cos(t * 1.85 + pz) * s;
-                } else if (kind >= 2u && kind <= 4u) && volt_terrain_wave_plants {
+                } else if (kind >= 2u && kind <= 4u) && volt_api_terrain_wave_plants {
                     var weight = clamp(1.0 - uv.y, 0.0, 1.0);
                     if kind == 3u {
                         weight = 1.0 + 0.80 * clamp(1.0 - uv.y, 0.0, 1.0);
@@ -108,7 +108,7 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
                     pos.x += dx;
                     pos.z += dz;
                     pos.y -= (dx * dx + dz * dz) * 1.8;
-                } else if kind == 5u && volt_terrain_wave_water {
+                } else if kind == 5u && volt_api_terrain_wave_water {
                     let w1 = sin(t * 2.2 + wp.x * 0.7853982 + wp.z * 0.3926991);
                     let w2 = cos(t * 1.65 - wp.x * 0.3926991 + wp.z * 0.7853982);
                     pos.y += ((w1 + w2) * 0.5 - 0.55) * 0.026 * min(amp, 1.5);
@@ -117,15 +117,15 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
         }
     }
     var out: VoltMaterialOut;
-    out.clip = volt_terrain_globals.view_proj * vec4(pos, 1.0);
+    out.clip = volt_api_terrain_globals.view_proj * vec4(pos, 1.0);
     out.uv = uv;
     out.layer = layer;
     out.tint = vec4(color.rgb, mat_tag);
-    let block = max(f32(light.y), volt_terrain_dynamic_block_light(pos));
+    let block = max(f32(light.y), volt_api_terrain_dynamic_block_light(pos));
     let sky = f32(light.x);
     // 16 per level, 15 levels.
     out.light = min(vec2(block, sky) / 240.0, vec2(1.0));
-    out.lightmap = volt_terrain_sample_lightmap(sky / 16.0, block / 16.0).rgb;
+    out.lightmap = volt_api_terrain_sample_lightmap(sky / 16.0, block / 16.0).rgb;
     out.position = pos;
     out.spherical = length(pos);
     out.cylindrical = max(length(pos.xz), abs(pos.y));
@@ -135,7 +135,7 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
     @location(0) position: vec3<f32>, @location(1) uv: vec2<u32>,
     @location(2) layer: u32, @location(3) color: vec4<f32>, @location(4) light: vec2<u32>,
     @location(5) origin: vec4<f32>) -> VoltMaterialOut {
-    return volt_material_vertex(position, volt_terrain_terrain_uv(uv, origin.w), layer,
+    return volt_material_vertex(position, volt_api_terrain_terrain_uv(uv, origin.w), layer,
         color, light, origin.xyz);
 }
 @vertex fn volt_material_vs_flat(
@@ -143,12 +143,12 @@ fn volt_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: v
     @location(0) position: vec3<f32>, @location(1) uv: vec2<u32>,
     @location(2) layer: u32, @location(3) color: vec4<f32>, @location(4) light: vec2<u32>
 ) -> VoltMaterialOut {
-    let origin = volt_terrain_slot_origins[volt_terrain_block_slots[vertex >> 8u]];
-    return volt_material_vertex(position, volt_terrain_terrain_uv(uv, origin.w), layer,
+    let origin = volt_api_terrain_slot_origins[volt_api_terrain_block_slots[vertex >> 8u]];
+    return volt_material_vertex(position, volt_api_terrain_terrain_uv(uv, origin.w), layer,
         color, light, origin.xyz);
 }
 fn volt_material_color(in: VoltMaterialOut, translucent: bool) -> vec4<f32> {
-    let albedo = volt_terrain_sprite(in.uv, in.layer & 0x7fffu);
+    let albedo = volt_api_terrain_sprite(in.uv, in.layer & 0x7fffu);
     return material(MaterialInput(albedo, in.tint, in.light, in.lightmap, in.position, in.uv,
         translucent)).color;
 }
@@ -156,12 +156,12 @@ fn volt_material_color(in: VoltMaterialOut, translucent: bool) -> vec4<f32> {
     let color = volt_material_color(in, false);
     // Bit 15 of the layer marks opaque leaves (forceOpaque): no alpha cutout.
     if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
-    return volt_terrain_apply_fog(vec4(color.rgb, 1.0), in.spherical, in.cylindrical);
+    return volt_api_terrain_apply_fog(vec4(color.rgb, 1.0), in.spherical, in.cylindrical);
 }
 @fragment fn volt_material_fs_translucent(in: VoltMaterialOut) -> @location(0) vec4<f32> {
     let color = volt_material_color(in, true);
     if color.a < 0.01 { discard; }
-    return volt_terrain_apply_fog(color, in.spherical, in.cylindrical);
+    return volt_api_terrain_apply_fog(color, in.spherical, in.cylindrical);
 }
 ";
 
@@ -221,8 +221,8 @@ impl NativeMaterial {
         let module = module(stage)?;
         let mut constants = present_constants(&module, constants);
         let sprite_names = [
-            "volt_terrain_SPRITE_ARRAYS",
-            "volt_terrain_SPRITE_SPLIT",
+            "volt_api_terrain_SPRITE_ARRAYS",
+            "volt_api_terrain_SPRITE_SPLIT",
         ];
         constants.extend(sprite_names.into_iter().zip(shape.sprites));
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);

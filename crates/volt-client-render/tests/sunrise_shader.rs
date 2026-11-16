@@ -155,14 +155,14 @@ fn native_pack_sky_keeps_sunrise_helpers_private() {
             section(TERRAIN, "struct SkyOut {", "// rendertype_lines"),
         ]
         .concat(),
-        "volt_sky_",
+        "volt_api_sky_",
     );
     for name in [
         "sunrise_weight",
         "sunrise_weight_full",
         "sunrise_triangle_weight",
     ] {
-        assert!(sky.contains(&format!("fn volt_sky_{name}(")));
+        assert!(sky.contains(&format!("fn volt_api_sky_{name}(")));
     }
     // A native pack may declare the same helper names as the renderer.
     let own = "fn sunrise_weight(d: vec3<f32>) -> f32 { return d.x; }\n\

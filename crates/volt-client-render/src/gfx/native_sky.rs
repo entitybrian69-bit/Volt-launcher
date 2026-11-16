@@ -2,7 +2,7 @@
 //! called for each pixel of the sky disc with vanilla's colour along its view ray. The
 //! pipeline's shader is the pack's stage (`CheckedStage::source`) followed by a copy of the
 //! renderer's sky (terrain.wgsl's `Globals`, `linear_fog` and sky section) whose names all
-//! take a `volt_sky_` prefix, so none can meet a pack's (the check refuses `volt_`
+//! take a `volt_api_sky_` prefix, so none can meet a pack's (the check refuses `volt_`
 //! names). It reads the renderer's globals (group 0) and the pack's frame (group 3), and
 //! draws where vanilla's sky draws; the sun, moon, stars and the dark disc are drawn over it.
 
@@ -11,13 +11,13 @@ use volt_shader_api::{check::CheckedStage, stages::GROUP};
 use super::native_post::{NativeFrame, present_constants};
 use super::wgsl_prefix::{TERRAIN, prefixed, section};
 
-const PREFIX: &str = "volt_sky_";
+const PREFIX: &str = "volt_api_sky_";
 
 /// The fragment entry that calls the pack: vanilla's colour in, an opaque colour out.
 const PACK_ENTRY: &str = "
-@fragment fn volt_sky_fs_pack(in: volt_sky_SkyOut) -> @location(0) vec4<f32> {
-    let d = volt_sky_view_ray(in.ndc);
-    return vec4(sky(SkyInput(d, vec4(volt_sky_sky_along_ray(d), 1.0))).rgb, 1.0);
+@fragment fn volt_api_sky_fs_pack(in: volt_api_sky_SkyOut) -> @location(0) vec4<f32> {
+    let d = volt_api_sky_view_ray(in.ndc);
+    return vec4(sky(SkyInput(d, vec4(volt_api_sky_sky_along_ray(d), 1.0))).rgb, 1.0);
 }
 ";
 
@@ -63,7 +63,7 @@ fn pipeline(
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module,
-            entry_point: Some("volt_sky_vs_sky"),
+            entry_point: Some("volt_api_sky_vs_sky"),
             compilation_options: options.clone(),
             buffers: &[],
         },
@@ -135,7 +135,7 @@ impl NativeSky {
             device,
             &layout,
             &module,
-            "volt_sky_fs_pack",
+            "volt_api_sky_fs_pack",
             &present,
             format,
         );
@@ -269,7 +269,7 @@ mod tests {
                     label: None,
                     source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
                 });
-                pipeline(&device, &layout, &module, "volt_sky_fs_sky", &[], format)
+                pipeline(&device, &layout, &module, "volt_api_sky_fs_sky", &[], format)
             } else {
                 sky.pipeline.clone()
             };

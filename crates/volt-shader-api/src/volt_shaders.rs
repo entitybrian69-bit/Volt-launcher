@@ -945,17 +945,17 @@ impl VoltShadersConfig {
             ),
             ("vignette_mode".into(), f64::from(self.vignette.index())),
             // Vertex-stage wind & material tag overrides consumed by `NativeMaterial`:
-            ("volt_terrain_volt_pack".into(), 1.0),
-            ("volt_terrain_wave_plants".into(), b(self.waving_plants)),
-            ("volt_terrain_wave_leaves".into(), b(self.waving_leaves)),
-            ("volt_terrain_wave_water".into(), b(self.waving_water)),
-            ("volt_terrain_storm_wind".into(), b(self.storm_wind)),
+            ("volt_api_terrain_volt_pack".into(), 1.0),
+            ("volt_api_terrain_wave_plants".into(), b(self.waving_plants)),
+            ("volt_api_terrain_wave_leaves".into(), b(self.waving_leaves)),
+            ("volt_api_terrain_wave_water".into(), b(self.waving_water)),
+            ("volt_api_terrain_storm_wind".into(), b(self.storm_wind)),
             (
-                "volt_terrain_wind_speed".into(),
+                "volt_api_terrain_wind_speed".into(),
                 pct(self.wind_speed, 25, 200),
             ),
             (
-                "volt_terrain_wind_strength".into(),
+                "volt_api_terrain_wind_strength".into(),
                 pct(self.wind_strength, 25, 200),
             ),
         ]

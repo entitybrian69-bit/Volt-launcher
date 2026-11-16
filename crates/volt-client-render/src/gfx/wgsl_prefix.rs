@@ -1,7 +1,8 @@
 //! Copies of the renderer's own WGSL that run beside a shader pack's code in one module (the
 //! sky and material stages of Volt's packs, docs/shaders.md): every name such a copy
-//! declares takes a prefix starting with `volt_`, which the pack check refuses in a pack,
-//! so no pack name can meet one of Volt's.
+//! declares takes the API's reserved `volt_api_` prefix, which the pack check refuses in a
+//! pack, so no pack name can meet one of Volt's. A pack's own helpers keep the plain
+//! `volt_` prefix (the bundled pack's `volt_aces`, `volt_luma`...).
 
 /// terrain.wgsl, which the copies are taken from.
 pub const TERRAIN: &str = include_str!("../terrain.wgsl");
