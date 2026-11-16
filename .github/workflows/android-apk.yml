@@ -676,7 +676,7 @@ jobs:
           # manifest is rebound (--force-common-mixins records the rebinds).
           cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
             --rev "$COMMON_MIXINS" \
-            --root "$RUNNER_TEMP/mixins-tool" volt-mixins-cli
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
       - name: Weave and build the engine library
         run: |
           set -euo pipefail
@@ -692,7 +692,7 @@ jobs:
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
             "${MOD_ARGS[@]}" \
-            --mixins "$RUNNER_TEMP/mixins-tool/bin/volt-mixins" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
             --mixins-revision "$COMMON_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
             --trust-native-code --experimental-raw-targets --force-common-mixins

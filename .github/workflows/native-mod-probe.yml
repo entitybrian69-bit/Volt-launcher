@@ -257,13 +257,13 @@ jobs:
         run: |
           cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
             --rev "$PROBE_MIXINS" \
-            --root "$RUNNER_TEMP/mixins-tool" volt-mixins-cli
+            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
       - name: Build reviewed source on disposable runner
         run: |
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
             --mod "${{ matrix.mod }}=$RUNNER_TEMP/bundle/${{ matrix.file }}" \
-            --mixins "$RUNNER_TEMP/mixins-tool/bin/volt-mixins" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
             --mixins-revision "$PROBE_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/worker-result" --trust-native-code \
             ${{ matrix.raw_targets }}

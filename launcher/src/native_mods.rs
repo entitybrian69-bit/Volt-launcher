@@ -654,14 +654,14 @@ fn tool(rust: &Toolchain, rev: &str) -> Result<PathBuf, String> {
     let dir = root().join("tools").join(&rev[..12]);
     let bin = dir
         .join("bin")
-        .join(format!("volt-mixins{}", std::env::consts::EXE_SUFFIX));
+        .join(format!("horizon-mixins{}", std::env::consts::EXE_SUFFIX));
     if !bin.is_file() {
         let mut cmd = rust.command(&rust.cargo());
         cmd.args([
             "install", "--locked", "--git", MIXINS_GIT, "--rev", rev, "--root",
         ])
         .arg(&dir)
-        .arg("volt-mixins-cli");
+        .arg("horizon-mixins-cli");
         run(cmd, "Building volt-mixins", |_| {})?;
     }
     Ok(bin)
