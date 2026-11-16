@@ -254,6 +254,6 @@ fn shader_packs_pass_the_game_s_own_check() {
         not_a_pack.contains(volt_shader_api::MANIFEST),
         "{not_a_pack}"
     );
-    assert_eq!(Kind::Shader.extension(), Some("vshader"));
+    assert_eq!(Kind::Shader.extension(), Some("hshader"));
     assert!(open(&Kind::Shader).is_ok());
 }

@@ -9,7 +9,7 @@ use std::{
 };
 
 /// A packaged pack's extension.
-pub const EXTENSION: &str = "vshader";
+pub const EXTENSION: &str = "hshader";
 /// Bytes per WGSL file, per other file, and in all.
 pub const MAX_WGSL: u64 = 256 << 10;
 const MAX_OTHER: u64 = 1 << 20;

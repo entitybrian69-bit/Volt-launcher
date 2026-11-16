@@ -70,9 +70,9 @@ impl Kind {
     /// The extension of its files; None for a kind this build doesn't know.
     pub fn extension(&self) -> Option<&'static str> {
         match self {
-            Kind::Mod => Some("vmod"),
+            Kind::Mod => Some("hmod"),
             Kind::NativeMod => Some("hnmod"),
-            Kind::Modpack => Some("vpack"),
+            Kind::Modpack => Some("hpack"),
             Kind::ResourcePack => Some("zip"),
             Kind::Shader => Some(volt_shader_api::EXTENSION),
             Kind::Other(_) => None,
