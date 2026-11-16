@@ -44,7 +44,7 @@ fn every_stage_compiles_with_vanilla_s_function() {
             module
                 .entry_points
                 .iter()
-                .all(|e| e.name.starts_with("volt_")),
+                .all(|e| e.name.starts_with("volt_api_")),
             "{kind:?}"
         );
     }

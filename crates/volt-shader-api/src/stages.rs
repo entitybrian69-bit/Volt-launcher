@@ -91,14 +91,14 @@ struct VoltPostOut {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
 }
-@vertex fn volt_vs_post(@builtin(vertex_index) i: u32) -> VoltPostOut {
+@vertex fn volt_api_vs_post(@builtin(vertex_index) i: u32) -> VoltPostOut {
     let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
     var out: VoltPostOut;
     out.position = vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
     out.uv = vec2<f32>(p.x, 1.0 - p.y);
     return out;
 }
-@fragment fn volt_fs_post(in: VoltPostOut) -> @location(0) vec4<f32> {
+@fragment fn volt_api_fs_post(in: VoltPostOut) -> @location(0) vec4<f32> {
     let color = textureSampleLevel(previous, linear_sampler, in.uv, 0.0);
     return post(PostInput(in.uv, in.position.xy, color, depth_at(in.uv)));
 }
@@ -117,7 +117,7 @@ struct VoltMaterialIn {
     @location(5) uv: vec2<f32>,
     @location(6) @interpolate(flat) translucent: u32,
 }
-@fragment fn volt_fs_material(in: VoltMaterialIn) -> @location(0) vec4<f32> {
+@fragment fn volt_api_fs_material(in: VoltMaterialIn) -> @location(0) vec4<f32> {
     let input = MaterialInput(in.albedo, in.tint, in.light, in.lightmap, in.world, in.uv, in.translucent != 0u);
     return material(input).color;
 }
@@ -131,7 +131,7 @@ struct VoltSkyIn {
     @location(0) direction: vec3<f32>,
     @location(1) color: vec4<f32>,
 }
-@fragment fn volt_fs_sky(in: VoltSkyIn) -> @location(0) vec4<f32> {
+@fragment fn volt_api_fs_sky(in: VoltSkyIn) -> @location(0) vec4<f32> {
     return sky(SkyInput(normalize(in.direction), in.color));
 }
 ";

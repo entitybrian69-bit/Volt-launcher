@@ -287,7 +287,7 @@ impl NativePost {
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &module,
-                    entry_point: Some("volt_vs_post"),
+                    entry_point: Some("volt_api_vs_post"),
                     compilation_options: options.clone(),
                     buffers: &[],
                 },
@@ -296,7 +296,7 @@ impl NativePost {
                 multisample: Default::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some("volt_fs_post"),
+                    entry_point: Some("volt_api_fs_post"),
                     compilation_options: options,
                     targets: &[Some(wgpu::ColorTargetState {
                         format: if i + 1 == count { format } else { INTERMEDIATE },

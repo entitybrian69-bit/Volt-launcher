@@ -89,8 +89,8 @@ fn a_pack_declares_no_bindings_entry_points_or_volt_names() {
     );
     one(
         GRADE,
-        &format!("{body}fn volt_mine() {{}}\n"),
-        "`volt_mine`: names starting with volt_",
+        &format!("{body}fn volt_api_mine() {{}}\n"),
+        "`volt_api_mine`: names starting with volt_api_",
     );
 }
 

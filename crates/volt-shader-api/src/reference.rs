@@ -36,7 +36,7 @@ pub fn markdown() -> String {
          rewrites it; the test fails when it drifts). The API's design and pack format: [shaders.md](shaders.md).\n\n\
          A stage is a function your WGSL defines, with the signature below; Volt puts the prelude (these structs, the\n\
          resources and helpers) before your files and calls the function from its own pass. Your files declare no\n\
-         bindings and no entry points, and no names starting with `volt_`.\n\n\
+         bindings and no entry points, and no names starting with `volt_api_`.\n\n\
          ## Stages\n\n\
          | Stage | In `volt-shaders.toml` | Your function |\n| --- | --- | --- |\n"
     );

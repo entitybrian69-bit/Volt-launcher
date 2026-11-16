@@ -4,7 +4,7 @@
 //!
 //! Each stage is built as the renderer builds it, parsed and validated by
 //! naga, checked against its signature and the API's rules (no bindings, no
-//! entry points, no `volt_` names), then translated to SPIR-V, Metal and
+//! entry points, no `volt_api_` names), then translated to SPIR-V, Metal and
 //! HLSL with its options at their defaults, minimums and maximums.
 use crate::manifest::{OptionKind, PackOption};
 use crate::package::Pack;
@@ -325,8 +325,14 @@ fn names(module: &naga::Module) -> HashSet<String> {
         .collect()
 }
 
-/// A pack's files declare no bindings, no entry points and no `volt_`
-/// names: what the prelude doesn't define is the pack's.
+/// Names under this prefix belong to Volt's shader API, not to a pack. It is
+/// deliberately narrower than `volt_`: a pack's own helpers may start with
+/// `volt_` (the bundled Volt Shaders pack uses `volt_aces`, `volt_luma`...),
+/// and only the API's entry points and prelude helpers are off limits.
+const RESERVED_PREFIX: &str = "volt_api_";
+
+/// A pack's files declare no bindings, no entry points and no names of the
+/// API's own: what the prelude doesn't define is the pack's.
 fn api_rules(module: &naga::Module, kind: StageKind, own: &Composed) -> Vec<Problem> {
     let prelude = naga::front::wgsl::parse_str(&kind.prelude()).expect("the prelude parses");
     let ours = names(&prelude);
@@ -354,13 +360,13 @@ fn api_rules(module: &naga::Module, kind: StageKind, own: &Composed) -> Vec<Prob
     }
     let mut theirs: Vec<String> = names(module)
         .into_iter()
-        .filter(|n| !ours.contains(n) && n.starts_with("volt_"))
+        .filter(|n| !ours.contains(n) && n.starts_with(RESERVED_PREFIX))
         .collect();
     theirs.sort();
     for name in theirs {
         problems.push(problem(
             file,
-            format!("`{name}`: names starting with volt_ are Volt's"),
+            format!("`{name}`: names starting with {RESERVED_PREFIX} are Volt's"),
         ));
     }
     problems

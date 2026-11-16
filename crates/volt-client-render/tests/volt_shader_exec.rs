@@ -38,7 +38,7 @@ struct ExecMaterial {
 ";
 
 /// Compute entry around the pack's `sky`, mirroring `stages.rs`'s
-/// `volt_fs_sky` (normalized direction, vanilla's sky colour).
+/// `volt_api_fs_sky` (normalized direction, vanilla's sky colour).
 const SKY_WRAPPER: &str = "
 struct ExecSky {
     direction: vec4<f32>,
