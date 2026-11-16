@@ -298,3 +298,40 @@ out by reading: the login hello carries the correct offline UUID
 known-packs entry; chat answers go out as a plain `serverbound_chat_message`
 with `signature: None`. To pin it down rather than guess again, the next step
 needs the exact kick text plus the client brand the server sees.
+
+### Round: shader packs, launcher switches, captcha trace
+
+1. **Shaders: the real schema.** The `fog` fix above was necessary but not
+   sufficient — the packs failed for three further reasons, found by pulling the
+   actual manifests out of the 12 shader repositories behind the registry's 13
+   shader projects rather than guessing:
+   - `Raw`, the top-level manifest, still had `deny_unknown_fields`. Real packs
+     declare `[vertex]`, `[weather]`, `[shadow]`, `[reflection]`,
+     `[[materials]]`, `[[textures]]`, `[[lights]]`, `[[particle_lights]]`,
+     `[[tags]]`; the first was `unknown field 'vertex'` and the download died.
+   - `Pack::from_files` refuses a `.wgsl` "not used by any stage or in shared".
+     Packs keep lighting/water/bloom in a stage's `files = [...]` list, which
+     `Stage` did not read, so those files looked unused.
+   - `check()` refuses an option no compiled stage declares. `[shadow]` and
+     `[reflection]` name theirs (`option`, `resolution_option`,
+     `distance_option`) and their `override` lives in a stage this API line does
+     not compile.
+   `[[textures]]` images are allowed when the manifest names them (2 MiB each
+   inside the existing 8 MiB total); unnamed files still refused. Replayed
+   against all 12 packs: **12/12 installable, 0/12 before.**
+
+2. **Mods off in the launcher were on in game.** `sync_catalog_from_engine` ran
+   every frame in `draw_options` and again on every launcher refresh, copying
+   stale engine flags back over `mod_catalog` and undoing the toggle the
+   launcher had just written. Both calls removed. `apply_engine_from_catalog`
+   runs once at load and only for mods whose catalog entry differs from its
+   default — applying every entry would switch on renderer features nobody
+   chose (`EntityCulling` defaults on in the catalog while
+   `Graphics::default().entity_culling` is false).
+
+3. **Captcha: instrumented, not guessed.** A mid-join kick is diagnosed by what
+   the server did in those seconds, and a phone has no log viewer. The join
+   trace is now appended to the **Connection Lost screen** and the join
+   milestone itself is traced (`joined: eid N, dimension, view, game type`), so
+   the screen says whether the kick came before or after play began. If it
+   still fails, that text names the phase.
