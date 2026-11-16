@@ -5,16 +5,16 @@
 //! The launcher only adds and removes entries: every other field of every entry is written back
 //! as it was read.
 use base64::Engine;
-use horizon_world::nbt::{self, Compound, JavaString, Limits, NamedTag, Tag};
+use volt_world::nbt::{self, Compound, JavaString, Limits, NamedTag, Tag};
 use std::fs;
 use std::path::Path;
 
 const FILE: &str = "servers.dat";
-/// Horizon's official survival server, named and placed as the game lists it.
-pub const OFFICIAL: (&str, &str) = ("Horizon Official", "horizon.bunchy7s.dev");
+/// Volt's official survival server, named and placed as the game lists it.
+pub const OFFICIAL: (&str, &str) = ("Volt Official", "volt.bunchy7s.dev");
 /// Beside servers.dat once the official server was offered, so a player who removes it never
 /// gets it back. The game writes the same file.
-const OFFICIAL_MARKER: &str = "horizon_official_server.txt";
+const OFFICIAL_MARKER: &str = "volt_official_server.txt";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Server {

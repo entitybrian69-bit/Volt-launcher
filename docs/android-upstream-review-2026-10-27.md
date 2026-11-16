@@ -29,8 +29,8 @@ and newly added upstream features require their own runtime validation.
 ## Follow-up through fde2dfff
 
 Reviewed and integrated 38 further main-branch commits. The command parser and
-shared data/text types move into `horizon-command` and `horizon-client-core`;
-old `horizon_client` import paths remain re-exports. Android's Cargo member,
+shared data/text types move into `volt-command` and `volt-client-core`;
+old `volt_client` import paths remain re-exports. Android's Cargo member,
 NativeActivity workspace exclusion and patched winit are retained. Desktop
 launcher instances and quick-play arguments remain separate from Android's
 existing profile UI. Aquatic mob rules and parity-tool changes are included.
@@ -43,7 +43,7 @@ with the new crate split.
 ## 0.7.0 cutoff: 8155baa6
 
 Integrated 655 additional commits after `94290b01` (307 changed files). The
-upstream `horizon-items` extraction keeps the existing client re-exports, while
+upstream `volt-items` extraction keeps the existing client re-exports, while
 `Opt` now lives in `settings.rs`; Android touch and F3 options follow that move.
 Renderer integration includes separate item/armour glint textures and vanilla
 HUD visibility fixes. The Android reticle policy, passive HUD margins,

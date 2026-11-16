@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the team rules Horizon's gameplay uses with vanilla's.
+"""Compare the team rules Volt's gameplay uses with vanilla's.
 
 The Java oracle (VanillaTeamRulesOracle) runs vanilla's own
 Entity.doTeamsAllowDamage (friendly fire: player attacks, explosions,
@@ -10,7 +10,7 @@ EntitySelector.pushableBy predicate (collision rules), Entity.isInvisibleTo
 stand-in entities, including Player.getScoreboardName profile-name teams with
 conflicting UUID membership, for every combination of two teams' options, the three
 entities' teams (none, either team) and the flags involved.
-`examples/probe/team_rules_fixture` answers from `horizon_client::scoreboard`.
+`examples/probe/team_rules_fixture` answers from `volt_client::scoreboard`.
 
   test_team_rules_parity.py [--count N]
 """
@@ -30,7 +30,7 @@ except ImportError:
     import test_rust_parity as base
     import test_model_baking_parity as baking
 
-PARITY = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity'
+PARITY = lab.ROOT / 'mods/volt/src/test/java/dev/voltlabs/parity'
 RULES = ['always', 'never', 'pushOtherTeams', 'pushOwnTeam']
 VISIBILITY = ['always', 'never', 'hideForOtherTeams', 'hideForOwnTeam']
 
@@ -83,9 +83,9 @@ def main():
     inputs.write_text(''.join(json.dumps(c) + '\n' for c in chosen))
     run(['javac', '--release', lock['minecraft']['java_major'], '-proc:none', '-nowarn', '-cp', dependencies, '-d', classes,
          PARITY / 'VanillaTeamRulesOracle.java'], 'compile-java')
-    run(['java', '-Xmx1G', '-cp', str(classes) + os.pathsep + dependencies, 'dev.horizonlab.parity.VanillaTeamRulesOracle',
+    run(['java', '-Xmx1G', '-cp', str(classes) + os.pathsep + dependencies, 'dev.voltlabs.parity.VanillaTeamRulesOracle',
          inputs, build / 'vanilla.jsonl'], 'vanilla')
-    run(['cargo', 'build', '--profile', 'fast', '-p', 'horizon-client', '--example', 'client_probe'], 'compile-rust')
+    run(['cargo', 'build', '--profile', 'fast', '-p', 'volt-client', '--example', 'client_probe'], 'compile-rust')
     metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--no-deps', '--format-version', '1'], cwd=lab.ROOT, text=True))
     binary = Path(metadata['target_directory']) / 'fast/examples' / ('client_probe.exe' if os.name=='nt' else 'client_probe')
     run([binary, 'team_rules_fixture',inputs, build / 'rust.jsonl'], 'rust')
@@ -99,7 +99,7 @@ def main():
     for c, v, r in bad[:5]:
         print('MISMATCH', json.dumps(c))
         print('   vanilla', json.dumps(v))
-        print('   horizon', json.dumps(r))
+        print('   volt', json.dumps(r))
     print(f'{len(vanilla) - len(bad) - len(errors)}/{len(vanilla)} team rule cases match; {len(errors)} oracle errors')
     if bad or errors:
         sys.exit(1)

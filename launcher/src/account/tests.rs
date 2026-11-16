@@ -847,7 +847,7 @@ fn credential_manager_error_8_says_the_store_is_full() {
 
 #[test]
 fn session_files_are_private_and_complete() {
-    let dir = std::env::temp_dir().join(format!("horizon-launcher-session-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("volt-launcher-session-{}", std::process::id()));
     let account = Account {
         uuid: UUID.into(),
         name: "Notch".into(),
@@ -936,7 +936,7 @@ fn offline_names_switch_with_accounts() {
     a.play_as(&store, Player::Offline("Builder_1".into()))
         .unwrap();
     // Forgetting drops the look and the name's skin and cape files too.
-    let dir = std::env::temp_dir().join(format!("horizon-accounts-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("volt-accounts-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (skin, cape) = crate::skins::files(&dir, "builder_1");

@@ -1,0 +1,21 @@
+[package]
+name = "volt-items"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.90"
+description = "Blocks and items as the client knows them: block facts, item stacks and their data components, enchantments, cooldowns, bundles, and items in NBT"
+
+[dependencies]
+volt-client-core = { path = "../volt-client-core" }
+volt-core = { path = "../volt-core" }
+volt-world = { path = "../volt-world" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+
+[features]
+# Test helpers (`Items::for_tests`, `enchant::tests`) for volt-client's unit tests.
+test-support = []
+
+[lints]
+workspace = true

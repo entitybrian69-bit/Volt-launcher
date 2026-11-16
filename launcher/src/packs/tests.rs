@@ -3,7 +3,7 @@ use std::io::Write;
 
 fn scratch(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "horizon-launcher-packs-{name}-{}",
+        "volt-launcher-packs-{name}-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -44,7 +44,7 @@ fn home(name: &str) -> PathBuf {
     let sp = home.join("shaderpacks");
     fs::create_dir_all(sp.join("warm")).unwrap();
     fs::write(
-        sp.join("warm/horizon-shaders.toml"),
+        sp.join("warm/volt-shaders.toml"),
         "schema = 1\nid = \"warm\"\nname = \"Warm Light\"\n",
     )
     .unwrap();
@@ -56,7 +56,7 @@ fn home(name: &str) -> PathBuf {
     )
     .unwrap();
     fs::write(
-        home.join("horizon-graphics.txt"),
+        home.join("volt-graphics.txt"),
         "preset:custom\npickedShaderPack:\nfxaa:true\n",
     )
     .unwrap();
@@ -112,7 +112,7 @@ fn turning_packs_on_and_off_writes_the_games_own_lines() {
     let classic = find(&home, Kind::Shader, "Classic.zip").unwrap();
     set_enabled(&home, &classic, true).unwrap();
     assert_eq!(
-        fs::read_to_string(home.join("horizon-graphics.txt")).unwrap(),
+        fs::read_to_string(home.join("volt-graphics.txt")).unwrap(),
         "preset:custom\npickedShaderPack:Classic.zip\nfxaa:true\n",
         "one shader pack at a time"
     );
@@ -152,7 +152,7 @@ fn a_dropped_file_goes_to_its_folder_under_a_free_name() {
     let drops = scratch("drops");
     zip_file(&drops.join("Zed.zip"), &[("pack.mcmeta", META)]);
     zip_file(&drops.join("Shiny.zip"), &[("shaders/composite.fsh", b"")]);
-    fs::write(drops.join("glow.hshader"), b"PK").unwrap();
+    fs::write(drops.join("glow.vshader"), b"PK").unwrap();
     zip_file(&drops.join("random.zip"), &[("a.txt", b"")]);
     fs::write(drops.join("picture.png"), b"").unwrap();
 
@@ -166,7 +166,7 @@ fn a_dropped_file_goes_to_its_folder_under_a_free_name() {
         Kind::Shader
     );
     assert!(home.join("shaderpacks/Shiny.zip").is_file());
-    assert_eq!(kind_of(&drops.join("glow.hshader")).unwrap(), Kind::Shader);
+    assert_eq!(kind_of(&drops.join("glow.vshader")).unwrap(), Kind::Shader);
     assert!(add(&home, &drops.join("random.zip")).is_err());
     assert!(add(&home, &drops.join("picture.png")).is_err());
     fs::remove_dir_all(&home).unwrap();

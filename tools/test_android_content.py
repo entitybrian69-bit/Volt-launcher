@@ -30,15 +30,15 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
     (root / 'src/lib.rs').write_text('''#![allow(dead_code)]
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod osk { pub enum Output { Text(String), Backspace, Enter, Close } }
-#[path = "../../../../crates/horizon-client/src/ime_edit.rs"] mod ime_edit;
-#[path = "../../../../crates/horizon-client/src/content_files.rs"] mod content_files;
-#[path = "../../../../crates/horizon-client-render/src/gfx/upload_budget.rs"] mod upload_budget;
-#[path = "../../../../crates/horizon-client-render/src/zip.rs"] mod archive_reader;
-#[path = "../../../../crates/horizon-client/src/android/search_queue.rs"] mod search_queue;
-#[path = "../../../../crates/horizon-client/src/android/document_store.rs"] mod document_store;
-#[path = "../../../../crates/horizon-client-render/src/graphics_startup.rs"] mod graphics_startup;
-#[path = "../../../../crates/horizon-client/src/android_resources.rs"] mod android_resources;
-#[path = "../../../../crates/horizon-client/src/ui_text.rs"] mod ui_text;
+#[path = "../../../../crates/volt-client/src/ime_edit.rs"] mod ime_edit;
+#[path = "../../../../crates/volt-client/src/content_files.rs"] mod content_files;
+#[path = "../../../../crates/volt-client-render/src/gfx/upload_budget.rs"] mod upload_budget;
+#[path = "../../../../crates/volt-client-render/src/zip.rs"] mod archive_reader;
+#[path = "../../../../crates/volt-client/src/android/search_queue.rs"] mod search_queue;
+#[path = "../../../../crates/volt-client/src/android/document_store.rs"] mod document_store;
+#[path = "../../../../crates/volt-client-render/src/graphics_startup.rs"] mod graphics_startup;
+#[path = "../../../../crates/volt-client/src/android_resources.rs"] mod android_resources;
+#[path = "../../../../crates/volt-client/src/ui_text.rs"] mod ui_text;
 ''', encoding='utf-8')
     subprocess.run(['cargo', 'test', '--manifest-path', str(root / 'Cargo.toml')],
                    cwd=ROOT, check=True)

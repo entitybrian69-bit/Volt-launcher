@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A Horizon CI runner (labels self-hosted, Linux, X64, horizon-game and the host's name) on a Linux machine of the
-# maintainer's (NixOS: ludodesktop; Ubuntu: playhorizon, a partner's server), as a systemd user service
+# A Volt CI runner (labels self-hosted, Linux, X64, volt-game and the host's name) on a Linux machine of the
+# maintainer's (NixOS: ludodesktop; Ubuntu: playvolt, a partner's server), as a systemd user service
 # of the account that holds his Minecraft files, like the Mac mini's runners (docs/release-flow.md). Run it on that
 # machine, as that user:
 #
@@ -8,24 +8,24 @@
 #   bash tools/ci/linux-runner.sh status     # the services, the runner's state, the pause watcher's last lines
 #   bash tools/ci/linux-runner.sh uninstall  # stop and unregister
 #
-# Everything lives in ~/.actions-runners/horizon (never in ~/code): the runner, its own rustup and cargo homes,
+# Everything lives in ~/.actions-runners/volt (never in ~/code): the runner, its own rustup and cargo homes,
 # the work folder, and copies of this script and runner_pause.py taken at install time (a pull request's checkout
-# never runs as the service). horizon-runner-pause.service (runner_pause.py) starts the runner only while nobody
+# never runs as the service). volt-runner-pause.service (runner_pause.py) starts the runner only while nobody
 # uses the machine (screen locked or untouched for 15 min, no game), and stops it otherwise. The runner runs nice,
-# in horizon-ci.slice (low CPU and I/O weight, memory capped), on its own virtual screen: vscreen (a headless sway)
+# in volt-ci.slice (low CPU and I/O weight, memory capped), on its own virtual screen: vscreen (a headless sway)
 # where it is installed, else Xvfb with Mesa's Vulkan drivers (from nixpkgs on NixOS, from the system elsewhere).
-# HORIZON_SHARED_SOURCE: the imported vanilla data (default ~/horizon-local/shared-local, else
-# ~/code/horizon/.local); RUNNER_JOBS: cargo jobs and harnesses at once (default a third of the threads, at most 8:
+# VOLT_SHARED_SOURCE: the imported vanilla data (default ~/volt-local/shared-local, else
+# ~/code/volt/.local); RUNNER_JOBS: cargo jobs and harnesses at once (default a third of the threads, at most 8:
 # ludodesktop froze under ~7 cold cargo builds on 2026-10-14, and it is the maintainer's own machine).
 # RUNNER_CPUS and RUNNER_MEMORY (GB): the slice's CPU quota and memory cap (default half the threads, two thirds of
 # the memory), for a machine that does nothing else. RUNNER_TOKEN: the registration (or, for uninstall, removal)
 # token, made with gh on another machine, where gh must not be logged in (a machine someone else also runs):
-#   RUNNER_TOKEN=$(gh api -X POST repos/horizon-rust/horizon/actions/runners/registration-token --jq .token)
+#   RUNNER_TOKEN=$(gh api -X POST repos/volt-rust/volt/actions/runners/registration-token --jq .token)
 # Without Nix (Debian, Ubuntu), the packages come from apt (the list in system_packages) and python3.13 from the
 # PATH (uv python install 3.13, linked into ~/.local/bin).
 set -euo pipefail
-repo=horizon-rust/horizon
-dir=$HOME/.actions-runners/horizon
+repo=volt-rust/volt
+dir=$HOME/.actions-runners/volt
 units=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 version=2.338.0
 sha=af4b794c1bc41d73d40535e3fe092a39f9679cd8d965954c2aca25a05ca41d32
@@ -48,10 +48,10 @@ token() {
 fix_shebangs() { sed -i '1s|^#!/bin/bash|#!/usr/bin/env bash|' "$dir"/*.sh "$dir"/bin/*.sh; }
 
 # Other machines' parity runs can send harnesses here (tools/parity_hosts.json "desktop": parity.py --worker over
-# ssh, in horizon-ci.slice). Their vanilla data is the runner checkout's: parity-host/shared-local links to its
+# ssh, in volt-ci.slice). Their vanilla data is the runner checkout's: parity-host/shared-local links to its
 # .local links, so it follows the preparation of the runner's last job.
 parity_host_links() {
-  local checkout=$dir/_work/horizon/horizon/.local shared=$dir/parity-host/shared-local entry
+  local checkout=$dir/_work/volt/volt/.local shared=$dir/parity-host/shared-local entry
   [ -d "$checkout" ] || return 0
   mkdir -p "$shared"
   for entry in "$checkout"/*; do
@@ -62,23 +62,23 @@ parity_host_links() {
 display_env() {
   # The jobs' screen. Never the maintainer's: the user manager hands every service his DISPLAY and WAYLAND_DISPLAY.
   if command -v vscreen > /dev/null; then
-    VSCREEN=ci-horizon vscreen env
+    VSCREEN=ci-volt vscreen env
   else
     echo "unset WAYLAND_DISPLAY; export DISPLAY=:$(cat "$dir/display")"
   fi
 }
 
 install() {
-  local name=${RUNNER_NAME:-$(hostname)-horizon} threads jobs
+  local name=${RUNNER_NAME:-$(hostname)-volt} threads jobs
   threads=$(nproc)
   jobs=${RUNNER_JOBS:-$(( threads / 3 > 8 ? 8 : threads / 3 > 1 ? threads / 3 : 1 ))}
-  local source=${HORIZON_SHARED_SOURCE:-}
+  local source=${VOLT_SHARED_SOURCE:-}
   if [ -z "$source" ]; then
-    for candidate in "$HOME/horizon-local/shared-local" "$HOME/code/horizon/.local"; do
+    for candidate in "$HOME/volt-local/shared-local" "$HOME/code/volt/.local"; do
       [ -d "$candidate/minecraft" ] && { source=$candidate; break; }
     done
   fi
-  [ -n "$source" ] && [ -d "$source/minecraft" ] || { echo "no imported Minecraft (HORIZON_SHARED_SOURCE)"; exit 1; }
+  [ -n "$source" ] && [ -d "$source/minecraft" ] || { echo "no imported Minecraft (VOLT_SHARED_SOURCE)"; exit 1; }
   mkdir -p "$dir/nix" "$units"
   cp "$here/linux-runner.sh" "$here/runner_pause.py" "$dir/"
 
@@ -93,7 +93,7 @@ install() {
     fix_shebangs
     token registration-token |
       (cd "$dir" && bash ./config.sh --unattended --replace --url "https://github.com/$repo" --token "$(cat)" \
-        --name "$name" --labels "${RUNNER_LABELS:-horizon-game,$(hostname)}" --work _work > /dev/null)
+        --name "$name" --labels "${RUNNER_LABELS:-volt-game,$(hostname)}" --work _work > /dev/null)
   fi
 
   # Libraries for building (pkg-config) and running (dlopen) the game, the JDK pinned by research-lock.json, sccache.
@@ -151,14 +151,14 @@ CARGO_BUILD_JOBS=$jobs
 PARITY_MACHINE_JOBS=$jobs
 PARITY_LOCAL_JOBS=$jobs
 JAVA_HOME=$java
-HORIZON_SHARED_SOURCE=$source
-HORIZON_NO_AUDIO=1
-HORIZON_NO_HEARTBEAT=1
-HORIZON_TELEMETRY_URL=off
-HORIZON_LAUNCHER_NO_SELF_UPDATE=1
+VOLT_SHARED_SOURCE=$source
+VOLT_NO_AUDIO=1
+VOLT_NO_HEARTBEAT=1
+VOLT_TELEMETRY_URL=off
+VOLT_LAUNCHER_NO_SELF_UPDATE=1
 EOF
     [ -n "$platform_env" ] && echo "$platform_env"
-    command -v vscreen > /dev/null && echo "VSCREEN=ci-horizon"
+    command -v vscreen > /dev/null && echo "VSCREEN=ci-volt"
     true
   } > "$dir/.env"
   echo "$path" > "$dir/.path"
@@ -167,9 +167,9 @@ EOF
   local memory cpus
   memory=${RUNNER_MEMORY:-$(( $(awk '/MemTotal/ {print int($2 / 1048576)}' /proc/meminfo) * 2 / 3 ))}
   cpus=${RUNNER_CPUS:-$(( threads / 2 > 1 ? threads / 2 : 1 ))}
-  cat > "$units/horizon-ci.slice" <<EOF
+  cat > "$units/volt-ci.slice" <<EOF
 [Unit]
-Description=Horizon CI: the runner's jobs and parity workers sent from other machines
+Description=Volt CI: the runner's jobs and parity workers sent from other machines
 [Slice]
 CPUWeight=20
 IOWeight=20
@@ -177,12 +177,12 @@ CPUQuota=$(( cpus * 100 ))%
 MemoryHigh=$(( memory * 3 / 4 ))G
 MemoryMax=${memory}G
 EOF
-  cat > "$units/horizon-runner.service" <<EOF
+  cat > "$units/volt-runner.service" <<EOF
 [Unit]
-Description=GitHub Actions runner for $repo (parity), started and stopped by horizon-runner-pause
+Description=GitHub Actions runner for $repo (parity), started and stopped by volt-runner-pause
 After=network-online.target
 [Service]
-Slice=horizon-ci.slice
+Slice=volt-ci.slice
 WorkingDirectory=$dir
 ExecStart=/usr/bin/env bash $dir/linux-runner.sh run
 Nice=19
@@ -193,9 +193,9 @@ TimeoutStopSec=5min
 Restart=on-failure
 RestartSec=30
 EOF
-  cat > "$units/horizon-runner-pause.service" <<EOF
+  cat > "$units/volt-runner-pause.service" <<EOF
 [Unit]
-Description=Runs the Horizon CI runner only while nobody uses the machine or plays on it
+Description=Runs the Volt CI runner only while nobody uses the machine or plays on it
 [Service]
 ExecStart=$(command -v python3) $dir/runner_pause.py
 Environment=NORMAL_CPUS=$cpus
@@ -210,12 +210,12 @@ EOF
   fi
   systemctl --user daemon-reload
   # Only the watcher starts the runner (never the boot itself): it decides whether anyone is at the screen.
-  systemctl --user enable horizon-runner-pause.service > /dev/null
+  systemctl --user enable volt-runner-pause.service > /dev/null
   # The runner reads .env when it starts: stop it, unless it is in a job (that would cancel the job); the watcher
   # starts it again when it may run.
-  if pgrep -f "$dir/bin/Runner.Worker" > /dev/null; then echo "In a job: stop horizon-runner.service after it"
-  else systemctl --user stop horizon-runner.service; rm -f "$dir/paused"; fi
-  systemctl --user restart horizon-runner-pause.service
+  if pgrep -f "$dir/bin/Runner.Worker" > /dev/null; then echo "In a job: stop volt-runner.service after it"
+  else systemctl --user stop volt-runner.service; rm -f "$dir/paused"; fi
+  systemctl --user restart volt-runner-pause.service
   status
 }
 
@@ -237,16 +237,16 @@ run() {
 }
 
 status() {
-  systemctl --user --no-pager list-units 'horizon-runner*' 'vscreen-ci-horizon*'
+  systemctl --user --no-pager list-units 'volt-runner*' 'vscreen-ci-volt*'
   [ -e "$dir/paused" ] && echo "paused: $(cat "$dir/paused")"
   tail -5 "$dir/pause.log" 2>/dev/null || true
 }
 
 uninstall() {
-  systemctl --user disable --now horizon-runner-pause.service horizon-runner.service 2>/dev/null || true
+  systemctl --user disable --now volt-runner-pause.service volt-runner.service 2>/dev/null || true
   token remove-token |
     (cd "$dir" && bash ./config.sh remove --token "$(cat)")
-  rm -f "$units/horizon-runner.service" "$units/horizon-runner-pause.service" "$units/horizon-ci.slice"
+  rm -f "$units/volt-runner.service" "$units/volt-runner-pause.service" "$units/volt-ci.slice"
   systemctl --user daemon-reload
 }
 

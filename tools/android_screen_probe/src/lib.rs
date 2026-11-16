@@ -1,6 +1,6 @@
 //! Isolated window/input probe. No game, resources, accounts or player data.
 #![allow(dead_code)]
-#[path = "../../../crates/horizon-client/src/android/native_ime.rs"]
+#[path = "../../../crates/volt-client/src/android/native_ime.rs"]
 mod ime;
 // SAF dispatch is outside this probe; the production screen/IME code is shared.
 mod document_bridge {
@@ -140,7 +140,7 @@ impl ApplicationHandler for Probe {
 fn android_on_create(s: &OnCreateState<'_>) {
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag("HorizonScreenProbe")
+            .with_tag("VoltScreenProbe")
             .with_max_level(log::LevelFilter::Info),
     );
     if let Err(e) = unsafe { ime::initialize(s.vm_as_ptr().cast(), s.activity_as_ptr().cast()) } {

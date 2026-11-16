@@ -2,8 +2,8 @@
 """The dedicated server against vanilla's, seen from a vanilla client.
 
 The pinned server JAR first generates a world (offline mode, a fixed seed,
-respawn_radius 0) and stops; a vanilla dedicated server and Horizon's
-(`horizon-client --dedicated --nogui`) then serve copies of it with the same
+respawn_radius 0) and stops; a vanilla dedicated server and Volt's
+(`volt-client --dedicated --nogui`) then serve copies of it with the same
 server.properties, server-icon.png and lists. VanillaProtocolClient, a
 headless client made of vanilla's own codecs (any byte vanilla would not
 read is an error), pings each server, joins it in offline mode through
@@ -27,7 +27,7 @@ exactly:
 - the status response (MOTD, players, version, favicon) and the ping;
 - the legacy (pre-1.7, 0xFE) ping reply;
 - the login and configuration packets in order (compression, profile,
-  brand (Horizon's server says "horizon", vanilla's "vanilla"), features,
+  brand (Volt's server says "volt", vanilla's "vanilla"), features,
   known packs, every registry, tags);
 - the play packets up to the first chunk batch, in order, with entity ids,
   keep-alive ids and times left out (the recipe property sets and
@@ -39,7 +39,7 @@ exactly:
 - after /kill, the packets from the death screen to the respawned
   inventory (PlayerList.respawn; chat, chunk data, light and keep-alives
   left out, runs of a packet counted), then that the level loads where the
-  player respawned (guests' death messages aren't Horizon's yet: left out);
+  player respawned (guests' death messages aren't Volt's yet: left out);
 - the furnace menu: its type and title, its contents, the slots each
   shift-click changes and its lit and cooking totals;
 - the snowballs each right click throws: one, though the client sends the
@@ -92,7 +92,7 @@ PROPERTIES = {
     'simulation-distance': '4',
     'spawn-protection': '0',
     'max-players': '5',
-    'motd': '\\u00a7aHorizon \\u00a7rparity \\u00e9t\\u00e9',
+    'motd': '\\u00a7aVolt \\u00a7rparity \\u00e9t\\u00e9',
     'pause-when-empty-seconds': '-1',
 }
 
@@ -242,7 +242,7 @@ CONSOLE_LINE = re.compile(r'^\[\d\d:\d\d:\d\d\] \[([^\]]+)\]: (.*)$')
 KEPT = re.compile(r'Tester|\[Server\]|\[Not Secure\]|There are|Stopping|Saving|ThreadedAnvilChunkStorage|All dimensions|Unknown or incomplete')
 
 
-# Guests' death messages and advancement announcements aren't Horizon's yet (the client's
+# Guests' death messages and advancement announcements aren't Volt's yet (the client's
 # own transcript leaves the death message out as well).
 NOT_YET = re.compile(r'Tester was killed|Tester has made the advancement')
 
@@ -361,24 +361,24 @@ def run_side(label, command, directory, client):
 PROPERTIES_PORTS = {}
 
 
-def horizon_client_joins(vanilla_server, binary, world, build, reference):
-    """Horizon's client joins a vanilla dedicated server headless: it must
+def volt_client_joins(vanilla_server, binary, world, build, reference):
+    """Volt's client joins a vanilla dedicated server headless: it must
     land where the vanilla client did, receive as many chunks, see its chat
     and /list reply, and leave as a vanilla client does (the server's log)."""
-    label = 'vanilla-for-horizon-client'
+    label = 'vanilla-for-volt-client'
     PROPERTIES_PORTS[label] = port = free_port()
     directory = build / label
     write_server_dir(directory, port, world)
-    client_dir = build / 'horizon-client'
+    client_dir = build / 'volt-client'
     shutil.rmtree(client_dir, ignore_errors=True)
     client_dir.mkdir()
-    report = build / 'horizon-client-report.json'
+    report = build / 'volt-client-report.json'
     report.unlink(missing_ok=True)
     server = Server(vanilla_server, directory, label)
     try:
         server.wait_for(r'Done \(')
-        env = lab.game_env(HORIZON_NET_REPORT=report)
-        with (build / 'horizon-client-run.log').open('w') as log:
+        env = lab.game_env(VOLT_NET_REPORT=report)
+        with (build / 'volt-client-run.log').open('w') as log:
             run_game([str(c) for c in [binary, '--resources', lab.RESOURCES, '--render-distance', 2,
                                              '--server', f'127.0.0.1:{port}', '--name', PLAYER]],
                            cwd=client_dir, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=True)
@@ -395,7 +395,7 @@ def horizon_client_joins(vanilla_server, binary, world, build, reference):
         'chunks received': want_chunks,
         'own chat shown': True,
         '/list reply shown': True,
-        'server log': ['logged in', 'Tester joined the game', '[Not Secure] <Tester> hello from the horizon client',
+        'server log': ['logged in', 'Tester joined the game', '[Not Secure] <Tester> hello from the volt client',
                        'Tester lost connection: Disconnected', 'Tester left the game'],
     }
     log = '\n'.join(server.lines)
@@ -403,11 +403,11 @@ def horizon_client_joins(vanilla_server, binary, world, build, reference):
         'connected throughout': got['error'],
         'spawn position': got['position'],
         'chunks received': got['chunks'],
-        'own chat shown': any('<Tester> hello from the horizon client' in c for c in got['chat']),
+        'own chat shown': any('<Tester> hello from the volt client' in c for c in got['chat']),
         '/list reply shown': any('There are 1 of a max of 5 players online: Tester' in c for c in got['chat']),
         'server log': [k for k in expected['server log'] if k in log],
     }
-    return [f'horizon-client {k}: {"ok" if actual[k] == v else f"expected {v!r}, got {actual[k]!r}"}'
+    return [f'volt-client {k}: {"ok" if actual[k] == v else f"expected {v!r}, got {actual[k]!r}"}'
             for k, v in expected.items()]
 
 
@@ -417,21 +417,21 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     report = build / 'report.json'
     report.unlink(missing_ok=True)
-    oracle = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaProtocolClient.java'
+    oracle = lab.ROOT / 'mods/volt/src/test/java/dev/voltlabs/parity/VanillaProtocolClient.java'
     classes = build / 'classes'
     shutil.rmtree(classes, ignore_errors=True)
     classes.mkdir()
     dependencies = os.pathsep.join(map(str, [jars['server'], *libraries]))
     oh.run_logged(['javac', '--release', lock['minecraft']['java_major'], '-proc:none', '-nowarn', '-sourcepath',
-                   lab.ROOT / 'mods/horizon/src/test/java', '-cp', dependencies, '-d', classes, oracle],
+                   lab.ROOT / 'mods/volt/src/test/java', '-cp', dependencies, '-d', classes, oracle],
                   build, 'compile-java')
-    oh.run_logged(['cargo', 'build', '--profile', 'fast', '-p', 'horizon-client', '--bin', 'horizon-client'], build,
+    oh.run_logged(['cargo', 'build', '--profile', 'fast', '-p', 'volt-client', '--bin', 'volt-client'], build,
                   'compile-rust')
     metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--no-deps', '--format-version', '1'],
                                                   cwd=lab.ROOT, text=True))
-    binary = Path(metadata['target_directory']) / 'fast' / ('horizon-client.exe' if os.name == 'nt' else 'horizon-client')
+    binary = Path(metadata['target_directory']) / 'fast' / ('volt-client.exe' if os.name == 'nt' else 'volt-client')
     vanilla_server = ['java', '-Xmx2g', '-Duser.timezone=UTC', '-cp', dependencies, 'net.minecraft.server.Main', 'nogui']
-    horizon_server = [binary, '--resources', lab.RESOURCES, '--dedicated', '--nogui']
+    volt_server = [binary, '--resources', lab.RESOURCES, '--dedicated', '--nogui']
 
     # The world, generated once by vanilla.
     generate = build / 'generate'
@@ -463,49 +463,49 @@ def main():
     def client(port, out):
         try:
             oh.run_logged(['java', '-Xmx1g', '-Duser.timezone=UTC', '-cp', str(classes) + os.pathsep + dependencies,
-                           'dev.horizonlab.parity.VanillaProtocolClient', '127.0.0.1', port, PLAYER, out], build,
+                           'dev.voltlabs.parity.VanillaProtocolClient', '127.0.0.1', port, PLAYER, out], build,
                           out.stem, timeout=300)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             log = (build / f'{out.stem}.log').read_text(encoding='utf-8', errors='replace').splitlines()
             raise AssertionError(f'{out.stem}: {error}:\n' + '\n'.join(log[-30:])) from None
 
     results = {}
-    for label, command in [('vanilla', vanilla_server), ('horizon', horizon_server)]:
+    for label, command in [('vanilla', vanilla_server), ('volt', volt_server)]:
         PROPERTIES_PORTS[label] = free_port()
         directory = build / label
         write_server_dir(directory, PROPERTIES_PORTS[label], world)
         results[label] = run_side(label, command, directory, client)
         (build / f'{label}.txt').write_text('\n'.join(results[label]) + '\n', encoding='utf-8')
-    client_checks = horizon_client_joins(vanilla_server, binary, world, build, results['vanilla'])
-    vanilla, horizon = results['vanilla'], results['horizon']
-    # The one intended difference: MinecraftServer.getServerModName is "vanilla" there, and Horizon's server names
-    # itself "horizon" as a modded server does (#3756). Check that, then compare the rest as vanilla's.
+    client_checks = volt_client_joins(vanilla_server, binary, world, build, results['vanilla'])
+    vanilla, volt = results['vanilla'], results['volt']
+    # The one intended difference: MinecraftServer.getServerModName is "vanilla" there, and Volt's server names
+    # itself "volt" as a modded server does (#3756). Check that, then compare the rest as vanilla's.
     brand = 'config minecraft:custom_payload BrandPayload[brand={}]'
-    errors_brand = [] if brand.format('horizon') in horizon else ['error: Horizon\'s server did not send the brand "horizon"']
-    horizon = [brand.format('vanilla') if l == brand.format('horizon') else l for l in horizon]
-    errors = [l for l in vanilla + horizon if l.startswith('error')] + [l for l in client_checks if not l.endswith(': ok')] + errors_brand
+    errors_brand = [] if brand.format('volt') in volt else ['error: Volt\'s server did not send the brand "volt"']
+    volt = [brand.format('vanilla') if l == brand.format('volt') else l for l in volt]
+    errors = [l for l in vanilla + volt if l.startswith('error')] + [l for l in client_checks if not l.endswith(': ok')] + errors_brand
     for line in client_checks:
         print(line)
     differences = []
     import difflib
-    for line in difflib.unified_diff(vanilla, horizon, 'vanilla', 'horizon', n=0, lineterm=''):
+    for line in difflib.unified_diff(vanilla, volt, 'vanilla', 'volt', n=0, lineterm=''):
         differences.append(line[:400])
     # Name the chunks that differ instead of the whole line.
     chunk_lines = [dict(re.findall(r'(-?\d+,-?\d+)=(\w+)', next((l for l in side if l.startswith('play-chunks')), '')))
-                   for side in (vanilla, horizon)]
+                   for side in (vanilla, volt)]
     for key in sorted(set(chunk_lines[0]) | set(chunk_lines[1])):
         a, b = chunk_lines[0].get(key), chunk_lines[1].get(key)
         if a != b:
-            differences.append(f'chunk {key}: vanilla {a} horizon {b}')
+            differences.append(f'chunk {key}: vanilla {a} volt {b}')
     if differences or errors:
-        notes = [line for name in ('vanilla', 'vanilla-client', 'horizon', 'horizon-client')
+        notes = [line for name in ('vanilla', 'vanilla-client', 'volt', 'volt-client')
                  for line in notable_lines(build / f'{name}.log')]
         raise AssertionError(f'{len([d for d in differences if d[:1] in "+-" and d[:3] not in ("+++", "---")])} differing lines '
-                             f'(see {build}/vanilla.txt and horizon.txt):\n' + '\n'.join(differences[:80] + notes))
+                             f'(see {build}/vanilla.txt and volt.txt):\n' + '\n'.join(differences[:80] + notes))
     lab.write_json(report, dict(
         schema=1, minecraft=lock['minecraft']['version'], platform=platform.platform(),
         java=subprocess.check_output(['java', '--version'], text=True).splitlines()[0],
-        lines=len(vanilla), output_sha256=lab.digest(build / 'horizon.txt', 'sha256'),
+        lines=len(vanilla), output_sha256=lab.digest(build / 'volt.txt', 'sha256'),
         scope='Dedicated server seen by a vanilla-codec client: status, legacy ping, login, configuration, play '
               'start (recipes, advancements, command tree), chunks, chat, /list, failing commands\' replies, '
               'console list/say/stop, files written. Offline mode.'))

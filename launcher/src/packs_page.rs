@@ -1,9 +1,9 @@
-//! The selected instance's resource packs and shader packs on Home (`horizon_launcher::packs`):
+//! The selected instance's resource packs and shader packs on Home (`volt_launcher::packs`):
 //! each turned on or off with one click, Remove (to the trash, after a confirmation), and
-//! Add (a file picker) or a .zip or .hshader dropped anywhere on the section.
+//! Add (a file picker) or a .zip or .vshader dropped anywhere on the section.
 use super::*;
 use gpui::{ExternalPaths, Image, ImageFormat};
-use horizon_launcher::packs::{self, Kind as PackKind, Pack};
+use volt_launcher::packs::{self, Kind as PackKind, Pack};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -169,7 +169,7 @@ impl Launcher {
             section = section.child(
                 text(theme::CAPTION)
                     .text_color(t.muted)
-                    .child("None yet: drop a .hshader or a shader pack .zip here."),
+                    .child("None yet: drop a .vshader or a shader pack .zip here."),
             );
         }
         for (i, pack) in shader.into_iter().enumerate() {

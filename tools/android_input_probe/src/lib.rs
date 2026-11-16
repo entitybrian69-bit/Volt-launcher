@@ -77,7 +77,7 @@ impl ApplicationHandler for Probe {
 fn android_main(app: AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag("HorizonInputProbe")
+            .with_tag("VoltInputProbe")
             .with_max_level(log::LevelFilter::Info),
     );
     let events = EventLoop::builder()

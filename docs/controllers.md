@@ -1,6 +1,6 @@
 # Controllers
 
-Horizon plays with PlayStation (DualShock 4, DualSense), Xbox (360, One,
+Volt plays with PlayStation (DualShock 4, DualSense), Xbox (360, One,
 Series) and Nintendo Switch Pro controllers, and on the Steam Deck with its
 built-in controls. Keyboard and mouse keep working exactly as before: with no
 controller connected, or with controllers turned off, nothing changes.
@@ -11,8 +11,8 @@ Nothing. Minecraft Java 26.3 never calls GLFW's gamepad or joystick API, has
 no controller options and ships no button glyphs. Its only non-mouse UI input
 is keyboard focus navigation (`InputType.KEYBOARD_ARROW` / `KEYBOARD_TAB`:
 arrows and Tab move a focus ring between widgets). So controller support is
-Horizon's own feature. It follows what players already know from Minecraft on
-consoles (Bedrock Edition's default controller layout) and Horizon's menu
+Volt's own feature. It follows what players already know from Minecraft on
+consoles (Bedrock Edition's default controller layout) and Volt's menu
 design for any new screen.
 
 ## Input layer
@@ -21,14 +21,14 @@ design for any new screen.
 libudev for hot-plugging), IOKit on macOS, Windows.Gaming.Input on Windows.
 Its SDL mapping database normalizes every pad to one positional layout
 (South/East/West/North face buttons, bumpers, triggers, sticks, D-pad,
-Select/Start). Horizon also injects a few SDL rows gilrs' bundled DB still
+Select/Start). Volt also injects a few SDL rows gilrs' bundled DB still
 misses (notably the 8BitDo Ultimate 2 on Linux/Bluetooth, whose right stick
 is on ABS_Z/ABS_RX without that row), and corrects that pad by vendor/product
 when no SDL row matched. No second windowing or event stack: gilrs is polled
 once per loop iteration next to winit's events.
 
 - The pure logic (mapping table, deadzones and curves, button edges, the
-  settings file, glyph choice) lives in `crates/horizon-client-input/src/gamepad.rs`
+  settings file, glyph choice) lives in `crates/volt-client-input/src/gamepad.rs`
   and is unit-tested. The game owns a thin gilrs backend and applies actions.
 - Controller actions go through the same path a keyboard key takes after
   rebinding: an action names a vanilla key mapping (`key.jump`, `key.attack`,
@@ -44,7 +44,7 @@ once per loop iteration next to winit's events.
   speed, as the server only hears the keys: an anticheat predicting from them
   pulls back a player moving at the stick's own angle and speed.
 - The pad last touched is the active one. Several pads are not merged.
-- `horizon-ctl pad ...` injects a virtual pad (buttons, sticks, triggers) into
+- `volt-ctl pad ...` injects a virtual pad (buttons, sticks, triggers) into
   a running game, for tests without hardware.
 
 ## Default mapping
@@ -57,7 +57,7 @@ once per loop iteration next to winit's events.
 | Drop item | B | ○ | `key.drop` |
 | Swap offhand | X | □ | `key.swapOffhand` |
 | Inventory | Y | △ | `key.inventory` |
-| Hotbar left / right | LB / RB | L1 / R1 | Horizon `pad.hotbarPrevious/Next` |
+| Hotbar left / right | LB / RB | L1 / R1 | Volt `pad.hotbarPrevious/Next` |
 | Use / place | LT | L2 | `key.use` |
 | Attack / break | RT | R2 | `key.attack` |
 | Sprint | Left stick click | L3 | `key.sprint` |
@@ -77,7 +77,7 @@ again. The controls options can make it hold-to-sneak.
 
 ## Menus and inventories
 
-Vanilla's screens are all mouse-driven, and Horizon draws them 1:1. A pad
+Vanilla's screens are all mouse-driven, and Volt draws them 1:1. A pad
 drives them in one of two ways, picked in the controller options ("Menu
 Navigation: Focus / Pointer", `menuNavigation:focus|pointer`):
 
@@ -128,7 +128,7 @@ the crafting result, armour to the player's grid.
 | Y | quick move (shift-click) in inventories |
 | View | throw one item from the focused slot (Q) |
 | Left stick click | throw the focused stack (Ctrl+Q) |
-| LB / RB | previous / next tab (creative, recipe book, the Horizon options' sections) |
+| LB / RB | previous / next tab (creative, recipe book, the Volt options' sections) |
 | Right stick | scroll |
 | Right stick click | swap focus and pointer for this screen |
 
@@ -165,7 +165,7 @@ The cursor is drawn only while the pad is the last-used input.
 ### Text fields
 
 A on a focused text field (A in pointer mode clicks into it) opens the
-**on-screen keyboard**: a QWERTY grid and a symbols grid in Horizon's design
+**on-screen keyboard**: a QWERTY grid and a symbols grid in Volt's design
 language, at the bottom of the screen (at the top when the field is in the
 lower half, as chat is). D-pad or stick to move, A types, X deletes, Y is a
 space, LT is Shift (twice: caps lock), RB switches to symbols and accents,
@@ -176,7 +176,7 @@ creative and recipe-book searches, the anvil, the LAN port.
 
 On a Steam Deck under Steam (`SteamDeck=1`), A asks Steam for its own
 keyboard instead (`steam://open/keyboard`), which types like a real keyboard;
-Steam + X opens it at any time. "On-Screen Keyboard: Auto / Horizon / Steam"
+Steam + X opens it at any time. "On-Screen Keyboard: Auto / Volt / Steam"
 (`keyboard:`) picks one.
 
 ### Screens covered
@@ -184,7 +184,7 @@ Steam + X opens it at any time. "On-Screen Keyboard: Auto / Horizon / Steam"
 Both modes reach every screen through the pointer events. Focus mode
 registers targets on: the title menus (main, world list and its search, create
 and edit world, delete, multiplayer list and its edit screens), every options
-page (vanilla's and Horizon Settings with the pages it opens, key and
+page (vanilla's and Volt Settings with the pages it opens, key and
 controller binds, language list), pause and Play with Friends, death, chat, signs and books (their buttons), the
 survival and creative inventories, every container and station (chests,
 furnaces, brewing, crafter, crafting table with its recipe book, anvil,
@@ -196,7 +196,7 @@ book's page text), the right stick click gives the pointer for that screen.
 
 ## Glyphs
 
-Horizon draws its own button glyphs in the HUD and screens (no Mojang
+Volt draws its own button glyphs in the HUD and screens (no Mojang
 assets, nothing new from the player's jar): a small round or pill shape with
 the label in the game font, sized to the GUI scale, with two styles:
 
@@ -213,10 +213,10 @@ hints, "Press X to dismount") only while the pad is the last-used input.
 
 ## Options and remapping
 
-Controller settings are Horizon's own: **Options → Controls → Controller
-Settings...** (or **Options → Horizon Settings... → Controller Settings...**),
+Controller settings are Volt's own: **Options → Controls → Controller
+Settings...** (or **Options → Volt Settings... → Controller Settings...**),
 a vanilla options list with **Controller Binds...** at the top. They live in
-`horizon-controller.txt` next to `options.txt`, like `horizon-graphics.txt`: `options.txt` stays
+`volt-controller.txt` next to `options.txt`, like `volt-graphics.txt`: `options.txt` stays
 exactly vanilla's, so a vanilla client can share the game folder.
 
 ```
@@ -260,7 +260,7 @@ is silently skipped there.
 ## DualSense output
 
 Gilrs only reads the pads. A DualSense (054c:0ce6, the Edge 054c:0df2) is also
-written to directly, over HID: the `horizon-dualsense` crate builds its output
+written to directly, over HID: the `volt-dualsense` crate builds its output
 report and [hidapi](https://crates.io/crates/hidapi) (MIT, bundling the C
 hidapi under its BSD option) sends it: hidraw on Linux, IOKit on macOS (opened
 shared, so gilrs keeps reading the same pad), the HID API on Windows.
@@ -294,7 +294,7 @@ shared, so gilrs keeps reading the same pad), the HID API on Windows.
   0x01 instead and would stop seeing the pad (SDL's
   `SDL_HINT_JOYSTICK_ENHANCED_REPORTS`: "break Windows DirectInput for other
   applications"), so there a pad on Bluetooth gets no output unless
-  `HORIZON_DUALSENSE_BT=1`. Doing it for everyone means reading the pad's
+  `VOLT_DUALSENSE_BT=1`. Doing it for everyone means reading the pad's
   input ourselves over HID, as SDL does (a later PR). A pad on both cables is
   written over USB.
 - **Writer thread.** Writes block (a Bluetooth write can take milliseconds),
@@ -315,14 +315,14 @@ shared, so gilrs keeps reading the same pad), the HID API on Windows.
   install it):
 
   ```
-  # /etc/udev/rules.d/70-horizon-dualsense.rules
+  # /etc/udev/rules.d/70-volt-dualsense.rules
   KERNEL=="hidraw*", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0ce6|0df2", TAG+="uaccess"
   KERNEL=="hidraw*", KERNELS=="*054C:0CE6*|*054C:0DF2*", TAG+="uaccess"
   ```
 
   The kernel's own `hid-playstation` driver keeps working alongside: its
   reports set only the parts their flags name.
-- **Trying it without the game:** `cargo run -p horizon-dualsense --example
+- **Trying it without the game:** `cargo run -p volt-dualsense --example
   dualsense -- all` plays each output on a connected pad and reads back what
   the pad reports: the triggers' active effect, and the accelerometer's
   shake while the motors run (`watch` logs the shake while the game drives
@@ -346,7 +346,7 @@ rebinding moves the feel along: with the default mapping that is L2 for
 | That shield disabled by an axe | use | feedback from zone 1, strength 8 | the trigger locks until the shield recovers |
 | Mining (survival) | attack | vibration from zone 1: amplitude 2 (dirt) to 5 (obsidian) of 8, 40 Hz on sand and dirt, 30 on stone, 20 on wood, deepslate and ores, 10 on obsidian | a grit that gets heavier and slower on harder blocks; none on blocks that break at once |
 
-The press zone is where Horizon presses the trigger's action: the trigger
+The press zone is where Volt presses the trigger's action: the trigger
 threshold (0.4 by default) times ten, kept between 3 and 8, so with the
 defaults a crossbow catches from zone 2 and breaks at zone 4, as its bolt
 leaves. This assumes the ten zones split the travel evenly, as dualsensectl
@@ -358,7 +358,7 @@ triggers free; quitting frees them too. `pad status` shows the effects in
 use.
 
 Why these values, from what shipped games do and what the community
-documents (none of it measured on Horizon's pad yet):
+documents (none of it measured on Volt's pad yet):
 
 - **Only the official modes.** Off 0x05, feedback 0x21, weapon 0x25 and
   vibration 0x26 are the modes Nielk1's notes call official and expected in
@@ -377,12 +377,12 @@ documents (none of it measured on Horizon's pad yet):
   describes a bazooka whose resistance "will cause the trigger to catch at the
   input position just before the bullet is fired, and as you continue to pull
   the trigger, the bullet will fire and release the tension": the weapon
-  effect does exactly that, and Horizon moves its breaking point onto the
+  effect does exactly that, and Volt moves its breaking point onto the
   threshold so the click is the shot. DSX community presets use the same
   shape (DSX++'s example `Weapon {2, 6, 8}`; dualsensectl's
   `weapon 2 3 8` "resists strongly and lets go almost immediately").
   Returnal and Ratchet & Clank: Rift Apart use a half-press stop to split two
-  actions on one trigger; Minecraft has one action per trigger, so Horizon
+  actions on one trigger; Minecraft has one action per trigger, so Volt
   doesn't.
 - **Boosts click lighter.** A rocket or a pig's carrot fires on the pull, so
   it gets a catch that gives way rather than a wall that never does (strength
@@ -416,7 +416,7 @@ channels 1 and 2 silent), the same shapes come out crisp. Per OS:
 |---|---|---|
 | macOS | the pad lists as a 4-channel CoreAudio output ("DualSense Wireless Controller", seen on the Mac mini by dualsense-1); cpal opens it by name | no audio device |
 | Linux | snd-usb-audio exposes the card "Controller" with 4 channels; cpal opens it through ALSA (`plughw:CARD=Controller`), which fails while PipeWire or PulseAudio holds the card, as desktops do: then the motors' emulation stays | no audio device |
-| Windows | a WASAPI endpoint named "Wireless Controller" (or "DualSense Wireless Controller"), stereo until its speaker setup is set to Quadraphonic in the Sound control panel (`mmsys.cpl`, Configure); until then Horizon finds no 4-channel output and keeps the motors | no audio device |
+| Windows | a WASAPI endpoint named "Wireless Controller" (or "DualSense Wireless Controller"), stereo until its speaker setup is set to Quadraphonic in the Sound control panel (`mmsys.cpl`, Configure); until then Volt finds no 4-channel output and keeps the motors | no audio device |
 
 The audio haptics play only while the pad is out of its rumble emulation:
 any report with the rumble flags (flags 0, bits 0 and 1) silences them until
@@ -424,7 +424,7 @@ a report without them (SDL: "Leaving emulated rumble bits off will restore
 audio haptics"; nondebug/dualsense and
 [dse-haptics](https://github.com/iranran666/dse-haptics) arm them with an
 all-zero report 0x02). While HD haptics are open the motors stay at zero, so
-every report Horizon sends, starting with the one at opening, keeps them
+every report Volt sends, starting with the one at opening, keeps them
 armed; that first report also clears the attenuation a PS5 may have left.
 The frame layout `[0, 0, left, right]` at 48 kHz is the one
 [KytyPS5 #843](https://github.com/KytyPS5/KytyPS5/pull/843) plays on
@@ -436,8 +436,8 @@ report 0x32, reverse-engineered by
 and [dualsense-bt-haptics](https://github.com/awalol/dualsense-bt-haptics);
 it needs Bluetooth output, which only Linux gets (see above), and isn't
 done: there the motors' emulation is used. HD haptics are opt-in for now
-(`HORIZON_DUALSENSE_HAPTICS=1`) until they are confirmed on a real pad;
-games started for tests (`HORIZON_NO_AUDIO`) never open them, and the pad's
+(`VOLT_DUALSENSE_HAPTICS=1`) until they are confirmed on a real pad;
+games started for tests (`VOLT_NO_AUDIO`) never open them, and the pad's
 audio device is only ever opened by name, never the system's default output.
 
 ### Lightbar and player LEDs
@@ -447,10 +447,10 @@ audio device is only ever opened by name, never the system's default output.
 amber at half to red; Dimension is blue in the Overworld, orange in the
 Nether, violet in the End. Both at half brightness (the pad's full light is
 glaring); menus keep the last colour. The player LEDs show player 1 (the
-middle LED). Off leaves both to the pad. When Horizon lets go of the pad, a
+middle LED). Off leaves both to the pad. When Volt lets go of the pad, a
 lightbar or LEDs it changed go back to a host's defaults: blue (0, 0, 128)
 and the middle LED, as Linux's driver gives a first pad (neither SDL nor
-the kernel resets anything when it lets go; Horizon does, so the pad never
+the kernel resets anything when it lets go; Volt does, so the pad never
 keeps a game's colour or a stiff trigger). The microphone's mute LED is
 never touched (flags 1, bit 0 stays clear): whatever the system set
 stays. Over Bluetooth the colour waits for the pad's connection
@@ -479,7 +479,7 @@ Bluetooth.
 ## Steam Deck
 
 - In Game Mode, or any game launched through Steam, Steam Input presents the
-  Deck's controls as a virtual Xbox pad: Horizon sees it like any Xbox pad
+  Deck's controls as a virtual Xbox pad: Volt sees it like any Xbox pad
   and uses Xbox-letter glyphs (the Deck's face buttons are A B X Y). Steam's
   default "Gamepad" layout works with no setup; the trackpads stay mouse.
 - Started outside Steam on the Deck, the kernel's `hid-steam` driver exposes

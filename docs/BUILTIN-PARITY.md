@@ -9,7 +9,7 @@ upgrade, against the exact upstream mod each one recreates. Status values:
 
 All five appear in Options > Mods with a toggle and a settings page, on PC
 and Android alike; settings persist (per-key files under
-`.horizon-mod-data/<id>/`) and apply live. Every built-in is zero-cost when
+`.volt-mod-data/<id>/`) and apply live. Every built-in is zero-cost when
 its row is toggled off (a suspended flag short-circuits all of its code
 paths). Licensing details are in `THIRD_PARTY_NOTICES.md`.
 
@@ -18,7 +18,7 @@ paths). Licensing details are in `THIRD_PARTY_NOTICES.md`.
 ## 1. Accurate Block Placement Reborn (woven native mod)
 
 **Upstream identity:** `accurate_block_placement` 1.0.0 by Lutziano888
-(MIT), the Horizon port of Accurate Block Placement: Reborn (MIT, by
+(MIT), the Volt port of Accurate Block Placement: Reborn (MIT, by
 Clayborn, Flourick, schwar and KadTheHunter). **Not a reimplementation** —
 the real mod is woven into the Android client, pinned by SHA-256
 `e631745f6d267360de6eb51995ee995bf1ab3d64393d287b7b93c332b85939ce`
@@ -37,7 +37,7 @@ the real mod is woven into the Android client, pinned by SHA-256
 ## 2. Not Enough Animations → `mobs/nea.rs`
 
 **Upstream identity:** Not Enough Animations by tr7zw (custom license — no
-code used). **Implementation:** port of CayMac's MIT Horizon native mod
+code used). **Implementation:** port of CayMac's MIT Volt native mod
 `not_enough_animations` (github.com/CayMac97/not-enough-animations), which
 already recreated it for this engine. Applied after the vanilla humanoid
 pose in `mobs/anim.rs::setup`.
@@ -81,8 +81,8 @@ or sounds are unsupported by policy).
 ## 4. Punchy → vendored native mod (Android weave)
 
 **Upstream identity:** Punchy! by PunchyDevGuy (All Rights Reserved);
-Rust port by the Horizon community
-([CihuyAkz/horizon-android-more-mods](https://github.com/CihuyAkz/horizon-android-more-mods),
+Rust port by the Volt community
+([CihuyAkz/volt-android-more-mods](https://github.com/CihuyAkz/volt-android-more-mods),
 `mods/official/punchy/`, MIT glue around the ARR engine).
 **Implementation:** the earlier clean-room `punchy.rs` built-in was
 removed. The real port is vendored at `tools/native_mods/vendored/punchy/`,
@@ -131,7 +131,7 @@ vanilla paths.
 
 ## Test coverage
 
-Each logic module has unit tests compiled into `horizon-client --lib` and
+Each logic module has unit tests compiled into `volt-client --lib` and
 run by the CI worldgen-test job filter: `nea::tests`,
 `player_gestures::tests`, `subtle_effects::tests` — pose
 math, gating flags, keyframe sampling, spring/landing behaviour, additive

@@ -14,25 +14,25 @@
 /run/
 /logs/
 /dist/
-/mods/horizon/build/
+/mods/volt/build/
 /saves/
 /backups/
 /tools/logs/
 .DS_Store
 # What the client writes to its working directory when run from the repo root.
 /options.txt
-/horizon.txt
-/horizon-graphics.txt
-/horizon-controller.txt
-/horizon-extras.txt
-/horizon-player.txt
+/volt.txt
+/volt-graphics.txt
+/volt-controller.txt
+/volt-extras.txt
+/volt-player.txt
 /servers.dat
 /screenshots/
-/.horizon-cache/
+/.volt-cache/
 /crash-reports/
 /debug/
-/horizon-touch.json
-/horizon-touch.json.tmp
+/volt-touch.json
+/volt-touch.json.tmp
 # Android build outputs, signing material and local account/session state.
 **/.gradle/
 **/node_modules/
@@ -50,8 +50,8 @@
 # Release-only compiled original exporter bundle.
 /exporters/
 
-/horizon-keypad.json
-/horizon-keypad.json.tmp
+/volt-keypad.json
+/volt-keypad.json.tmp
 
 # Local artwork workspace and original reference images.
 /art/

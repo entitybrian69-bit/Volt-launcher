@@ -78,7 +78,7 @@ impl Need {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Source {
-    /// Mojang's, downloaded by Horizon.
+    /// Mojang's, downloaded by Volt.
     Mojang,
     /// Installed on this computer (JAVA_HOME, the PATH, the usual folders).
     Installed,
@@ -132,14 +132,14 @@ fn runtime(home: PathBuf, source: Source) -> Option<Runtime> {
     found.java().is_file().then_some(found)
 }
 
-/// Mojang's runtimes Horizon downloaded.
+/// Mojang's runtimes Volt downloaded.
 pub fn runtimes_dir() -> PathBuf {
     backend::data_dir().join("minecraft").join("runtime")
 }
 
 /// The runtimes in a Mojang `runtime` folder.
 pub fn mojang_runtimes(dir: &Path) -> Vec<Runtime> {
-    horizon_prepare::java::minecraft_runtimes(dir)
+    volt_prepare::java::minecraft_runtimes(dir)
         .into_iter()
         .filter_map(|home| runtime(home, Source::Mojang))
         .collect()

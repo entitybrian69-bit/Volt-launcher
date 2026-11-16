@@ -1,4 +1,4 @@
-# Horizon Android 0.7.6
+# Volt Android 0.7.6
 
 This update targets touch controls, initial menu navigation and diagnostic recording.
 
@@ -11,7 +11,7 @@ This update targets touch controls, initial menu navigation and diagnostic recor
 - Hardware D-pad navigation works in the initial title menu before the full game loads. Focus acquisition retries after widgets become available.
 - GPU profiling and performance recording share one report session. Both launcher controls use the same button style. Reports include the requested profiling mode and whether encoder timestamps are supported; unsupported hardware cannot provide these stage timings.
 - Installation cleanup waits for active resource preparation to finish; the final asset index is saved from verified memory rather than reopened from Androidâ€™s evictable cache. This prevents a concurrent startup cleanup from deleting files needed by a reinstall (#30). The original device report does not include a log, so a clean installation on that affected device still needs verification.
-- Stable upstream history merged through `c3905131b` (717 incoming commits, including merge history): rendering, chunk work, resource packs, gameplay, network and mod API changes. Android input, presentation bounds, upload budgets and sandbox `.hmod` support are retained.
+- Stable upstream history merged through `c3905131b` (717 incoming commits, including merge history): rendering, chunk work, resource packs, gameplay, network and mod API changes. Android input, presentation bounds, upload budgets and sandbox `.vmod` support are retained.
 
 Native `.hnmod` compilation on Android remains unsupported. Java Fabric, Forge and NeoForge mods are not supported.
 

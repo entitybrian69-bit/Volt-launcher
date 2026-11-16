@@ -26,7 +26,7 @@ zip = {{ version = "={version}", default-features = false, features = ["deflate"
 ''', encoding='utf-8')
     (harness / 'src/lib.rs').write_text('''#![allow(dead_code)]
 mod backend { pub const VERSION: &str = "diagnostics-test"; }
-#[path = "../../../../crates/horizon-client/src/android/diagnostics.rs"] mod diagnostics;
+#[path = "../../../../crates/volt-client/src/android/diagnostics.rs"] mod diagnostics;
 ''', encoding='utf-8')
     subprocess.run(['cargo', 'test', '--manifest-path', str(harness / 'Cargo.toml'),
                     '--', '--test-threads=1'], cwd=ROOT, check=True)

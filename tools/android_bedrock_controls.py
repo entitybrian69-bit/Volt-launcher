@@ -2,7 +2,7 @@
 """Prepare original Bedrock control textures privately; never vendor them in Git.
 
 Source is Mojang/bedrock-samples at the exact revision below. Its LICENSE.md
-retains Mojang's EULA terms; these assets are not covered by Horizon's MIT license.
+retains Mojang's EULA terms; these assets are not covered by Volt's MIT license.
 """
 from pathlib import Path
 import hashlib

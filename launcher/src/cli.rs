@@ -1,23 +1,23 @@
-//! `horizon-launcher <subcommand>`: the same steps as the window, from a terminal. Every
+//! `volt-launcher <subcommand>`: the same steps as the window, from a terminal. Every
 //! command goes through `backend`; this file only parses arguments and prints.
 use clap::{Parser, Subcommand};
-use horizon_launcher::account::{self, Accounts};
-use horizon_launcher::backend::{self, Release};
-use horizon_launcher::github_mods;
-use horizon_launcher::instances;
-use horizon_launcher::loaders;
-use horizon_launcher::native_mods;
-use horizon_launcher::other_launchers;
-use horizon_launcher::server_list;
+use volt_launcher::account::{self, Accounts};
+use volt_launcher::backend::{self, Release};
+use volt_launcher::github_mods;
+use volt_launcher::instances;
+use volt_launcher::loaders;
+use volt_launcher::native_mods;
+use volt_launcher::other_launchers;
+use volt_launcher::server_list;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Parser)]
 #[command(
-    name = "horizon-launcher",
+    name = "volt-launcher",
     version = backend::VERSION,
-    about = "Installs, prepares and starts Horizon. Without a subcommand, opens the window."
+    about = "Installs, prepares and starts Volt. Without a subcommand, opens the window."
 )]
 struct Cli {
     /// Print JSON instead of text, where a command has something to report
@@ -29,7 +29,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum JavaCmd {
-    /// The Java runtimes Horizon downloaded from Mojang and the ones installed on this computer
+    /// The Java runtimes Volt downloaded from Mojang and the ones installed on this computer
     List,
     /// Download Mojang's Java runtime: a major (8, 16, 17, 21, 25) or a component name from a
     /// version's JSON (java-runtime-delta)
@@ -90,7 +90,7 @@ enum ServersCmd {
         #[arg(long)]
         version: Option<String>,
     },
-    /// Run a horizon-server command on a server, for example: servers run "My server" -- status
+    /// Run a volt-server command on a server, for example: servers run "My server" -- status
     Run {
         /// The server's name or folder
         server: String,
@@ -219,7 +219,7 @@ enum InstanceCmd {
         #[arg(long)]
         copy: Option<String>,
         /// Make a Minecraft: Java Edition instance of this version (1.21.4, latest or
-        /// latest-snapshot) instead of a Horizon one
+        /// latest-snapshot) instead of a Volt one
         #[arg(long, conflicts_with = "copy")]
         minecraft: Option<String>,
         /// With this mod loader: fabric or quilt
@@ -271,7 +271,7 @@ enum InstanceCmd {
     /// Rename an instance (its folder stays)
     Rename { instance: String, name: String },
     /// Delete an instance: its folder (worlds, options, packs) goes to the Trash, where you can
-    /// get it back. Horizon's own instance stays
+    /// get it back. Volt's own instance stays
     Delete { instance: String },
     /// Set an instance's icon: a block or item name from your prepared files (grass_block),
     /// a colour (#3fa7d6), or none
@@ -283,9 +283,9 @@ enum InstanceCmd {
     },
     /// Make Play start this instance
     Select { instance: String },
-    /// Keep an instance on one installed Horizon version, or "latest" to follow updates again
+    /// Keep an instance on one installed Volt version, or "latest" to follow updates again
     Version { instance: String, version: String },
-    /// Export an instance (or a port) to share: its settings, packs, Horizon mods and the worlds
+    /// Export an instance (or a port) to share: its settings, packs, Volt mods and the worlds
     /// named, as a .mrpack (resource packs from Modrinth listed by download) or a zip. Never
     /// logs, screenshots or account data; worlds go without their per-player files
     Export {
@@ -434,7 +434,7 @@ enum PackKindArg {
     Shader,
 }
 
-impl From<PackKindArg> for horizon_launcher::packs::Kind {
+impl From<PackKindArg> for volt_launcher::packs::Kind {
     fn from(k: PackKindArg) -> Self {
         match k {
             PackKindArg::Resource => Self::Resource,
@@ -454,7 +454,7 @@ enum PacksCmd {
         #[arg(long)]
         instance: Option<String>,
     },
-    /// Copy a pack file in: a resource pack .zip, a shader pack .zip or a .hshader
+    /// Copy a pack file in: a resource pack .zip, a shader pack .zip or a .vshader
     Add {
         file: PathBuf,
         #[arg(long)]
@@ -538,7 +538,7 @@ enum ModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
-    /// Search for packs Horizon loads, or for what a Java instance runs (made for its
+    /// Search for packs Volt loads, or for what a Java instance runs (made for its
     /// Minecraft version and loader)
     Search {
         text: Vec<String>,
@@ -553,7 +553,7 @@ enum ModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
-    /// Say how well a Java mod runs in Horizon: its jar is downloaded (checksum checked),
+    /// Say how well a Java mod runs in Volt: its jar is downloaded (checksum checked),
     /// carried over and read; the answer is kept
     Check {
         project: String,
@@ -564,7 +564,7 @@ enum ModsCmd {
         source: SourceArg,
     },
     /// Install a pack and what it needs into an instance, by its id or slug (checksums
-    /// checked); a Java mod is ported into horizon-mods and turned on (a Java instance gets the
+    /// checked); a Java mod is ported into volt-mods and turned on (a Java instance gets the
     /// jar made for its version and loader in mods/); a modpack is imported as an instance of
     /// its own; a data pack goes into the world `--world` names
     Install {
@@ -594,7 +594,7 @@ enum ModsCmd {
     /// Install a native mod from a GitHub link (docs/native-mods.md, "Install from GitHub"):
     /// https://github.com/OWNER/REPO (its latest release, else its default branch),
     /// .../releases/tag/TAG, .../tree/REF or .../commit/SHA. Resolved to an exact release file or
-    /// commit, checked like a registry mod. NOT reviewed by the Horizon registry
+    /// commit, checked like a registry mod. NOT reviewed by the Volt registry
     AddGithub {
         url: String,
         /// The mod to install when the link holds several
@@ -632,7 +632,7 @@ enum ModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
-    /// Turn on a mod the browser installed (horizon-mods.txt, as the game's Options > Mods does;
+    /// Turn on a mod the browser installed (volt-mods.txt, as the game's Options > Mods does;
     /// in a Java instance, its file loses `.disabled`)
     Enable {
         project: String,
@@ -655,7 +655,7 @@ enum KindArg {
     Mod,
     Resource,
     Modpack,
-    /// Horizon's own shader packs (Horizon's registry only)
+    /// Volt's own shader packs (Volt's registry only)
     Shader,
     /// Data packs (Modrinth): install one into a world with `mods install <pack> --world <name>`
     Datapack,
@@ -666,17 +666,17 @@ enum SourceArg {
     Modrinth,
     /// CurseForge support is coming soon
     Curseforge,
-    /// Horizon's own registry: mods, modpacks and resource packs made for Horizon, reviewed
-    Horizon,
+    /// Volt's own registry: mods, modpacks and resource packs made for Volt, reviewed
+    Volt,
 }
 
 impl SourceArg {
-    fn get(self) -> Result<Box<dyn horizon_launcher::browser::Source>, String> {
-        use horizon_launcher::browser::{self, SourceId};
+    fn get(self) -> Result<Box<dyn volt_launcher::browser::Source>, String> {
+        use volt_launcher::browser::{self, SourceId};
         let id = match self {
             SourceArg::Modrinth => SourceId::Modrinth,
             SourceArg::Curseforge => SourceId::CurseForge,
-            SourceArg::Horizon => SourceId::Horizon,
+            SourceArg::Volt => SourceId::Volt,
         };
         browser::source(id).ok_or_else(|| browser::CURSEFORGE_SOON.into())
     }
@@ -684,7 +684,7 @@ impl SourceArg {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// List Horizon releases, or the installed versions
+    /// List Volt releases, or the installed versions
     Versions {
         /// Only the versions installed here (no network)
         #[arg(long)]
@@ -744,11 +744,11 @@ enum Cmd {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Native mods (experimental, docs/native-mods.md): compile mixin bundles on the Horizon
+    /// Native mods (experimental, docs/native-mods.md): compile mixin bundles on the Volt
     /// revision they pin, with the launcher's own Rust, as the version the "Native mods" instance
     /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
-        /// A mod folder (horizon-mixin.toml, or an unpacked .hnmod), or a folder of them
+        /// A mod folder (volt-mixin.toml, or an unpacked .hnmod), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
         folder: Option<PathBuf>,
         /// The instance whose installed native mods to build, and which then plays the build
@@ -762,7 +762,7 @@ enum Cmd {
         /// You read the mods' source and trust it with full access to this computer
         #[arg(long)]
         trust_native_code: bool,
-        /// Build mods made for different Horizon versions together anyway, on the newest of them
+        /// Build mods made for different Volt versions together anyway, on the newest of them
         #[arg(long)]
         allow_version_mismatch: bool,
     },
@@ -783,7 +783,7 @@ enum Cmd {
     /// ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default"
-    /// shows Horizon's landscape)
+    /// shows Volt's landscape)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
@@ -818,13 +818,13 @@ enum Cmd {
         #[arg(long)]
         crash: bool,
     },
-    /// Look for a newer Horizon release and launcher, and install them
+    /// Look for a newer Volt release and launcher, and install them
     Update {
         /// Only report what is available
         #[arg(long)]
         check: bool,
     },
-    /// Linux: put Horizon in the applications menu (an entry and the icon, under
+    /// Linux: put Volt in the applications menu (an entry and the icon, under
     /// $XDG_DATA_HOME), or take it out with --remove
     DesktopEntry {
         /// Remove the entry and the icon, and stop adding them back
@@ -886,8 +886,8 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<RustCmd>,
     },
-    /// Servers hosted with horizon-server (the Servers page): list them, create one, or run any
-    /// horizon-server command on one
+    /// Servers hosted with volt-server (the Servers page): list them, create one, or run any
+    /// volt-server command on one
     Servers {
         #[command(subcommand)]
         action: Option<ServersCmd>,
@@ -906,7 +906,7 @@ enum Cmd {
         test: bool,
     },
     /// Show or set No AI: on hides and turns off every AI feature (the companion, agent control,
-    /// horizon-ctl and both MCP servers); off, the default, makes them available
+    /// volt-ctl and both MCP servers); off, the default, makes them available
     NoAi {
         /// Omit to show the current state
         #[arg(value_parser = ["on", "off"])]
@@ -979,7 +979,7 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
                 .ok_or_else(|| format!("{value}: say stay, minimize or hide"))?
         }
         "accent" => {
-            use horizon_launcher::themes::Accent;
+            use volt_launcher::themes::Accent;
             s.accent = Accent::parse(value).ok_or_else(|| {
                 let names: Vec<_> = Accent::ALL.iter().map(|a| a.name()).collect();
                 format!("{value}: say {}", names.join(", "))
@@ -988,14 +988,14 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
         "background" => {
             s.background = match value.trim() {
                 "default" | "" => None,
-                file => Some(horizon_launcher::themes::keep_background(
+                file => Some(volt_launcher::themes::keep_background(
                     &backend::data_dir(),
                     std::path::Path::new(file),
                 )?),
             }
         }
         "language" => {
-            use horizon_launcher::i18n::Language;
+            use volt_launcher::i18n::Language;
             s.language = match value.trim() {
                 "system" | "default" => None,
                 code => Some(Language::parse(code).ok_or_else(|| {
@@ -1006,7 +1006,7 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
         "proxy" => {
             if value == "default" || value.is_empty() {
                 s.proxy = None;
-            } else if let Some(why) = horizon_launcher::proxy::refuse(value) {
+            } else if let Some(why) = volt_launcher::proxy::refuse(value) {
                 return Err(why);
             } else {
                 s.proxy = Some(value.trim().to_string());
@@ -1033,7 +1033,7 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "while_playing": s.while_playing.name(),
         "language": s.language.map_or("system", |l| l.code()),
         "accent": s.accent.name(),
-        "background": horizon_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
+        "background": volt_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
         "no_ai": backend::no_ai(),
     })
 }
@@ -1052,7 +1052,7 @@ pub fn run() -> Option<i32> {
     let cli = Cli::from_arg_matches(&definition.get_matches()).unwrap_or_else(|e| e.exit());
     let command = cli.command?;
     let result = match command {
-        Cmd::Mcp | Cmd::AgentConfig { .. } if no_ai => Err(horizon_core::no_ai::REFUSAL.into()),
+        Cmd::Mcp | Cmd::AgentConfig { .. } if no_ai => Err(volt_core::no_ai::REFUSAL.into()),
         Cmd::Mcp => crate::mcp::serve(),
         command => execute(command, cli.json),
     };
@@ -1167,7 +1167,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 );
             } else {
                 println!(
-                    "Installed {tag}. Prepare it next: horizon-launcher prepare --version {tag}"
+                    "Installed {tag}. Prepare it next: volt-launcher prepare --version {tag}"
                 );
             }
         }
@@ -1190,11 +1190,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let (folder, target) = match folder {
                 Some(folder) => (folder, None),
                 None => (
-                    horizon_launcher::native_mods::installed_mods(&target.home)?,
+                    volt_launcher::native_mods::installed_mods(&target.home)?,
                     Some(&target),
                 ),
             };
-            let built = horizon_launcher::native_mods::build(
+            let built = volt_launcher::native_mods::build(
                 &base,
                 &folder,
                 target,
@@ -1202,7 +1202,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 |step| eprintln!("{}", step.label()),
             )
             .map_err(|e| {
-                match e.starts_with(horizon_launcher::native_mods::MISMATCH) {
+                match e.starts_with(volt_launcher::native_mods::MISMATCH) {
                     true => {
                         format!("{e} They often still build: pass --allow-version-mismatch to try.")
                     }
@@ -1258,7 +1258,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 if version.is_some() || world.is_some() || join.is_some() || creative {
                     return Err(format!(
                         "{} plays Minecraft: Java Edition: --version, --world, --creative and \
-                         --join are for Horizon instances.",
+                         --join are for Volt instances.",
                         instance.name
                     ));
                 }
@@ -1275,7 +1275,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 let vars = instance.vars(cmd.get_program());
                 cmd.envs(vars.iter().map(|(k, v)| (k, v)));
                 let started = std::time::Instant::now();
-                let played = attached(horizon_launcher::launch::wrap(cmd, &instance.launch));
+                let played = attached(volt_launcher::launch::wrap(cmd, &instance.launch));
                 if let Err(e) = instances::record_play(&instance.id, started.elapsed()) {
                     eprintln!("Play time not saved: {e}");
                 }
@@ -1307,7 +1307,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             cmd.envs(accounts.look_env());
             let vars = instance.vars(cmd.get_program());
             cmd.envs(vars.iter().map(|(k, v)| (k, v)));
-            let played = attached(horizon_launcher::launch::wrap(cmd, &instance.launch));
+            let played = attached(volt_launcher::launch::wrap(cmd, &instance.launch));
             if let Err(e) = instances::record_play(&instance.id, started.elapsed()) {
                 eprintln!("Play time not saved: {e}");
             }
@@ -1377,7 +1377,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             }
         }
         Cmd::AgentConfig { test: true, .. } => {
-            let tools = horizon_launcher::agents::self_test(backend::exe_path())?;
+            let tools = volt_launcher::agents::self_test(backend::exe_path())?;
             if as_json {
                 json(serde_json::json!({ "answered": true, "tools": tools }));
             } else {
@@ -1385,7 +1385,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             }
         }
         Cmd::AgentConfig { client, .. } => {
-            use horizon_launcher::agents;
+            use volt_launcher::agents;
             let exe = backend::exe_path();
             if as_json {
                 let mut all = agents::json(exe);
@@ -1423,7 +1423,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 let value = value.ok_or("settings KEY VALUE: the value is missing")?;
                 set_setting(&mut settings, &key, &value)?;
                 settings.save();
-                horizon_launcher::proxy::announce(settings.proxy.clone());
+                volt_launcher::proxy::announce(settings.proxy.clone());
             }
             let all = settings_json(&settings);
             if as_json {
@@ -1453,7 +1453,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             }
         }
         Cmd::ShareLog { instance } => {
-            use horizon_launcher::game_log;
+            use volt_launcher::game_log;
             let i = match instance {
                 Some(name) => instances::find(&name)?,
                 None => instances::selected(),
@@ -1471,7 +1471,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             } else {
                 println!("{}", shared.url);
                 println!(
-                    "Delete it: horizon-launcher unshare-log {}:{}",
+                    "Delete it: volt-launcher unshare-log {}:{}",
                     shared.id, shared.token
                 );
             }
@@ -1480,7 +1480,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let (id, token) = shared
                 .split_once(':')
                 .ok_or("Give the \"<id>:<token>\" share-log printed.")?;
-            horizon_launcher::game_log::unshare(&horizon_launcher::game_log::Shared {
+            volt_launcher::game_log::unshare(&volt_launcher::game_log::Shared {
                 url: String::new(),
                 id: id.into(),
                 token: token.into(),
@@ -1502,11 +1502,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             settings.desktop_entry = Some(!remove);
             settings.save();
             if remove {
-                horizon_launcher::desktop::remove()?;
-                println!("Removed Horizon from the applications menu.");
+                volt_launcher::desktop::remove()?;
+                println!("Removed Volt from the applications menu.");
             } else {
-                horizon_launcher::desktop::install(backend::exe_path())?;
-                println!("Horizon is in the applications menu.");
+                volt_launcher::desktop::install(backend::exe_path())?;
+                println!("Volt is in the applications menu.");
             }
         }
         Cmd::Worlds { action } => worlds(
@@ -1540,7 +1540,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
 }
 
 fn java(action: JavaCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::java;
+    use volt_launcher::java;
     match action {
         JavaCmd::List => {
             let mut all = java::mojang_runtimes(&java::runtimes_dir());
@@ -1548,11 +1548,11 @@ fn java(action: JavaCmd, as_json: bool) -> Result<(), String> {
             if as_json {
                 json(serde_json::json!(all));
             } else if all.is_empty() {
-                println!("No Java yet. Horizon downloads Mojang's when an instance needs it.");
+                println!("No Java yet. Volt downloads Mojang's when an instance needs it.");
             } else {
                 for r in &all {
                     let from = match r.source {
-                        java::Source::Mojang => "Mojang's, downloaded by Horizon",
+                        java::Source::Mojang => "Mojang's, downloaded by Volt",
                         java::Source::Installed => "installed",
                     };
                     println!("Java {}  ({from})\n  {}", r.version, r.home.display());
@@ -1577,7 +1577,7 @@ fn java(action: JavaCmd, as_json: bool) -> Result<(), String> {
 }
 
 fn rust(action: RustCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::rust_toolchain as rust;
+    use volt_launcher::rust_toolchain as rust;
     match action {
         RustCmd::Status => {
             let installed = rust::installed();
@@ -1595,7 +1595,7 @@ fn rust(action: RustCmd, as_json: bool) -> Result<(), String> {
                 match (&installed, &version) {
                     (Some(t), Some(v)) => println!("{v} in {}", t.dir.display()),
                     _ => println!(
-                        "Rust {} is not installed (`horizon-launcher rust install`).",
+                        "Rust {} is not installed (`volt-launcher rust install`).",
                         rust::VERSION
                     ),
                 }
@@ -1628,19 +1628,19 @@ fn update(check: bool, as_json: bool) -> Result<(), String> {
     let updates = backend::check_updates()?;
     if as_json && check {
         json(serde_json::json!({
-            "horizon": updates.horizon.as_ref().map(|r| &r.tag),
+            "volt": updates.volt.as_ref().map(|r| &r.tag),
             "launcher": updates.launcher.as_ref().and_then(|r| backend::launcher_version(&r.tag)),
             "launcher_current": backend::VERSION,
         }));
         return Ok(());
     }
-    match &updates.horizon {
-        None => println!("Horizon: up to date."),
-        Some(r) if check => println!("Horizon: {} is available.", r.tag),
+    match &updates.volt {
+        None => println!("Volt: up to date."),
+        Some(r) if check => println!("Volt: {} is available.", r.tag),
         Some(r) => {
             let tag =
                 backend::install_tag(&r.tag, true, progress(format!("Installing {}", r.tag)))?;
-            println!("Horizon: installed {tag}.");
+            println!("Volt: installed {tag}.");
         }
     }
     match &updates.launcher {
@@ -1670,7 +1670,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
         accounts
             .find(who)
             .cloned()
-            .ok_or_else(|| format!("No signed-in account {who}. See `horizon-launcher account`."))
+            .ok_or_else(|| format!("No signed-in account {who}. See `volt-launcher account`."))
     };
     match action {
         AccountCmd::List => {
@@ -1690,7 +1690,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             } else if accounts.accounts.is_empty() && accounts.offline.is_empty() {
                 println!(
                     "No Microsoft account signed in. Play needs one that owns Minecraft: Java \
-                     Edition: horizon-launcher account sign-in"
+                     Edition: volt-launcher account sign-in"
                 );
             } else {
                 for a in &accounts.accounts {
@@ -1776,7 +1776,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             no_skin,
             no_cape,
         } => {
-            use horizon_launcher::skins::{self, Model};
+            use volt_launcher::skins::{self, Model};
             let name = accounts
                 .offline
                 .iter()
@@ -1824,7 +1824,7 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
             }
         }
         AccountCmd::ForgetOffline { name } => {
-            accounts.remove_offline(&name, &horizon_launcher::skins::dir())?;
+            accounts.remove_offline(&name, &volt_launcher::skins::dir())?;
             accounts.save()?;
             println!("Forgot the offline name {name}.");
         }
@@ -1834,8 +1834,8 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
 
 /// `data`: the same consent as Settings → Data collection.
 fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::telemetry;
-    let review = |item: &horizon_telemetry::Item, yes: bool| -> Result<bool, String> {
+    use volt_launcher::telemetry;
+    let review = |item: &volt_telemetry::Item, yes: bool| -> Result<bool, String> {
         println!(
             "{}",
             serde_json::to_string_pretty(item).map_err(|e| e.to_string())?
@@ -1869,9 +1869,9 @@ fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
                 println!("{name}: {}", if on { "on" } else { "off" });
             }
             println!("Waiting to be sent: {}", status["waiting"]);
-            match horizon_telemetry::endpoint() {
+            match volt_telemetry::endpoint() {
                 Some(url) => println!("Server: {url}"),
-                None => println!("Server: turned off (HORIZON_TELEMETRY_URL=off), nothing is sent"),
+                None => println!("Server: turned off (VOLT_TELEMETRY_URL=off), nothing is sent"),
             }
         }
         DataCmd::Allow { kinds } => {
@@ -1890,14 +1890,14 @@ fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
         DataCmd::Delete => println!("{}", telemetry::delete_my_data()?),
         DataCmd::Send => println!("{:?}", telemetry::send()),
         DataCmd::Bug { text, log, yes } => {
-            telemetry::ensure_allowed(horizon_telemetry::Kind::Bug)?;
+            telemetry::ensure_allowed(volt_telemetry::Kind::Bug)?;
             let item = telemetry::bug_report(&text, log)?;
             if review(&item, yes)? {
                 println!("{}", telemetry::submit(&item)?);
             }
         }
         DataCmd::Benchmark { file, yes } => {
-            telemetry::ensure_allowed(horizon_telemetry::Kind::Benchmark)?;
+            telemetry::ensure_allowed(volt_telemetry::Kind::Benchmark)?;
             let item = telemetry::benchmark_report(&file)?;
             if review(&item, yes)? {
                 println!("{}", telemetry::submit(&item)?);
@@ -1908,13 +1908,13 @@ fn data(action: DataCmd, as_json: bool) -> Result<(), String> {
 }
 
 fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::servers::{self, NewServer, World};
+    use volt_launcher::servers::{self, NewServer, World};
     let find = |which: &str| {
         servers::list()
             .into_iter()
             .find(|e| e.name == which || e.dir == std::path::Path::new(which))
             .ok_or_else(|| {
-                format!("No server called {which}: `horizon-launcher servers` lists them")
+                format!("No server called {which}: `volt-launcher servers` lists them")
             })
     };
     match action {
@@ -1932,7 +1932,7 @@ fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
                         .collect(),
                 ));
             } else if list.is_empty() {
-                println!("No server yet: horizon-launcher servers create --accept-eula");
+                println!("No server yet: volt-launcher servers create --accept-eula");
             }
             for e in list.iter().filter(|_| !as_json) {
                 println!(
@@ -1986,7 +1986,7 @@ fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
             let tag = backend::resolve_version(version.as_deref())?;
             servers::set_up(&tag)?;
             println!(
-                "Servers run Horizon {}",
+                "Servers run Volt {}",
                 servers::runtime_release().unwrap_or(tag)
             );
         }
@@ -1997,7 +1997,7 @@ fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
                 .status()
                 .map_err(|e| e.to_string())?;
             if !status.success() {
-                return Err(format!("horizon-server exited with {status}"));
+                return Err(format!("volt-server exited with {status}"));
             }
         }
         ServersCmd::Forget { server } => {
@@ -2024,7 +2024,7 @@ fn github_native(
     trust: bool,
 ) -> Result<(), String> {
     if java {
-        return Err("Native mods from GitHub are for Horizon instances.".into());
+        return Err("Native mods from GitHub are for Volt instances.".into());
     }
     println!("{}", found.label());
     println!("Source, to read: {}", found.source_url());
@@ -2063,13 +2063,13 @@ fn github_native(
         settings.native_mods_noticed = true;
         settings.save();
     }
-    println!("Build it next: horizon-launcher native-build --trust-native-code");
+    println!("Build it next: volt-launcher native-build --trust-native-code");
     Ok(())
 }
 
 fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::browser::{horizon, installed, java_instance, Kind, Query, SourceId};
-    use horizon_launcher::modpacks;
+    use volt_launcher::browser::{volt, installed, java_instance, Kind, Query, SourceId};
+    use volt_launcher::modpacks;
     // What the browser installs goes into an instance's game folder; Java mods' checks are kept
     // in the default one, shared by all.
     let instance = match &action {
@@ -2101,10 +2101,10 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
     let from_registry = installed::Installed::load(&home)
         .entries
         .iter()
-        .any(|e| e.source == SourceId::Horizon);
+        .any(|e| e.source == SourceId::Volt);
     if from_registry {
-        if let Ok(index) = horizon::index() {
-            for said in horizon::turn_off_revoked(&index, &home) {
+        if let Ok(index) = volt::index() {
+            for said in volt::turn_off_revoked(&index, &home) {
                 eprintln!("{said}");
             }
         }
@@ -2117,10 +2117,10 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 json(list.iter().map(entry_json).collect());
             } else if list.is_empty() && github_mods::origins(&home).is_empty() {
                 println!(
-                    "Nothing installed from the browser yet: horizon-launcher mods search <text>"
+                    "Nothing installed from the browser yet: volt-launcher mods search <text>"
                 );
             }
-            for o in horizon_launcher::github_mods::origins(&home)
+            for o in volt_launcher::github_mods::origins(&home)
                 .iter()
                 .filter(|_| !as_json && java.is_none())
             {
@@ -2190,18 +2190,18 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                         "id": p.id, "slug": p.slug, "title": p.title, "summary": p.summary,
                         "author": p.author, "downloads": p.downloads, "page": p.page,
                         "license": p.license, "support": support.label(), "reason": support.reason(),
-                        "about": if p.source == SourceId::Horizon { horizon::trust_and_capabilities(&p.id) } else { Vec::new() },
+                        "about": if p.source == SourceId::Volt { volt::trust_and_capabilities(&p.id) } else { Vec::new() },
                     })
                 }).collect());
             } else {
                 if datapack && !found.is_empty() {
-                    println!("{}\n", horizon_launcher::browser::DATAPACK_SUPPORT);
+                    println!("{}\n", volt_launcher::browser::DATAPACK_SUPPORT);
                 }
                 for p in &found {
                     let support = p.support();
-                    if p.source == SourceId::Horizon {
+                    if p.source == SourceId::Volt {
                         println!("{}  ({})  {}\n  {}", p.title, p.slug, p.author, p.summary);
-                        for line in horizon::trust_and_capabilities(&p.id) {
+                        for line in volt::trust_and_capabilities(&p.id) {
                             println!("  {line}");
                         }
                         continue;
@@ -2220,9 +2220,9 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                         p.summary
                     );
                     if unchecked {
-                        println!("  horizon-launcher mods check {}", p.slug);
+                        println!("  volt-launcher mods check {}", p.slug);
                     } else if datapack {
-                        println!("  horizon-launcher mods install {} --world <world>", p.slug);
+                        println!("  volt-launcher mods install {} --world <world>", p.slug);
                     } else if let Some(why) = support.reason() {
                         println!("  {why}");
                     }
@@ -2239,7 +2239,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
             if p.kind != Kind::Mod {
                 return Err(format!("{} isn't a Java mod.", p.title));
             }
-            let (version, c) = horizon_launcher::browser::java::check_project(
+            let (version, c) = volt_launcher::browser::java::check_project(
                 &home,
                 &*source,
                 &p,
@@ -2279,7 +2279,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
             let source = source.get()?;
             let p = source.project(&project)?;
             if let Some(world) = world {
-                let world = horizon_launcher::worlds::find(&home, &world)?;
+                let world = volt_launcher::worlds::find(&home, &world)?;
                 let done = installed::install_datapack(
                     &*source,
                     &p,
@@ -2311,11 +2311,11 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     p.title
                 ));
             }
-            if p.kind == Kind::Modpack && p.source == SourceId::Horizon {
-                let pack = horizon::pack::install(&p.id, &line)?;
+            if p.kind == Kind::Modpack && p.source == SourceId::Volt {
+                let pack = volt::pack::install(&p.id, &line)?;
                 if as_json {
                     json(
-                        serde_json::json!({"pack": pack.id, "version": pack.version, "mods": pack.mods, "home": horizon::pack::home(&pack.work)}),
+                        serde_json::json!({"pack": pack.id, "version": pack.version, "mods": pack.mods, "home": volt::pack::home(&pack.work)}),
                     );
                 } else {
                     println!(
@@ -2324,7 +2324,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                         pack.version,
                         pack.mods.join(", ")
                     );
-                    println!("Play it: horizon-launcher modpack play {}", pack.id);
+                    println!("Play it: volt-launcher modpack play {}", pack.id);
                 }
                 return Ok(());
             }
@@ -2339,7 +2339,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     .map(|t| backend::resources(&t));
                 let pack = modpacks::import_and_port(&file, resources.as_deref(), log)?;
                 println!("{} ({})", modpacks::outcome(&pack), pack.summary());
-                println!("Play it: horizon-launcher modpack play {}", pack.slug);
+                println!("Play it: volt-launcher modpack play {}", pack.slug);
                 return Ok(());
             }
             let done = match &java {
@@ -2384,7 +2384,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 });
             }
             for e in chosen {
-                let Some(source) = horizon_launcher::browser::source(e.source) else {
+                let Some(source) = volt_launcher::browser::source(e.source) else {
                     println!("{}: {} isn't available here.", e.title, e.source.label());
                     continue;
                 };
@@ -2437,14 +2437,14 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
             ..
         } => {
             if java.is_some() {
-                return Err("Native mods from GitHub are for Horizon instances.".into());
+                return Err("Native mods from GitHub are for Volt instances.".into());
             }
             let mut origins = github_mods::origins(&home);
             origins.retain(|o| id.as_deref().is_none_or(|i| o.id == i));
             if origins.is_empty() {
                 return Err(match id {
                     Some(i) => format!("{i} wasn't installed from GitHub."),
-                    None => "No native mod was installed from GitHub: horizon-launcher mods add-github <url>".into(),
+                    None => "No native mod was installed from GitHub: volt-launcher mods add-github <url>".into(),
                 });
             }
             for o in origins {
@@ -2490,13 +2490,13 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 .lookup(&project)
                 .cloned()
                 .ok_or_else(|| format!("{project} wasn't installed by the browser."))?;
-            let id = horizon::mod_id(&e)
+            let id = volt::mod_id(&e)
                 .filter(|_| e.kind == Kind::Mod)
                 .ok_or_else(|| format!("{} isn't a mod: only mods turn on and off.", e.title))?;
             if on {
-                if let Some(r) = horizon::index()
+                if let Some(r) = volt::index()
                     .ok()
-                    .filter(|_| e.source == SourceId::Horizon)
+                    .filter(|_| e.source == SourceId::Volt)
                     .and_then(|i| {
                         i.revoked(&e.project, e.checksum.trim_start_matches("SHA-256:"))
                             .cloned()
@@ -2505,7 +2505,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                     return Err(format!("{} was taken down: {}", e.title, r.reason));
                 }
             }
-            horizon_launcher::browser::java::set_enabled(&home, id, on)?;
+            volt_launcher::browser::java::set_enabled(&home, id, on)?;
             println!("{} is {}.", e.title, if on { "on" } else { "off" });
         }
     }
@@ -2514,7 +2514,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
 
 /// The other launchers' instances in `folder`, else in their default folders.
 fn other_instances(folder: Option<&Path>) -> Result<Vec<other_launchers::Found>, String> {
-    use horizon_launcher::sources::{Folders, Os};
+    use volt_launcher::sources::{Folders, Os};
     Ok(match folder {
         Some(dir) if !dir.is_dir() => return Err(format!("{} isn't a folder.", dir.display())),
         Some(dir) => other_launchers::in_folder(dir, None),
@@ -2545,7 +2545,7 @@ fn other_json(f: &other_launchers::Found) -> serde_json::Value {
 /// Runs the instance's post-exit command in this terminal, if it has one, and waits for it.
 fn after_exit(instance: &instances::Instance, vars: &[(&'static str, std::ffi::OsString)]) {
     let Some(mut cmd) =
-        horizon_launcher::launch::after_exit(&instance.launch, &instance.home, vars)
+        volt_launcher::launch::after_exit(&instance.launch, &instance.home, vars)
     else {
         return;
     };
@@ -2645,7 +2645,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             loader_version,
             ..
         } => {
-            let versions = horizon_launcher::minecraft_versions::load()?;
+            let versions = volt_launcher::minecraft_versions::load()?;
             let id = &versions.find(&version)?.id;
             // The loader first: a version it doesn't have makes no instance.
             let loader = loader
@@ -2667,7 +2667,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
         } => {
             let Some(java) = instances::find(&instance)?.java else {
                 return Err(format!(
-                    "{instance} is a Horizon instance: mod loaders are for Java instances."
+                    "{instance} is a Volt instance: mod loaders are for Java instances."
                 ));
             };
             if list {
@@ -2691,7 +2691,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             })?)
         }
         InstanceCmd::Versions { snapshots, old } => {
-            let versions = horizon_launcher::minecraft_versions::load()?;
+            let versions = volt_launcher::minecraft_versions::load()?;
             let shown: Vec<_> = versions.of(snapshots, old).collect();
             if as_json {
                 json(serde_json::json!(shown));
@@ -2713,7 +2713,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             let window = window.as_deref().map(parse_window).transpose()?;
             if instances::find(&instance)?.java.is_none() {
                 return Err(format!(
-                    "{instance} is a Horizon instance: Horizon is not a Java program."
+                    "{instance} is a Volt instance: Volt is not a Java program."
                 ));
             }
             changed(instances::edit(&instance, |m| {
@@ -2766,7 +2766,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             dedicated_gpu,
             post_exit,
         } => {
-            use horizon_launcher::launch;
+            use volt_launcher::launch;
             let env = env.as_deref().map(launch::parse_env).transpose()?;
             let [gamemode, mangohud, dedicated_gpu] =
                 [gamemode, mangohud, dedicated_gpu].map(|v| v.as_deref().map(on_off));
@@ -2853,7 +2853,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             }
         }
         InstanceCmd::Shortcut { instance, remove } => {
-            use horizon_launcher::shortcut;
+            use volt_launcher::shortcut;
             let i = match instance {
                 Some(name) => instances::find(&name)?,
                 None => instances::selected(),
@@ -2903,7 +2903,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                 [] => {
                     return Err(format!(
                         "No other launcher has an instance called {name}: \
-                         horizon-launcher instance others"
+                         volt-launcher instance others"
                     ))
                 }
                 _ => {
@@ -2928,8 +2928,8 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             changed(made);
         }
         InstanceCmd::Import { file, instance } => {
-            use horizon_launcher::import::{self, Dropped};
-            use horizon_launcher::modpacks;
+            use volt_launcher::import::{self, Dropped};
+            use volt_launcher::modpacks;
             match import::what(&file)? {
                 Dropped::Instance => {
                     let i = import::import_instance(&file, &|line, _| eprintln!("{line}"))?;
@@ -2937,7 +2937,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                         json(value(&i, false));
                     } else {
                         println!(
-                            "Made the instance {} in {}: horizon-launcher instance select \"{}\"",
+                            "Made the instance {} in {}: volt-launcher instance select \"{}\"",
                             i.name,
                             i.home.display(),
                             i.name
@@ -2948,7 +2948,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                     let pack = modpacks::import(&file, &|line: String| eprintln!("{line}"))?;
                     println!("{} ({})", modpacks::outcome(&pack), pack.summary());
                     println!(
-                        "Port and play it: horizon-launcher modpack port {}",
+                        "Port and play it: volt-launcher modpack port {}",
                         pack.slug
                     );
                 }
@@ -2957,15 +2957,15 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                         Some(name) => instances::find(&name)?,
                         None => instances::selected(),
                     };
-                    let p = horizon_launcher::packs::add(&i.home, &file)?;
+                    let p = volt_launcher::packs::add(&i.home, &file)?;
                     println!(
-                        "Added {} to {}: turn it on with horizon-launcher packs on",
+                        "Added {} to {}: turn it on with volt-launcher packs on",
                         p.title, i.name
                     );
                 }
                 Dropped::DataPack => {
                     return Err(format!(
-                        "{} is a data pack: put it into a world with horizon-launcher worlds \
+                        "{} is a data pack: put it into a world with volt-launcher worlds \
                          datapack-add <world> <file>",
                         file.display()
                     ))
@@ -2978,7 +2978,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             world,
             out,
         } => {
-            use horizon_launcher::export::{self, Format};
+            use volt_launcher::export::{self, Format};
             let i = match instance {
                 Some(name) => instances::find(&name)?,
                 None => instances::selected(),
@@ -2989,7 +2989,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
             };
             let worlds = world
                 .iter()
-                .map(|w| horizon_launcher::worlds::find(&i.home, w).map(|w| w.folder))
+                .map(|w| volt_launcher::worlds::find(&i.home, w).map(|w| w.folder))
                 .collect::<Result<Vec<_>, _>>()?;
             let linked = match format {
                 Format::Mrpack => export::linkable(&i.home, &export::from_modrinth),
@@ -3028,7 +3028,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
 }
 
 fn game_packs(action: PacksCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::packs::{self, Kind};
+    use volt_launcher::packs::{self, Kind};
     let home = |instance: Option<String>| -> Result<PathBuf, String> {
         Ok(match instance {
             Some(name) => instances::find(&name)?.home,
@@ -3100,11 +3100,11 @@ fn game_packs(action: PacksCmd, as_json: bool) -> Result<(), String> {
 
 fn set_pack(
     home: &std::path::Path,
-    kind: horizon_launcher::packs::Kind,
+    kind: volt_launcher::packs::Kind,
     query: &str,
     on: bool,
 ) -> Result<(), String> {
-    use horizon_launcher::packs;
+    use volt_launcher::packs;
     let pack = packs::find(home, kind, query)?;
     packs::set_enabled(home, &pack, on)?;
     println!("{} is {}.", pack.title, if on { "on" } else { "off" });
@@ -3112,7 +3112,7 @@ fn set_pack(
 }
 
 fn screenshots(action: ScreenshotsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::screenshots;
+    use volt_launcher::screenshots;
     let home = |instance: Option<String>| -> Result<PathBuf, String> {
         Ok(match instance {
             Some(name) => instances::find(&name)?.home,
@@ -3204,8 +3204,8 @@ fn multiplayer(action: MultiplayerCmd, as_json: bool) -> Result<(), String> {
 }
 
 fn worlds(action: WorldsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::datapacks;
-    use horizon_launcher::worlds::{self, World};
+    use volt_launcher::datapacks;
+    use volt_launcher::worlds::{self, World};
     let home = |instance: Option<String>| -> Result<PathBuf, String> {
         Ok(match instance {
             Some(name) => instances::find(&name)?.home,
@@ -3307,13 +3307,13 @@ fn worlds(action: WorldsCmd, as_json: bool) -> Result<(), String> {
 }
 
 fn modpack(action: ModpackCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::browser::horizon;
-    use horizon_launcher::modpacks::{self, Imported};
-    use horizon_port_pack::report::Status;
+    use volt_launcher::browser::volt;
+    use volt_launcher::modpacks::{self, Imported};
+    use volt_port_pack::report::Status;
     let log = &|line: String| eprintln!("{line}");
     let work = |pack: &str| {
-        let registry = horizon::pack::packs_dir().join(pack);
-        if horizon::pack::is_pack(&registry) {
+        let registry = volt::pack::packs_dir().join(pack);
+        if volt::pack::is_pack(&registry) {
             return Ok(registry);
         }
         let work = modpacks::ports_dir().join(pack);
@@ -3349,19 +3349,19 @@ fn modpack(action: ModpackCmd, as_json: bool) -> Result<(), String> {
     match action {
         ModpackCmd::List => {
             let packs = modpacks::list();
-            let registry = horizon::pack::list();
+            let registry = volt::pack::list();
             if packs.is_empty() && registry.is_empty() && !as_json {
-                println!("No modpack imported yet: horizon-launcher modpack import <pack>");
+                println!("No modpack imported yet: volt-launcher modpack import <pack>");
             }
             packs.iter().for_each(show);
             for p in &registry {
                 if as_json {
                     json(
-                        serde_json::json!({"pack": p.id, "name": p.name, "version": p.version, "source": "horizon", "mods": p.mods}),
+                        serde_json::json!({"pack": p.id, "name": p.name, "version": p.version, "source": "volt", "mods": p.mods}),
                     );
                 } else {
                     println!(
-                        "{} {}  ({}, from Horizon's registry)\n  {}",
+                        "{} {}  ({}, from Volt's registry)\n  {}",
                         p.name,
                         p.version,
                         p.id,
@@ -3421,7 +3421,7 @@ mod tests {
     #[test]
     fn play_takes_extra_arguments_that_start_with_hyphens() {
         let cli = Cli::try_parse_from([
-            "horizon-launcher",
+            "volt-launcher",
             "play",
             "--arg",
             "--server-thread",
@@ -3438,7 +3438,7 @@ mod tests {
     #[test]
     fn game_args_takes_one_line_that_starts_with_hyphens() {
         let cli = Cli::try_parse_from([
-            "horizon-launcher",
+            "volt-launcher",
             "game-args",
             "--server-thread --render-distance 40",
         ])
@@ -3466,7 +3466,7 @@ mod tests {
     #[test]
     fn mods_commands_name_their_instance() {
         let parse = |args: &[&str]| {
-            let cli = Cli::try_parse_from([&["horizon-launcher", "mods"], args].concat()).unwrap();
+            let cli = Cli::try_parse_from([&["volt-launcher", "mods"], args].concat()).unwrap();
             match cli.command {
                 Some(Cmd::Mods { action }) => action,
                 _ => panic!("expected mods"),
@@ -3520,7 +3520,7 @@ mod tests {
             Some(ModsCmd::Search { instance: Some(i), .. }) if i == "A"
         ));
         assert!(
-            Cli::try_parse_from(["horizon-launcher", "mods", "check", "x", "--instance", "A"])
+            Cli::try_parse_from(["volt-launcher", "mods", "check", "x", "--instance", "A"])
                 .is_err()
         );
     }

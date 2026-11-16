@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Volt
+GenericName=Game launcher
+Comment=Install, prepare and play Volt, Minecraft: Java Edition 26.3 rewritten in Rust
+Exec=volt-launcher
+Icon=volt
+Terminal=false
+Categories=Game;
+StartupWMClass=volt-launcher

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 fn scratch(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
-        "horizon-launcher-servers-{name}-{}",
+        "volt-launcher-servers-{name}-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -195,10 +195,10 @@ fn the_official_server_is_put_on_top_once() {
     // Already there under the player's own name and spelling: not duplicated.
     let home = scratch("official-present");
     let mut list = List::load(&home);
-    list.add("SMP", "Horizon.Bunchy7s.dev:25565").unwrap();
+    list.add("SMP", "Volt.Bunchy7s.dev:25565").unwrap();
     list.save(&home).unwrap();
     add_official(&home).unwrap();
-    assert_eq!(ips(&home), ["Horizon.Bunchy7s.dev:25565"]);
+    assert_eq!(ips(&home), ["Volt.Bunchy7s.dev:25565"]);
     // A list that can't be read is left alone, and offered again once it can be.
     let home = scratch("official-broken");
     fs::write(home.join(FILE), b"not nbt").unwrap();

@@ -6,14 +6,14 @@ Local scratch document; delete it if it should not stay in the tree.
 ## What this repository is
 
 `entitybrian69-bit/Volt-launcher` is the **Volt Launcher** distribution of
-**Horizon Android** — an unofficial Android fork of
-[Horizon](https://github.com/ludovic111/horizon), a from-scratch Rust + wgpu
+**Volt Android** — an unofficial Android fork of
+[Volt](https://github.com/ludovic111/volt), a from-scratch Rust + wgpu
 reimplementation of **Minecraft: Java Edition 26.3**. Players install an APK, the
 app downloads Mojang's original resources itself, and the engine runs natively on
 the phone (no Java runtime, no JVM, no Minecraft jar at play time).
 
 - Vanilla Java 26.3 is the specification; the PC/desktop launcher is
-  GPUI/Rust (`launcher/`), the game is `crates/horizon-client` (+ 32 more crates).
+  GPUI/Rust (`launcher/`), the game is `crates/volt-client` (+ 32 more crates).
 - Branding on top of upstream: `ae.net.Voltlauncher` (stable) and
   `ae.net.Voltlauncher.debug` ("Volt Debug"), Volt theme (Liquid Glass /
   Liquid Black), dashboard, Controls Studio, mod catalog, updater.
@@ -22,14 +22,14 @@ the phone (no Java runtime, no JVM, no Minecraft jar at play time).
 
 | Path | What it holds |
 | --- | --- |
-| `crates/horizon-client` | The game: `src/lib.rs` (flat modules) + `src/main.rs` → `game.rs`, `game/`; also `bin/horizon-ctl` and the dedicated server |
-| `crates/horizon-client/src/android/` | **Volt Android launcher UI**: `launcher.rs`, `launcher_pages.rs`, `catalog.rs`, `controls_studio.rs`, `volt_updater.rs`, `volt_accounts.rs`, `login.rs`, `secure_store.rs`, `diagnostics.rs`, `native_ime.rs`, … |
-| `crates/horizon-client/src/game/` | Gameplay per feature: `android_input.rs`, `pad.rs`, `touch_ui`, `remote*.rs`, `lan*.rs`, `integrated.rs`, `dedicated.rs`, mods, screens |
-| `crates/horizon-client-render` | World data, rendering, HUD/menus/settings (~80 modules re-exported as `horizon_client::*`) |
-| `crates/horizon-world` | Vanilla world data: NBT, regions, chunks, `datafix/`, `worldgen/`, `level/` |
-| `crates/horizon-core`, `horizon-protocol`, `horizon-assets`, `horizon-command`, `horizon-items`, `horizon-mod*`, `horizon-theme`, … | 33 crates total (see `AGENTS.md` table) |
-| `crates/horizon-android` | The `cdylib` `libhorizon_android.so` wrapper (NativeActivity + Rust IME bridge) |
-| `crates/horizon-client/src/touch*`, `ui_theme.rs` | Touch schemes (joystick/D-pad × crosshair/tap), HUD editor, theme |
+| `crates/volt-client` | The game: `src/lib.rs` (flat modules) + `src/main.rs` → `game.rs`, `game/`; also `bin/volt-ctl` and the dedicated server |
+| `crates/volt-client/src/android/` | **Volt Android launcher UI**: `launcher.rs`, `launcher_pages.rs`, `catalog.rs`, `controls_studio.rs`, `volt_updater.rs`, `volt_accounts.rs`, `login.rs`, `secure_store.rs`, `diagnostics.rs`, `native_ime.rs`, … |
+| `crates/volt-client/src/game/` | Gameplay per feature: `android_input.rs`, `pad.rs`, `touch_ui`, `remote*.rs`, `lan*.rs`, `integrated.rs`, `dedicated.rs`, mods, screens |
+| `crates/volt-client-render` | World data, rendering, HUD/menus/settings (~80 modules re-exported as `volt_client::*`) |
+| `crates/volt-world` | Vanilla world data: NBT, regions, chunks, `datafix/`, `worldgen/`, `level/` |
+| `crates/volt-core`, `volt-protocol`, `volt-assets`, `volt-command`, `volt-items`, `volt-mod*`, `volt-theme`, … | 33 crates total (see `AGENTS.md` table) |
+| `crates/volt-android` | The `cdylib` `libvolt_launcher.so` wrapper (NativeActivity + Rust IME bridge) |
+| `crates/volt-client/src/touch*`, `ui_theme.rs` | Touch schemes (joystick/D-pad × crosshair/tap), HUD editor, theme |
 | `packaging/android/` | `AndroidManifest.xml`, `build.gradle` (namespaces/app ids/versions), `java/` (2 stock-Java classes), `res/`, `aidl/` |
 | `tools/android_*.py` | `android_build.py` (Gradle + NDK + signing + audit), `android_prepare.py` (engine tables from your own MC install), `android_release.py`, `android_ctl.py`, probes |
 | `tests/test_android*.py` | Release audit, source export, release schedule, public-tree checks |
@@ -69,7 +69,7 @@ so it never overwrites a stable install.
 | `arena/42c008a1-volt-launcher` | `e11d9c788` (2026-11-07) | merged (PR #1): Volt branding + screenshot gallery (docs only) |
 | `arena/c3d6069d-volt-launcher` | `6b225e4d6` (2026-11-13) | **PR #2, open, stale** — 4 commits, none in `android` or the PR #4 tip: dark-glass monochrome overhaul, app branding, APK rename, then it pulls in the full PR #4 branch. Likely to be superseded by PR #4 (which already carries Liquid Glass/Liquid Black). |
 | `arena/58a3cdf9-volt-launcher` | `3c6a6ad50` (2026-10-31) | no PR; "Brand Android app as Volt Launcher" — early predecessor, 1,700+ lines of docs behind |
-| `arena/a4df1109-volt-launcher` | `9199f02ad` (2026-11-14) | no PR; spike that reverted an extra `horizon-client-render` dep that broke the weave |
+| `arena/a4df1109-volt-launcher` | `9199f02ad` (2026-11-14) | no PR; spike that reverted an extra `volt-client-render` dep that broke the weave |
 | `check-log-branch` | `5f7b9689b` | throwaway CI log dump (`check.log`), tag `check-log` with a `check.log` asset |
 
 Repo tags/releases: `v1.0.0` (stable, `e413ea1a4`), `v0.7.6-build.939d02a` (pre-release),
@@ -91,7 +91,7 @@ Release page: <https://github.com/entitybrian69-bit/Volt-launcher/releases/tag/d
 | `Volt-Launcher-debug-x86_64.apk` | x86_64 (emulator/ChromeOS) | 80,757,536 B | `511c3c804938f5e062b5dd491042ed32ee0b921e1fcdf72008e19b12c0996813` |
 | `Volt-Launcher-debug-x86.apk` | x86 | 73,433,885 B | `32d9d73ce1e9c16fd04e85bc276426cf675dca33f82c8fc14f5bd316040952e2` |
 
-Also attached: `biomes_unseen.hmod` (44 biomes, 176 blocks, 29 items), `SHA256SUMS.txt`,
+Also attached: `biomes_unseen.vmod` (44 biomes, 176 blocks, 29 items), `SHA256SUMS.txt`,
 `LICENSE.txt`, `THIRD_PARTY_NOTICES.md`.
 
 Per-run CI artifacts for `android` @ `53883055b` (37 MB arm64-v8a zip, run 43700660342)
@@ -118,14 +118,14 @@ with `python tools/android_build.py --abi arm64-v8a --public` (needs SDK 35, NDK
   Volt **Debug** installs — it installs beside the stable `ae.net.Voltlauncher`.
 - First launch: pick **Download Minecraft 26.3** (~500 MiB, official Mojang HTTPS,
   hash-pinned, resumable), then **Play**. Vulkan is the default renderer with a GLES
-  fallback; Android 9+ (API 28); arm64 build ships the native `.hmod` runtime.
+  fallback; Android 9+ (API 28); arm64 build ships the native `.vmod` runtime.
 - Verify integrity with `sha256sum Volt-Launcher-debug-arm64-v8a.apk`.
 
 ## How the pieces fit (mental model)
 
 - **Two launchers, one engine.** `launcher/` is the desktop GPUI launcher; on Android
-  the launcher is *in-engine* UI from `crates/horizon-client/src/android/`. The APK
-  contains one `libhorizon_android.so` and two small stock Java classes; no duplicated engine.
+  the launcher is *in-engine* UI from `crates/volt-client/src/android/`. The APK
+  contains one `libvolt_launcher.so` and two small stock Java classes; no duplicated engine.
 - **Launcher → installer → game.** The launcher downloads/verifies resources, then
   re-execs the same binary into the game loop (`game.rs`). Leaving the game returns to
   the launcher.
@@ -152,7 +152,7 @@ debug builds with `--latest=false` and never marks them pre-release (only
 `docs/RELEASE-NOTES-v*.md` tags ship notes); this keeps agent branches out of the
 download page entirely.
 
-### Dashboard layout (`crates/horizon-client/src/android/launcher_pages.rs`)
+### Dashboard layout (`crates/volt-client/src/android/launcher_pages.rs`)
 - **Play** sits on the bottom edge and is centred in the column between the two
   rails (was offset 22 dp up and off-centre because the right column is wider).
   Pinned by `play_pill_is_centred_between_the_rails`.
@@ -176,8 +176,8 @@ download page entirely.
   Download with `← Back`, a `Home` button, and `← List` in the footer, so a detail
   page is never a dead end.
 
-### Shader download failures were silent (`crates/horizon-client/src/android/catalog.rs`)
-Failures lived only in `status`, so a failed Horizon shader left its Download tab
+### Shader download failures were silent (`crates/volt-client/src/android/catalog.rs`)
+Failures lived only in `status`, so a failed Volt shader left its Download tab
 looking inert. Now every install path records a per-project reason
 (`failed_message` + `failure_for`), including early returns that used to do
 nothing (busy worker, unsupported kind), and the detail page + grid cards print
@@ -187,14 +187,14 @@ it. The Download tab shows a live percentage and a "still working" note after 20
 ### "Captcha failed" on public server joins (ported from the unmerged PR #4)
 Three non-vanilla behaviours in the join fingerprint; all three also existed on
 `android`:
-1. `net.rs` — the client volunteered a `horizon:mod_net` hello to every server
+1. `net.rs` — the client volunteered a `volt:mod_net` hello to every server
    during configuration. Vanilla sends exactly `ClientInformation` and
    `minecraft:brand`; the hello is now strictly an answer to the host's own
    announcement (LAN hosts announce first, `lan/conn.rs`), and the client stays
    silent otherwise. Regression test
-   `horizon_hello_only_answers_the_servers_mod_net_announcement`.
+   `volt_hello_only_answers_the_servers_mod_net_announcement`.
 2. `game/remote.rs` — `volt:skin` only goes to hosts that announced themselves
-   as Horizon.
+   as Volt.
 3. `game/remote.rs` — the SkinsRestorer `/skin` command no longer fires the
    instant the command tree arrives (auth plugins punish that as bot behaviour);
    it waits 3 s and the player's own movement input (`pending_skin_cmd`).
@@ -276,7 +276,7 @@ first pass.
    `play_pill_is_centred_on_the_screen` pin both.
 
 2. **Shaders still not downloading.** The on-screen reason was the answer:
-   `horizon-shaders.toml: TOML parse error ... unknown field 'fog', expected
+   `volt-shaders.toml: TOML parse error ... unknown field 'fog', expected
    'file' or 'name'`. `Stage`, `RawOption` and `RawPage` had
    `deny_unknown_fields`, so one published registry pack writing `fog = false`
    in its `[[post]]` blocks aborted its whole download. Unknown keys are now
@@ -365,7 +365,7 @@ main hand.
 
 **The status bar corrupted menu text.** `targetSdk 35` means Android 15+ forces
 edge-to-edge, so the system status bar is composited over the game surface:
-`HorizonActivity` extends `NativeActivity`, whose default decor no longer
+`VoltActivity` extends `NativeActivity`, whose default decor no longer
 reserves that strip. The "Volt Mods" title bar and the `Mouse`/`Back` header
 buttons were drawn into the same rows as the clock and battery. The activity now
 hides the status and navigation bars in `onCreate` and again on

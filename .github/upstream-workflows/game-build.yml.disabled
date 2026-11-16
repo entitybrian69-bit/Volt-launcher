@@ -12,11 +12,11 @@ on:
         type: string
         required: true
       version:
-        description: The version built in (HORIZON_VERSION), e.g. 0.2.81 or nightly-2026-10-28
+        description: The version built in (VOLT_VERSION), e.g. 0.2.81 or nightly-2026-10-28
         type: string
         required: true
       nightly:
-        description: A nightly's "<date> <short sha>" (HORIZON_NIGHTLY), shown by the game; empty for a release
+        description: A nightly's "<date> <short sha>" (VOLT_NIGHTLY), shown by the game; empty for a release
         type: string
         default: ''
       trusted:
@@ -37,10 +37,10 @@ permissions:
 jobs:
   exporters:
     # This runner holds the maintainer's own pinned Minecraft jars. Only our classes leave it. An untrusted build
-    # goes to the Mac mini's nightly runner (macOS + horizon-nightly: ludovics-mac-mini-nightly, beside the one that
+    # goes to the Mac mini's nightly runner (macOS + volt-nightly: ludovics-mac-mini-nightly, beside the one that
     # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
     # (MAC_RUNNER: ludovics-mac-mini-release) nor parity-main's.
-    runs-on: ${{ inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-nightly"]') }}
+    runs-on: ${{ inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "volt-nightly"]') }}
     # Three full preparations (two isolated, one batched) besides the compile.
     timeout-minutes: 60
     steps:
@@ -52,7 +52,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: bash tools/ci/runner-env.sh
         env:
-          HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
+          VOLT_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
       - run: bash tools/ci/vanilla-data.sh
       - name: Compile and validate original exporters against the pinned jars
         shell: bash
@@ -60,18 +60,18 @@ jobs:
           set -euo pipefail
           # target/ is gone after the clean checkout, and vanilla-data.sh builds the preparer only when it
           # prepares afresh.
-          cargo build --release --locked -p horizon-prepare
+          cargo build --release --locked -p volt-prepare
           # Compiled here, never taken from the runner's shared preparations: pull requests' parity jobs
           # write those (vanilla-data.sh links .local/exporters to them).
           rm -rf .local/exporters
-          bundle=$(target/release/horizon-prepare compile-exporters --root "$PWD" | tail -1)
+          bundle=$(target/release/volt-prepare compile-exporters --root "$PWD" | tail -1)
           mkdir -p exporters
           cp -R "$bundle/server" "$bundle/client" "$bundle/manifest.json" exporters/
           # Only our classes and their manifest leave this runner.
           stray=$(find exporters -type f ! -path exporters/manifest.json \
-            ! \( -name '*.class' \( -path 'exporters/server/dev/horizonlab/parity/*' -o -path 'exporters/client/dev/horizonlab/parity/*' \) \))
+            ! \( -name '*.class' \( -path 'exporters/server/dev/voltlabs/parity/*' -o -path 'exporters/client/dev/voltlabs/parity/*' \) \))
           [ -z "$stray" ] || { echo "::error::not one of our classes: $stray"; exit 1; }
-          python3 tools/check_prepare_exporters.py --binary target/release/horizon-prepare
+          python3 tools/check_prepare_exporters.py --binary target/release/volt-prepare
       - uses: actions/upload-artifact@v4
         with:
           name: original-exporters
@@ -88,32 +88,32 @@ jobs:
         include:
           - name: linux
             os: ubuntu-22.04
-            dir: horizon-linux-x86_64
-            asset: horizon-linux-x86_64.tar.gz
+            dir: volt-linux-x86_64
+            asset: volt-linux-x86_64.tar.gz
             # The server build too: packaging/server/install.sh installs it on Linux.
-            server_dir: horizon-server-linux-x86_64
-            server_asset: horizon-server-linux-x86_64.tar.gz
+            server_dir: volt-server-linux-x86_64
+            server_asset: volt-server-linux-x86_64.tar.gz
           - name: windows
             os: windows-latest
-            dir: horizon-windows-x64
-            asset: horizon-windows-x64.zip
+            dir: volt-windows-x64
+            asset: volt-windows-x64.zip
             exe: .exe
             # The C runtime linked in, so the game runs without the Visual C++ redistributable.
             rustflags: -C target-feature=+crt-static
           - name: macos
             mac: true
-            dir: horizon-macos-arm64
-            asset: horizon-macos-arm64.zip
-    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "horizon-nightly"]')) || matrix.os }}
+            dir: volt-macos-arm64
+            asset: volt-macos-arm64.zip
+    runs-on: ${{ matrix.mac && (inputs.trusted && vars.MAC_RUNNER || fromJSON('["self-hosted", "macOS", "volt-nightly"]')) || matrix.os }}
     # Notarizing the zip can take a few minutes.
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
-      # The release's version, built in (horizon_core::release): --version, user agents, crash reports and
+      # The release's version, built in (volt_core::release): --version, user agents, crash reports and
       # telemetry say it. No version-bump commits.
-      HORIZON_VERSION: ${{ inputs.version }}
+      VOLT_VERSION: ${{ inputs.version }}
       # A nightly's date and commit ("2026-10-28 0c02067"), which the game shows; empty for a release.
-      HORIZON_NIGHTLY: ${{ inputs.nightly }}
+      VOLT_NIGHTLY: ${{ inputs.nightly }}
     defaults:
       run:
         shell: bash
@@ -137,12 +137,12 @@ jobs:
       - name: ALSA and udev headers
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
-      - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        # `horizon-client/mods`: every released game runs code mods (the feature is off in dev builds).
-        run: cargo build --release --locked --features horizon-client/mods -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+      - name: Build the client, volt-ctl, volt-prepare and volt-server
+        # `volt-client/mods`: every released game runs code mods (the feature is off in dev builds).
+        run: cargo build --release --locked --features volt-client/mods -p volt-client --bin volt-client --bin volt-ctl -p volt-prepare --bin volt-prepare -p volt-server --bin volt-server
       - name: Every program the release folder takes was built
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in volt-client volt-ctl volt-prepare volt-server; do
             test -f "target/release/$binary${{ matrix.exe }}" || { echo "::error::target/release/$binary${{ matrix.exe }} is missing"; exit 1; }
           done
       - name: The signing keychain, unlocked
@@ -156,16 +156,16 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ vars.MACOS_SIGN_IDENTITY }}
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in volt-client volt-ctl volt-prepare volt-server; do
             codesign --force --options runtime --timestamp --keychain "$MACOS_SIGN_KEYCHAIN" \
-              --identifier "dev.horizon.${binary#horizon-}" --sign "$MACOS_SIGN_IDENTITY" "target/release/$binary"
+              --identifier "dev.volt.${binary#volt-}" --sign "$MACOS_SIGN_IDENTITY" "target/release/$binary"
             codesign --verify --strict --verbose=2 "target/release/$binary"
           done
       - name: Only system libraries
         # Windows: no non-system DLL (a "DLL not found" dialog on some players' machines). Linux: the standard
         # loader and libraries every desktop distribution has. macOS: only the system's own libraries.
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in volt-client volt-ctl volt-prepare volt-server; do
             file="target/release/$binary${{ matrix.exe }}"
             if [[ "$RUNNER_OS" == macOS ]]; then
               others=$(otool -L "$file" | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/Library/)' || true)
@@ -178,19 +178,19 @@ jobs:
         run: |
           set -euo pipefail
           bin=target/release
-          "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
-          "$bin/horizon-ctl${{ matrix.exe }}" --help > /dev/null
-          "$bin/horizon-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
+          "$bin/volt-client${{ matrix.exe }}" --help | grep -q -- '--resources'
+          "$bin/volt-ctl${{ matrix.exe }}" --help > /dev/null
+          "$bin/volt-prepare${{ matrix.exe }}" --help | grep -q -- '--minecraft-dir'
           # The version is the release's.
-          for binary in horizon-prepare horizon-server; do
+          for binary in volt-prepare volt-server; do
             out=$("$bin/$binary${{ matrix.exe }}" --version | tr -d '\r')
             echo "$out"
-            [[ "$out" == "$binary $HORIZON_VERSION" ]] || { echo "::error::expected $binary $HORIZON_VERSION"; exit 1; }
+            [[ "$out" == "$binary $VOLT_VERSION" ]] || { echo "::error::expected $binary $VOLT_VERSION"; exit 1; }
           done
       - name: Tools from the runner
         if: runner.environment == 'self-hosted'
         env:
-          HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
+          VOLT_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}
         run: bash tools/ci/runner-env.sh
       - name: Resources prepared from the runner's own Minecraft
         if: runner.environment == 'self-hosted'
@@ -200,12 +200,12 @@ jobs:
         run: |
           set -euo pipefail
           # From a scratch folder: the game keeps its saves and options in the folder it starts in.
-          home="$RUNNER_TEMP/horizon-smoke"
+          home="$RUNNER_TEMP/volt-smoke"
           rm -rf "$home" && mkdir -p "$home"
           version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' research-lock.json | head -1)
-          client="$PWD/target/release/horizon-client"
-          resources="$PWD/.local/horizon-client/$version"
-          (cd "$home" && HORIZON_HOME="$home" HORIZON_NO_AUDIO=1 "$client" --resources "$resources" --offscreen \
+          client="$PWD/target/release/volt-client"
+          resources="$PWD/.local/volt-client/$version"
+          (cd "$home" && VOLT_HOME="$home" VOLT_NO_AUDIO=1 "$client" --resources "$resources" --offscreen \
             --world smoke --seed 1 --render-distance 4 --world-frames 1500 --timeout-seconds 180 \
             --smoke-report "$home/smoke.json" > "$home/client.log" 2>&1) || { tail -40 "$home/client.log"; exit 1; }
           python3 - "$home/smoke.json" <<'EOF'
@@ -232,7 +232,7 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          cargo run --locked -p xtask -- package "target/release/horizon-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
+          cargo run --locked -p xtask -- package "target/release/volt-client${{ matrix.exe }}" "dist/${{ matrix.dir }}"
           cd dist
           rm -f "${{ matrix.asset }}"
           case "${{ matrix.asset }}" in
@@ -252,7 +252,7 @@ jobs:
         # A zip of programs can't be stapled: Gatekeeper asks Apple the first time each one runs.
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != '' && inputs.developer_id
         run: |
-          for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
+          for binary in volt-client volt-ctl volt-prepare volt-server; do
             codesign --verify --strict "dist/${{ matrix.dir }}/$binary"
           done
           packaging/macos/notarize.sh "dist/${{ matrix.asset }}"
@@ -262,19 +262,19 @@ jobs:
           path: dist/${{ matrix.asset }}
           if-no-files-found: error
           retention-days: 3
-      - name: The server build (the game without sound or controllers, as horizon-engine)
+      - name: The server build (the game without sound or controllers, as volt-engine)
         if: matrix.server_asset
         run: |
           set -euo pipefail
-          # After the client is packaged: target/release/horizon-client is rebuilt without the audio and
+          # After the client is packaged: target/release/volt-client is rebuilt without the audio and
           # controllers features, so it needs neither libasound nor libudev (minimal server images lack them),
           # and with code mods like the client.
-          cargo build --release --locked -p horizon-client --no-default-features --features mods --bin horizon-client
-          cargo run --locked -p xtask -- package-server target/release/horizon-client "dist/${{ matrix.server_dir }}"
+          cargo build --release --locked -p volt-client --no-default-features --features mods --bin volt-client
+          cargo run --locked -p xtask -- package-server target/release/volt-client "dist/${{ matrix.server_dir }}"
           folder="dist/${{ matrix.server_dir }}"
-          python3 tools/check_imports.py --server "$folder/horizon-engine" "$folder/horizon-server" "$folder/horizon-prepare"
-          "$folder/horizon-engine" --help | grep -q -- '--resources'
-          [[ "$("$folder/horizon-server" --version)" == "horizon-server $HORIZON_VERSION" ]]
+          python3 tools/check_imports.py --server "$folder/volt-engine" "$folder/volt-server" "$folder/volt-prepare"
+          "$folder/volt-engine" --help | grep -q -- '--resources'
+          [[ "$("$folder/volt-server" --version)" == "volt-server $VOLT_VERSION" ]]
           cd dist
           rm -f "${{ matrix.server_asset }}"
           tar czf "${{ matrix.server_asset }}" "${{ matrix.server_dir }}"

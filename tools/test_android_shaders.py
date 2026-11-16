@@ -30,7 +30,7 @@ sha1 = "0.10"
 sha2 = "0.10"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
-horizon-mods = { path = "../../../crates/horizon-mods", default-features = false, features = ["index"] }
+volt-mods = { path = "../../../crates/volt-mods", default-features = false, features = ["index"] }
 ''', encoding='utf-8')
     browser = (ROOT / 'launcher/src/browser.rs').read_text(encoding='utf-8')
     browser = browser[browser.index('use serde::'):browser.index('#[cfg(test)]')]
@@ -44,8 +44,8 @@ horizon-mods = { path = "../../../crates/horizon-mods", default-features = false
         return f'#[path = "{(ROOT / path).as_posix()}"] pub mod {name};\n'
 
     source = '''#![allow(dead_code, unused_imports)]
-extern crate self as horizon_client;
-extern crate self as horizon_port_pack;
+extern crate self as volt_client;
+extern crate self as volt_port_pack;
 pub mod net {
     pub fn keep<T>(_: &str, _: Option<&str>, make: impl FnOnce(Option<ureq::Proxy>) -> T) -> T { make(None) }
 }
@@ -53,18 +53,18 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 mod backend { pub const VERSION: &str = "shader-test"; }
 mod proxy { pub fn spec_for(_: &str) -> Option<String> { None } }
 '''
-    source += module('content_files', 'crates/horizon-client/src/content_files.rs')
+    source += module('content_files', 'crates/volt-client/src/content_files.rs')
     source += 'pub mod browser {\n' + browser
     source += module('details', 'launcher/src/browser/details.rs')
     source += module('download', 'launcher/src/browser/download.rs')
     source += module('modrinth', 'launcher/src/browser/modrinth.rs')
-    for name, path, constant in [('horizon', 'launcher/src/browser/horizon.rs', 'LOADER'),
+    for name, path, constant in [('volt', 'launcher/src/browser/volt.rs', 'LOADER'),
                                  ('java', 'launcher/src/browser/java.rs', 'LOADERS')]:
         line = next(line for line in (ROOT / path).read_text(encoding='utf-8').splitlines()
                     if line.startswith(f'pub const {constant}:'))
         source += f'pub mod {name} {{ {line} }}\n'
     source += 'pub mod installed { use super::*; use std::{fs, path::Path};\n' + manifest + '\n}\n}\n'
-    source += module('shader_catalog', 'crates/horizon-client/src/android/shader_catalog.rs')
+    source += module('shader_catalog', 'crates/volt-client/src/android/shader_catalog.rs')
     source += '''#[test] #[ignore = "live Modrinth metadata, no downloads"]
 fn live_shader_search() {
     let mut q = browser::Query::new("", browser::Kind::Shader);

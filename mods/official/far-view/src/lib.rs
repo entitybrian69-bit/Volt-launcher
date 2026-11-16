@@ -1,9 +1,9 @@
-//! Horizon's official far view: the world past the render distance drawn as
+//! Volt's official far view: the world past the render distance drawn as
 //! distant terrain (`render.set-far-terrain`; the game builds the tiles on
 //! its own workers). Its settings page picks how far it reaches and the far
 //! tiles' detail, kept in the mod's storage (`distance`, `detail`). The
 //! player's own LOD Distance setting, when on, wins over the mod.
-use horizon_mod_sdk::{
+use volt_mod_sdk::{
     Mod, Registration,
     render::{self, FarTerrain},
     storage,
@@ -86,4 +86,4 @@ impl Mod for FarView {
     }
 }
 
-horizon_mod_sdk::export_mod!(FarView);
+volt_mod_sdk::export_mod!(FarView);

@@ -27,7 +27,7 @@ naga = { version = "30.0.1", features = ["wgsl-in"] }
 glam = "0.30"
 ''', encoding='utf-8')
     modules = '\n'.join(
-        f'#[path = "{(ROOT / "crates/horizon-client-render/src/gfx" / (name + ".rs")).as_posix()}"] pub mod {name};'
+        f'#[path = "{(ROOT / "crates/volt-client-render/src/gfx" / (name + ".rs")).as_posix()}"] pub mod {name};'
         for name in ('arena', 'upload', 'timing', 'frame_timing', 'opaque_output')
     )
     (work / 'src/lib.rs').write_text('''#![allow(dead_code)]
@@ -104,14 +104,14 @@ fn storage_pages_fit_portable_binding_limits() {
 }
 ''', encoding='utf-8')
     with (work / 'src/lib.rs').open('a', encoding='utf-8') as output:
-        shader = (ROOT / 'crates/horizon-client-render/src/terrain.wgsl').as_posix()
+        shader = (ROOT / 'crates/volt-client-render/src/terrain.wgsl').as_posix()
         output.write(f'\n#[test] fn terrain_shader_validates() {{\n'
                      f'let module = naga::front::wgsl::parse_str(include_str!("{shader}")).unwrap();\n'
                      'naga::valid::Validator::new(naga::valid::ValidationFlags::all(), '
                      'naga::valid::Capabilities::all()).validate(&module).unwrap();\n}\n')
     # Use the shader's real functions: duplicating their math in a GPU test
     # would miss changes made only to the shipped WGSL.
-    terrain = (ROOT / 'crates/horizon-client-render/src/terrain.wgsl').read_text(encoding='utf-8')
+    terrain = (ROOT / 'crates/volt-client-render/src/terrain.wgsl').read_text(encoding='utf-8')
     functions = terrain[terrain.index('fn sunrise_weight_full'):terrain.index("// The sky's colour")]
     (work / 'src/sunrise.wgsl').write_text('''const PI: f32 = 3.141592653589793;
 struct Globals { sunrise: vec4<f32>, sunrise_fan: array<vec4<f32>,32> }
@@ -128,7 +128,7 @@ struct Globals { sunrise: vec4<f32>, sunrise_fan: array<vec4<f32>,32> }
 ''', encoding='utf-8')
     with (work / 'src/lib.rs').open('a', encoding='utf-8') as output:
         for name, source in [
-            ('sunrise_fan', ROOT / 'crates/horizon-client-render/src/gfx/sunrise_fan.rs'),
+            ('sunrise_fan', ROOT / 'crates/volt-client-render/src/gfx/sunrise_fan.rs'),
             ('sunrise_gpu', ROOT / 'tools/android_sunrise_gpu_test.rs'),
         ]:
             output.write(f'\n#[path = "{source.as_posix()}"] mod {name};\n')

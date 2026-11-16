@@ -25,35 +25,35 @@ class ParityRunnerTests(unittest.TestCase):
 
     def test_artifacts_keep_the_package_and_feature_selection(self):
         self.assertEqual(parity.artifacts_of(["cargo", "build", "--locked", "--profile=fast", "-j", "4", "--package",
-                                              "horizon-client", "--bins", "-F", "x"]),
-                         [["bins", "", "fast", ["-p", "horizon-client", "--features", "x"], False]])
-        self.assertEqual(parity.artifacts_of(["cargo", "build", "--release", "-p", "horizon-world", "--bin=horizon-world"]),
-                         [["bin", "horizon-world", "release", ["-p", "horizon-world"], False]])
+                                              "volt-client", "--bins", "-F", "x"]),
+                         [["bins", "", "fast", ["-p", "volt-client", "--features", "x"], False]])
+        self.assertEqual(parity.artifacts_of(["cargo", "build", "--release", "-p", "volt-world", "--bin=volt-world"]),
+                         [["bin", "volt-world", "release", ["-p", "volt-world"], False]])
 
     def test_prebuild_repeats_each_harness_selection(self):
         artifacts = [
-            *parity.artifacts_of(["cargo", "build", "--release", "-p", "horizon-world", "--example", "a"]),
-            *parity.artifacts_of(["cargo", "build", "--release", "-p", "horizon-world", "--example", "b"]),
-            *parity.artifacts_of(["cargo", "build", "--release", "-p", "horizon-world", "--bin", "horizon-world"]),
-            *parity.artifacts_of(["cargo", "build", "--release", "--bin", "horizon-world"]),
-            *parity.artifacts_of(["cargo", "run", "--profile", "fast", "-p", "horizon-client", "--example", "c"]),
-            *parity.artifacts_of(["cargo", "build", "--release", "-p", "horizon-world", "--example", "renamed"]),
+            *parity.artifacts_of(["cargo", "build", "--release", "-p", "volt-world", "--example", "a"]),
+            *parity.artifacts_of(["cargo", "build", "--release", "-p", "volt-world", "--example", "b"]),
+            *parity.artifacts_of(["cargo", "build", "--release", "-p", "volt-world", "--bin", "volt-world"]),
+            *parity.artifacts_of(["cargo", "build", "--release", "--bin", "volt-world"]),
+            *parity.artifacts_of(["cargo", "run", "--profile", "fast", "-p", "volt-client", "--example", "c"]),
+            *parity.artifacts_of(["cargo", "build", "--release", "-p", "volt-world", "--example", "renamed"]),
             ["example", "old", "release"],  # recorded before selections were kept: its own crate's -p
             ["example", "unknown", "release"],  # no longer in the workspace: left to its harness
         ]
-        packages = {("example", "a"): "horizon-world", ("example", "b"): "horizon-world", ("example", "c"): "horizon-client",
-                    ("bin", "horizon-world"): "horizon-world", ("example", "old"): "horizon-world"}
+        packages = {("example", "a"): "volt-world", ("example", "b"): "volt-world", ("example", "c"): "volt-client",
+                    ("bin", "volt-world"): "volt-world", ("example", "old"): "volt-world"}
         self.assertEqual(parity.prebuild_commands(artifacts, packages), [
-            ["cargo", "build", "--locked", "--profile", "fast", "-p", "horizon-client", "--example", "c"],
-            ["cargo", "build", "--locked", "--profile", "release", "--bin", "horizon-world"],
-            ["cargo", "build", "--locked", "--profile", "release", "-p", "horizon-world", "--bin", "horizon-world"],
-            ["cargo", "build", "--locked", "--profile", "release", "-p", "horizon-world", "--example", "a", "--example", "b",
+            ["cargo", "build", "--locked", "--profile", "fast", "-p", "volt-client", "--example", "c"],
+            ["cargo", "build", "--locked", "--profile", "release", "--bin", "volt-world"],
+            ["cargo", "build", "--locked", "--profile", "release", "-p", "volt-world", "--bin", "volt-world"],
+            ["cargo", "build", "--locked", "--profile", "release", "-p", "volt-world", "--example", "a", "--example", "b",
              "--example", "old"],
         ])
 
     def test_a_probe_binary_depends_only_on_the_probes_it_ran(self):
         commands = [["/t/release/examples/world_probe", "a_fixture", "/dir"],
-                    ["cargo", "run", "-p", "horizon-client", "--example", "client_probe", "--", "b_fixture"]]
+                    ["cargo", "run", "-p", "volt-client", "--example", "client_probe", "--", "b_fixture"]]
         self.assertEqual(parity.probes_run(commands), {"a_fixture", "b_fixture"})
         with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp)):
             probe = Path(temp, "crates/w/examples/probe")
@@ -82,24 +82,24 @@ class ParityRunnerTests(unittest.TestCase):
         ]), {"a_fixture", "b_fixture"})
 
     def test_records_of_the_shared_probe_name_build_their_crates_probe(self):
-        record = {"dependencies": ["crates/horizon-world/examples/probe/a_fixture.rs", "crates/horizon-world/src/lib.rs"],
-                  "artifacts": [["example", "probe", "release", ["-p", "horizon-client"], True],
+        record = {"dependencies": ["crates/volt-world/examples/probe/a_fixture.rs", "crates/volt-world/src/lib.rs"],
+                  "artifacts": [["example", "probe", "release", ["-p", "volt-client"], True],
                                 ["example", "probe", "release"],  # no selection: the crate of its probe sources
-                                ["example", "probe", "release", ["-p", "horizon-core", "-p", "horizon-world"], True],
-                                ["bin", "horizon-world", "release", ["-p", "horizon-world"], False]]}
+                                ["example", "probe", "release", ["-p", "volt-core", "-p", "volt-world"], True],
+                                ["bin", "volt-world", "release", ["-p", "volt-world"], False]]}
         artifacts = parity.recorded_artifacts(record)
-        self.assertEqual(artifacts, [["example", "client_probe", "release", ["-p", "horizon-client"], True],
+        self.assertEqual(artifacts, [["example", "client_probe", "release", ["-p", "volt-client"], True],
                                      ["example", "world_probe", "release"],
-                                     ["example", "world_probe", "release", ["-p", "horizon-core", "-p", "horizon-world"], True],
-                                     ["bin", "horizon-world", "release", ["-p", "horizon-world"], False]])
-        packages = {("example", "client_probe"): "horizon-client", ("example", "world_probe"): "horizon-world",
-                    ("bin", "horizon-world"): "horizon-world"}
+                                     ["example", "world_probe", "release", ["-p", "volt-core", "-p", "volt-world"], True],
+                                     ["bin", "volt-world", "release", ["-p", "volt-world"], False]])
+        packages = {("example", "client_probe"): "volt-client", ("example", "world_probe"): "volt-world",
+                    ("bin", "volt-world"): "volt-world"}
         self.assertEqual(parity.prebuild_commands(artifacts, packages), [
-            ["cargo", "build", "--locked", "--profile", "release", "-p", "horizon-client", "--example", "client_probe"],
-            ["cargo", "build", "--locked", "--profile", "release", "-p", "horizon-core", "-p", "horizon-world",
+            ["cargo", "build", "--locked", "--profile", "release", "-p", "volt-client", "--example", "client_probe"],
+            ["cargo", "build", "--locked", "--profile", "release", "-p", "volt-core", "-p", "volt-world",
              "--example", "world_probe"],
-            ["cargo", "build", "--locked", "--profile", "release", "-p", "horizon-world", "--bin", "horizon-world"],
-            ["cargo", "build", "--locked", "--profile", "release", "-p", "horizon-world", "--example", "world_probe"],
+            ["cargo", "build", "--locked", "--profile", "release", "-p", "volt-world", "--bin", "volt-world"],
+            ["cargo", "build", "--locked", "--profile", "release", "-p", "volt-world", "--example", "world_probe"],
         ])
         self.assertEqual(parity.recorded_artifacts({"artifacts": [["example", "probe", "release"]]}),
                          [["example", "probe", "release"]])  # no crate to tell: left to its harness
@@ -156,9 +156,9 @@ class ParityRunnerTests(unittest.TestCase):
                 self.assertEqual(handled, list(numbers.values()))
 
     def test_a_hosts_excludes_are_skipped_when_it_runs_parity_itself(self):
-        config = {"hosts": {"playhorizon": {"exclude": {"remote_fireworks": "starved"}}, "macmini": {"exclude": {}}}}
+        config = {"hosts": {"playvolt": {"exclude": {"remote_fireworks": "starved"}}, "macmini": {"exclude": {}}}}
         with mock.patch.object(parity.sys, "platform", "linux"):
-            self.assertEqual(parity.platform_skips(config, "playhorizon"), {"remote_fireworks": "starved"})
+            self.assertEqual(parity.platform_skips(config, "playvolt"), {"remote_fireworks": "starved"})
             self.assertEqual(parity.platform_skips(config, "macmini"), {})
             self.assertEqual(parity.platform_skips(config, "elsewhere"), {})
 
@@ -219,7 +219,7 @@ class DependencyPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp)):
             found = {"probe": Path(temp, "tools/test_probe_parity.py")}
             for path in ("crates/w/examples/probe.rs", "crates/w/src/bin/probe.rs",
-                         "mods/horizon/src/test/java/Oracle.java"):
+                         "mods/volt/src/test/java/Oracle.java"):
                 with self.subTest(path=path), mock.patch.object(parity, "changed_files", return_value={path}):
                     records = {"probe": {"dependencies": [path.replace("/", "\\")]}}
                     self.assertEqual(parity.changed_harnesses(found, records, "main"), {"probe"})
@@ -233,12 +233,12 @@ class DependencyPathTests(unittest.TestCase):
                 mock.patch.object(parity, "STATE_DIR", Path(temp, "state")):
             root = Path(temp)
             files = {
-                "crates/horizon-world/Cargo.toml": '[package]\nname = "horizon-world"\n'
+                "crates/volt-world/Cargo.toml": '[package]\nname = "volt-world"\n'
                                                    '\n[[example]]\nname = "world_probe"\npath = "examples/probe.rs"\n',
-                "crates/horizon-world/src/lib.rs": "pub mod used;\npub mod unused;\n",
-                "crates/horizon-world/src/used.rs": "pub fn f() {}\n",
-                "crates/horizon-world/src/unused.rs": "pub fn f() {}\n",
-                "crates/horizon-world/examples/probe.rs": "fn main() { horizon_world::used::f(); }\n",
+                "crates/volt-world/src/lib.rs": "pub mod used;\npub mod unused;\n",
+                "crates/volt-world/src/used.rs": "pub fn f() {}\n",
+                "crates/volt-world/src/unused.rs": "pub fn f() {}\n",
+                "crates/volt-world/examples/probe.rs": "fn main() { volt_world::used::f(); }\n",
             }
             for path, text in files.items():
                 target = root / path
@@ -248,8 +248,8 @@ class DependencyPathTests(unittest.TestCase):
             dependencies[1] += "#keep:used"
             record = {"dependencies": dependencies, "artifacts": [["example", "probe", "release"]]}
             found = {"probe": root / "tools/test_probe_parity.py"}
-            for path, expected in (("crates/horizon-world/src/used.rs", {"probe"}),
-                                   ("crates/horizon-world/src/unused.rs", set())):
+            for path, expected in (("crates/volt-world/src/used.rs", {"probe"}),
+                                   ("crates/volt-world/src/unused.rs", set())):
                 with self.subTest(path=path):
                     self.assertEqual(parity.affected_harnesses(found, {"probe": record}, {path}), expected)
             self.assertEqual(record["dependencies"], dependencies)
@@ -486,7 +486,7 @@ class KnownFlakyTests(unittest.TestCase):
 
 
 class SoloTests(unittest.TestCase):
-    """Harnesses driving game windows run alone on a small machine (playhorizon's 4-CPU runner)."""
+    """Harnesses driving game windows run alone on a small machine (playvolt's 4-CPU runner)."""
 
     def executor(self, running):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(parity, "STATE_DIR", Path(tmp)):
@@ -522,8 +522,8 @@ if __name__ == "__main__":
 
 class WorkspaceManifestTests(unittest.TestCase):
     """A crate split's Cargo.toml and Cargo.lock changes don't select every harness; a dependency change still does."""
-    CLIENT = '[package]\nname = "horizon-client"\n\n[dependencies]\nserde = "1"\nwgpu = { version = "27", features = ["x"] }\n'
-    LOCK = ('version = 4\n\n[[package]]\nname = "horizon-client"\nversion = "0.1.0"\ndependencies = [\n "serde",\n]\n\n'
+    CLIENT = '[package]\nname = "volt-client"\n\n[dependencies]\nserde = "1"\nwgpu = { version = "27", features = ["x"] }\n'
+    LOCK = ('version = 4\n\n[[package]]\nname = "volt-client"\nversion = "0.1.0"\ndependencies = [\n "serde",\n]\n\n'
             '[[package]]\nname = "serde"\nversion = "1.0.1"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n')
 
     def verdict(self, base, head):
@@ -538,45 +538,45 @@ class WorkspaceManifestTests(unittest.TestCase):
             return parity.workspace_only_manifests(set(head) | set(base), "base")
 
     def test_a_crate_split_is_left_out(self):
-        command = '[package]\nname = "horizon-command"\n\n[dependencies]\nserde = "1"\nhorizon-core = { path = "../horizon-core" }\n'
-        client = self.CLIENT + 'horizon-command = { path = "../horizon-command" }\n'
-        lock = self.LOCK.replace('[[package]]\nname = "serde"', '[[package]]\nname = "horizon-command"\nversion = "0.1.0"\n\n'
+        command = '[package]\nname = "volt-command"\n\n[dependencies]\nserde = "1"\nvolt-core = { path = "../volt-core" }\n'
+        client = self.CLIENT + 'volt-command = { path = "../volt-command" }\n'
+        lock = self.LOCK.replace('[[package]]\nname = "serde"', '[[package]]\nname = "volt-command"\nversion = "0.1.0"\n\n'
                                  '[[package]]\nname = "serde"')
-        base = {"Cargo.toml": '[workspace]\nmembers = ["crates/horizon-client"]\nresolver = "2"\n',
-                "crates/horizon-client/Cargo.toml": self.CLIENT, "Cargo.lock": self.LOCK}
-        head = {"Cargo.toml": '[workspace]\nmembers = ["crates/horizon-client", "crates/horizon-command"]\nresolver = "2"\n',
-                "crates/horizon-client/Cargo.toml": client, "crates/horizon-command/Cargo.toml": command, "Cargo.lock": lock}
+        base = {"Cargo.toml": '[workspace]\nmembers = ["crates/volt-client"]\nresolver = "2"\n',
+                "crates/volt-client/Cargo.toml": self.CLIENT, "Cargo.lock": self.LOCK}
+        head = {"Cargo.toml": '[workspace]\nmembers = ["crates/volt-client", "crates/volt-command"]\nresolver = "2"\n',
+                "crates/volt-client/Cargo.toml": client, "crates/volt-command/Cargo.toml": command, "Cargo.lock": lock}
         self.assertEqual(self.verdict(base, head), set(head))
 
     def test_a_dependency_change_still_counts(self):
-        base = {"crates/horizon-client/Cargo.toml": self.CLIENT, "Cargo.lock": self.LOCK}
-        bumped = {"crates/horizon-client/Cargo.toml": self.CLIENT, "Cargo.lock": self.LOCK.replace("1.0.1", "1.0.2")}
+        base = {"crates/volt-client/Cargo.toml": self.CLIENT, "Cargo.lock": self.LOCK}
+        bumped = {"crates/volt-client/Cargo.toml": self.CLIENT, "Cargo.lock": self.LOCK.replace("1.0.1", "1.0.2")}
         self.assertEqual(self.verdict(base, bumped), set())
-        feature = {"crates/horizon-client/Cargo.toml": self.CLIENT.replace('["x"]', '["x", "y"]')}
-        self.assertEqual(self.verdict({"crates/horizon-client/Cargo.toml": self.CLIENT}, feature), set())
+        feature = {"crates/volt-client/Cargo.toml": self.CLIENT.replace('["x"]', '["x", "y"]')}
+        self.assertEqual(self.verdict({"crates/volt-client/Cargo.toml": self.CLIENT}, feature), set())
         resolver = {"Cargo.toml": '[workspace]\nmembers = ["a"]\nresolver = "3"\n'}
         self.assertEqual(self.verdict({"Cargo.toml": '[workspace]\nmembers = ["a"]\nresolver = "2"\n'}, resolver), set())
 
     def test_a_feature_of_a_workspace_crate_counts_through_its_sources(self):
-        items = '[package]\nname = "horizon-items"\n\n[features]\ntest-support = []\n'
-        client = self.CLIENT + '\n[dev-dependencies]\nhorizon-items = { path = "../horizon-items", features = ["test-support"] }\n'
-        head = {"crates/horizon-items/Cargo.toml": items, "crates/horizon-client/Cargo.toml": client,
-                "crates/horizon-items/src/lib.rs": '#[cfg(feature = "test-support")]\npub fn for_tests() {}\n'}
-        base = {"crates/horizon-client/Cargo.toml": self.CLIENT}
+        items = '[package]\nname = "volt-items"\n\n[features]\ntest-support = []\n'
+        client = self.CLIENT + '\n[dev-dependencies]\nvolt-items = { path = "../volt-items", features = ["test-support"] }\n'
+        head = {"crates/volt-items/Cargo.toml": items, "crates/volt-client/Cargo.toml": client,
+                "crates/volt-items/src/lib.rs": '#[cfg(feature = "test-support")]\npub fn for_tests() {}\n'}
+        base = {"crates/volt-client/Cargo.toml": self.CLIENT}
         # The new crate's files are all changed, the code the feature gates with them.
-        self.assertEqual(self.verdict(base, head), {"crates/horizon-items/Cargo.toml", "crates/horizon-client/Cargo.toml"})
+        self.assertEqual(self.verdict(base, head), {"crates/volt-items/Cargo.toml", "crates/volt-client/Cargo.toml"})
         # Turning on a feature of a crate whose gated code didn't change selects as before.
-        world = '[package]\nname = "horizon-world"\n\n[features]\nextra = ["more"]\nmore = []\n'
+        world = '[package]\nname = "volt-world"\n\n[features]\nextra = ["more"]\nmore = []\n'
         with tempfile.TemporaryDirectory() as temp, mock.patch.object(parity, "ROOT", Path(temp)):
-            Path(temp, "crates/horizon-world/src").mkdir(parents=True)
-            Path(temp, "crates/horizon-world/Cargo.toml").write_text(world)
-            Path(temp, "crates/horizon-world/src/lib.rs").write_text('#[cfg(feature = "more")]\nfn x() {}\n')
-            self.assertFalse(parity.feature_sources_changed("horizon-world", "extra", {"crates/horizon-client/Cargo.toml"}))
-            self.assertTrue(parity.feature_sources_changed("horizon-world", "extra", {"crates/horizon-world/src/lib.rs"}))
-            self.assertFalse(parity.feature_sources_changed("horizon-nothing", "extra", set()))
+            Path(temp, "crates/volt-world/src").mkdir(parents=True)
+            Path(temp, "crates/volt-world/Cargo.toml").write_text(world)
+            Path(temp, "crates/volt-world/src/lib.rs").write_text('#[cfg(feature = "more")]\nfn x() {}\n')
+            self.assertFalse(parity.feature_sources_changed("volt-world", "extra", {"crates/volt-client/Cargo.toml"}))
+            self.assertTrue(parity.feature_sources_changed("volt-world", "extra", {"crates/volt-world/src/lib.rs"}))
+            self.assertFalse(parity.feature_sources_changed("volt-nothing", "extra", set()))
         # A feature that reaches an external package counts.
-        optional = {"crates/horizon-client/Cargo.toml": self.CLIENT + '\n[features]\nfast = ["wgpu/x"]\n'}
-        self.assertEqual(self.verdict({"crates/horizon-client/Cargo.toml": self.CLIENT}, optional), set())
+        optional = {"crates/volt-client/Cargo.toml": self.CLIENT + '\n[features]\nfast = ["wgpu/x"]\n'}
+        self.assertEqual(self.verdict({"crates/volt-client/Cargo.toml": self.CLIENT}, optional), set())
 
     def test_without_a_base_everything_counts(self):
         self.assertEqual(parity.workspace_only_manifests({"Cargo.lock"}, None), set())

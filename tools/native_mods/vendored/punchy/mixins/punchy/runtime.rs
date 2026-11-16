@@ -1,4 +1,4 @@
-// Horizon glue. This is an integration preview, not complete Punchy renderer parity.
+// Volt glue. This is an integration preview, not complete Punchy renderer parity.
 use super::*;
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use punchy_engine::player::Playback;
@@ -250,11 +250,11 @@ pub(super) fn tick(game: &mut Game<'_>) {
                 let owner=game.player_owner(Some(stack));
                 let mut kind=input.hands[i].kind;
                 if kind==action::ItemKind::Other {
-                    let components=game.pack.item_renderer.models.components(&horizon_client::item_render::stack_view(stack));
-                    let mut animation=components.get("minecraft:consumable").map_or(horizon_world::consumable::UseAnimation::None,horizon_client::first_person::consumable_animation);
+                    let components=game.pack.item_renderer.models.components(&volt_client::item_render::stack_view(stack));
+                    let mut animation=components.get("minecraft:consumable").map_or(volt_world::consumable::UseAnimation::None,volt_client::first_person::consumable_animation);
                     game.native_use_animation(stack,&mut animation);
-                    kind=match animation {horizon_world::consumable::UseAnimation::Eat=>action::ItemKind::Eat,
-                        horizon_world::consumable::UseAnimation::Drink=>action::ItemKind::Drink,_=>kind};
+                    kind=match animation {volt_world::consumable::UseAnimation::Eat=>action::ItemKind::Eat,
+                        volt_world::consumable::UseAnimation::Drink=>action::ItemKind::Drink,_=>kind};
                 }
                 input.using=Some(action::UseState {hand:hand(h),kind,
                     elapsed_ticks:owner.use_duration-owner.use_item_remaining_ticks-1,
@@ -338,8 +338,8 @@ pub(super) fn settings(game: &Game<'_>, buttons: &mut Vec<String>) {
     buttons.push("Reload animations".into());
     buttons.push(format!(
         "Hand poses: {}",
-        if game.native_setting(ID, "hand_poses").as_deref() == Some("horizon") {
-            "Horizon"
+        if game.native_setting(ID, "hand_poses").as_deref() == Some("volt") {
+            "Volt"
         } else {
             "Punchy"
         }
@@ -402,10 +402,10 @@ pub(super) fn click(game: &Game<'_>, button: usize) {
         2 => game.native_set_setting(
             ID,
             "hand_poses",
-            if game.native_setting(ID, "hand_poses").as_deref() == Some("horizon") {
+            if game.native_setting(ID, "hand_poses").as_deref() == Some("volt") {
                 "punchy"
             } else {
-                "horizon"
+                "volt"
             },
         ),
         // 3 is the status line; 4.. are the hand viewmodel rows.
@@ -439,7 +439,7 @@ pub(super) fn click(game: &Game<'_>, button: usize) {
 }
 
 // Authored skeletal delta calibrated against the same bone's rest transform.
-// This preserves Horizon's item renderer and equipment coordinates; the full
+// This preserves Volt's item renderer and equipment coordinates; the full
 // Punchy item mesh/physics/attachment renderer is a separate unfinished port.
 fn bone_delta(s: &State, name: &str, alpha: f32) -> Mat4 {
     let Some(p) = &s.active else {
@@ -567,7 +567,7 @@ pub(super) fn begin(game: &mut Game<'_>, alpha: f64) {
             [false, false]
         };
         let mut authored = [None, None];
-        if s.enabled && game.native_setting(ID, "hand_poses").as_deref() != Some("horizon") {
+        if s.enabled && game.native_setting(ID, "hand_poses").as_deref() != Some("volt") {
             if let (Some(source), Some(tuning)) = (&s.source, &s.tuning) {
                 if let Ok(skeleton) = punchy_engine::skeleton::Skeleton::new(&source.bones)
                 {
@@ -639,7 +639,7 @@ pub(super) fn begin(game: &mut Game<'_>, alpha: f64) {
                 "arm_matrices":authored.map(|p|p.map(|p|p.arm.to_cols_array())),"item_matrices":authored.map(|p|p.map(|p|p.item.to_cols_array()))});
             if let Ok(bytes)=serde_json::to_vec_pretty(&value){let _=std::fs::write(path,bytes);}
         }
-        punchy_engine::horizon_pose::set_frame(punchy_engine::horizon_pose::Frame {
+        punchy_engine::volt_pose::set_frame(punchy_engine::volt_pose::Frame {
             authored,
             enabled: s.enabled,
             deltas,
@@ -655,38 +655,38 @@ pub(super) fn item_pose(
     left: bool,
     height: f32,
     attack: f32,
-    pose: horizon_client::first_person::ItemPose,
+    pose: volt_client::first_person::ItemPose,
 ) -> Mat4 {
-    if let Some(pose) = punchy_engine::horizon_pose::authored(left) {
+    if let Some(pose) = punchy_engine::volt_pose::authored(left) {
         return pose.item;
     }
-    let swing = if punchy_engine::horizon_pose::suppress_swing(left) {
+    let swing = if punchy_engine::volt_pose::suppress_swing(left) {
         0.
     } else {
         attack
     };
-    punchy_engine::horizon_pose::transform(
+    punchy_engine::volt_pose::transform(
         left,
-        horizon_client::first_person::item_pose(left, height, swing, pose),
+        volt_client::first_person::item_pose(left, height, swing, pose),
     )
 }
 pub(super) fn arm_pose(left: bool, height: f32, attack: f32) -> Mat4 {
-    if let Some(pose) = punchy_engine::horizon_pose::authored(left) {
+    if let Some(pose) = punchy_engine::volt_pose::authored(left) {
         return pose.arm;
     }
-    let swing = if punchy_engine::horizon_pose::suppress_swing(left) {
+    let swing = if punchy_engine::volt_pose::suppress_swing(left) {
         0.
     } else {
         attack
     };
-    punchy_engine::horizon_pose::transform(
+    punchy_engine::volt_pose::transform(
         left,
-        horizon_client::first_person::player_arm_pose(left, height, swing),
+        volt_client::first_person::player_arm_pose(left, height, swing),
     )
 }
 
 pub(super) fn authored(left: bool) -> bool {
-    punchy_engine::horizon_pose::authored(left).is_some()
+    punchy_engine::volt_pose::authored(left).is_some()
 }
 
 // Called only after a successful client-side interaction, including offhand.

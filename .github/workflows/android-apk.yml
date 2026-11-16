@@ -88,7 +88,7 @@ jobs:
           elif event == "workflow_dispatch" and raw_abis:
               selected = [abi.strip() for abi in raw_abis.split(",") if abi.strip()]
           else:
-              # Starling/Horizon-Android parity: ship all four ABIs so
+              # Starling/Volt-Android parity: ship all four ABIs so
               # emulators, ChromeOS and x86 handhelds install natively.
               selected = ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]
 
@@ -115,7 +115,7 @@ jobs:
         # always downloadable through the API, annotations always are.
         run: |
           set -o pipefail
-          if ! cargo test -p horizon-shader-api 2>&1 | tee shader-api-test.log; then
+          if ! cargo test -p volt-shader-api 2>&1 | tee shader-api-test.log; then
             python3 - <<'PY'
           lines = open('shader-api-test.log', errors='replace').read().splitlines()
           keep = []
@@ -127,7 +127,7 @@ jobs:
                   keep.extend(lines[i:i + 20])
           text = '\n'.join(keep[:220]) or '\n'.join(lines[-60:])
           safe = text[:18000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print('::error title=horizon-shader-api test diagnostics::' + safe)
+          print('::error title=volt-shader-api test diagnostics::' + safe)
           PY
             exit 1
           fi
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      HORIZON_TELEMETRY_URL: "off"
+      VOLT_TELEMETRY_URL: "off"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -155,7 +155,7 @@ jobs:
           set -u +e -o pipefail
           rustup show active-toolchain
           cargo --version
-          cargo test -p horizon-client --lib --no-default-features -- \
+          cargo test -p volt-client --lib --no-default-features -- \
             climate_entry_strips_keys_and_quantizes \
             biomes_unseen_hmod_biomes_reach_the_preset_tables \
             biomes_unseen_hmod_ships_textures_models_lang_and_creative_entries \
@@ -180,20 +180,20 @@ jobs:
           PY
             exit "$status"
           fi
-      - name: Tolerant .hmod loader tests (horizon-mods)
+      - name: Tolerant .vmod loader tests (volt-mods)
         run: |
           set -u +e -o pipefail
-          cargo test -p horizon-mods --lib --no-default-features -- \
-            --nocapture 2>&1 | tee horizon-mods-test.log
+          cargo test -p volt-mods --lib --no-default-features -- \
+            --nocapture 2>&1 | tee volt-mods-test.log
           status=$?
           if [ "$status" -ne 0 ]; then
             python3 - <<'PY'
-          lines = open("horizon-mods-test.log", encoding="utf-8", errors="replace").read().splitlines()
+          lines = open("volt-mods-test.log", encoding="utf-8", errors="replace").read().splitlines()
           def emit(title, chosen):
               msg = "%0A".join(l.replace("%", "%25")[:400] for l in chosen)[:3800]
               print(f"::error title={title}::{msg or '(empty)'}")
-          emit("horizon-mods-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
-          emit("horizon-mods-log-tail", lines[-35:])
+          emit("volt-mods-errors", [l for l in lines if l.lstrip().startswith(("error", "panicked", "FAILED", "failures"))][:30])
+          emit("volt-mods-log-tail", lines[-35:])
           PY
             exit "$status"
           fi
@@ -207,7 +207,7 @@ jobs:
           test "$count" -eq 44
           grep -F "assets: 176 blockstates, 609 models, 193 item definitions, 217 textures, 206 lang keys verified" worldgen-test.log
           grep -F "creative inventory: 193 Biomes Unseen item(s) join the category and search tabs" worldgen-test.log
-          grep -F "android import validation: biomes_unseen.hmod accepted as a Mods package" worldgen-test.log
+          grep -F "android import validation: biomes_unseen.vmod accepted as a Mods package" worldgen-test.log
           # Publish the proof lines as an annotation readable through the
           # checks API (job logs are not downloadable from every network).
           python3 - <<'PY'
@@ -223,7 +223,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      HORIZON_TELEMETRY_URL: "off"
+      VOLT_TELEMETRY_URL: "off"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -233,8 +233,8 @@ jobs:
         id: full-root-cache
         uses: actions/cache@v4
         with:
-          path: .local/horizon-client
-          key: full-root-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_prepare.py') }}
+          path: .local/volt-client
+          key: full-root-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/volt-prepare/**', 'mods/volt/src/test/java/dev/voltlabs/parity/**', 'tools/android_prepare.py') }}
 
       - name: Set up Java 25 for resource preparation
         if: steps.full-root-cache.outputs.cache-hit != 'true'
@@ -277,8 +277,8 @@ jobs:
           if os.environ.get("JAVA_HOME"):
               cmd += ["--java-home", os.environ["JAVA_HOME"]]
           subprocess.run(cmd, check=True)
-          root = Path(".local/horizon-client") / version
-          assert (root / "horizon-resources.json").is_file(), "preparation produced no root"
+          root = Path(".local/volt-client") / version
+          assert (root / "volt-resources.json").is_file(), "preparation produced no root"
           print(f"Prepared full root at {root}", flush=True)
           PY
 
@@ -286,7 +286,7 @@ jobs:
         run: |
           set -u +e -o pipefail
           rustup show active-toolchain
-          cargo test -p horizon-client --lib --no-default-features -- \
+          cargo test -p volt-client --lib --no-default-features -- \
             biomes_unseen_full_root_runtime \
             biomes_unseen_android_shaped_root_places_biomes \
             subtle_effects_burst_in_the_live_animate_tick \
@@ -316,7 +316,7 @@ jobs:
           grep -F "live animate_tick: Subtle Effects spawns visible bursts on the real render path" runtime-proof.log
           grep -E "live animate_tick: subtle effects off 0/0/[0-9]+ on [0-9]+/[0-9]+/[0-9]+" runtime-proof.log
 
-      - name: Build the client and horizon-ctl for the live run
+      - name: Build the client and volt-ctl for the live run
         run: |
           set -u +e -o pipefail
           # Default features link ALSA and udev on Linux.
@@ -340,7 +340,7 @@ jobs:
             apt-cache policy libasound2-dev pkg-config || true
             exit 1
           fi
-          cargo build --locked --profile fast -p horizon-client --bins 2>&1 | tee client-build.log
+          cargo build --locked --profile fast -p volt-client --bins 2>&1 | tee client-build.log
           status=$?
           if [ "$status" -ne 0 ]; then
             python3 - <<'PY'
@@ -385,7 +385,7 @@ jobs:
       - name: Volt Shaders executed-value proof (every profile on lavapipe)
         run: |
           set -u +e -o pipefail
-          cargo test --locked --profile fast -p horizon-client-render --test volt_shader_exec -- \
+          cargo test --locked --profile fast -p volt-client-render --test volt_shader_exec -- \
             --include-ignored --nocapture 2>&1 | tee volt-exec.log
           status=$?
           python3 - <<'PY'
@@ -419,7 +419,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      HORIZON_TELEMETRY_URL: "off"
+      VOLT_TELEMETRY_URL: "off"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -429,8 +429,8 @@ jobs:
         id: tables-cache
         uses: actions/cache@v4
         with:
-          path: .local/horizon-client-tables
-          key: engine-tables-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_build.py', 'tools/android_prepare.py') }}
+          path: .local/volt-client-tables
+          key: engine-tables-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/volt-prepare/**', 'mods/volt/src/test/java/dev/voltlabs/parity/**', 'tools/android_build.py', 'tools/android_prepare.py') }}
 
       - name: Set up Java 25 for resource preparation
         if: steps.tables-cache.outputs.cache-hit != 'true'
@@ -439,11 +439,11 @@ jobs:
           distribution: temurin
           java-version: '25'
 
-      - name: Ensure Rust toolchain for horizon-prepare
+      - name: Ensure Rust toolchain for volt-prepare
         if: steps.tables-cache.outputs.cache-hit != 'true'
         run: rustup show active-toolchain
 
-      - name: Generate allowlisted Horizon engine tables
+      - name: Generate allowlisted Volt engine tables
         if: steps.tables-cache.outputs.cache-hit != 'true'
         env:
           CARGO_TARGET_DIR: .local/prepare-target
@@ -471,8 +471,8 @@ jobs:
               cmd += ["--java-home", os.environ["JAVA_HOME"]]
           subprocess.run(cmd, check=True)
 
-          src = Path(".local/horizon-client") / version
-          root_dst = Path(".local/horizon-client-tables")
+          src = Path(".local/volt-client") / version
+          root_dst = Path(".local/volt-client-tables")
           dst = root_dst / version
           if dst.exists():
               shutil.rmtree(dst)
@@ -490,7 +490,7 @@ jobs:
                   shutil.copy2(path, target)
                   copied += 1
 
-          if not (dst / "horizon-resources.json").is_file() or not (dst / "worldgen/blocks/structure-blocks.json").is_file():
+          if not (dst / "volt-resources.json").is_file() or not (dst / "worldgen/blocks/structure-blocks.json").is_file():
               raise SystemExit("Missing required generated engine tables after preparation")
           print(f"Prepared {copied} allowlisted generated table files for Minecraft {version}", flush=True)
           PY
@@ -499,11 +499,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: _internal-engine-tables
-          path: .local/horizon-client-tables
+          path: .local/volt-client-tables
           if-no-files-found: error
           retention-days: 1
 
-  # Weave the pinned official registry mods (JEI, Horizon Physics) into the
+  # Weave the pinned official registry mods (JEI, Volt Physics) into the
   # engine library on a disposable no-secrets runner. Native bundles and
   # Cargo build scripts are code: this job has read-only permissions and no
   # keystore; the signing job only verifies and packages its attested output
@@ -521,7 +521,7 @@ jobs:
       # id=file; the release tag is the file name without .hnmod.
       WEAVE_SET: |
         jei=jei-0.1.0.hnmod
-        horizon_physics=horizon_physics-0.15.1.hnmod
+        volt_physics=volt_physics-0.15.1.hnmod
         jade=jade-26.3.5.hnmod
         veinminer=veinminer-0.3.2.hnmod
         appleskin=appleskin-1.0.0.hnmod
@@ -541,8 +541,8 @@ jobs:
         invisible_frames=invisible_frames-0.1.1.hnmod
         freelook=freelook-0.3.1.hnmod
         worldedit=worldedit-1.2.1.hnmod
-        horizonmatica=horizonmatica-0.1.1.hnmod
-        visuality_horizon=visuality_horizon-1.0.2.hnmod
+        voltmatica=voltmatica-0.1.1.hnmod
+        visuality_volt=visuality_volt-1.0.2.hnmod
         held_item_info=held_item_info-0.1.0.hnmod
         carryblock=carryblock-0.1.2.hnmod
         chatheads=chatheads-0.1.0.hnmod
@@ -591,7 +591,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/registry"
-          curl --retry 3 -fsSL "https://codeload.github.com/horizon-rust/horizon-mods/tar.gz/$REGISTRY_REV" | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
+          curl --retry 3 -fsSL "https://codeload.github.com/volt-rust/volt-mods/tar.gz/$REGISTRY_REV" | tar -xz -C "$RUNNER_TEMP/registry" --strip-components=1
       - name: Pack vendored bundles and install their entries
         shell: bash
         run: |
@@ -610,7 +610,7 @@ jobs:
           while IFS='=' read -r mod_id file; do
             [ -n "$mod_id" ] || continue
             tag="${file%.hnmod}"
-            url="https://github.com/horizon-rust/horizon-mods/releases/download/$tag/$file"
+            url="https://github.com/volt-rust/volt-mods/releases/download/$tag/$file"
             ok=0
             for attempt in 1 2 3 4 5 6; do
               if curl --retry 5 --retry-delay 5 --retry-all-errors -fsSL \
@@ -647,7 +647,7 @@ jobs:
               print(f"{mod_id}: verified, pins mixins {revs[mod_id]}")
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
               env.write(f"JEI_MIXINS={revs['jei']}\n")
-              env.write(f"PHYS_MIXINS={revs['horizon_physics']}\n")
+              env.write(f"PHYS_MIXINS={revs['volt_physics']}\n")
               env.write(f"COMMON_MIXINS={revs['fast_items']}\n")
           PYCODE
       - name: Install the pinned mixin compiler
@@ -659,9 +659,9 @@ jobs:
           # consumer, and its MODIFY_VARIABLE locals need the compiler's
           # closure-tolerant store scan; every other pin is older and its
           # manifest is rebound (--force-common-mixins records the rebinds).
-          cargo install --locked --git https://github.com/horizon-rust/horizon-mixins \
+          cargo install --locked --git https://github.com/volt-rust/volt-mixins \
             --rev "$COMMON_MIXINS" \
-            --root "$RUNNER_TEMP/mixins-tool" horizon-mixins-cli
+            --root "$RUNNER_TEMP/mixins-tool" volt-mixins-cli
       - name: Weave and build the engine library
         run: |
           set -euo pipefail
@@ -677,7 +677,7 @@ jobs:
           python3 tools/native_mods/build_set.py \
             --registry "$RUNNER_TEMP/registry" \
             "${MOD_ARGS[@]}" \
-            --mixins "$RUNNER_TEMP/mixins-tool/bin/horizon-mixins" \
+            --mixins "$RUNNER_TEMP/mixins-tool/bin/volt-mixins" \
             --mixins-revision "$COMMON_MIXINS" \
             --abi "${{ matrix.abi }}" --output "$RUNNER_TEMP/woven-result" \
             --trust-native-code --experimental-raw-targets --force-common-mixins
@@ -728,7 +728,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
-      HORIZON_TELEMETRY_URL: "off"
+      VOLT_TELEMETRY_URL: "off"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -738,7 +738,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: _internal-engine-tables
-          path: .local/horizon-client
+          path: .local/volt-client
 
       - name: Verify downloaded engine tables
         run: |
@@ -747,8 +747,8 @@ jobs:
           from pathlib import Path
 
           version = json.loads(Path("research-lock.json").read_text(encoding="utf-8"))["minecraft"]["version"]
-          root = Path(".local/horizon-client") / version
-          assert (root / "horizon-resources.json").is_file(), f"Missing {root / 'horizon-resources.json'}"
+          root = Path(".local/volt-client") / version
+          assert (root / "volt-resources.json").is_file(), f"Missing {root / 'volt-resources.json'}"
           assert (root / "worldgen/blocks/structure-blocks.json").is_file(), f"Missing {root / 'worldgen/blocks/structure-blocks.json'}"
           PY
 
@@ -771,21 +771,21 @@ jobs:
           python3 - <<'PY'
           import subprocess, sys
           cmds = [
-              ["cargo", "test", "-p", "horizon-theme", "--lib", "glass::"],
-              ["cargo", "test", "-p", "horizon-core", "--lib", "game_version"],
-              ["cargo", "test", "-p", "horizon-client-core", "--lib", "lang"],
-              ["cargo", "test", "-p", "horizon-client-input", "--lib", "keybinds"],
-              ["cargo", "test", "-p", "horizon-mods", "--features", "index", "--lib", "index::"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "bundled_native"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "graphics"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "translating_ui_subtree_also_moves_depth_scissors"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "touch"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_features"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_mods"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_settings_ui"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "volt_qol"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "extras"],
-              ["cargo", "test", "-p", "horizon-client-render", "--lib", "options_ui"],
+              ["cargo", "test", "-p", "volt-theme", "--lib", "glass::"],
+              ["cargo", "test", "-p", "volt-core", "--lib", "game_version"],
+              ["cargo", "test", "-p", "volt-client-core", "--lib", "lang"],
+              ["cargo", "test", "-p", "volt-client-input", "--lib", "keybinds"],
+              ["cargo", "test", "-p", "volt-mods", "--features", "index", "--lib", "index::"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "bundled_native"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "graphics"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "translating_ui_subtree_also_moves_depth_scissors"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "touch"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "volt_features"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "volt_mods"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "volt_settings_ui"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "volt_qol"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "extras"],
+              ["cargo", "test", "-p", "volt-client-render", "--lib", "options_ui"],
           ]
           for cmd in cmds:
               proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -800,10 +800,10 @@ jobs:
                   print(f"\n::error title=Unit test failed ({' '.join(cmd)})::{tail}")
                   sys.exit(proc.returncode)
           PY
-          rustc --edition 2024 --test crates/horizon-client/src/game/official_zoom.rs -o "$RUNNER_TEMP/official-zoom-tests"
+          rustc --edition 2024 --test crates/volt-client/src/game/official_zoom.rs -o "$RUNNER_TEMP/official-zoom-tests"
           "$RUNNER_TEMP/official-zoom-tests"
           for mod in fps_overlay keystrokes minimap; do
-            rustc --edition 2024 --test "crates/horizon-client/src/game/official_${mod}.rs" -o "$RUNNER_TEMP/official-${mod}-tests"
+            rustc --edition 2024 --test "crates/volt-client/src/game/official_${mod}.rs" -o "$RUNNER_TEMP/official-${mod}-tests"
             "$RUNNER_TEMP/official-${mod}-tests"
           done
 
@@ -1046,7 +1046,7 @@ jobs:
           expected = {
               ("jei", "0.1.0",
                "c5590e0d4618d435fc0c56abcc9cdabf253be694710068a3dd4643ac25466b5b"),
-              ("horizon_physics", "0.15.1",
+              ("volt_physics", "0.15.1",
                "d7cf1201f0a47a852aa1a4c9684ef9e658ec3c86852104d44716d05f11281ca3"),
               ("jade", "26.3.5",
                "676a129f55db075284313a39ff4387674c426ebd9be04a8830ffb8955281c7ec"),
@@ -1086,9 +1086,9 @@ jobs:
                "9c0c92ce9f0fc8e7bc1bd34349e26d42b32b8abd2c7a09ec710936f9b6ce9aaf"),
               ("worldedit", "1.2.1",
                "b2bb3019ecd4d5392644c54c70a87d6c3277538a6e18d0c311f3a051f7d2f015"),
-              ("horizonmatica", "0.1.1",
+              ("voltmatica", "0.1.1",
                "2ddc562dd2ea0f9a76a47eb761c64c803def68a8c81b92cb5d15ec26c5d432aa"),
-              ("visuality_horizon", "1.0.2",
+              ("visuality_volt", "1.0.2",
                "b764f15a062e44b27c55f478b2d02e163bfb01c3d8e222fcd6d83bcc66f19a0d"),
               ("held_item_info", "0.1.0",
                "37a11d98f0afabe37f8ffa9982dc710ad2985817db6b5e094d807c24d30a6a6a"),
@@ -1123,7 +1123,7 @@ jobs:
                "4c9c75be020e311acfbb5389dd538486f65981651660d15aebaa57cbc79b41e7"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
-          library = root / "libhorizon_android.so"
+          library = root / "libvolt_launcher.so"
           digest = hashlib.sha256(library.read_bytes()).hexdigest()
           assert digest == report["library_sha256"], "library hash differs from the weave report"
           print(f"Woven engine library verified: {digest}")
@@ -1306,7 +1306,7 @@ jobs:
 
               gradle_text = Path("packaging/android/build.gradle").read_text(encoding="utf-8")
               version = re.search(r"versionName '([^']+)'", gradle_text).group(1)
-              src_apk = Path(".local/android/apk") / abi / "horizon-android-public.apk"
+              src_apk = Path(".local/android/apk") / abi / "volt-android-public.apk"
               if not src_apk.is_file():
                   raise RuntimeError(f"Expected built APK at {src_apk}")
 
@@ -1678,12 +1678,12 @@ jobs:
               apks = renamed
 
           # The Biomes Unseen content mod ships beside the APKs: the same
-          # .hmod the worldgen-test job verifies (docs/biomes_unseen/).
-          hmod = Path("crates/horizon-client/testdata/biomes_unseen.hmod")
+          # .vmod the worldgen-test job verifies (docs/biomes_unseen/).
+          hmod = Path("crates/volt-client/testdata/biomes_unseen.vmod")
           with zipfile.ZipFile(hmod, "r") as zf:
               if zf.testzip() is not None:
-                  raise SystemExit("biomes_unseen.hmod failed CRC check")
-          target = collect / "biomes_unseen.hmod"
+                  raise SystemExit("biomes_unseen.vmod failed CRC check")
+          target = collect / "biomes_unseen.vmod"
           target.write_bytes(hmod.read_bytes())
 
           summed = apks + [target]
@@ -1738,10 +1738,10 @@ jobs:
           Controlling, Mouse Tweaks, No Fog, FerriteCore, Dynamic FPS, BadOptimizations,
           Screenshot to Clipboard, Chat Heads, and Better Clouds; see THIRD_PARTY_NOTICES.md.
 
-          **Biomes Unseen** (`biomes_unseen.hmod`, attached): 44 data-driven biomes
+          **Biomes Unseen** (`biomes_unseen.vmod`, attached): 44 data-driven biomes
           (39 Overworld, 5 Nether), 176 blocks and 29 items. The APK does not bundle
           it. Install on Android: copy the asset link above, open Volt Launcher >
-          Mods, paste the HTTPS URL and tap Import .hmod; then enable Biomes Unseen
+          Mods, paste the HTTPS URL and tap Import .vmod; then enable Biomes Unseen
           in Installed (or the game's Options > Mods) and create a new world.
           EOF
           sed -i 's/^          //' "$NOTES_FILE"
@@ -1755,7 +1755,7 @@ jobs:
             sleep 5
             gh release create "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
-              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/biomes_unseen.vmod \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
@@ -1766,7 +1766,7 @@ jobs:
           elif gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
-              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/biomes_unseen.vmod \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \
@@ -1775,7 +1775,7 @@ jobs:
           else
             gh release create "$TAG" \
               .local/android/release-collect/Volt-Launcher-*.apk \
-              .local/android/release-collect/biomes_unseen.hmod \
+              .local/android/release-collect/biomes_unseen.vmod \
               .local/android/release-collect/SHA256SUMS.txt \
               .local/android/release-collect/LICENSE.txt \
               .local/android/release-collect/THIRD_PARTY_NOTICES.md \

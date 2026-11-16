@@ -6,13 +6,13 @@ Changes after 0.7.1:
   lobby transfers in the same dimension.
 - Initialize menu audio and the FPS/frame graph before full game startup, and
   preserve them when handing over to the game.
-- Browse the official Horizon Mods catalog, retaining direct HTTPS `.hmod`
+- Browse the official Volt Mods catalog, retaining direct HTTPS `.vmod`
   imports. Native mod execution requires a 64-bit APK.
 - Show per-project download progress, installed state and retry actions in mod
   and resource-pack search results; provide launcher button press feedback.
-- Use the upstream Horizon application icon.
+- Use the upstream Volt application icon.
 - Add a launcher icon, text-field carets, offline player-name status, client
-  version and a GitHub link. Catalog tabs remain Mods/Packs, with Horizon Mods
+  version and a GitHub link. Catalog tabs remain Mods/Packs, with Volt Mods
   and Resource Packs section headings.
 - Move Add buttons below the editor toolbar and draw editable controls above
   the toolbar. Improve launcher content insets and footer spacing.

@@ -9,7 +9,7 @@ NOW = "2026-10-28T12:00:00+00:00"
 PATTERNS = ns.guarded_patterns((Path(__file__).resolve().parents[1] / ".github/CODEOWNERS").read_text())
 
 
-def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main"):
+def pr(n, head="h", state="open", files=("crates/volt-world/src/lib.rs",), base="main"):
     return ns.PullRequest(n, state, f"{head}{n}", f"Fix {n}", f"dev{n}", base, list(files))
 
 
@@ -24,7 +24,7 @@ def run(state, text, login="kacpherek", *prs):
 T = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
 
 
-def merged_pr(n, title, labels, issues=(), paths=("crates/horizon-world/src/lib.rs",)):
+def merged_pr(n, title, labels, issues=(), paths=("crates/volt-world/src/lib.rs",)):
     return {"number": n, "title": title, "labels": labels, "issues": list(issues), "author": f"dev{n}",
             "paths": list(paths)}
 
@@ -145,15 +145,15 @@ class UntrustedBuildTests(unittest.TestCase):
         runs_on = [line for line in self.game.splitlines() if "runs-on:" in line]
         self.assertEqual(len(runs_on), 2)
         # The nightly's own runner: never the release runner, and never behind pull requests' parity queue.
-        nightly_runner = "fromJSON('[\"self-hosted\", \"macOS\", \"horizon-nightly\"]')"
+        nightly_runner = "fromJSON('[\"self-hosted\", \"macOS\", \"volt-nightly\"]')"
         for line in runs_on:
             self.assertIn(f"inputs.trusted && vars.MAC_RUNNER || {nightly_runner}", line)
 
     def test_a_trusted_build_never_reads_the_shared_sccache(self):
         calls = self.game.count("bash tools/ci/runner-env.sh")
-        self.assertEqual(self.game.count("HORIZON_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}"), calls)
+        self.assertEqual(self.game.count("VOLT_NO_SCCACHE: ${{ inputs.trusted && '1' || '' }}"), calls)
         env = (Path(__file__).resolve().parents[1] / "tools/ci/runner-env.sh").read_text()
-        self.assertEqual(env.count('-z "${HORIZON_NO_SCCACHE:-}"'), 2)
+        self.assertEqual(env.count('-z "${VOLT_NO_SCCACHE:-}"'), 2)
 
 
 class PruneBuildsTests(unittest.TestCase):
@@ -186,12 +186,12 @@ class PruneBuildsTests(unittest.TestCase):
     def test_the_source_is_archived_from_git_signed_attached_and_tagged(self):
         build = workflow("nightly-build.yml")
         pick = build.split("\n  build:", 1)[0]
-        self.assertIn('git archive --format=tar.gz --prefix="horizon-${SHA:0:7}/" -o horizon-source.tar.gz "$SHA"',
+        self.assertIn('git archive --format=tar.gz --prefix="volt-${SHA:0:7}/" -o volt-source.tar.gz "$SHA"',
                       pick)
         sign = build.split("\n  sign:", 1)[1].split("\n  publish:", 1)[0]
-        self.assertIn("dist/horizon-source.tar.gz", sign.split("sign_release.sh nightly", 1)[1])
+        self.assertIn("dist/volt-source.tar.gz", sign.split("sign_release.sh nightly", 1)[1])
         publish = build.split("\n  publish:", 1)[1].split("\n  answer:", 1)[0]
-        self.assertIn('"dist/horizon-source.tar.gz#Source of this Nightly', publish)
+        self.assertIn('"dist/volt-source.tar.gz#Source of this Nightly', publish)
         self.assertIn('nightly.py keep-source "$SHA" "$DATE"', publish)
 
     def test_the_workflow_prunes_on_schedule_only(self):

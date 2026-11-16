@@ -6,7 +6,7 @@
 
 ### A native Rust Minecraft launcher and client for Android
 
-**Android 9+ · Vulkan · Minecraft Java 26.3 · Touch controls · Sandboxed `.hmod` mods**
+**Android 9+ · Vulkan · Minecraft Java 26.3 · Touch controls · Sandboxed `.vmod` mods**
 
 [![Release](https://img.shields.io/github/v/release/entitybrian69-bit/Volt-launcher?color=ff2d2d&label=release&style=for-the-badge)](https://github.com/entitybrian69-bit/Volt-launcher/releases)
 [![Downloads](https://img.shields.io/github/downloads/entitybrian69-bit/Volt-launcher/total?color=ff2d2d&label=downloads&style=for-the-badge)](https://github.com/entitybrian69-bit/Volt-launcher/releases)
@@ -77,13 +77,13 @@
 - Editable button positions, sizes and opacity; handedness, circle size, optional
   360-degree movement, Auto Sprint and Sprint-button visibility.
 - Java multiplayer, including the Hypixel Arcade lobby shown in **In game** below.
-- Native launcher, verified resource downloads, resource packs and `.hmod` import.
+- Native launcher, verified resource downloads, resource packs and `.vmod` import.
 - Vulkan rendering modes and resolution scaling; Android keyboard, clipboard,
   AAudio sound and phone vibration through the existing game settings.
 - Account status and Android Keystore storage; the current sign-in configuration
   is still for development. [Feature support and remaining work](docs/android-features.md).
 
-The engine targets Minecraft Java **26.3**. Sandboxed `.hmod`
+The engine targets Minecraft Java **26.3**. Sandboxed `.vmod`
 code mods run on 64-bit APKs. Source-only `.hnmod` mods require a separately
 compiled client and are not supported on Android yet. Fabric/Forge Java code
 does not run in this client. Server and anticheat
@@ -128,7 +128,7 @@ compatibility requires testing on the actual server.
 | | |
 | :---: | :---: |
 | [<img src="docs/media/volt/launcher-1.png" alt="Volt Launcher home screen: Play button, instance, renderer and Volt Boost settings">](docs/media/volt/launcher-1.png)<br><sub><b>Home</b> — Play, instance and renderer at a glance</sub> | [<img src="docs/media/volt/launcher-5.png" alt="Volt Launcher home screen with the instance panel">](docs/media/volt/launcher-5.png)<br><sub><b>Home</b> — the instance panel</sub> |
-| [<img src="docs/media/volt/launcher-2.png" alt="Volt Launcher Mods page listing Horizon Zoom, FPS Overlay, Keystrokes, Minimap, JEI and Horizon Physics">](docs/media/volt/launcher-2.png)<br><sub><b>Mods</b> — install or switch off per profile</sub> | [<img src="docs/media/volt/launcher-6.png" alt="Volt Launcher Mods page showing which official mods are built into the APK">](docs/media/volt/launcher-6.png)<br><sub><b>Mods</b> — what is built into the APK</sub> |
+| [<img src="docs/media/volt/launcher-2.png" alt="Volt Launcher Mods page listing Volt Zoom, FPS Overlay, Keystrokes, Minimap, JEI and Volt Physics">](docs/media/volt/launcher-2.png)<br><sub><b>Mods</b> — install or switch off per profile</sub> | [<img src="docs/media/volt/launcher-6.png" alt="Volt Launcher Mods page showing which official mods are built into the APK">](docs/media/volt/launcher-6.png)<br><sub><b>Mods</b> — what is built into the APK</sub> |
 
 [<img src="docs/media/volt/launcher-4.png" alt="Volt Launcher Choose profile dialog with Profile 0, Profile 1 and Create profile">](docs/media/volt/launcher-4.png)
 
@@ -151,18 +151,18 @@ APKs and signing keys stay outside Git.
 </sub>
 
 <details>
-<summary>Upstream Horizon documentation (desktop)</summary>
+<summary>Upstream Volt documentation (desktop)</summary>
 
 The following is the upstream desktop project description. Its download links,
-CI badges and parity claims describe upstream Horizon, not validation of this
+CI badges and parity claims describe upstream Volt, not validation of this
 Android fork.
 
 <p align="center">
-  <img src="docs/media/banner.webp" alt="The Horizon website: the game you know, rebuilt in Rust" width="100%">
+  <img src="docs/media/banner.webp" alt="The Volt website: the game you know, rebuilt in Rust" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/horizon-rust/horizon/actions/workflows/ci.yml"><img src="https://github.com/horizon-rust/horizon/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/volt-rust/volt/actions/workflows/ci.yml"><img src="https://github.com/volt-rust/volt/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
   <img src="https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white" alt="Rust">
   <img src="https://img.shields.io/badge/vanilla%20parity-100%25-F0795A" alt="Vanilla parity 100%">
@@ -172,26 +172,26 @@ Android fork.
 </p>
 
 <p align="center">
-  <a href="https://playhorizon.dev"><b>Website</b></a> ·
+  <a href="https://playvolt.dev"><b>Website</b></a> ·
   <a href="#download"><b>Download</b></a> ·
-  <a href="https://playhorizon.dev/docs/"><b>Documentation</b></a> ·
-  <a href="https://github.com/horizon-rust/horizon/releases"><b>Release notes</b></a> ·
+  <a href="https://playvolt.dev/docs/"><b>Documentation</b></a> ·
+  <a href="https://github.com/volt-rust/volt/releases"><b>Release notes</b></a> ·
   <a href="ROADMAP.md"><b>Roadmap</b></a> ·
   <a href="#project-status"><b>Project status</b></a> ·
   <a href="#contributing"><b>Contributing</b></a>
 </p>
 
-# Horizon
+# Volt
 
 Minecraft: Java Edition 26.3, rewritten in Rust. Same worlds, same rules, same terrain, checked against the Java game by more than 300 differential harnesses. Free, open source and unofficial.
 
-> Not an official Minecraft product, nor approved by or associated with Mojang or Microsoft. Horizon contains no Minecraft code, assets or data: you need your own copy of Java Edition 26.3.
+> Not an official Minecraft product, nor approved by or associated with Mojang or Microsoft. Volt contains no Minecraft code, assets or data: you need your own copy of Java Edition 26.3.
 
 ## Download
 
-Get **the Horizon launcher** from [playhorizon.dev](https://playhorizon.dev) or [the launcher releases](https://github.com/horizon-rust/horizon/releases?q=launcher-v&expanded=true) (Linux x86-64, macOS on Apple Silicon, Windows x64). It installs and updates the game, prepares its files from your copy of Minecraft, and updates itself.
+Get **the Volt launcher** from [playvolt.dev](https://playvolt.dev) or [the launcher releases](https://github.com/volt-rust/volt/releases?q=launcher-v&expanded=true) (Linux x86-64, macOS on Apple Silicon, Windows x64). It installs and updates the game, prepares its files from your copy of Minecraft, and updates itself.
 
-**You need** a Microsoft account that owns Java Edition ([why](docs/microsoft-account.md)) and a GPU with Vulkan or OpenGL 3.3 (Linux), Vulkan or DirectX 12 (Windows), or an Apple Silicon Mac. An existing Minecraft install (official launcher, Prism, MultiMC...) is reused; without one, Play downloads 26.3 from Mojang for your account. Step by step: [Install and first launch](https://playhorizon.dev/docs/install).
+**You need** a Microsoft account that owns Java Edition ([why](docs/microsoft-account.md)) and a GPU with Vulkan or OpenGL 3.3 (Linux), Vulkan or DirectX 12 (Windows), or an Apple Silicon Mac. An existing Minecraft install (official launcher, Prism, MultiMC...) is reused; without one, Play downloads 26.3 from Mojang for your account. Step by step: [Install and first launch](https://playvolt.dev/docs/install).
 
 <table>
   <tr>
@@ -203,10 +203,10 @@ Get **the Horizon launcher** from [playhorizon.dev](https://playhorizon.dev) or 
 ## What works today
 
 - **The game:** vanilla world generation, mobs, villagers, raids, redstone, every command, the HUD and the recipe book, on vanilla saves. Worlds from 1.8 to 26.2 are upgraded. [Status](#project-status).
-- **Extras:** new menus, graphics presets, distant terrain up to 1024 chunks, controllers, zoom, minimap and more, off by default where they change the vanilla look. [Settings](https://playhorizon.dev/docs/settings).
+- **Extras:** new menus, graphics presets, distant terrain up to 1024 chunks, controllers, zoom, minimap and more, off by default where they change the vanilla look. [Settings](https://playvolt.dev/docs/settings).
 - **Packs:** resource packs, and data packs with functions, predicates, item modifiers and world generation.
-- **Multiplayer:** invite friends with a code, Open to LAN, join servers (online mode included). [Multiplayer](https://playhorizon.dev/docs/multiplayer).
-- **Mods:** content mods (blocks, items, data) and native Rust mods, built by the launcher with nothing to install. Java mod jars do not run. [Mods](https://playhorizon.dev/docs/mods).
+- **Multiplayer:** invite friends with a code, Open to LAN, join servers (online mode included). [Multiplayer](https://playvolt.dev/docs/multiplayer).
+- **Mods:** content mods (blocks, items, data) and native Rust mods, built by the launcher with nothing to install. Java mod jars do not run. [Mods](https://playvolt.dev/docs/mods).
 
 In the Rust client, with vanilla assets and no mods or shaders:
 
@@ -216,7 +216,7 @@ In the Rust client, with vanilla assets and no mods or shaders:
   </tr>
   <tr>
     <td width="50%"><img src="docs/media/survival.webp" alt="Survival at dusk: a zombie walks up, with the hotbar, health, hunger and experience"></td>
-    <td width="50%"><img src="docs/media/settings.webp" alt="Vanilla's Video Settings screen with Horizon's own buttons at the top: Horizon Graphics and Advanced Graphics"></td>
+    <td width="50%"><img src="docs/media/settings.webp" alt="Vanilla's Video Settings screen with Volt's own buttons at the top: Volt Graphics and Advanced Graphics"></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/media/village.webp" alt="A plains village among savanna hills, with farms, villagers and an iron golem"></td>
@@ -226,47 +226,47 @@ In the Rust client, with vanilla assets and no mods or shaders:
 
 ## Host a server
 
-The launcher's **Servers** page creates, starts, backs up and updates a server, and invites friends over Tailscale. On a VPS, `horizon-server` installs with one command and needs no Java. [Host a server](https://playhorizon.dev/docs/hosting) ([reference](docs/hosting.md)).
+The launcher's **Servers** page creates, starts, backs up and updates a server, and invites friends over Tailscale. On a VPS, `volt-server` installs with one command and needs no Java. [Host a server](https://playvolt.dev/docs/hosting) ([reference](docs/hosting.md)).
 
 ## Modpacks
 
-The launcher imports Modrinth and CurseForge packs and plays the mods Horizon can carry over: today, content mods made of data and assets, not Java code. [Modpacks](https://playhorizon.dev/docs/modpacks).
+The launcher imports Modrinth and CurseForge packs and plays the mods Volt can carry over: today, content mods made of data and assets, not Java code. [Modpacks](https://playvolt.dev/docs/modpacks).
 
 ## Agent control
 
-AI agents and scripts can play Horizon. `horizon-ctl`, shipped with the game, reads its state as JSON and acts like a player; `horizon-ctl mcp` serves the same commands over MCP.
+AI agents and scripts can play Volt. `volt-ctl`, shipped with the game, reads its state as JSON and acts like a player; `volt-ctl mcp` serves the same commands over MCP.
 
 ```sh
-horizon-ctl launch --world Survival --seed 5 --wait   # finds the version the launcher installed
-horizon-ctl state                                       # position, health, food, target, screen...
-horizon-ctl find-block birch_log                        # the nearest logs
-horizon-ctl goto -0.5 65 -2.5 --near 2.5                # walks there along a path
-horizon-ctl break -1 65 -3                              # mines it; replies with the drops
-horizon-ctl open-inventory && horizon-ctl click-slot 0  # menus: slots, buttons by label, text fields
+volt-ctl launch --world Survival --seed 5 --wait   # finds the version the launcher installed
+volt-ctl state                                       # position, health, food, target, screen...
+volt-ctl find-block birch_log                        # the nearest logs
+volt-ctl goto -0.5 65 -2.5 --near 2.5                # walks there along a path
+volt-ctl break -1 65 -3                              # mines it; replies with the drops
+volt-ctl open-inventory && volt-ctl click-slot 0  # menus: slots, buttons by label, text fields
 ```
 
-Commands block until done and reply with the result; `horizon-ctl help` lists them all. [Agent control](docs/native-client.md#agent-control-horizon-ctl-and-mcp).
+Commands block until done and reply with the result; `volt-ctl help` lists them all. [Agent control](docs/native-client.md#agent-control-volt-ctl-and-mcp).
 
 ## Build from source
 
-Needs Rust 1.90+, Python 3.10+, JDK 25, and on Linux `libasound2-dev libudev-dev`. `horizon-prepare` builds the game's resources from **your own copy** of Java Edition 26.3 (checked against `research-lock.json`) and never downloads it:
+Needs Rust 1.90+, Python 3.10+, JDK 25, and on Linux `libasound2-dev libudev-dev`. `volt-prepare` builds the game's resources from **your own copy** of Java Edition 26.3 (checked against `research-lock.json`) and never downloads it:
 
-1. **Client:** play 26.3 once in the official launcher. Horizon reads `~/.minecraft` (or `--minecraft-dir` / `HORIZON_MINECRAFT_DIR`).
-2. **Server jar:** the 26.3 server jar (`downloads.server.url` in `versions/26.3/26.3.json`), passed once with `--server-jar` or `HORIZON_SERVER_JAR`.
+1. **Client:** play 26.3 once in the official launcher. Volt reads `~/.minecraft` (or `--minecraft-dir` / `VOLT_MINECRAFT_DIR`).
+2. **Server jar:** the 26.3 server jar (`downloads.server.url` in `versions/26.3/26.3.json`), passed once with `--server-jar` or `VOLT_SERVER_JAR`.
 
 ```sh
-git clone https://github.com/horizon-rust/horizon.git
-cd horizon
-cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar   # needs JDK 25
-cargo run --release -p horizon-prepare -- sounds   # optional: sounds from your launcher install
-cargo run --release -p horizon-client
+git clone https://github.com/volt-rust/volt.git
+cd volt
+cargo run --release -p volt-prepare -- --prepare --server-jar ~/Downloads/server.jar   # needs JDK 25
+cargo run --release -p volt-prepare -- sounds   # optional: sounds from your launcher install
+cargo run --release -p volt-client
 ```
 
 Prepared files land in the gitignored `.local/`: never commit or share them. Options, controls and architecture: [the native client guide](docs/native-client.md); all developer docs: [docs/README.md](docs/README.md).
 
 ## Roadmap
 
-What is in progress, what comes next and where to help: [ROADMAP.md](ROADMAP.md), or [playhorizon.dev/hub](https://playhorizon.dev/hub) with the work board and what shipped.
+What is in progress, what comes next and where to help: [ROADMAP.md](ROADMAP.md), or [playvolt.dev/hub](https://playvolt.dev/hub) with the work board and what shipped.
 
 ## Contributing
 
@@ -281,7 +281,7 @@ It runs rustfmt, clippy, the touched crates' tests, the Python tests, the public
 
 ## Project status
 
-**Player-visible gaps: 833 open** of the 833 the [port ledger](tools/port_ledger.py) found, reading every vanilla 26.3 method against Horizon's code: vanilla behaviour a player would notice that Horizon doesn't have yet. By area: Screens, HUD and client packets [197](https://github.com/horizon-rust/horizon/issues/3518); Entity and block rendering, models [129](https://github.com/horizon-rust/horizon/issues/3519); Animals [110](https://github.com/horizon-rust/horizon/issues/3512); Server and players on the server [106](https://github.com/horizon-rust/horizon/issues/3520); Blocks, redstone and fluids [86](https://github.com/horizon-rust/horizon/issues/3516); Entities, projectiles, vehicles and decorations [64](https://github.com/horizon-rust/horizon/issues/3514); Monsters and bosses [53](https://github.com/horizon-rust/horizon/issues/3513); Mob AI, villagers and raids [35](https://github.com/horizon-rust/horizon/issues/3521); World, world generation and saves [32](https://github.com/horizon-rust/horizon/issues/3517); Items, enchantments and inventories [21](https://github.com/horizon-rust/horizon/issues/3515). This number goes down as gaps close (`tools/parity_gaps.py`); the harness results below say that what is tested matches.
+**Player-visible gaps: 833 open** of the 833 the [port ledger](tools/port_ledger.py) found, reading every vanilla 26.3 method against Volt's code: vanilla behaviour a player would notice that Volt doesn't have yet. By area: Screens, HUD and client packets [197](https://github.com/volt-rust/volt/issues/3518); Entity and block rendering, models [129](https://github.com/volt-rust/volt/issues/3519); Animals [110](https://github.com/volt-rust/volt/issues/3512); Server and players on the server [106](https://github.com/volt-rust/volt/issues/3520); Blocks, redstone and fluids [86](https://github.com/volt-rust/volt/issues/3516); Entities, projectiles, vehicles and decorations [64](https://github.com/volt-rust/volt/issues/3514); Monsters and bosses [53](https://github.com/volt-rust/volt/issues/3513); Mob AI, villagers and raids [35](https://github.com/volt-rust/volt/issues/3521); World, world generation and saves [32](https://github.com/volt-rust/volt/issues/3517); Items, enchantments and inventories [21](https://github.com/volt-rust/volt/issues/3515). This number goes down as gaps close (`tools/parity_gaps.py`); the harness results below say that what is tested matches.
 
 The table is the project's own audit: every subsystem matches vanilla in every harness that compares it. 100% means 100% of what the harnesses compare, not that nothing else differs.
 

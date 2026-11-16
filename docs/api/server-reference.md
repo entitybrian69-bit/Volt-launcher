@@ -1,16 +1,16 @@
-<!-- Generated from crates/horizon-server/src (the help text, config::TEMPLATE, api::ROUTES) by reference.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-server reference -->
+<!-- Generated from crates/volt-server/src (the help text, config::TEMPLATE, api::ROUTES) by reference.rs; a test fails when this file is out of date. Update it with: VOLT_WRITE_DOCS=1 cargo test -p volt-server reference -->
 # Server reference
 
-Everything `horizon-server` offers a host or a tool: its commands, every `server.toml` key and the control API. How to host: [hosting.md](../hosting.md); the design: [server.md](../server.md); stability and versions: [stability.md](stability.md).
+Everything `volt-server` offers a host or a tool: its commands, every `server.toml` key and the control API. How to host: [hosting.md](../hosting.md); the design: [server.md](../server.md); stability and versions: [stability.md](stability.md).
 
 ## Commands
 
-`horizon-server help` prints:
+`volt-server help` prints:
 
 ```text
-horizon-server: host a Horizon (Minecraft Java Edition 26.3) server
+volt-server: host a Volt (Minecraft Java Edition 26.3) server
 
-Usage: horizon-server [--dir DIR] <command>
+Usage: volt-server [--dir DIR] <command>
 
   init        Set up a server here: the EULA, the world, the port, who may join (asks, or takes flags:
               --eula --world NAME --seed SEED --port N --whitelist/--no-whitelist --player NAME... --op NAME
@@ -63,7 +63,7 @@ Settings live in server.toml; the server writes server.properties from it before
 
 ## `server.toml`
 
-Horizon server settings (docs/server.md). The server writes them into server.properties before every start: edit this file, not that one. Unknown keys are refused. `horizon-server init` writes this file with these defaults; `horizon-server config set SECTION.KEY=VALUE` changes it.
+Volt server settings (docs/server.md). The server writes them into server.properties before every start: edit this file, not that one. Unknown keys are refused. `volt-server init` writes this file with these defaults; `volt-server config set SECTION.KEY=VALUE` changes it.
 
 ### `[server]`
 
@@ -78,7 +78,7 @@ Horizon server settings (docs/server.md). The server writes them into server.pro
 | `enforce_whitelist` | `false` | `enforce-whitelist` | kick online players taken off the whitelist |
 | `view_distance` | `10` | `view-distance` | chunks sent around each player |
 | `simulation_distance` | `10` | `simulation-distance` | chunks around each player where mobs, crops and redstone tick |
-| `max_view_distance` | `0` | `horizon-max-view-distance` | past view_distance, saved chunks only, up to this (never generated; 0: off) |
+| `max_view_distance` | `0` | `volt-max-view-distance` | past view_distance, saved chunks only, up to this (never generated; 0: off) |
 
 ### `[world]`
 
@@ -98,7 +98,7 @@ Any other server.properties key, spelled as vanilla spells it, for example: spaw
 
 | Key | Default | In `server.properties` | What it does |
 | --- | --- | --- | --- |
-| `path` | `""` |  | the game program; empty: the one installed beside horizon-server |
+| `path` | `""` |  | the game program; empty: the one installed beside volt-server |
 | `resources` | `""` |  | the prepared game files; empty: resources/ here, else the usual places |
 | `restart_on_crash` | `true` |  | start the game again when it crashes |
 
@@ -124,7 +124,7 @@ Any other server.properties key, spelled as vanilla spells it, for example: spaw
 
 ## Control API (`/api/v1`)
 
-HTTP and JSON on 127.0.0.1. A running server writes its address and a random token to `.horizon/api.json`, readable only by its own user; every request sends `Authorization: Bearer <token>` and a `Host` that is that address. Errors answer `{"error": "..."}` with 400, 401, 403, 404, 405 or 409. The web panel uses the same routes with its session.
+HTTP and JSON on 127.0.0.1. A running server writes its address and a random token to `.volt/api.json`, readable only by its own user; every request sends `Authorization: Bearer <token>` and a `Host` that is that address. Errors answer `{"error": "..."}` with 400, 401, 403, 404, 405 or 409. The web panel uses the same routes with its session.
 
 | Method | Path | Takes | Answers | What it does |
 | --- | --- | --- | --- | --- |

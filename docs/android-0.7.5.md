@@ -1,4 +1,4 @@
-# Horizon Android 0.7.5
+# Volt Android 0.7.5
 
 The published RC is followed by source changes for the next 0.7.5 candidate.
 
@@ -16,11 +16,11 @@ The published RC is followed by source changes for the next 0.7.5 candidate.
 
 Virtual mouse, gyroscope and crosshair gestures are in Options > Controls > Touch Controls. Display refresh rate, Performance hints (ADPF), GPU profiling and existing performance recording are in launcher Settings. Earlier system preferences are migrated from the touch file without overriding choices already saved by the client. Sensor/performance controls default to off and display frequency defaults to System default.
 
-Reports are accessible through the Android Files app under Horizon Android > Reports. Native exit history appears after the next launch. Review logs before sharing: they can include file paths, server addresses and exception text. No reports are uploaded automatically. Normal Android low-memory process termination is recorded as such; it is not automatically labeled a game crash.
+Reports are accessible through the Android Files app under Volt Android > Reports. Native exit history appears after the next launch. Review logs before sharing: they can include file paths, server addresses and exception text. No reports are uploaded automatically. Normal Android low-memory process termination is recorded as such; it is not automatically labeled a game crash.
 
 Device support is detected at runtime. Old Android releases retain normal startup without linking newer performance/frequency symbols at load time.
 
-Sandboxed `.hmod` execution is retained in this Android fork alongside the upstream native hooks. Source-only `.hnmod` entries remain visible in the catalog with an unsupported status; compiling and running them on Android is deferred. Native-engine experiments are excluded from this release.
+Sandboxed `.vmod` execution is retained in this Android fork alongside the upstream native hooks. Source-only `.hnmod` entries remain visible in the catalog with an unsupported status; compiling and running them on Android is deferred. Native-engine experiments are excluded from this release.
 
 ## Release scope and verification
 
@@ -35,7 +35,7 @@ saved Off choices are retained. The status bar stays hidden in both modes. Off
 shows only Android navigation, with its occupied area excluded from the picture.
 Microsoft device-code polling retains the active code through temporary network
 outages, with bounded request retries, backoff and service/error categories.
-The configured `HORIZON_MSA_CLIENT_ID` is honored when supplied; the upstream
+The configured `VOLT_MSA_CLIENT_ID` is honored when supplied; the upstream
 registration value is not distributed in source and has not been substituted.
 
-Custom physical-key touch buttons now send sandbox `.hmod` key-down/key-up events, matching hardware keyboard dispatch. Entity-placement items (boats, rafts, minecarts, spawn eggs and decorations) retain tap placement; contextual holds include boats and minecarts.
+Custom physical-key touch buttons now send sandbox `.vmod` key-down/key-up events, matching hardware keyboard dispatch. Entity-placement items (boats, rafts, minecarts, spawn eggs and decorations) retain tap placement; contextual holds include boats and minecarts.

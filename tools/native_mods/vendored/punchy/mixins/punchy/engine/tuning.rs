@@ -69,7 +69,7 @@ impl Transform {
     }
 }
 
-/// The classifier's evidence comes from Horizon's registry, rather than guesses
+/// The classifier's evidence comes from Volt's registry, rather than guesses
 /// for custom items. `kind` accepts Punchy's upper-case ToolKind names.
 #[derive(Clone, Debug, Default)]
 pub struct ItemContext<'a> {

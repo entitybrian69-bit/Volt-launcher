@@ -18,19 +18,19 @@ edition = "2024"
 serde_json = "1"
 log = "0.4"
 rustix = { version = "1", features = ["time"] }
-horizon-threads = { path = "../../../crates/horizon-threads" }
+volt-threads = { path = "../../../crates/volt-threads" }
 ''', encoding='utf-8')
     (harness / 'src/lib.rs').write_text('''#![allow(dead_code)]
-extern crate self as horizon_client;
+extern crate self as volt_client;
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-#[path = "../../../../crates/horizon-client/src/control.rs"] pub mod control;
-#[path = "../../../../crates/horizon-client-render/src/spans.rs"] pub mod spans;
+#[path = "../../../../crates/volt-client/src/control.rs"] pub mod control;
+#[path = "../../../../crates/volt-client-render/src/spans.rs"] pub mod spans;
 mod backend { pub const VERSION: &str = "0.7.2-test"; }
 mod platform {
     pub fn open_documents(_: &str) -> bool { true }
 }
-#[path = "../../../../crates/horizon-client/src/android/performance.rs"] mod performance;
-#[path = "../../../../crates/horizon-client/src/android/device_math.rs"] mod device_math;
+#[path = "../../../../crates/volt-client/src/android/performance.rs"] mod performance;
+#[path = "../../../../crates/volt-client/src/android/device_math.rs"] mod device_math;
 ''', encoding='utf-8')
     subprocess.run(['cargo', 'test', '--manifest-path', str(harness / 'Cargo.toml'),
                     '--', '--test-threads=1'], cwd=ROOT, check=True)

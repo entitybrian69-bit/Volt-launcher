@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a reviewed set of Horizon native bundles into an Android library.
+"""Compile a reviewed set of Volt native bundles into an Android library.
 
 Run ONLY in a disposable, isolated worker with no credentials, shared caches,
 network access to private services, or signing keys. This is not a sandbox,
@@ -51,7 +51,7 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         raise compat.Rejected("invalid source or mixin revision")
     results = []
     # One staging folder per trusted compiler revision: bundles pinning
-    # different horizon-mixins revisions are applied by their own compiler.
+    # different volt-mixins revisions are applied by their own compiler.
     for index in range(len(mixins_revisions)):
         (work / "mixins" / str(index)).mkdir(parents=True)
     for mod_id, bundle in sorted(selections):
@@ -70,10 +70,10 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         if rebind:
             manifest_path = data["manifest_path"]
             text = manifest_path.read_text(encoding="utf-8")
-            old = f'horizon_revision = "{meta["horizon"]}"'
+            old = f'volt_revision = "{meta["volt"]}"'
             if text.count(old) != 1:
                 raise compat.Rejected(f"{mod_id}: cannot safely rebind hook revision")
-            manifest_path.write_text(text.replace(old, f'horizon_revision = "{volt_revision}"'), encoding="utf-8")
+            manifest_path.write_text(text.replace(old, f'volt_revision = "{volt_revision}"'), encoding="utf-8")
             compat.apply_fork_remaps(manifest_path)
             compat.apply_fork_source_shims(mod_id, manifest_path.parent)
         # Mods injecting the same hook must be woven in one compiler pass, so
@@ -82,7 +82,7 @@ def prepare_set(registry: Path, selections: list[tuple[str, Path]], mixins_revis
         group = 0 if force_common else mixins_revisions.index(meta["mixins"])
         shutil.copytree(extracted / "mixins" / mod_id, work / "mixins" / str(group) / mod_id)
         entry_report = {"id": mod_id, "version": meta["version"], "sha256": data["sha256"],
-                        "horizon_revision": meta["horizon"], "hook_revision_rebound": rebind,
+                        "volt_revision": meta["volt"], "hook_revision_rebound": rebind,
                         "mixins_revision": meta["mixins"],
                         "mixins_applied": mixins_revisions[group],
                         "raw_target_rebind": bool(raw_targets and rebind)}
@@ -109,7 +109,7 @@ def run(args: argparse.Namespace) -> dict:
               "signed": False}
     args.output.mkdir(parents=True, exist_ok=True)
     # Never leave a stale success artifact when a subsequent request fails.
-    library = args.output / "libhorizon_android.so"
+    library = args.output / "libvolt_launcher.so"
     library.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="volt-native-set-") as tmp:
         work = Path(tmp)
@@ -122,7 +122,7 @@ def run(args: argparse.Namespace) -> dict:
         with archive.open("wb") as f:
             subprocess.run(["git", "archive", rev], cwd=compat.ROOT, stdout=f, check=True)
         compat.extract_source_archive(archive, source)
-        (source / ".horizon-revision").write_text(rev + "\n", encoding="utf-8")
+        (source / ".volt-revision").write_text(rev + "\n", encoding="utf-8")
         env = compat.sanitized_env()
         env["CARGO_TARGET_DIR"] = str(work / "target")
         # Apply each trusted compiler's mods in the order the compilers were
@@ -156,7 +156,7 @@ def run(args: argparse.Namespace) -> dict:
         if build.returncode:
             report["status"] = "build_failed"
             return report
-        result = work / "target" / TARGETS[args.abi] / "release" / "libhorizon_android.so"
+        result = work / "target" / TARGETS[args.abi] / "release" / "libvolt_launcher.so"
         if not result.is_file() or result.stat().st_size == 0:
             raise compat.Rejected("build returned success without an Android library")
         shutil.copyfile(result, library)
@@ -170,7 +170,7 @@ def main() -> int:
     parser.add_argument("--registry", type=Path, required=True)
     parser.add_argument("--mod", action="append", type=selection, required=True, help="registry ID=local verified bundle path; repeat for combinations")
     parser.add_argument("--mixins", type=Path, action="append", required=True,
-                        help="trusted pinned horizon-mixins executable; repeat when the "
+                        help="trusted pinned volt-mixins executable; repeat when the "
                              "selected bundles pin different compiler revisions")
     parser.add_argument("--mixins-revision", action="append", required=True,
                         help="the pinned revision of each --mixins executable, in order")
@@ -186,14 +186,14 @@ def main() -> int:
                              "compiler judge raw targets; output stays unsigned")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    for name in ("report.json", "apply.log", "build.log", "libhorizon_android.so"):
+    for name in ("report.json", "apply.log", "build.log", "libvolt_launcher.so"):
         (args.output / name).unlink(missing_ok=True)
     try:
         report = run(args)
     except (compat.Rejected, OSError, ValueError, subprocess.CalledProcessError) as error:
         report = {"schema": 1, "abi": args.abi, "status": "rejected", "reason": str(error),
                   "runtime_tested": False, "signed": False}
-        (args.output / "libhorizon_android.so").unlink(missing_ok=True)
+        (args.output / "libvolt_launcher.so").unlink(missing_ok=True)
     (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
     return 0 if report["status"] == "library_built" else 1

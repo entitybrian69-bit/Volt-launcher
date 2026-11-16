@@ -1,0 +1,1211 @@
+//! A native Rust installer and version screen, sharing the game's Vulkan renderer.
+use crate::catalog::{Catalog, Page};
+use crate::game;
+#[path = "login.rs"]
+mod login;
+thread_local! {static SESSION:std::cell::RefCell<Option<PathBuf>>=const{std::cell::RefCell::new(None)};}
+pub(crate) fn session_argument() -> Option<PathBuf> {
+    SESSION.with(|s| s.borrow_mut().take())
+}
+/// The game's Rich Presence toggle (`discordPresence` in the profile's
+/// `options.txt`), read lightly so the launcher can show "In the launcher"
+/// without loading full game settings. Missing file or key = the default, on.
+fn presence_enabled(game_home: &std::path::Path) -> bool {
+    match std::fs::read_to_string(game_home.join("options.txt")) {
+        Ok(text) => !text
+            .lines()
+            .any(|l| l.trim() == "discordPresence:false"),
+        Err(_) => true,
+    }
+}
+#[path = "chooser.rs"]
+mod chooser;
+#[path = "controls_studio.rs"]
+pub(crate) mod controls_studio;
+#[path = "launcher_gesture.rs"]
+mod gesture;
+#[path = "launcher_pages.rs"]
+pub(crate) mod pages;
+use volt_client::{
+    Result,
+    gfx::Renderer,
+    hud::{HudAtlas, HudBatch},
+    ui_theme::{Face, Ui},
+};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex, mpsc},
+    time::{Duration, Instant},
+};
+use winit::{
+    application::ApplicationHandler,
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, TouchPhase, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow},
+    window::{Window, WindowId},
+};
+
+pub(super) struct Launcher {
+    home: PathBuf,
+    controller_edges: volt_client::gamepad::Edges,
+    controller_repeat: Option<(volt_client::gamepad::Button, Instant, bool)>,
+    window: Option<Arc<Window>>,
+    renderer: Option<Renderer>,
+    renderer_signature: Option<(crate::catalog::RendererMode, Option<String>)>,
+    gui: Option<game::UiResources>,
+    game: Option<game::AndroidGame>,
+    cursor: (f64, f64),
+    mouse_down: bool,
+    feedback: Option<(pages::Action, Instant)>,
+    install: Arc<Mutex<volt_client::official_install::InstallProgress>>,
+    worker: Option<mpsc::Receiver<std::result::Result<(), String>>>,
+    error: Option<String>,
+    catalog: Catalog,
+    home_tab: pages::HomeTab,
+    targets: Vec<([f32; 4], pages::Action)>,
+    list_targets: Vec<([f32; 4], pages::Action)>,
+    list_view: Option<[f32; 3]>,
+    pending_focus: Option<pages::Action>,
+    drag: Option<gesture::Drag>,
+    chooser: Option<chooser::Chooser>,
+    login: login::Login,
+    volt_accounts: crate::volt_accounts::VoltAccountManager,
+    preview_yaw: f32,
+    preview_pitch: f32,
+    preview_vel_yaw: f32,
+    preview_target_yaw: Option<f32>,
+    preview_rect: Option<[f32; 4]>,
+    launch_start: Instant,
+    last_frame: Instant,
+    prev_rendered_page: Page,
+    sidebar_anim: f32,
+    page_anim: Option<(Instant, f32)>,
+    pub(crate) tab_anim: Option<(Instant, f32)>,
+    modal_was_open: bool,
+    modal_anim: Option<Instant>,
+    session_worker:
+        Option<mpsc::Receiver<std::result::Result<(Option<PathBuf>, Option<(String, String)>), String>>>,
+    session_ready: bool,
+    focus: Option<usize>,
+    diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
+    update_check_rx: Option<mpsc::Receiver<crate::volt_updater::UpdateInfo>>,
+    pub(super) manual_check_rx: Option<mpsc::Receiver<Option<crate::volt_updater::UpdateInfo>>>,
+    update_prompt: Option<crate::volt_updater::UpdatePrompt>,
+    pub(super) controls_studio: controls_studio::ControlsStudio,
+    pub(super) pending_play: bool,
+    pub(super) pending_activate: Option<(f64, f64, Option<usize>)>,
+    pub(super) pending_escape: bool,
+    pub(super) transition_guard_until: Option<Instant>,
+    pub(super) needs_redraw: bool,
+    last_redraw: Instant,
+    /// Decoded gallery pictures (screenshots, world icons, favicons, replay
+    /// covers, catalog gallery shots), letterboxed off-thread.
+    pub(super) photos: crate::photo_cache::PhotoCache,
+    /// The full-screen photo viewer, over every page until Back.
+    pub(super) photo_view: Option<pages::PhotoView>,
+}
+
+impl Launcher {
+    pub(super) fn new(home: PathBuf) -> Self {
+        // Upgrade existing installations that retained the old download cache.
+        let cleanup_home = home.clone();
+        let _ = std::thread::Builder::new()
+            .name("volt-cleanup".into())
+            .stack_size(4 * 1024 * 1024)
+            .spawn(move || {
+                if let Err(error) =
+                    volt_client::official_install::cleanup_completed_downloads(&cleanup_home)
+                {
+                    log::warn!("Could not clean completed Minecraft downloads: {error}");
+                }
+            });
+        let mut catalog = Catalog::new(&home);
+        if crate::diagnostics::previous_unclean(&home) {
+            catalog.status = crate::diagnostics::summary(&home);
+        }
+        volt_client::android_runtime::graphics_startup::configure(home.clone());
+        if let Some(driver_path) = catalog
+            .config
+            .custom_vulkan_driver
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|p| p.is_file())
+        {
+            volt_client::android_runtime::configure_custom_vulkan_driver(Some(driver_path));
+        } else {
+            volt_client::android_runtime::configure_custom_vulkan_driver(None);
+        }
+        if volt_client::android_runtime::graphics_startup::recover(&home) {
+            if catalog.config.custom_vulkan_driver.is_some() {
+                catalog.config.custom_vulkan_driver = None;
+                catalog.config.custom_vulkan_driver_name = None;
+                volt_client::android_runtime::configure_custom_vulkan_driver(None);
+                if matches!(
+                    catalog.config.renderer,
+                    crate::catalog::RendererMode::Vulkan
+                        | crate::catalog::RendererMode::VulkanCompatibility
+                ) {
+                    catalog.config.renderer = crate::catalog::RendererMode::VulkanSupporter;
+                }
+                catalog.status =
+                    "Custom Vulkan driver crashed on startup. Reverted to built-in Vulkan Supporter."
+                        .into();
+                if let Err(error) = catalog.config.save(&home) {
+                    log::warn!("Could not save graphics recovery choice: {error}");
+                }
+            } else {
+                // Never auto-downgrade or fall back to OpenGL on crash; preserve the configured Vulkan mode.
+                log::warn!(
+                    "Previous startup ended before first frame; keeping renderer mode {}",
+                    catalog.config.renderer.label()
+                );
+            }
+        }
+        volt_client::android_runtime::configure_graphics_api(
+            catalog.config.renderer.graphics_api(),
+        );
+        // "In the launcher" on Discord from the moment the dashboard opens,
+        // not only once a game session starts. Honors the game's Rich
+        // Presence toggle (options.txt in the profile's game folder).
+        if presence_enabled(&catalog.config.game_home(&home)) {
+            volt_client::discord_presence::start(true, false);
+            volt_client::discord_presence::set(
+                volt_client::discord_presence::Status::Launcher,
+            );
+        }
+        let update_check_rx = Some(crate::volt_updater::spawn_startup_check(home.clone()));
+        crate::configure_input_mode(catalog.config.input_host);
+        crate::device_runtime::configure(catalog.config.device);
+        let msa_store = crate::account::Accounts::load();
+        let volt_accounts =
+            crate::volt_accounts::VoltAccountManager::load(&home, &catalog.config.name, &msa_store);
+        if let Some(acc) = volt_accounts.active() {
+            catalog.offline_name_input = acc.name.clone();
+            catalog.account_tab = acc.provider;
+            if catalog.config.name.trim().is_empty() {
+                catalog.config.name = acc.name.clone();
+            }
+        }
+        Self {
+            home,
+            controller_edges: Default::default(),
+            controller_repeat: None,
+            window: None,
+            renderer: None,
+            renderer_signature: None,
+            gui: None,
+            game: None,
+            cursor: (0.0, 0.0),
+            mouse_down: false,
+            feedback: None,
+            install: Arc::default(),
+            worker: None,
+            error: None,
+            catalog,
+            home_tab: pages::HomeTab::Overview,
+            targets: vec![],
+            list_targets: vec![],
+            list_view: None,
+            pending_focus: None,
+            drag: None,
+            chooser: None,
+            login: login::Login::new(),
+            volt_accounts,
+            preview_yaw: -18.0,
+            preview_pitch: 6.0,
+            preview_vel_yaw: 0.0,
+            preview_target_yaw: None,
+            preview_rect: None,
+            launch_start: Instant::now(),
+            last_frame: Instant::now(),
+            prev_rendered_page: Page::Play,
+            sidebar_anim: 0.0,
+            page_anim: Some((Instant::now(), 1.0)),
+            tab_anim: None,
+            modal_was_open: false,
+            modal_anim: None,
+            session_worker: None,
+            session_ready: false,
+            focus: None,
+            diagnostic_export: None,
+            update_check_rx,
+            manual_check_rx: None,
+            update_prompt: None,
+            controls_studio: Default::default(),
+            pending_play: false,
+            pending_activate: None,
+            pending_escape: false,
+            transition_guard_until: None,
+            needs_redraw: true,
+            last_redraw: Instant::now() - Duration::from_secs(1),
+            photos: crate::photo_cache::PhotoCache::new(),
+            photo_view: None,
+        }
+    }
+
+    pub(super) fn request_activate(&mut self) {
+        if self.pending_activate.is_none() {
+            self.pending_activate = Some((self.cursor.0, self.cursor.1, self.focus));
+            self.needs_redraw = true;
+        }
+    }
+
+    fn restore_launcher(&mut self, events: &ActiveEventLoop) {
+        if !volt_client::android_runtime::take_launcher_return() {
+            return;
+        }
+        let mut reclaimed = None;
+        if let Some(mut game) = self.game.take() {
+            game.exiting(events);
+            reclaimed = game.take_android_handoff();
+            drop(game);
+        }
+        if let Some((window, mut renderer)) = reclaimed {
+            if renderer.can_replace_world_textures(1) {
+                let _ = renderer.replace_world_textures(
+                    &[0; 4],
+                    1,
+                    1,
+                    1,
+                    &[],
+                    &[],
+                    (&[0; 4], 1),
+                    None,
+                );
+            }
+            self.window = Some(window);
+            self.renderer = Some(renderer);
+            self.gui = None;
+        }
+        volt_threads::release_free_memory();
+        crate::performance::stop();
+        crate::platform::hide();
+        volt_client::auth::clear_current();
+        self.session_ready = false;
+        // Back in the launcher: keep "In the launcher" showing instead of
+        // dropping presence, unless the player turned the toggle off in game.
+        if presence_enabled(&self.catalog.config.game_home(&self.home)) {
+            volt_client::discord_presence::set(
+                volt_client::discord_presence::Status::Launcher,
+            );
+        } else {
+            volt_client::discord_presence::stop();
+        }
+        volt_client::ui_theme::reset_atlas();
+        self.cursor = (0.0, 0.0);
+        self.drag = None;
+        self.chooser = None;
+        self.focus = None;
+        self.pending_focus = None;
+        self.pending_play = false;
+        self.pending_activate = None;
+        self.pending_escape = false;
+        self.transition_guard_until = None;
+        self.needs_redraw = true;
+        if let Err(error) = std::env::set_current_dir(&self.home) {
+            self.fail(error);
+            return;
+        }
+        volt_client::android_runtime::clear_gamepads();
+        self.controller_edges = Default::default();
+        self.controller_repeat = None;
+        self.catalog.config.input_host = volt_client::android_runtime::input_mode();
+        self.catalog.refresh(&self.home);
+        self.login.refresh_status();
+        crate::diagnostics::heartbeat("returned_to_launcher", || serde_json::json!({}));
+        self.catalog.page = Page::Play;
+        if let Ok(message) = std::fs::read_to_string(self.home.join("android-error.txt")) {
+            self.error = Some(message);
+        }
+        if let Err(error) = self.open(events) {
+            self.fail(error);
+            events.exit();
+        }
+    }
+    pub(super) fn configure_screen(&self) {
+        crate::native_ime::configure_screen(
+            self.catalog.config.screen.immersive,
+            self.catalog.config.screen.avoid_cutout,
+        );
+        crate::native_ime::set_keep_screen_awake(
+            self.catalog.extras.keep_screen_awake || self.worker.is_some(),
+        );
+        winit::platform::android::set_native_content_aspect(
+            self.catalog.config.screen.aspect.ratio(),
+        );
+    }
+    fn fail(&mut self, error: impl std::fmt::Display) {
+        log::error!("{error}");
+        crate::diagnostics::record_error(&error.to_string());
+        self.error = Some(error.to_string());
+        let _ = std::fs::write(self.home.join("android-error.txt"), error.to_string());
+    }
+
+    fn open(&mut self, events: &ActiveEventLoop) -> Result<()> {
+        crate::platform::set_orientation(self.catalog.config.orientation);
+        self.configure_screen();
+        crate::display::set_scale(self.catalog.config.render_scale);
+        let desired_sig = (
+            self.catalog.config.renderer,
+            self.catalog.config.custom_vulkan_driver.clone(),
+        );
+        volt_client::android_runtime::configure_graphics_api(
+            self.catalog.config.renderer.graphics_api(),
+        );
+        volt_client::android_runtime::configure_gpu(
+            self.catalog.config.renderer == crate::catalog::RendererMode::Vulkan,
+        );
+        if self.renderer.is_some() && self.renderer_signature != Some(desired_sig.clone()) {
+            if let Some(mut old_renderer) = self.renderer.take() {
+                old_renderer.suspend_surface();
+                drop(old_renderer);
+            }
+            self.window = None;
+            self.gui = None;
+        }
+        if let Some(renderer) = &mut self.renderer {
+            if let Some(size) = crate::display::prepare(self.window.as_ref().unwrap())? {
+                renderer.resize(size[0], size[1]);
+            }
+            if renderer.suspended {
+                renderer.recreate_surface()?;
+            }
+            let size = self.window.as_ref().unwrap().inner_size();
+            renderer.resize(size.width, size.height);
+            if self.gui.is_none() {
+                let gui = game::UiResources {
+                    atlas: HudAtlas::build(&self.home.join("installer"))?,
+                    panorama: Arc::new(volt_client::gfx::panorama::Faces {
+                        size: 1,
+                        pixels: [0u8; 4].repeat(6),
+                    }),
+                };
+                let atlas = &gui.atlas;
+                atlas.font.reset_cache();
+                renderer.replace_ui_textures(
+                    (&atlas.pixels, atlas.width, atlas.height),
+                    (&atlas.glint.0, atlas.glint.1, atlas.glint.2),
+                    (
+                        &atlas.glint_armor.0,
+                        atlas.glint_armor.1,
+                        atlas.glint_armor.2,
+                    ),
+                    &gui.panorama,
+                )?;
+                renderer.hud.sprite_animations.clear();
+                self.gui = Some(gui);
+            }
+            return Ok(());
+        }
+        let window = Arc::new(
+            events.create_window(Window::default_attributes().with_title("Volt Launcher"))?,
+        );
+        crate::display::prepare(&window)?;
+        // Open the GPU device first so `ATLAS_LIMIT` reflects this device's real
+        // `max_texture_dimension_2d` before building `HudAtlas`.
+        let mut renderer = game::loading_renderer(
+            window.clone(),
+            false,
+            None,
+            None,
+            self.catalog.config.renderer.graphics_api(),
+        )?;
+        let gui = game::UiResources {
+            atlas: HudAtlas::build(&self.home.join("installer"))?,
+            panorama: Arc::new(volt_client::gfx::panorama::Faces {
+                size: 1,
+                pixels: [0u8; 4].repeat(6),
+            }),
+        };
+        let atlas = &gui.atlas;
+        atlas.font.reset_cache();
+        renderer.replace_ui_textures(
+            (&atlas.pixels, atlas.width, atlas.height),
+            (&atlas.glint.0, atlas.glint.1, atlas.glint.2),
+            (
+                &atlas.glint_armor.0,
+                atlas.glint_armor.1,
+                atlas.glint_armor.2,
+            ),
+            &gui.panorama,
+        )?;
+        renderer.hud.sprite_animations.clear();
+        self.renderer = Some(renderer);
+        self.renderer_signature = Some(desired_sig);
+        self.window = Some(window);
+        self.gui = Some(gui);
+        Ok(())
+    }
+
+    fn action(&mut self, events: &ActiveEventLoop) -> Result<()> {
+        if self.worker.is_some() || self.session_worker.is_some() {
+            return Ok(());
+        }
+        if self.login.pending() {
+            return Ok(());
+        }
+        crate::diagnostics::heartbeat(
+            "play_requested",
+            || serde_json::json!({"renderer":self.catalog.config.renderer.label(),"resolution_percent":self.catalog.config.render_scale.percent()}),
+        );
+        crate::configure_input_mode(self.catalog.config.input_host);
+        crate::device_runtime::configure(self.catalog.config.device);
+        if volt_client::official_install::ready(&self.home) {
+            crate::wait_for_engine_data();
+            volt_client::android_resources::repair_structure_transforms(
+                &self.home.join("engine-data.zip"),
+                &self
+                    .home
+                    .join(".local/volt-client")
+                    .join(volt_core::VANILLA_VERSION),
+            )?;
+            crate::platform::hide();
+            self.catalog.config.save(&self.home)?;
+            volt_client::android_runtime::configure_graphics_api(
+                self.catalog.config.renderer.graphics_api(),
+            );
+            // Preserve `OPEN_GL = true` (`sprite_split() == 256`) if the live launcher
+            // renderer already fell back to OpenGL ES under `Auto` / `VulkanSupporter`.
+            if self.renderer.as_ref().is_some_and(|r| r.is_open_gl()) {
+                volt_client::android_runtime::note_opened_backend(true, false);
+            }
+            volt_client::android_runtime::configure_gpu(
+                self.catalog.config.renderer == crate::catalog::RendererMode::Vulkan,
+            );
+            // Migrate the earlier launcher preset once; subsequent edits belong to Key Binds.
+            let keypad_path = self
+                .catalog
+                .config
+                .game_home(&self.home)
+                .join("volt-keypad.json");
+            if self.catalog.config.keypad_controls && !keypad_path.exists() {
+                if let Some(dir) = keypad_path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                volt_client::keypad::Settings {
+                    enabled: true,
+                    ..Default::default()
+                }
+                .save(&keypad_path)?;
+            }
+            self.catalog.config.keypad_controls = false;
+            let game_home = self.catalog.config.game_home(&self.home);
+            if !self.session_ready {
+                let (active_name, launch_session) = self.volt_accounts.prepare_for_launch();
+                self.catalog.config.name = active_name;
+                self.catalog.config.save(&self.home)?;
+                match launch_session {
+                    crate::volt_accounts::LaunchSession::Microsoft => {
+                        if crate::account::Accounts::load().selected().is_some() {
+                            let id = self.catalog.config.microsoft_client_id.clone();
+                            let (sender, receiver) = mpsc::channel();
+                            self.session_worker = Some(receiver);
+                            self.catalog.status = "Preparing Microsoft session...".into();
+                            if let Err(err) = std::thread::Builder::new()
+                                .name("volt-msa-session".into())
+                                .stack_size(4 * 1024 * 1024)
+                                .spawn(move || {
+                                    let result = (|| {
+                                        login::Login::session(&id)?
+                                            .map(|(a, s)| {
+                                                crate::account::write_session_file(
+                                                    &game_home.join("sessions"),
+                                                    &a,
+                                                    &s,
+                                                )
+                                            })
+                                            .transpose()
+                                            .map(|path| (path, None))
+                                    })();
+                                    let _ = sender.send(result);
+                                })
+                            {
+                                self.session_worker = None;
+                                return Err(format!("Could not start Microsoft session worker: {err}").into());
+                            }
+                            return Ok(());
+                        }
+                        SESSION.with(|s| *s.borrow_mut() = None);
+                    }
+                    crate::volt_accounts::LaunchSession::ElyBy {
+                        account_id,
+                        name,
+                        uuid_hex,
+                        access_token,
+                        client_token,
+                        session_path,
+                    } => {
+                        let (sender, receiver) = mpsc::channel();
+                        self.session_worker = Some(receiver);
+                        self.catalog.status = "Preparing Ely.by session...".into();
+                        if let Err(err) = std::thread::Builder::new()
+                            .name("volt-ely-session".into())
+                            .stack_size(4 * 1024 * 1024)
+                            .spawn(move || {
+                                let out = crate::volt_accounts::prepare_ely_session_off_thread(
+                                    account_id,
+                                    name,
+                                    uuid_hex,
+                                    access_token,
+                                    client_token,
+                                    session_path,
+                                );
+                                let _ = sender.send(Ok(out));
+                            })
+                        {
+                            self.session_worker = None;
+                            return Err(format!("Could not start Ely.by session worker: {err}").into());
+                        }
+                        return Ok(());
+                    }
+                    crate::volt_accounts::LaunchSession::Immediate(session_file) => {
+                        SESSION.with(|s| *s.borrow_mut() = session_file);
+                    }
+                }
+            }
+            self.session_ready = false;
+            std::fs::create_dir_all(&game_home)?;
+            // The game's first frames re-read the mod switches from this
+            // exact directory: belt and braces against any working-directory
+            // drift between the launcher's Mods tab and the game's startup.
+            crate::documents::note_mods_changed(&game_home);
+            std::env::set_current_dir(&game_home)?;
+            self.error = None;
+            let _ = std::fs::remove_file(self.home.join("android-error.txt"));
+            if self.catalog.config.record_performance || self.catalog.config.device.gpu_profile {
+                crate::performance::start(
+                    &self.home,
+                    serde_json::json!({
+                        "renderer": self.catalog.config.renderer.label(),
+                        "resolution_percent": self.catalog.config.render_scale.percent(),
+                        "source_commit": option_env!("VOLT_LAUNCHER_BUILD_COMMIT"),
+                        "source_dirty": option_env!("VOLT_LAUNCHER_BUILD_DIRTY"),
+                        "performance_recording": self.catalog.config.record_performance,
+                        "gpu_profiling": self.catalog.config.device.gpu_profile,
+                    }),
+                )?;
+            }
+            // The A press that launches the game must not accept its first menu too.
+            volt_client::android_runtime::clear_gamepads();
+            self.controller_edges = Default::default();
+            self.controller_repeat = None;
+            // Hand the live `(Window, Renderer)` directly into `Loading` when the
+            // active graphics mode & custom driver match, avoiding a second Vulkan
+            // instance/device/swapchain teardown + creation cycle on the same
+            // `ANativeWindow` during cold-start.
+            self.gui = None;
+            volt_client::ui_theme::reset_atlas();
+            let desired_sig = (
+                self.catalog.config.renderer,
+                self.catalog.config.custom_vulkan_driver.clone(),
+            );
+            let handoff = if self.renderer_signature == Some(desired_sig.clone()) {
+                match (self.window.take(), self.renderer.take()) {
+                    (Some(window), Some(mut renderer)) => {
+                        renderer.hud.sprite_animations.clear();
+                        crate::performance::mark("handoff_reuse_renderer");
+                        Some((window, renderer))
+                    }
+                    _ => None,
+                }
+            } else {
+                if let Some(mut old_renderer) = self.renderer.take() {
+                    old_renderer.suspend_surface();
+                    drop(old_renderer);
+                }
+                self.window = None;
+                self.renderer_signature = Some(desired_sig);
+                crate::performance::mark("handoff_recreate_renderer");
+                None
+            };
+            volt_threads::release_free_memory();
+            // Tier-1 Discord presence: hand the configured webhook (if any)
+            // to the game before the session starts.
+            volt_client::discord_webhook::configure(&self.catalog.config.discord_webhook);
+            let game = match game::android_game(handoff) {
+                Ok(game) => game,
+                Err(error) => {
+                    crate::performance::stop();
+                    let _ = self.open(events);
+                    return Err(error);
+                }
+            };
+            self.game = Some(game);
+            self.game.as_mut().unwrap().resumed(events);
+        } else {
+            self.error = None;
+            *self.install.lock().unwrap() = Default::default();
+            let home = self.home.clone();
+            let install = self.install.clone();
+            let (sender, receiver) = mpsc::channel();
+            self.worker = Some(receiver);
+            crate::native_ime::set_keep_screen_awake(true);
+            let _ = std::thread::Builder::new()
+                .name("volt-installer".into())
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || {
+                    crate::wait_for_engine_data();
+                    if !home.join("engine-data.zip").is_file() {
+                        let _ = sender.send(Err(
+                            "This APK is missing its engine data. Install a complete build.".into(),
+                        ));
+                        return;
+                    }
+                    let result =
+                        volt_client::official_install::install_with_progress(&home, |update| {
+                            let mut current = install.lock().unwrap();
+                            let done = if current.stage == update.stage {
+                                current.done.max(update.done)
+                            } else {
+                                update.done
+                            };
+                            *current =
+                                volt_client::official_install::InstallProgress { done, ..update };
+                        });
+                    volt_threads::release_free_memory();
+                    let _ = sender.send(result.map_err(|e| e.to_string()));
+                });
+        }
+        Ok(())
+    }
+
+    fn run_game_guarded(
+        &mut self,
+        events: &ActiveEventLoop,
+        f: impl FnOnce(&mut game::AndroidGame),
+    ) -> bool {
+        let Some(mut active_game) = self.game.take() else {
+            return false;
+        };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f(&mut active_game);
+            active_game
+        })) {
+            Ok(active_game) => {
+                self.game = Some(active_game);
+                self.restore_launcher(events);
+            }
+            Err(payload) => {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .map(str::to_owned)
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unexpected internal error".into());
+                let full = format!("Minecraft client recovered from internal error: {message}");
+                log::error!("{full}");
+                crate::diagnostics::record_error(&full);
+                let _ = std::fs::write(self.home.join("android-error.txt"), &full);
+                volt_client::android_runtime::return_to_launcher();
+                self.restore_launcher(events);
+            }
+        }
+        true
+    }
+}
+
+impl ApplicationHandler for Launcher {
+    fn resumed(&mut self, events: &ActiveEventLoop) {
+        self.configure_screen();
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.resumed(events));
+            return;
+        }
+        if let Err(error) = self.open(events) {
+            self.fail(error);
+            events.exit();
+        }
+    }
+    fn suspended(&mut self, events: &ActiveEventLoop) {
+        crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.suspended(events));
+            return;
+        }
+        self.drag = None;
+        self.mouse_down = false;
+        self.pending_activate = None;
+        self.pending_escape = false;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.suspend_surface();
+        }
+    }
+    fn window_event(&mut self, events: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if crate::documents::handle_event(&event) {
+            return;
+        }
+        if matches!(event, WindowEvent::Resized(_)) {
+            let _ = crate::native_ime::viewport_bottom();
+        }
+        if matches!(event, WindowEvent::Focused(true)) {
+            self.configure_screen();
+        }
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.window_event(events, id, event));
+            return;
+        }
+        if !matches!(event, WindowEvent::RedrawRequested) {
+            self.needs_redraw = true;
+        }
+        let result = match event {
+            WindowEvent::CloseRequested => {
+                if let Some(prompt) = self.update_prompt.take() {
+                    crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                    return;
+                }
+                if self.login.visible || self.login.pending() {
+                    self.login.hide();
+                    return;
+                }
+                if self.controls_studio.open {
+                    if !self.controls_studio.back() {
+                        crate::platform::hide();
+                        self.catalog.refresh_controls(&self.home);
+                    }
+                    return;
+                }
+                events.exit();
+                Ok(())
+            }
+            WindowEvent::Resized(size) => {
+                if let Some(r) = &mut self.renderer {
+                    r.resize(size.width, size.height);
+                }
+                Ok(())
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.focus = None;
+                self.pending_focus = None;
+                let density = self.ui_density() as f64;
+                if self.mouse_down {
+                    if self.controls_studio.open
+                        && self.controls_studio.pointer_move(
+                            (position.x / density) as f32,
+                            (position.y / density) as f32,
+                        )
+                    {
+                        if let Some(drag) = &mut self.drag {
+                            let _ = drag.update_xy(position.x, position.y, density);
+                        }
+                    } else if let Some(drag) = &mut self.drag {
+                        let (dx, dy) = drag.update_xy(position.x, position.y, density);
+                        if drag.moved
+                            && !self.login.visible
+                            && self.chooser.is_none()
+                            && !self.controls_studio.open
+                            && self.preview_rect.is_some_and(|[rx, ry, rw, rh]| {
+                                let [ox, oy] = drag.origin_xy();
+                                let ux = (ox / density) as f32;
+                                let uy = (oy / density) as f32;
+                                ux >= rx && ux <= rx + rw && uy >= ry && uy <= ry + rh
+                            })
+                        {
+                            self.preview_target_yaw = None;
+                            self.preview_yaw = (self.preview_yaw + dx * 0.9).rem_euclid(360.0);
+                            self.preview_vel_yaw = (dx * 42.0).clamp(-360.0, 360.0);
+                            self.preview_pitch =
+                                (self.preview_pitch - dy * 0.45).clamp(-28.0, 28.0);
+                        }
+                    }
+                }
+                self.cursor = (position.x, position.y);
+                Ok(())
+            }
+            WindowEvent::Touch(touch) => self.touch_event(events, touch),
+            WindowEvent::Focused(false) => {
+                crate::diagnostics::heartbeat("launcher_background", || serde_json::json!({}));
+                volt_client::android_runtime::clear_gamepads();
+                self.controller_repeat = None;
+                self.mouse_down = false;
+                self.drag = None;
+                self.pending_activate = None;
+                self.pending_escape = false;
+                Ok(())
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if state == ElementState::Pressed {
+                    self.mouse_down = true;
+                    if self.controls_studio.open {
+                        let density = self.ui_density() as f64;
+                        let _ = self.controls_studio.pointer_down(
+                            (self.cursor.0 / density) as f32,
+                            (self.cursor.1 / density) as f32,
+                        );
+                    }
+                    self.drag = Some(gesture::Drag::new(self.cursor.0, self.cursor.1));
+                    Ok(())
+                } else if std::mem::take(&mut self.mouse_down) {
+                    let studio_dragged = self.controls_studio.pointer_up();
+                    let dragged = self.drag.take().is_some_and(|d| d.moved);
+                    if !dragged && !studio_dragged {
+                        self.request_activate();
+                    }
+                    Ok(())
+                } else {
+                    Ok(())
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let y = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y * 42.0,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / self.ui_density(),
+                };
+                if let Some(prompt) = &mut self.update_prompt {
+                    prompt.scroll = (prompt.scroll - y).max(0.0);
+                } else if let Some(chooser) = &mut self.chooser {
+                    chooser.scroll = (chooser.scroll - y).max(0.0);
+                } else {
+                    self.catalog.scroll = (self.catalog.scroll - y).max(0.0);
+                }
+                Ok(())
+            }
+            WindowEvent::RedrawRequested => {
+                self.needs_redraw = false;
+                self.last_redraw = Instant::now();
+                self.draw_pages()
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.navigate(&event) {
+                    Ok(())
+                } else if self.catalog.editing.is_none()
+                    && !event.repeat
+                    && matches!(
+                        event.logical_key,
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
+                    )
+                {
+                    self.request_activate();
+                    Ok(())
+                } else {
+                    self.type_key(event);
+                    Ok(())
+                }
+            }
+            WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
+                self.catalog
+                    .edit(volt_client::osk::Output::Text(text), &self.home);
+                Ok(())
+            }
+            _ => Ok(()),
+        };
+        if let Err(error) = result {
+            self.fail(error);
+        }
+    }
+    fn device_event(&mut self, events: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.device_event(events, id, event));
+        } else {
+            volt_client::android_runtime::gamepad_event(
+                winit::platform::android::native_device_id(id),
+                &event,
+            );
+        }
+    }
+    fn about_to_wait(&mut self, events: &ActiveEventLoop) {
+        if self.game.is_some() {
+            let _ = self.run_game_guarded(events, |game| game.about_to_wait(events));
+            return;
+        }
+        // Process deferred input activations outside android-activity's InputQueue critical section.
+        if std::mem::take(&mut self.pending_escape) {
+            self.handle_escape();
+            self.needs_redraw = true;
+        }
+        if let Some((cx, cy, focus)) = self.pending_activate.take() {
+            self.cursor = (cx, cy);
+            self.focus = focus;
+            if let Err(error) = self.activate(events) {
+                self.fail(error);
+            }
+            self.needs_redraw = true;
+        }
+        if self.pending_play {
+            if volt_client::official_install::ready(&self.home) && !crate::engine_data_ready() {
+                self.catalog.status = "Preparing bundled Minecraft 26.3 engine...".into();
+                self.needs_redraw = true;
+            } else {
+                self.pending_play = false;
+                if let Err(error) = self.action(events) {
+                    self.fail(error);
+                }
+                if self.game.is_some() {
+                    return;
+                }
+            }
+        }
+        crate::diagnostics::heartbeat("launcher", || serde_json::json!({}));
+        if let Some(result) = self
+            .diagnostic_export
+            .as_ref()
+            .and_then(|r| r.try_recv().ok())
+        {
+            self.diagnostic_export = None;
+            self.catalog.status = match result {
+                Ok(name) => {
+                    let _ = crate::platform::open_documents("reports");
+                    format!(
+                        "Saved {name} in Reports. Review the ZIP before sharing; nothing was uploaded."
+                    )
+                }
+                Err(error) => format!("Diagnostic export failed: {error}"),
+            };
+        }
+        crate::platform::poll_gamepad_connections();
+        if let Err(error) = self.controller_frame(events) {
+            self.fail(error);
+        }
+        if let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer)
+            && let Err(error) = crate::display::apply(window, renderer)
+        {
+            crate::display::set_scale(crate::display::RenderScale::default());
+            self.fail(error);
+        }
+        if let Some(result) = self.worker.as_ref().and_then(|w| w.try_recv().ok()) {
+            self.worker = None;
+            if let Err(error) = result {
+                let message = error.to_string();
+                if message.contains("Dns Failed") || message.contains("lookup address") {
+                    self.fail("Minecraft download interrupted: DNS could not resolve the download host. Check your connection, VPN or Private DNS, then retry Download. Completed files are kept.");
+                } else {
+                    self.fail(error);
+                }
+            }
+        }
+        for out in crate::platform::poll() {
+            if self.controls_studio.handle_osk(&out) {
+                self.needs_redraw = true;
+                continue;
+            }
+            if matches!(out, volt_client::osk::Output::Enter) {
+                crate::platform::hide();
+            }
+            self.catalog.edit(out, &self.home);
+        }
+        self.catalog.poll(&self.home);
+        if self.photos.poll() {
+            self.needs_redraw = true;
+        }
+        if let Some(notice) = crate::documents::poll() {
+            self.catalog.status = notice.text;
+            if let Some((driver_label, driver_path)) = notice.driver_imported {
+                let path_str = driver_path.to_string_lossy().into_owned();
+                self.catalog.config.custom_vulkan_driver = Some(path_str);
+                self.catalog.config.custom_vulkan_driver_name = Some(driver_label);
+                if self.catalog.config.renderer == crate::catalog::RendererMode::OpenGl {
+                    self.catalog.config.renderer = crate::catalog::RendererMode::VulkanSupporter;
+                }
+                let _ = self.catalog.config.save(&self.home);
+                volt_client::android_runtime::configure_custom_vulkan_driver(Some(driver_path));
+                volt_client::android_runtime::configure_graphics_api(
+                    self.catalog.config.renderer.graphics_api(),
+                );
+            } else if let Some((is_cape, path)) = notice.cosmetic_imported {
+                self.volt_accounts.on_saf_cosmetic_imported(is_cape, &path);
+                if is_cape {
+                    self.preview_target_yaw = Some(162.0);
+                }
+            } else if notice.controls_changed {
+                if matches!(
+                    self.catalog.config.input_host,
+                    crate::catalog::InputHost::KeyboardMouse | crate::catalog::InputHost::Controller
+                ) {
+                    self.catalog.config.input_host = crate::catalog::InputHost::Auto;
+                    let _ = self.catalog.config.save(&self.home);
+                    crate::configure_input_mode(self.catalog.config.input_host);
+                }
+                self.catalog.refresh_controls(&self.home);
+                if self.controls_studio.open {
+                    let profile_home = self.catalog.config.game_home(&self.home);
+                    self.controls_studio.open_for_profile(&profile_home);
+                    self.controls_studio.status_hint =
+                        "Imported external control layout into Controls Studio.".into();
+                }
+            } else if notice.changed {
+                self.catalog.refresh(&self.home);
+                self.catalog.show_installed(notice.kind);
+            }
+        }
+        if let Some(rx) = &self.manual_check_rx {
+            match rx.try_recv() {
+                Ok(Some(info)) => {
+                    self.manual_check_rx = None;
+                    self.catalog.status = format!("Update available: {}", info.display_version);
+                    if self.update_prompt.is_none() {
+                        self.update_prompt =
+                            Some(crate::volt_updater::UpdatePrompt { info, scroll: 0.0 });
+                    }
+                }
+                Ok(None) => {
+                    self.manual_check_rx = None;
+                    self.catalog.status = "You're on the latest version.".into();
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.manual_check_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(rx) = &self.update_check_rx {
+            match rx.try_recv() {
+                Ok(info) => {
+                    self.update_check_rx = None;
+                    if self.update_prompt.is_none() {
+                        self.update_prompt =
+                            Some(crate::volt_updater::UpdatePrompt { info, scroll: 0.0 });
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.update_check_rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        for result in crate::gallery::poll() {
+            self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
+        }
+        let prev_msa = self.login.signed_in;
+        self.login.poll();
+        if self.login.signed_in != prev_msa {
+            let msa_store = crate::account::Accounts::load();
+            self.volt_accounts.sync_msa_accounts(&msa_store, self.login.signed_in);
+            if self.login.signed_in {
+                self.login.visible = false;
+                if let Some(acc) = self.volt_accounts.active() {
+                    self.catalog.config.name = acc.name.clone();
+                    let _ = self.catalog.config.save(&self.home);
+                }
+            }
+        }
+        if let Some(msg) = self.volt_accounts.poll() {
+            self.catalog.status = msg;
+            if let Some(acc) = self.volt_accounts.active() {
+                self.catalog.config.name = acc.name.clone();
+                let _ = self.catalog.config.save(&self.home);
+            }
+        }
+        if let Some(result) = self.session_worker.as_ref().and_then(|w| w.try_recv().ok()) {
+            self.session_worker = None;
+            match result {
+                Ok((file, refreshed_ely)) => {
+                    if let Some((account_id, new_token)) = refreshed_ely {
+                        self.volt_accounts.update_ely_token(&account_id, new_token);
+                    }
+                    SESSION.with(|s| *s.borrow_mut() = file);
+                    self.session_ready = true;
+                    if let Err(e) = self.action(events) {
+                        self.fail(e);
+                    }
+                }
+                Err(e) => self.fail(e),
+            }
+        }
+
+        let now = Instant::now();
+        let min_frame = Duration::from_millis(14);
+        let since_last = now.saturating_duration_since(self.last_redraw);
+        let frame_wait = if self.drag.is_some()
+            || self.is_animating()
+            || self.worker.is_some()
+            || self.catalog.busy()
+            || self.photos.busy()
+            || (self.pending_play && !crate::engine_data_ready())
+        {
+            Duration::from_millis(16)
+        } else {
+            // The flowing backdrop is always in motion, so every launcher page
+            // redraws at a steady ~30 FPS while the launcher is foregrounded.
+            Duration::from_millis(33)
+        };
+        if self.needs_redraw {
+            // Coalesce high-rate touch bursts to <= ~70 FPS so swapchain acquire/present
+            // never outpaces Android's BufferQueue during rapid multi-finger taps.
+            if since_last >= min_frame {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                events.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(8)));
+            } else {
+                events.set_control_flow(ControlFlow::WaitUntil(self.last_redraw + min_frame));
+            }
+        } else if since_last >= frame_wait {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            events.set_control_flow(ControlFlow::WaitUntil(now + Duration::from_millis(8)));
+        } else {
+            events.set_control_flow(ControlFlow::WaitUntil(self.last_redraw + frame_wait));
+        }
+    }
+    fn exiting(&mut self, events: &ActiveEventLoop) {
+        if let Some(game) = &mut self.game {
+            game.exiting(events);
+        }
+    }
+}
+
+impl Launcher {
+    fn controller_frame(&mut self, events: &ActiveEventLoop) -> Result<()> {
+        use volt_client::gamepad::Button;
+        use winit::keyboard::{Key, NamedKey};
+        let mut state = volt_client::android_runtime::gamepad_state();
+        for (b, held) in [
+            (Button::DPadLeft, state.left[0] < -0.55),
+            (Button::DPadRight, state.left[0] > 0.55),
+            (Button::DPadUp, state.left[1] > 0.55),
+            (Button::DPadDown, state.left[1] < -0.55),
+        ] {
+            state.set(b, held || state.held(b));
+        }
+        let now = Instant::now();
+        let mut pressed: Vec<_> = self
+            .controller_edges
+            .update(&state, 0.5)
+            .into_iter()
+            .filter_map(|(b, down)| down.then_some(b))
+            .collect();
+        if let Some((button, last, repeating)) = self.controller_repeat {
+            if !state.held(button) {
+                self.controller_repeat = None;
+            } else if now.duration_since(last).as_secs_f32() >= if repeating { 0.09 } else { 0.35 }
+            {
+                pressed.push(button);
+                self.controller_repeat = Some((button, now, true));
+            }
+        }
+        for b in pressed {
+            let direction = match b {
+                Button::DPadUp => Some(NamedKey::ArrowUp),
+                Button::DPadDown => Some(NamedKey::ArrowDown),
+                Button::DPadLeft => Some(NamedKey::ArrowLeft),
+                Button::DPadRight => Some(NamedKey::ArrowRight),
+                _ => None,
+            };
+            if let Some(key) = direction {
+                self.navigate_key(&Key::Named(key));
+                if self.controller_repeat.is_none_or(|(old, _, _)| old != b) {
+                    self.controller_repeat = Some((b, now, false));
+                }
+            } else if b == Button::South {
+                self.activate(events)?;
+            } else if b == Button::East {
+                crate::platform::hide();
+                self.catalog.editing = None;
+                if let Some(prompt) = self.update_prompt.take() {
+                    crate::volt_updater::mark_update_seen(&self.home, &prompt.info.tag_name);
+                } else if self.chooser.take().is_none() {
+                    if self.login.visible {
+                        self.login.visible = false;
+                    } else {
+                        self.catalog.page = Page::Play;
+                    }
+                }
+                self.focus = None;
+            }
+        }
+        Ok(())
+    }
+}

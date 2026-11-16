@@ -3,10 +3,10 @@
 Run with the pinned prepared client resources:
 
 ```sh
-flock /tmp/horizon-optimizations-20261015-heavy.lock env CARGO_BUILD_JOBS=2 \
-  CARGO_TARGET_DIR=/home/bob/Documents/horizon/target \
-  cargo run --profile fast -p horizon-client --example random_tick_eligibility_bench -- \
-  .local/horizon-client/26.3
+flock /tmp/volt-optimizations-20261015-heavy.lock env CARGO_BUILD_JOBS=2 \
+  CARGO_TARGET_DIR=/home/bob/Documents/volt/target \
+  cargo run --profile fast -p volt-client --example random_tick_eligibility_bench -- \
+  .local/volt-client/26.3
 ```
 
 The example keeps the original selection algorithm alongside the cache. Both run

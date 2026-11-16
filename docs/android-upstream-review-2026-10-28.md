@@ -4,7 +4,7 @@ The 0.7.1 integration reviews 68 main-branch commits after `8155baa6`, through
 `1feb28c0`. The base is the published Android 0.7.0 (`23658ad4`), including its
 installer fix. No experimental branch is merged separately.
 
-- Input moves into `horizon-client-input`, with the old client paths re-exported.
+- Input moves into `volt-client-input`, with the old client paths re-exported.
   Android clipboard callbacks move with the module; desktop-only arboard remains
   excluded on Android. Keypad, touch and NativeActivity input retain their bridges.
 - Mob sound loops, mob state synchronization, fishing interactions, campfire

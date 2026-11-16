@@ -1,0 +1,83 @@
+[package]
+name = "volt-android"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "volt_launcher"
+path = "../volt-client/src/android_main.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+volt-client-input = { path = "../volt-client-input" }
+# Native physics mixins woven into game/*.rs call volt_client_render
+# directly; this crate compiles those sources, so it needs the direct dep.
+volt-client-render = { path = "../volt-client-render" }
+volt-anticheat = { path = "../volt-anticheat" }
+volt-client = { path = "../volt-client", default-features = false }
+android_logger = "0.15"
+regex = "1"
+volt-hdr = { path = "../volt-hdr" }
+volt-shader-api = { path = "../volt-shader-api" }
+jni = "0.21"
+getrandom = "0.3"
+url = "2"
+volt-assets = { path = "../volt-assets" }
+volt-port-pack = { path = "../volt-port-pack" }
+sha1 = "0.10"
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+volt-core = { path = "../volt-core" }
+volt-items = { path = "../volt-items" }
+# The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
+volt-threads = { path = "../volt-threads" }
+volt-world = { path = "../volt-world" }
+volt-protocol = { path = "../volt-protocol" }
+# server.properties, eula.txt and the user lists, shared with volt-server.
+volt-server-files = { path = "../volt-server-files" }
+volt-shaders = { path = "../volt-shaders" }
+volt-friends = { path = "../volt-friends" }
+# Native mod discovery shares the upstream index. Java mods are not supported.
+volt-mods = { path = "../volt-mods", default-features = false, features = ["index"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
+winit = { version = "0.30.13", features = ["android-native-activity"] }
+pollster = "0.4"
+bytemuck = { version = "1.24", features = ["derive"] }
+glam = "0.30"
+png = "0.18"
+sha2 = "0.10.9"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+# hlsl-out: the gfx.rs tests translate every shader as wgpu's DirectX 12 backend does. A normal feature,
+# not a dev-dependency's, so builds, tests and examples share one build of naga, wgpu and this crate.
+naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out"] }
+# Sound (ALSA on Linux); the `audio` feature.
+symphonia = { version = "0.5", default-features = false, features = ["ogg", "vorbis"] }
+miniz_oxide = "0.8"
+ab_glyph = "0.2.32"
+log = "0.4"
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
+volt-theme = { path = "../volt-theme" }
+# Opt-in data collection: the game keeps, the launcher sends (docs/telemetry.md); `live` is
+# the anonymous "I'm playing" ping the game sends itself (`heartbeat.rs`).
+volt-telemetry = { path = "../volt-telemetry", default-features = false, features = ["live"] }
+volt-bench = { path = "../volt-bench" }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Controllers (evdev + libudev on Linux, IOKit on macOS, Windows.Gaming.Input); the `controllers` feature.
+# The DualSense's rumble, adaptive triggers and lights over HID (gilrs only reads it).
+# HTTPS to the Minecraft services (online-mode session join).
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "time", "fs"] }
+
+[features]
+default = ["mods", "audio"]
+audio = ["volt-client/audio"]
+controllers = []
+mods = ["volt-client/mods", "volt-mods/runtime"]
+
+[lints]
+workspace = true

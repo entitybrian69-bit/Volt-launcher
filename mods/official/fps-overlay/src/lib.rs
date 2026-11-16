@@ -1,10 +1,10 @@
-//! Horizon's official FPS counter, formerly the built-in extra: the game's
+//! Volt's official FPS counter, formerly the built-in extra: the game's
 //! frame counter (frames in the last second, the slowest frame and the 1%
 //! low of the last 5 seconds) in a box in a corner, drawn as the extra drew
 //! it. Its settings page has the extra's two options; they are kept in the
 //! mod's storage (`corner`, `lows`), where the game writes a player's old
 //! extra settings when it installs the mod for them.
-use horizon_mod_sdk::{
+use volt_mod_sdk::{
     Mod, Registration,
     render::{self, Corner, FillShape, Point, Rect, Shape, TextShape},
     storage,
@@ -128,4 +128,4 @@ impl Mod for Fps {
     }
 }
 
-horizon_mod_sdk::export_mod!(Fps);
+volt_mod_sdk::export_mod!(Fps);

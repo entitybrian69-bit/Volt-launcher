@@ -1,0 +1,15 @@
+{
+  "volt.options.controller": "Kontroler",
+  "volt.options.vibration": "Wibracje",
+  "volt.options.adaptive_triggers": "Adaptacyjne spusty",
+  "volt.options.lightbar": "Pasek świetlny",
+  "volt.options.look_sensitivity": "Czułość rozglądania",
+  "volt.options.invert_x": "Odwróć oś X rozglądania",
+  "volt.options.invert_y": "Odwróć oś Y rozglądania",
+  "volt.options.sneak_button": "Przycisk skradania",
+  "volt.options.move_deadzone": "Martwa strefa ruchu",
+  "volt.options.look_deadzone": "Martwa strefa rozglądania",
+  "volt.options.button_glyphs": "Symbole przycisków",
+  "volt.options.menu_navigation": "Nawigacja po menu",
+  "volt.options.on_screen_keyboard": "Klawiatura ekranowa"
+}

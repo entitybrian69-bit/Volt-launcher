@@ -21,10 +21,10 @@ const HOSTS: [&str; 10] = [
     "https://mediafilez.forgecdn.net/",
     "https://edge.forgecdn.net/",
     "https://avatars.githubusercontent.com/",
-    // Horizon's registry's icons (its GitHub Pages), and the mirror kept at the address it had
-    // before the repositories moved to the horizon-rust organization.
-    "https://horizon-rust.github.io/horizon-mods/",
-    "https://ludovic111.github.io/horizon-mods/",
+    // Volt's registry's icons (its GitHub Pages), and the mirror kept at the address it had
+    // before the repositories moved to the volt-rust organization.
+    "https://volt-rust.github.io/volt-mods/",
+    "https://ludovic111.github.io/volt-mods/",
 ];
 /// The most an image may weigh before decoding.
 pub const MAX_DOWNLOAD: u64 = 8 << 20;
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn images_are_scaled_stored_and_pruned() {
-        let home = std::env::temp_dir().join(format!("horizon-images-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("volt-images-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
         let big = image::RgbaImage::from_pixel(300, 150, image::Rgba([1, 2, 3, 255]));
         let mut png = Vec::new();

@@ -4,14 +4,14 @@
 
 On an APK containing the 0.7.6 diagnostic changes:
 
-1. Reproduce the problem. If Android closes the app, open Horizon again and wait
+1. Reproduce the problem. If Android closes the app, open Volt again and wait
    a few seconds so its background system-exit collector can finish.
 2. Open launcher Settings > **Diagnostic report** > **Export ZIP**.
-3. The system Files app opens **Horizon Android / Reports**. Copy/share the newest
-   `horizon-diagnostics-*.zip`. Review it before attaching it to an issue.
+3. The system Files app opens **Volt Android / Reports**. Copy/share the newest
+   `volt-diagnostics-*.zip`. Review it before attaching it to an issue.
 4. Include the exact APK version/source commit, device, renderer, resolution,
    and what you did immediately before the failure. State whether you returned
-   to the Horizon launcher or the Android home screen.
+   to the Volt launcher or the Android home screen.
 
 Performance recording is not required. If it was enabled, its retained report
 can also contribute a bounded tail to the ZIP. Nothing is uploaded automatically.
@@ -34,7 +34,7 @@ by the user also lacks that marker; it is not automatically labelled a crash.
   PSS/RSS samples in KiB, device model/API and trace availability. Zero memory
   values can mean no OS sample. Collection errors and unsupported Android
   versions are explicit; one inaccessible trace does not discard other entries.
-- `last-rust-panic.txt` and available Horizon crash reports: bounded panic/error
+- `last-rust-panic.txt` and available Volt crash reports: bounded panic/error
   details. These cannot intercept every signal or an Android low-memory kill.
 - `exit-*.trace-summary.txt`: selected fields from available native protobuf
   tombstones: signal, crashed thread, up to 64 frames, relative PCs, module names
@@ -74,9 +74,9 @@ not retain traces. In these cases collect an ADB log while reproducing, or ask
 for a device-specific test. With the correct device selected:
 
 ```powershell
-adb -s SERIAL logcat -v threadtime > horizon-system-log.txt
+adb -s SERIAL logcat -v threadtime > volt-system-log.txt
 # Reproduce; stop collection with Ctrl+C.
-adb -s SERIAL shell dumpsys activity exit-info dev.horizon.android
+adb -s SERIAL shell dumpsys activity exit-info dev.volt.android
 ```
 
 A full system log may include other apps' information. Review/redact it before
@@ -94,5 +94,5 @@ and the installed game/player data were not used. This verifies collection,
 not the causes of issues #22, #24, #33 or #34 and not every vendor's trace support.
 
 Host tests: `python tools/test_android_diagnostics.py`. Optional private fixture:
-set `HORIZON_NATIVE_TOMBSTONE_FIXTURE` to a saved Android protobuf trace to test
+set `VOLT_NATIVE_TOMBSTONE_FIXTURE` to a saved Android protobuf trace to test
 its readable summary. Fixtures and device captures stay under ignored `.local/`.

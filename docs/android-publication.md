@@ -1,6 +1,6 @@
 # Android release packaging
 
-Horizon Android preserves the upstream Git history, MIT copyright and license,
+Volt Android preserves the upstream Git history, MIT copyright and license,
 third-party notices and dependency licenses. See [upstream integration](android-upstream.json).
 The `android` branch is maintained separately from upstream deployment workflows.
 
@@ -15,14 +15,14 @@ python tools/android_build.py --abi x86 --public
 python tools/android_build.py --abi x86_64 --public
 ```
 
-Outputs are `.local/android/apk/<abi>/horizon-android-public.apk`.
+Outputs are `.local/android/apk/<abi>/volt-android-public.apk`.
 The build signs and audits each APK. Default development APKs are not release
 artifacts: they may contain private resource bundles and enable debugging.
 
 ### Payload
 
 The public APK includes the Rust engine, licensed application dependencies and
-allowlisted generated Horizon tables. Original Minecraft resource files, JARs,
+allowlisted generated Volt tables. Original Minecraft resource files, JARs,
 textures and sounds are not packaged as game resources. The installer downloads
 them from Mojang, checks pinned hashes and reconstructs required world data on
 the device. Touch textures and their license come from a pinned revision of

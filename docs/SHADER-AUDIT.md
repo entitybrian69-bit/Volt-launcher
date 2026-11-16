@@ -1,6 +1,6 @@
 # Shader pipeline audit: this fork vs upstream
 
-Verified against the real upstream sources (github.com/horizon-rust/horizon
+Verified against the real upstream sources (github.com/volt-rust/volt
 and github.com/starling-client/starling) in November 2026 — not against the
 earlier assumption that upstream had removed packs pending a rewrite. That
 assumption was **wrong**: upstream's Shader API 0.2 is back, with pack
@@ -12,17 +12,17 @@ translate passes, `core_shader.rs` and `textures.rs`.
 
 | Piece | File(s) | State |
 |---|---|---|
-| Volt Shaders (built-in, WGSL) | `crates/horizon-shaders`, `crates/horizon-shader-api` | Shipped; validated in CI (`cargo test -p horizon-shader-api`). Off by default, Potato→Custom presets, Moving Vegetation, BSL/Complementary-like look. |
-| Pack folder + selection UI | `game/shader_packs.rs`, `crates/horizon-client-render/src/shader_pack_list.rs`, `android/shader_catalog.rs`, `crates/horizon-client-render/src/shader_options.rs` | Shipped on Android and PC; same folder semantics. |
+| Volt Shaders (built-in, WGSL) | `crates/volt-shaders`, `crates/volt-shader-api` | Shipped; validated in CI (`cargo test -p volt-shader-api`). Off by default, Potato→Custom presets, Moving Vegetation, BSL/Complementary-like look. |
+| Pack folder + selection UI | `game/shader_packs.rs`, `crates/volt-client-render/src/shader_pack_list.rs`, `android/shader_catalog.rs`, `crates/volt-client-render/src/shader_options.rs` | Shipped on Android and PC; same folder semantics. |
 | Iris-format zip reading | `game/shader_packs.rs` | Shipped (data-only translation to our pipeline; no execution). |
 | Native shader hook | `game/native_shaders.rs` | Shipped. |
 | Failure handling | render pipeline | A pack that fails to compile falls back to the default renderer; the client does not crash. |
 
-## Upstream (horizon-rust/horizon)
+## Upstream (volt-rust/volt)
 
 | Piece | Present upstream | Present here | Gap assessment |
 |---|---|---|---|
-| Shader API 0.2 | Yes | Yes (WGSL `horizon-shader-api`) | Compatible intent, divergent engine revs (hooks 411 vs 40) — wholesale merge is **not** safe; cherry-picks only. |
+| Shader API 0.2 | Yes | Yes (WGSL `volt-shader-api`) | Compatible intent, divergent engine revs (hooks 411 vs 40) — wholesale merge is **not** safe; cherry-picks only. |
 | `shader_ui.rs` screen | Yes | Our own selection + settings screens | Ours stays (Volt UI directives). |
 | `golden_hour_0_2` pack | Yes | Not imported | Candidate cherry-pick; data-only, low risk. Not yet imported — listed as outstanding. |
 | Extra translate passes (~10) | Yes | Partially (our pipeline covers the common ones) | Audit-first, partial merge; the engine divergence makes blind ports risky. Outstanding. |
@@ -49,7 +49,7 @@ short. Target look confirmed by the owner: **Complementary Reimagined**.
 
 What changed:
 
-- **Executed-value proof.** `crates/horizon-client-render/tests/volt_shader_exec.rs`
+- **Executed-value proof.** `crates/volt-client-render/tests/volt_shader_exec.rs`
   compiles the shipped sky + material stages of every profile exactly as
   the renderer does and executes them on a host GPU (CI: lavapipe) over
   six scenes (noon, sunset, night, storm, cave, far-lands) and ten
@@ -62,7 +62,7 @@ What changed:
   paint white/garbage pixels on mobile GPUs.
 - **Neutral daylight.** The permanent warm-sun white balance is gone:
   daylight is neutral (Complementary Reimagined), and the light only
-  turns golden near the horizon (`golden_hour` term on the sun height).
+  turns golden near the volt (`golden_hour` term on the sun height).
   All preset `warmth` values are 0 and every preset now defaults to the
   Complementary Crisp style (BSL Soft stays selectable, softened).
 - **Water.** Deep azure Complementary palette, clearer body (lower
@@ -71,12 +71,12 @@ What changed:
 - **Classic ZIP intake (parity with OptiFine/Iris).** A downloaded or
   imported classic pack may carry its `shaders/` folder inside exactly
   one wrapping folder (`Pack-1.0/shaders/...`, the usual release-page
-  layout). `content_files::validate` and the `horizon-shaders` pack
+  layout). `content_files::validate` and the `volt-shaders` pack
   loader both resolve that single wrapper; two wrapped candidates in one
   archive stay refused, and every security check (path safety, size
   caps, mandatory checksum, host allowlist) is unchanged.
 
-## Registry `.hshader` compatibility mode (2026-11-15)
+## Registry `.vshader` compatibility mode (2026-11-15)
 
 The registry's shader packs (Aurora, Photon, Nimbe and the rest) are written
 for newer lines of the native shader API than this fork's snapshot: late-0.1

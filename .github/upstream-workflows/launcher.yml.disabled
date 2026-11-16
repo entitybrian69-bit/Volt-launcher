@@ -5,10 +5,10 @@ name: launcher
 # for the game.
 # A release is launcher@X.Y.Z on the release line in .github/release-line.txt (docs/versioning.md); without it
 # launcher-vX.Y.Z, the patch after the last launcher tag or the next minor when a merged pull request is labelled
-# feature. The version and the tag are given to the build (HORIZON_LAUNCHER_VERSION, HORIZON_LAUNCHER_TAG): no bump
+# feature. The version and the tag are given to the build (VOLT_LAUNCHER_VERSION, VOLT_LAUNCHER_TAG): no bump
 # commits.
 # Never marked latest. Pushes to launcher branches only build. RELEASES_PAUSED=1 stops releases.
-# macOS: with the repository variable MACOS_SIGN_IDENTITY set, Horizon.app and the .dmg are signed with
+# macOS: with the repository variable MACOS_SIGN_IDENTITY set, Volt.app and the .dmg are signed with
 # Developer ID, notarized and stapled, from the runner's signing keychain (packaging/macos/README.md);
 # unset (forks), they are signed ad hoc.
 #   gh workflow run launcher --ref <branch>                    # dry run: builds everything, publishes nothing
@@ -20,14 +20,14 @@ on:
     paths:
       # Every crate the launcher builds in, as tools/release_train.py's LAUNCHER_PATHS.
       - 'launcher/**'
-      - 'crates/horizon-bench/**'
-      - 'crates/horizon-friends/**'
-      - 'crates/horizon-mods/**'
-      - 'crates/horizon-port-pack/**'
-      - 'crates/horizon-prepare/**'
-      - 'crates/horizon-release-sign/**'
-      - 'crates/horizon-telemetry/**'
-      - 'crates/horizon-theme/**'
+      - 'crates/volt-bench/**'
+      - 'crates/volt-friends/**'
+      - 'crates/volt-mods/**'
+      - 'crates/volt-port-pack/**'
+      - 'crates/volt-prepare/**'
+      - 'crates/volt-release-sign/**'
+      - 'crates/volt-telemetry/**'
+      - 'crates/volt-theme/**'
       - '.github/workflows/launcher.yml'
   schedule:
     - cron: '7-59/10 * * * *'
@@ -51,7 +51,7 @@ concurrency:
 
 env:
   # Test runs never reach the telemetry server: no live-count ping, no uploads (docs/telemetry.md).
-  HORIZON_TELEMETRY_URL: "off"
+  VOLT_TELEMETRY_URL: "off"
 
 jobs:
   decide:
@@ -99,16 +99,16 @@ jobs:
         include:
           - name: linux
             os: ubuntu-22.04
-            asset: horizon-launcher-linux-x86_64.tar.gz
-            binary: horizon-launcher
+            asset: volt-launcher-linux-x86_64.tar.gz
+            binary: volt-launcher
           - name: macos
             mac: true
-            asset: horizon-launcher-macos-arm64.zip
-            binary: horizon-launcher
+            asset: volt-launcher-macos-arm64.zip
+            binary: volt-launcher
           - name: windows
             os: windows-latest
-            asset: horizon-launcher-windows-x64.zip
-            binary: horizon-launcher.exe
+            asset: volt-launcher-windows-x64.zip
+            binary: volt-launcher.exe
             # The C runtime linked in: without it the launcher asks for VCRUNTIME140.dll,
             # which only the Visual C++ redistributable installs.
             rustflags: -C target-feature=+crt-static
@@ -117,16 +117,16 @@ jobs:
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
-      # Horizon's Azure app for Microsoft sign-in (docs/microsoft-account.md): a repository
+      # Volt's Azure app for Microsoft sign-in (docs/microsoft-account.md): a repository
       # variable, not a secret. Unset, the launcher says sign-in is not configured.
-      HORIZON_MSA_CLIENT_ID: ${{ vars.HORIZON_MSA_CLIENT_ID }}
+      VOLT_MSA_CLIENT_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
       # The mod browser's CurseForge source (docs/mod-browser.md#curseforge): a repository secret. Unset, the
       # launcher searches Modrinth only.
-      HORIZON_CURSEFORGE_API_KEY: ${{ secrets.HORIZON_CURSEFORGE_API_KEY }}
+      VOLT_CURSEFORGE_API_KEY: ${{ secrets.VOLT_CURSEFORGE_API_KEY }}
       # The release's version and tag, built in (launcher/src/backend.rs VERSION and own_tag: the tag says which
       # line it is on, docs/versioning.md); a launcher branch's build keeps Cargo.toml's.
-      HORIZON_LAUNCHER_VERSION: ${{ (github.event_name != 'push' || github.ref == 'refs/heads/main') && needs.decide.outputs.version || '' }}
-      HORIZON_LAUNCHER_TAG: ${{ (github.event_name != 'push' || github.ref == 'refs/heads/main') && needs.decide.outputs.tag || '' }}
+      VOLT_LAUNCHER_VERSION: ${{ (github.event_name != 'push' || github.ref == 'refs/heads/main') && needs.decide.outputs.version || '' }}
+      VOLT_LAUNCHER_TAG: ${{ (github.event_name != 'push' || github.ref == 'refs/heads/main') && needs.decide.outputs.tag || '' }}
     defaults:
       run:
         working-directory: launcher
@@ -166,8 +166,8 @@ jobs:
         run: |
           out=$(target/release/${{ matrix.binary }} --version)
           echo "$out"
-          expected="${HORIZON_LAUNCHER_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
-          [[ "$out" == "horizon-launcher $expected" ]] || { echo "::error::expected horizon-launcher $expected"; exit 1; }
+          expected="${VOLT_LAUNCHER_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
+          [[ "$out" == "volt-launcher $expected" ]] || { echo "::error::expected volt-launcher $expected"; exit 1; }
       - name: Only system libraries
         run: |
           file=target/release/${{ matrix.binary }}
@@ -178,13 +178,13 @@ jobs:
           esac
       - name: Smoke test
         env:
-          HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
-          HORIZON_GITHUB_TOKEN: ${{ github.token }}
+          VOLT_LAUNCHER_NO_SELF_UPDATE: '1'
+          VOLT_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          export HORIZON_LAUNCHER_HOME="${RUNNER_TEMP//\\//}/horizon-launcher-smoke"
-          export HORIZON_HOME="$HORIZON_LAUNCHER_HOME/game"
-          rm -rf "$HORIZON_LAUNCHER_HOME"
+          export VOLT_LAUNCHER_HOME="${RUNNER_TEMP//\\//}/volt-launcher-smoke"
+          export VOLT_HOME="$VOLT_LAUNCHER_HOME/game"
+          rm -rf "$VOLT_LAUNCHER_HOME"
           launcher="$PWD/target/release/${{ matrix.binary }}"
           # GitHub's API rate-limits shared runner addresses now and then: try a few times.
           retry() { for i in 1 2 3 4; do "$@" && return 0; sleep $((i * 15)); done; return 1; }
@@ -193,7 +193,7 @@ jobs:
           "$launcher" versions --installed
           "$launcher" links --json
           # `install latest` is the Nightly since #3342 (versions/nightly-<date>-<commit>), a vX.Y.Z before.
-          clients=("$HORIZON_LAUNCHER_HOME"/versions/*/horizon-client*)
+          clients=("$VOLT_LAUNCHER_HOME"/versions/*/volt-client*)
           client="${clients[0]}"
           echo "installed client: $client"
           [[ -f "$client" ]] || { echo "::error::no game installed under versions/"; exit 1; }
@@ -208,7 +208,7 @@ jobs:
           # The client starts: --help prints before any window or GPU is needed.
           help() { "$client" --help > "$RUNNER_TEMP/help.txt" 2>&1 && head -3 "$RUNNER_TEMP/help.txt" && grep -q -- '--resources' "$RUNNER_TEMP/help.txt"; }
           soft help
-          rm -rf "$HORIZON_LAUNCHER_HOME"
+          rm -rf "$VOLT_LAUNCHER_HOME"
       - name: The signing keychain, unlocked
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != ''
         env:
@@ -220,12 +220,12 @@ jobs:
         run: |
           rm -rf dist out && mkdir -p out
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            # Horizon.app, zipped (self-update) and in a .dmg (installer), signed (and notarized with
+            # Volt.app, zipped (self-update) and in a .dmg (installer), signed (and notarized with
             # Developer ID): packaging/macos.
             python3 -m venv "$RUNNER_TEMP/dmg" && "$RUNNER_TEMP/dmg/bin/pip" install --quiet dmgbuild==1.6.5
-            version=${HORIZON_LAUNCHER_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
+            version=${VOLT_LAUNCHER_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
             DMGBUILD="$RUNNER_TEMP/dmg/bin/dmgbuild" ../packaging/macos/package.sh target/release/${{ matrix.binary }} "$version" out
-            rm -rf out/Horizon.app
+            rm -rf out/Volt.app
           else
             mkdir -p dist
             cp target/release/${{ matrix.binary }} dist/
@@ -262,7 +262,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: horizon-launcher-*
+          pattern: volt-launcher-*
           merge-multiple: true
       - name: Sign the checksums (SHA256SUMS, SHA256SUMS.sig)
         env:
@@ -270,7 +270,7 @@ jobs:
           RELEASE_SIGNING_KEY_NEXT: ${{ secrets.RELEASE_SIGNING_KEY_NEXT }}
           EPHEMERAL: ${{ needs.decide.outputs.dry_run == 'true' && 'yes' || '' }}
           TAG: ${{ needs.decide.outputs.tag }}
-        run: bash tools/ci/sign_release.sh "$TAG" dist/horizon-launcher-*
+        run: bash tools/ci/sign_release.sh "$TAG" dist/volt-launcher-*
       - uses: actions/upload-artifact@v4
         with:
           name: signature
@@ -311,8 +311,8 @@ jobs:
           EPHEMERAL: ${{ needs.decide.outputs.dry_run == 'true' && 'yes' || '' }}
         run: |
           key=(); [[ -n "$EPHEMERAL" ]] && key=(--key "$(cat dist/ephemeral.pub)")
-          cargo run --locked --quiet -p horizon-release-sign -- verify --tag "$TAG" --publishing "${key[@]}" dist
-      # Never marked latest: Horizon's own releases stay the repository's latest.
+          cargo run --locked --quiet -p volt-release-sign -- verify --tag "$TAG" --publishing "${key[@]}" dist
+      # Never marked latest: Volt's own releases stay the repository's latest.
       - name: Publish ${{ needs.decide.outputs.tag }}
         if: needs.decide.outputs.dry_run != 'true'
         env:
@@ -321,7 +321,7 @@ jobs:
         run: |
           signature=(); [[ -f dist/SHA256SUMS.sig ]] && signature=(dist/SHA256SUMS.sig)
           gh release create "$TAG" --target "${{ needs.decide.outputs.head }}" --title "$(cat notes/title.txt)" \
-            --notes-file notes/body.md --latest=false dist/horizon-launcher-* dist/SHA256SUMS "${signature[@]}"
+            --notes-file notes/body.md --latest=false dist/volt-launcher-* dist/SHA256SUMS "${signature[@]}"
       - name: Dry run, the release that would be published
         if: needs.decide.outputs.dry_run == 'true'
         run: |

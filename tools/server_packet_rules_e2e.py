@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small rules of vanilla's ServerGamePacketListenerImpl on Horizon's dedicated server, end to end.
+"""Small rules of vanilla's ServerGamePacketListenerImpl on Volt's dedicated server, end to end.
 
     python3 tools/server_packet_rules_e2e.py --bin-dir target/fast
 
@@ -12,10 +12,10 @@ A survival dedicated server in a flat world, a world border 20 blocks wide aroun
 - handleSetBeaconPacket: a player opens a beacon and sets Speed without paying; vanilla disconnects them
   (multiplayer.disconnect.generic) and warns "Player <name> tried to set invalid beacon effects".
 
-horizon-bots stand in for the clients (`--attack`, `--raw`). The server runs in a fresh folder with fresh
-HORIZON_HOME and XDG folders (lab.game_env), on a free port. Build first:
-    cargo build --profile fast -p horizon-client --bin horizon-client
-    cargo build --profile fast -p horizon-bots
+volt-bots stand in for the clients (`--attack`, `--raw`). The server runs in a fresh folder with fresh
+VOLT_HOME and XDG folders (lab.game_env), on a free port. Build first:
+    cargo build --profile fast -p volt-client --bin volt-client
+    cargo build --profile fast -p volt-bots
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -59,8 +59,8 @@ class Failed(Exception):
 
 
 def serverbound_ids():
-    """The play state's serverbound packet ids, from horizon-protocol's table."""
-    text = (lab.ROOT / 'crates/horizon-protocol/src/ids.rs').read_text()
+    """The play state's serverbound packet ids, from volt-protocol's table."""
+    text = (lab.ROOT / 'crates/volt-protocol/src/ids.rs').read_text()
     play = text[text.index('pub mod play {'):]
     block = play[play.index('pub mod serverbound {'):]
     block = block[:block.index('}')]
@@ -83,7 +83,7 @@ def block_pos(x, y, z):
 
 def bot(bins, port, out, name, behaviour, *extra):
     report = out / f'{name}.json'
-    subprocess.run([bins / f'horizon-bots{EXE}', '--server', f'127.0.0.1:{port}', '--bots', '1',
+    subprocess.run([bins / f'volt-bots{EXE}', '--server', f'127.0.0.1:{port}', '--bots', '1',
                     '--behaviour', behaviour, '--height', '0', '--seconds', str(SECONDS), '--name', name,
                     '--report', report, *extra],
                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=SECONDS + 180)
@@ -107,7 +107,7 @@ def run(bins, folder, out):
     props = dict(PROPERTIES, **{'server-port': str(port)})
     (folder / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()))
     (folder / 'eula.txt').write_text('eula=true\n')
-    command = [bins / f'horizon-client{EXE}', '--resources', lab.RESOURCES, '--dedicated', '--nogui']
+    command = [bins / f'volt-client{EXE}', '--resources', lab.RESOURCES, '--dedicated', '--nogui']
     server = Server(command, folder, out / 'server.log')
     try:
         server.wait_for(DONE, 300)

@@ -1,0 +1,15 @@
+{
+  "volt.options.controller": "Геймпад",
+  "volt.options.vibration": "Вібрація",
+  "volt.options.adaptive_triggers": "Адаптивні тригери",
+  "volt.options.lightbar": "Світлова панель",
+  "volt.options.look_sensitivity": "Чутливість огляду",
+  "volt.options.invert_x": "Інвертувати огляд по X",
+  "volt.options.invert_y": "Інвертувати огляд по Y",
+  "volt.options.sneak_button": "Кнопка присідання",
+  "volt.options.move_deadzone": "Мертва зона руху",
+  "volt.options.look_deadzone": "Мертва зона огляду",
+  "volt.options.button_glyphs": "Значки кнопок",
+  "volt.options.menu_navigation": "Навігація в меню",
+  "volt.options.on_screen_keyboard": "Екранна клавіатура"
+}

@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
-"""Generate the Biomes Unseen (biomes_unseen) Horizon content mod (.hmod).
+"""Generate the Biomes Unseen (biomes_unseen) Volt content mod (.vmod).
 
 Original procedural textures only (no Biomes O' Plenty assets copied).
 Ported from Rust-store- scripts/generate_biomes_unseen.py with every fix the
 Volt Launcher CI required baked in, so rebuilds need no manual changes:
   - block properties use the engine's `explosion_resistance` (not
     `resistance`); no generator-only `wood_type` / `wall_block` keys
-    (crates/horizon-mods/src/content.rs, BlockFile/BlockProperties).
+    (crates/volt-mods/src/content.rs, BlockFile/BlockProperties).
   - items set `max_stack_size` / `rarity` as fields, never as component
     patches (ItemFile; check_components rejects them).
-  - no `data/<ns>/horizon/creative_tab/` file: the engine instead places
+  - no `data/<ns>/volt/creative_tab/` file: the engine instead places
     every mod item next to its vanilla template in the creative export
-    (crates/horizon-client/src/mod_content.rs, `append_creative`).
+    (crates/volt-client/src/mod_content.rs, `append_creative`).
   - placed features use vanilla's `minecraft:heightmap` placement, not the
     invalid `minecraft:surface_heightmap`.
   - every item-bearing id gets an `assets/<ns>/items/<name>.json` client
     item definition, which this engine requires to render items
-    (crates/horizon-client/src/item_render.rs, `load_definitions`).
+    (crates/volt-client/src/item_render.rs, `load_definitions`).
   - self-contained: the BIOMES table is inlined (no build_hnmod.py import);
-    biomes ship as data with `horizon:climate` (the Volt worldgen API).
+    biomes ship as data with `volt:climate` (the Volt worldgen API).
 
-Usage: python3 scripts/generate_biomes_unseen.py [out-dir] [out.hmod]
-Defaults: build/biomes_unseen-src and build/biomes_unseen.hmod.
+Usage: python3 scripts/generate_biomes_unseen.py [out-dir] [out.vmod]
+Defaults: build/biomes_unseen-src and build/biomes_unseen.vmod.
 """
 import json, struct, sys, zipfile, zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MOD = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "build" / "biomes_unseen-src"
-HMOD = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "build" / "biomes_unseen.hmod"
+HMOD = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "build" / "biomes_unseen.vmod"
 ID = "biomes_unseen"
 
 BIOMES = [
@@ -105,8 +105,8 @@ def wj(p, data): p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.
 def wb(p, data): p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(data)
 
 LANG={}
-BLOCKS=[]  # (name, display, horizon_block_dict, model_kind, palette)
-ITEMS=[]   # (name, display, horizon_item_dict, palette, shape)
+BLOCKS=[]  # (name, display, volt_block_dict, model_kind, palette)
+ITEMS=[]   # (name, display, volt_item_dict, palette, shape)
 
 def block(name, display, template, props, kind, palette, sounds=None):
     props={("explosion_resistance" if k=="resistance" else k): v for k,v in props.items()}
@@ -279,13 +279,13 @@ def gen_variant(name, suf, pal):
 
 def main():
     MOD.mkdir(parents=True, exist_ok=True)
-    (MOD/"horizon-mod.toml").write_text(
+    (MOD/"volt-mod.toml").write_text(
       'id = "biomes_unseen"\nname = "Biomes Unseen"\nversion = "1.0.2"\n'
-      'description = "Biomes O\' Plenty-style expansion for Horizon 26.3: 44 biomes across the Overworld and Nether, 12 wood sets, flowers, plants, nether flesh/brimstone, tanzanite gem tier and more. Blocks, items, creative entries and world generation are all data-driven - no code runs."\n'
+      'description = "Biomes O\' Plenty-style expansion for Volt 26.3: 44 biomes across the Overworld and Nether, 12 wood sets, flowers, plants, nether flesh/brimstone, tanzanite gem tier and more. Blocks, items, creative entries and world generation are all data-driven - no code runs."\n'
       'authors = ["Biomes Unseen Contributors"]\napi = "0.2"\nside = "both"\ncapabilities = ["registries"]\n')
     axe, pick = [], []
     for name,disp,d,kind,pal in BLOCKS:
-        wj(MOD/f"data/{ID}/horizon/block/{name}.json", d)
+        wj(MOD/f"data/{ID}/volt/block/{name}.json", d)
         base,border,accent = pal
         wb(MOD/f"assets/{ID}/textures/block/{name}.png", tex(base,border,accent, "leaves" if kind=="leaves" else "ore" if kind=="ore" else "grain" if kind=="log" else "bevel"))
         if kind.startswith("variant:"):
@@ -306,7 +306,7 @@ def main():
         wj(MOD/f"data/{ID}/loot_table/blocks/{name}.json", {"type":"minecraft:block","pools":[{"rolls":1.0,"bonus_rolls":0.0,"entries":[{"type":"minecraft:item","name":f"{ID}:{name}"}],"conditions":[{"condition":"minecraft:survives_explosion"}]}]})
         (axe if name.endswith(("_log","_planks")) else pick if name in ("tanzanite_ore","tanzanite_block","brimstone") else axe if kind=="leaves" else pick).append(f"{ID}:{name}")
     for name,disp,d,pal,shape in ITEMS:
-        wj(MOD/f"data/{ID}/horizon/item/{name}.json", d)
+        wj(MOD/f"data/{ID}/volt/item/{name}.json", d)
         wb(MOD/f"assets/{ID}/textures/item/{name}.png", item_tex(pal[0],pal[1],shape))
         wj(MOD/f"assets/{ID}/models/item/{name}.json", {"parent":"minecraft:item/handheld" if shape=="sword" else "minecraft:item/generated","textures":{"layer0":f"{ID}:item/{name}"}})
         wj(MOD/f"assets/{ID}/items/{name}.json", {"model":{"type":"minecraft:model","model":f"{ID}:item/{name}"}})
@@ -358,7 +358,7 @@ def main():
           "temperature":temp,"downfall":down,"has_precipitation":down>0.05,
           "effects":{"sky_color":sky,"fog_color":fog,"water_color":water,"water_fog_color":water,"grass_color":grass,"foliage_color":grass},
           "spawners":{},"spawn_costs":{},"carvers":[],"features":steps,
-          "horizon:climate":climate, **({"horizon:dimension":"minecraft:the_nether"} if cat=="nether" else {})})
+          "volt:climate":climate, **({"volt:dimension":"minecraft:the_nether"} if cat=="nether" else {})})
     # biome tags: overworld/nether membership for vanilla systems (locate, etc.)
     wj(MOD/f"data/{ID}/tags/worldgen/biome/is_biomes_unseen.json", {"replace":False,"values":[f"{ID}:{b[0]}" for b in BIOMES]})
 
@@ -371,7 +371,7 @@ def main():
     wj(MOD/f"assets/{ID}/lang/en_us.json", LANG)
     print(f"blocks={len(BLOCKS)} items={len(ITEMS)} total={len(all_ids)}")
 
-    # Package the .hmod: the manifest and every content file, sorted, so
+    # Package the .vmod: the manifest and every content file, sorted, so
     # the archive is reproducible.
     HMOD.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(HMOD, "w") as z:

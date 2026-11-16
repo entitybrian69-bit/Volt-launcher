@@ -4,9 +4,9 @@ Standalone Rust NativeActivity linking the real local writer and Android exit
 collector. It uses only its own `files/diagnostic-probe/` directory and links no
 game or renderer. Never package this in a player APK.
 
-Package as a distinct debuggable application ID `dev.horizon.diagnosticsprobe`,
+Package as a distinct debuggable application ID `dev.volt.diagnosticsprobe`,
 with stock `android.app.NativeActivity`, `android.app.lib_name` set to
-`horizon_diagnostics_probe`, `hasCode=false`, min SDK 28 and target SDK 35.
+`volt_diagnostics_probe`, `hasCode=false`, min SDK 28 and target SDK 35.
 
 After launch, write `abort`, `panic`, `export` or `finish` to
 `files/diagnostic-probe/command` using `run-as` for this probe only. The first

@@ -1,11 +1,11 @@
 <resources>
-    <style name="HorizonGameTheme" parent="android:style/Theme.Material.NoActionBar">
+    <style name="VoltGameTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
         <!-- Android 15 (targetSdk 35) draws edge-to-edge whether or not the
              window asks: without the cutout escape the game's title bar sits
-             under the status bar. HorizonActivity hides the bars as well. -->
+             under the status bar. VoltActivity hides the bars as well. -->
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:colorAccent">#9a86ff</item>
     </style>

@@ -3,7 +3,7 @@
 deterministic .hnmod archives their registry entries pin.
 
 A vendored mod is one whose reviewed source tree lives in this repository
-(vendored/<id>/ holding horizon-native.json and mixins/<id>/...) with a
+(vendored/<id>/ holding volt-native.json and mixins/<id>/...) with a
 registry-style entry beside it (vendored/<id>.toml). This script rebuilds
 the bundle byte-for-byte (sorted paths, fixed timestamps, stored entries),
 checks its SHA-256 against the entry's pin, and places both the bundle and
@@ -35,8 +35,8 @@ STAMP = (2026, 11, 9, 0, 0, 0)
 def build_bundle(source: Path, out: Path) -> str:
     """Deterministically zip `source` (a vendored mod dir) to `out`."""
     files = sorted(p for p in source.rglob("*") if p.is_file())
-    if not (source / "horizon-native.json").is_file():
-        raise SystemExit(f"{source}: vendored bundle lacks horizon-native.json")
+    if not (source / "volt-native.json").is_file():
+        raise SystemExit(f"{source}: vendored bundle lacks volt-native.json")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
         for p in files:
             rel = p.relative_to(source).as_posix()

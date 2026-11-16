@@ -4,10 +4,10 @@
 //!   `pack.mcmeta`. The ones turned on are `options.txt`'s `resourcePacks` list (vanilla's
 //!   format, `"file/<name>"`, the bottom first), so the game's Resource Packs screen shows the
 //!   same choice. A pack turned on here goes on top, as the screen puts a newly picked one.
-//! - Shader packs: `shaderpacks/`, Horizon's own (a folder with `horizon-shaders.toml`, or a
-//!   `.hshader`) and those in the `shaders/` format (a `.zip`, or a folder with `shaders/`), as
+//! - Shader packs: `shaderpacks/`, Volt's own (a folder with `volt-shaders.toml`, or a
+//!   `.vshader`) and those in the `shaders/` format (a `.zip`, or a folder with `shaders/`), as
 //!   the game's Shader Packs page lists them (`shader_pack_list`). One at most is on:
-//!   `pickedShaderPack` in `horizon-graphics.txt`.
+//!   `pickedShaderPack` in `volt-graphics.txt`.
 //!
 //! Every other line of both files is written back as it was.
 use std::fs;
@@ -15,8 +15,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const OPTIONS: &str = "options.txt";
-const GRAPHICS: &str = "horizon-graphics.txt";
-const SHADER_MANIFEST: &str = "horizon-shaders.toml";
+const GRAPHICS: &str = "volt-graphics.txt";
+const SHADER_MANIFEST: &str = "volt-shaders.toml";
 const SHADER_PACKAGE: &str = "hshader";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub struct Pack {
     /// Its file or folder name in the pack folder: the id commands take.
     pub file: String,
     pub path: PathBuf,
-    /// A Horizon shader pack's own name, else the file's.
+    /// A Volt shader pack's own name, else the file's.
     pub title: String,
     /// `pack.mcmeta`'s description as plain text; a shader pack's format.
     pub description: String,
@@ -103,7 +103,7 @@ fn read(path: &Path, kind: Kind, on: &[String]) -> Option<Pack> {
                 .and_then(|t| t.get("name")?.as_str().map(str::to_string));
             (
                 name.unwrap_or_else(|| file.clone()),
-                "Horizon shader pack".into(),
+                "Volt shader pack".into(),
                 None,
             )
         }
@@ -263,8 +263,8 @@ pub fn find(home: &Path, kind: Kind, query: &str) -> Result<Pack, String> {
         .ok_or_else(|| format!("No pack {query} in {}", home.join(kind.folder()).display()))
 }
 
-/// What a dropped or picked file is: a resource pack (a zip with `pack.mcmeta`), a Horizon
-/// shader pack (`.hshader`), or a shader pack in the `shaders/` format (a zip with `shaders/`).
+/// What a dropped or picked file is: a resource pack (a zip with `pack.mcmeta`), a Volt
+/// shader pack (`.vshader`), or a shader pack in the `shaders/` format (a zip with `shaders/`).
 pub fn kind_of(file: &Path) -> Result<Kind, String> {
     let name = file
         .file_name()
@@ -278,7 +278,7 @@ pub fn kind_of(file: &Path) -> Result<Kind, String> {
         Some("zip") => {}
         _ => {
             return Err(format!(
-                "{name} is not a pack: packs are .zip or .hshader files."
+                "{name} is not a pack: packs are .zip or .vshader files."
             ))
         }
     }

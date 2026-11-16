@@ -237,7 +237,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "beacons"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -362,10 +362,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo-horizon-mod"
+name = "cargo-volt-mod"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "volt-mods",
  "serde_json",
 ]
 
@@ -503,7 +503,7 @@ dependencies = [
 name = "coords-hud"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -985,7 +985,7 @@ checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 name = "far-view"
 version = "1.0.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -1084,7 +1084,7 @@ dependencies = [
 name = "fps-overlay"
 version = "1.0.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -1410,7 +1410,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-android"
+name = "volt-android"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
@@ -1421,26 +1421,26 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "glam",
- "horizon-anticheat",
- "horizon-assets",
- "horizon-bench",
- "horizon-client",
- "horizon-client-input",
- "horizon-client-render",
- "horizon-core",
- "horizon-friends",
- "horizon-hdr",
- "horizon-items",
- "horizon-mods",
- "horizon-port-pack",
- "horizon-protocol",
- "horizon-server-files",
- "horizon-shader-api",
- "horizon-shaders",
- "horizon-telemetry",
- "horizon-theme",
- "horizon-threads",
- "horizon-world",
+ "volt-anticheat",
+ "volt-assets",
+ "volt-bench",
+ "volt-client",
+ "volt-client-input",
+ "volt-client-render",
+ "volt-core",
+ "volt-friends",
+ "volt-hdr",
+ "volt-items",
+ "volt-mods",
+ "volt-port-pack",
+ "volt-protocol",
+ "volt-server-files",
+ "volt-shader-api",
+ "volt-shaders",
+ "volt-telemetry",
+ "volt-theme",
+ "volt-threads",
+ "volt-world",
  "image",
  "jni 0.21.1",
  "log",
@@ -1463,7 +1463,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-anticheat"
+name = "volt-anticheat"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1471,34 +1471,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-assets"
+name = "volt-assets"
 version = "0.1.0"
 dependencies = [
- "horizon-core",
+ "volt-core",
  "png",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-bench"
+name = "volt-bench"
 version = "0.1.0"
 dependencies = [
- "horizon-telemetry",
+ "volt-telemetry",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-bots"
+name = "volt-bots"
 version = "0.1.0"
 dependencies = [
- "horizon-protocol",
+ "volt-protocol",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-client"
+name = "volt-client"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
@@ -1509,27 +1509,27 @@ dependencies = [
  "fs4",
  "gilrs",
  "glam",
- "horizon-anticheat",
- "horizon-assets",
- "horizon-bench",
- "horizon-client-core",
- "horizon-client-input",
- "horizon-client-render",
- "horizon-command",
- "horizon-core",
- "horizon-dualsense",
- "horizon-friends",
- "horizon-hdr",
- "horizon-items",
- "horizon-mods",
- "horizon-protocol",
- "horizon-server-files",
- "horizon-shader-api",
- "horizon-shaders",
- "horizon-telemetry",
- "horizon-theme",
- "horizon-threads",
- "horizon-world",
+ "volt-anticheat",
+ "volt-assets",
+ "volt-bench",
+ "volt-client-core",
+ "volt-client-input",
+ "volt-client-render",
+ "volt-command",
+ "volt-core",
+ "volt-dualsense",
+ "volt-friends",
+ "volt-hdr",
+ "volt-items",
+ "volt-mods",
+ "volt-protocol",
+ "volt-server-files",
+ "volt-shader-api",
+ "volt-shaders",
+ "volt-telemetry",
+ "volt-theme",
+ "volt-threads",
+ "volt-world",
  "log",
  "miniz_oxide 0.8.9",
  "naga",
@@ -1551,27 +1551,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-client-core"
+name = "volt-client-core"
 version = "0.1.0"
 dependencies = [
- "horizon-world",
+ "volt-world",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-client-input"
+name = "volt-client-input"
 version = "0.1.0"
 dependencies = [
  "arboard",
- "horizon-client-core",
- "horizon-dualsense",
- "horizon-theme",
+ "volt-client-core",
+ "volt-dualsense",
+ "volt-theme",
  "png",
  "winit",
 ]
 
 [[package]]
-name = "horizon-client-render"
+name = "volt-client-render"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
@@ -1581,21 +1581,21 @@ dependencies = [
  "cpal",
  "flate2",
  "glam",
- "horizon-assets",
- "horizon-bench",
- "horizon-client-core",
- "horizon-client-input",
- "horizon-command",
- "horizon-core",
- "horizon-hdr",
- "horizon-items",
- "horizon-protocol",
- "horizon-shader-api",
- "horizon-shaders",
- "horizon-telemetry",
- "horizon-theme",
- "horizon-threads",
- "horizon-world",
+ "volt-assets",
+ "volt-bench",
+ "volt-client-core",
+ "volt-client-input",
+ "volt-command",
+ "volt-core",
+ "volt-hdr",
+ "volt-items",
+ "volt-protocol",
+ "volt-shader-api",
+ "volt-shaders",
+ "volt-telemetry",
+ "volt-theme",
+ "volt-threads",
+ "volt-world",
  "log",
  "miniz_oxide 0.8.9",
  "naga",
@@ -1615,23 +1615,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-command"
+name = "volt-command"
 version = "0.1.0"
 dependencies = [
- "horizon-client-core",
- "horizon-protocol",
- "horizon-world",
+ "volt-client-core",
+ "volt-protocol",
+ "volt-world",
 ]
 
 [[package]]
-name = "horizon-core"
+name = "volt-core"
 version = "0.1.0"
 dependencies = [
  "libm",
 ]
 
 [[package]]
-name = "horizon-dualsense"
+name = "volt-dualsense"
 version = "0.1.0"
 dependencies = [
  "cpal",
@@ -1640,7 +1640,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-friends"
+name = "volt-friends"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
@@ -1655,7 +1655,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-hdr"
+name = "volt-hdr"
 version = "0.1.0"
 dependencies = [
  "ash",
@@ -1666,28 +1666,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-items"
+name = "volt-items"
 version = "0.1.0"
 dependencies = [
- "horizon-client-core",
- "horizon-core",
- "horizon-world",
+ "volt-client-core",
+ "volt-core",
+ "volt-world",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-mod-sdk"
+name = "volt-mod-sdk"
 version = "0.1.0"
 dependencies = [
  "wit-bindgen 0.60.0",
 ]
 
 [[package]]
-name = "horizon-mods"
+name = "volt-mods"
 version = "0.1.0"
 dependencies = [
- "horizon-shader-api",
+ "volt-shader-api",
  "log",
  "minisign-verify",
  "serde",
@@ -1702,24 +1702,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mods-test-guest"
+name = "volt-mods-test-guest"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
-name = "horizon-mods-test-ui-guest"
+name = "volt-mods-test-ui-guest"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
-name = "horizon-port-pack"
+name = "volt-port-pack"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "volt-mods",
  "serde",
  "serde_json",
  "sha1",
@@ -1729,7 +1729,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-prepare"
+name = "volt-prepare"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
@@ -1741,13 +1741,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-protocol"
+name = "volt-protocol"
 version = "0.1.0"
 dependencies = [
  "flate2",
  "getrandom 0.3.4",
- "horizon-core",
- "horizon-world",
+ "volt-core",
+ "volt-world",
  "ipconfig",
  "serde_json",
  "sha1",
@@ -1755,16 +1755,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-relay"
+name = "volt-relay"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
- "horizon-friends",
+ "volt-friends",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-release-sign"
+name = "volt-release-sign"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -1772,14 +1772,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-server"
+name = "volt-server"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "horizon-anticheat",
- "horizon-bench",
- "horizon-release-sign",
- "horizon-server-files",
+ "volt-anticheat",
+ "volt-bench",
+ "volt-release-sign",
+ "volt-server-files",
  "libc",
  "serde",
  "serde_json",
@@ -1792,19 +1792,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-server-files"
+name = "volt-server-files"
 version = "0.1.0"
 dependencies = [
  "base64",
- "horizon-core",
- "horizon-protocol",
- "horizon-world",
+ "volt-core",
+ "volt-protocol",
+ "volt-world",
  "log",
  "ureq",
 ]
 
 [[package]]
-name = "horizon-shader-api"
+name = "volt-shader-api"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -1817,16 +1817,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-shaders"
+name = "volt-shaders"
 version = "0.1.0"
 dependencies = [
- "horizon-core",
+ "volt-core",
  "naga",
  "zip",
 ]
 
 [[package]]
-name = "horizon-telemetry"
+name = "volt-telemetry"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
@@ -1837,11 +1837,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-theme"
+name = "volt-theme"
 version = "0.1.0"
 
 [[package]]
-name = "horizon-threads"
+name = "volt-threads"
 version = "0.1.0"
 dependencies = [
  "libc",
@@ -1851,11 +1851,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-world"
+name = "volt-world"
 version = "0.1.0"
 dependencies = [
  "flate2",
- "horizon-core",
+ "volt-core",
  "libm",
  "lz4_flex",
  "postcard",
@@ -2224,7 +2224,7 @@ dependencies = [
 name = "keystrokes"
 version = "1.0.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -2407,7 +2407,7 @@ dependencies = [
 name = "minimap"
 version = "1.0.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -3173,7 +3173,7 @@ dependencies = [
 name = "predator-missile"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -3318,7 +3318,7 @@ dependencies = [
 name = "recipes"
 version = "1.0.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -4715,7 +4715,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 name = "welcome"
 version = "0.1.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]
@@ -5541,7 +5541,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "horizon-theme",
+ "volt-theme",
 ]
 
 [[package]]
@@ -5686,7 +5686,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 name = "zoom"
 version = "1.0.0"
 dependencies = [
- "horizon-mod-sdk",
+ "volt-mod-sdk",
 ]
 
 [[package]]

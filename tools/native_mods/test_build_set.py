@@ -29,13 +29,13 @@ class BuildSetTests(unittest.TestCase):
 
     def bundle(self, mod_id, *, compiler=None, revoked=False):
         metadata = {'schema': 1, 'id': mod_id, 'version': '2.0', 'game': '26.3',
-                    'horizon': self.revision, 'mixins': compiler or self.compiler, 'hooks': 1}
+                    'volt': self.revision, 'mixins': compiler or self.compiler, 'hooks': 1}
         path = self.root / f'{mod_id}.hnmod'
         with zipfile.ZipFile(path, 'w') as z:
-            z.writestr('horizon-native.json', json.dumps(metadata))
-            z.writestr(f'mixins/{mod_id}/horizon-mixin.toml',
+            z.writestr('volt-native.json', json.dumps(metadata))
+            z.writestr(f'mixins/{mod_id}/volt-mixin.toml',
                        f'[mod]\nid = "{mod_id}"\nversion = "2.0"\n'
-                       f'[compatibility]\nhorizon_revision = "{self.revision}"\n')
+                       f'[compatibility]\nvolt_revision = "{self.revision}"\n')
             z.writestr(f'mixins/{mod_id}/runtime.rs', '// test')
         sha = hashlib.sha256(path.read_bytes()).hexdigest()
         (self.registry / 'mods' / f'{mod_id}.toml').write_text(
@@ -101,7 +101,7 @@ class BuildSetTests(unittest.TestCase):
                 self.assertEqual(mixins.name, '0')
                 Path(command[command.index('--out') + 1]).mkdir()
             else:
-                lib = Path(kwargs['env']['CARGO_TARGET_DIR']) / build_set.TARGETS[args.abi] / 'release/libhorizon_android.so'
+                lib = Path(kwargs['env']['CARGO_TARGET_DIR']) / build_set.TARGETS[args.abi] / 'release/libvolt_launcher.so'
                 lib.parent.mkdir(parents=True)
                 lib.write_bytes(b'example library')
             return SimpleNamespace(returncode=0, stdout='', stderr='')
@@ -144,7 +144,7 @@ class BuildSetTests(unittest.TestCase):
                                 Path(command[command.index('--workspace') + 1]).name))
                 Path(command[command.index('--out') + 1]).mkdir()
             else:
-                lib = Path(kwargs['env']['CARGO_TARGET_DIR']) / build_set.TARGETS[args.abi] / 'release/libhorizon_android.so'
+                lib = Path(kwargs['env']['CARGO_TARGET_DIR']) / build_set.TARGETS[args.abi] / 'release/libvolt_launcher.so'
                 lib.parent.mkdir(parents=True, exist_ok=True)
                 lib.write_bytes(b'two pass library')
             return SimpleNamespace(returncode=0, stdout='', stderr='')

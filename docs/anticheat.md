@@ -1,6 +1,6 @@
 # The dedicated server's anticheat
 
-Horizon's dedicated server can check what players send beyond what vanilla checks. It is **off**: a
+Volt's dedicated server can check what players send beyond what vanilla checks. It is **off**: a
 server that doesn't turn it on runs vanilla's checks only ("moved too quickly", "moved wrongly"...)
 and costs nothing more. An owner turns it on in `server.toml`:
 
@@ -19,13 +19,13 @@ kick = 20
 decay = 0.02
 ```
 
-It lives in the server for now, in its own crate (`horizon-anticheat`) plus one file of the hub
+It lives in the server for now, in its own crate (`volt-anticheat`) plus one file of the hub
 (`lan/anticheat.rs`), because the native mod API ([native-mods.md](native-mods.md)) has no hooks yet for a
 player's moves (the position, the on-ground claim, cancelling a move) or for packet timing. It moves into a
 native mod once those hooks exist.
 
-horizon-server checks the section before every start; the game reads it from `server.toml` when it
-starts (`horizon-client --dedicated` run by hand reads the same file from its folder, if there is one).
+volt-server checks the section before every start; the game reads it from `server.toml` when it
+starts (`volt-client --dedicated` run by hand reads the same file from its folder, if there is one).
 
 ## How a check acts
 
@@ -55,10 +55,10 @@ ones in this version.
 
 ## Writing a check
 
-- The rules are in `crates/horizon-anticheat` (no game state: unit-test them there); the hub runs them
-  where it handles the packet (`crates/horizon-client/src/lan/`) and calls `Hub::flag`, which carries out
+- The rules are in `crates/volt-anticheat` (no game state: unit-test them there); the hub runs them
+  where it handles the packet (`crates/volt-client/src/lan/`) and calls `Hub::flag`, which carries out
   setback, alert and kick (`lan/anticheat.rs`).
-- A check is one entry in the `checks!` table of `horizon-anticheat/src/lib.rs`: its name in
+- A check is one entry in the `checks!` table of `volt-anticheat/src/lib.rs`: its name in
   `server.toml`, its default thresholds and its own settings.
 - Predict what vanilla allows (effects, ice, elytra, riptide, vehicles, knockback, levitation, slime,
   bubble columns, latency). A false positive is worse than a missed cheat: when unsure, don't flag.
@@ -67,13 +67,13 @@ ones in this version.
 - Original code only (CONTRIBUTING.md): written from vanilla 26.3 and public descriptions of what cheats
   do. Never read, copy or paraphrase another anticheat's source (Grim, NoCheatPlus, Vulcan, Matrix,
   Spartan, Paper's anti-xray...), its decompiled jars or docs quoting its code.
-- Test it both ways in `tools/anticheat_e2e.py`: a horizon-bots cheat is caught, legit bots are never
+- Test it both ways in `tools/anticheat_e2e.py`: a volt-bots cheat is caught, legit bots are never
   flagged, and nothing happens with the anticheat off.
 
 ```sh
-cargo build --profile fast -p horizon-client --bin horizon-client
-cargo build --profile fast -p horizon-bots
+cargo build --profile fast -p volt-client --bin volt-client
+cargo build --profile fast -p volt-bots
 python3 tools/anticheat_e2e.py --bin-dir target/fast
-python3 tools/server_bench.py --servers horizon --bots 60 --behaviour walk --anticheat   # its cost
-python3 tools/server_bench.py --servers horizon --bots 60 --behaviour walk --ground --anticheat   # survival, on the ground
+python3 tools/server_bench.py --servers volt --bots 60 --behaviour walk --anticheat   # its cost
+python3 tools/server_bench.py --servers volt --bots 60 --behaviour walk --ground --anticheat   # survival, on the ground
 ```

@@ -1405,8 +1405,8 @@ mod jar_parity {
 #[path = "tuning.rs"]
 pub mod tuning;
 
-#[path = "horizon_pose.rs"]
-pub mod horizon_pose;
+#[path = "volt_pose.rs"]
+pub mod volt_pose;
 
 #[path = "skeleton.rs"]
 pub mod skeleton;

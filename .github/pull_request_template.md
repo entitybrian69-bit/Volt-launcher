@@ -8,18 +8,18 @@
 
 <!-- Tick one: it sets the pull request's label (CONTRIBUTING.md "Pull requests"). -->
 
-- [ ] parity: Horizon now does what vanilla 26.3 does
+- [ ] parity: Volt now does what vanilla 26.3 does
 - [ ] bug: a crash or a breakage
 - [ ] perf: faster, or less memory
 - [ ] feature: something new for players (listed under New in the release notes)
-- [ ] extra: Horizon-only, off by default
+- [ ] extra: Volt-only, off by default
 - [ ] tooling: tools, CI, tests, harnesses
 - [ ] docs
 
 ## Vanilla reference
 
 <!-- The vanilla classes and methods this follows (tools/rea_vanilla.py), and the harness that checks it.
-     "Horizon-only" for a feature vanilla doesn't have; "none" for tooling or docs. -->
+     "Volt-only" for a feature vanilla doesn't have; "none" for tooling or docs. -->
 
 ## Other projects' code
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The dedicated server's anticheat (docs/anticheat.md), end to end: a real `horizon-client --dedicated`
-and horizon-bots, legit bots beside cheating ones.
+"""The dedicated server's anticheat (docs/anticheat.md), end to end: a real `volt-client --dedicated`
+and volt-bots, legit bots beside cheating ones.
 
     python3 tools/anticheat_e2e.py --bin-dir target/fast            # every check
     python3 tools/anticheat_e2e.py --bin-dir target/fast --check timer
@@ -15,21 +15,21 @@ Checks:
          hovering 24 blocks up that claims the ground in every move (no-fall) and one standing on water
          that does (jesus) are flagged, their claim dropped, and kicked; bots walking on the ground and
          standing still are never flagged.
-- prediction: `[anticheat]` on, survival: a real Horizon client, through a relay that holds every packet
+- prediction: `[anticheat]` on, survival: a real Volt client, through a relay that holds every packet
          20-120 ms, walks, sprint-jumps, strafes and sneaks, with effects given and cleared, over ice and
          soul sand, swims, walks into cows, has blocks changed around it, flies in creative, glides with an
          elytra and a firework, launches with riptide and rides a boat: it is never flagged. A bot, which
          moves by its own rules and sends no keys, is flagged and sent back.
 - prediction-vanilla (only with --check): the same with the real vanilla 26.3 client (tools/vanilla_client.py, from the owner's
          own files; on macOS from the logged-in screen session, even a locked one), its keys pressed by
-         VanillaMover (mods/horizon/src/test/java): it walks, sprint-jumps, strafes and sneaks, with Speed
+         VanillaMover (mods/volt/src/test/java): it walks, sprint-jumps, strafes and sneaks, with Speed
          given and cleared, over packed ice, swims, walks into cows, jumps at a block set in front of it and
          glides with an elytra and a firework, through the same relay: it is never flagged.
 
-Each server runs in a fresh folder with fresh HORIZON_HOME and XDG folders (lab.game_env), on a free port,
+Each server runs in a fresh folder with fresh VOLT_HOME and XDG folders (lab.game_env), on a free port,
 in a flat world (creative unless the check says otherwise: the bots fly). Build first:
-    cargo build --profile fast -p horizon-client --bin horizon-client --bin horizon-ctl
-    cargo build --profile fast -p horizon-bots
+    cargo build --profile fast -p volt-client --bin volt-client --bin volt-ctl
+    cargo build --profile fast -p volt-bots
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -84,16 +84,16 @@ def start(bins, folder, anticheat, out, name, **extra):
     (folder / 'eula.txt').write_text('eula=true\n')
     if anticheat is not None:
         (folder / 'server.toml').write_text(anticheat)
-    command = [bins / f'horizon-client{EXE}', '--resources', lab.RESOURCES, '--dedicated', '--nogui']
+    command = [bins / f'volt-client{EXE}', '--resources', lab.RESOURCES, '--dedicated', '--nogui']
     server = Server(command, folder, out / f'{name}-server.log')
     server.wait_for(DONE, 300)
     return server, port
 
 
 def bots(bins, port, out, name, count, behaviour, seconds, *extra):
-    """horizon-bots, run to the end; its report."""
+    """volt-bots, run to the end; its report."""
     report = out / f'{name}.json'
-    subprocess.run([bins / f'horizon-bots{EXE}', '--server', f'127.0.0.1:{port}', '--bots', str(count),
+    subprocess.run([bins / f'volt-bots{EXE}', '--server', f'127.0.0.1:{port}', '--bots', str(count),
                     '--behaviour', behaviour, '--seconds', str(seconds), '--join-every', '0.2',
                     '--name', name, '--report', report, *extra],
                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=seconds + 180)
@@ -329,10 +329,10 @@ def check_prediction(bins, scratch, out, seconds):
     toml = '[anticheat]\nenabled = true\n[anticheat.timer]\nenabled = false\n[anticheat.ground]\nenabled = false\n'
     server, port = start(bins, folder, toml, out, 'prediction', gamemode='survival', difficulty='peaceful')
     from lan_e2e import Game  # noqa: E402 (only this check drives a client)
-    game = Game('client', bins / f'horizon-ctl{EXE}', lab.RESOURCES.resolve())
-    for key in ('XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'HORIZON_LAUNCHER_HOME'):
+    game = Game('client', bins / f'volt-ctl{EXE}', lab.RESOURCES.resolve())
+    for key in ('XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'VOLT_LAUNCHER_HOME'):
         game.d.env[key] = str(game.work / key.lower())
-    game.d.env['HORIZON_LAUNCHER_NO_SELF_UPDATE'] = '1'
+    game.d.env['VOLT_LAUNCHER_NO_SELF_UPDATE'] = '1'
     relay = Jitter(port)
     try:
         try:
@@ -373,7 +373,7 @@ class VanillaClient:
         classes.mkdir(parents=True)
         jars = os.pathsep.join(map(str, vanilla_client.classpath()))
         release = str(lab.config()[0]['minecraft']['java_major'])
-        mover = lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaMover.java'
+        mover = lab.ROOT / 'mods/volt/src/test/java/dev/voltlabs/parity/VanillaMover.java'
         subprocess.run(['javac', '--release', release, '-proc:none', '-nowarn', '-cp', jars, '-d', classes, mover],
                        check=True, capture_output=True)
         args = argparse.Namespace(name=name, join=address, world=None, game_dir=work / 'client', assets=None,
@@ -383,7 +383,7 @@ class VanillaClient:
         command = vanilla_client.command(args)
         cp = command.index('-cp') + 1
         command[cp] = os.pathsep.join([str(classes), command[cp]])
-        command[command.index('net.minecraft.client.main.Main')] = 'dev.horizonlab.parity.VanillaMover'
+        command[command.index('net.minecraft.client.main.Main')] = 'dev.voltlabs.parity.VanillaMover'
         self.log = open(log, 'w')
         self.ready = threading.Event()
         self.positions = []
@@ -512,7 +512,7 @@ def main():
     bins, out = Path(args.bin_dir).resolve(), Path(args.out)
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
-    # One set of scratch HORIZON_HOME and XDG folders for every server below.
+    # One set of scratch VOLT_HOME and XDG folders for every server below.
     os.environ.update(lab.game_env())
     failed = []
     with tempfile.TemporaryDirectory(prefix='anticheat-e2e-') as scratch:

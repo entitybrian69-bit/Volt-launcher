@@ -1,25 +1,25 @@
-# Horizon mods
+# Volt mods
 
-Two kinds of mod run in Horizon:
+Two kinds of mod run in Volt:
 
 | Kind | File | What it is | Where it runs |
 |---|---|---|---|
-| **Content mod** | `.hmod` | Data and assets: blocks, items, recipes, loot, tags, models, textures, structures. No code. | Read when the game starts |
-| **Native mod** | `.hnmod` | A [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) bundle: Rust that changes the game's own source before it is compiled. | In a game the launcher builds for the player ([native-mods.md](native-mods.md)) |
+| **Content mod** | `.vmod` | Data and assets: blocks, items, recipes, loot, tags, models, textures, structures. No code. | Read when the game starts |
+| **Native mod** | `.hnmod` | A [volt-mixins](https://github.com/volt-rust/volt-mixins) bundle: Rust that changes the game's own source before it is compiled. | In a game the launcher builds for the player ([native-mods.md](native-mods.md)) |
 
 Fabric and NeoForge jars do **not** run as they are: their code calls and patches Minecraft's Java classes, and
-Horizon has none. What carries over is the data and assets inside a jar ([modpacks.md](modpacks.md)).
+Volt has none. What carries over is the data and assets inside a jar ([modpacks.md](modpacks.md)).
 
-Mods are **off by default**. A fresh install has no `horizon-mods` folder and plays exactly like vanilla 26.3.
+Mods are **off by default**. A fresh install has no `volt-mods` folder and plays exactly like vanilla 26.3.
 
 ## Playing with mods
 
 1. Install a mod from the launcher's Mods page ([mod-browser.md](mod-browser.md)), or put its files by hand in the
-   game folder (the one holding `options.txt`): a content mod's `.hmod` (or a folder holding `horizon-mod.toml`) in
-   `horizon-mods/`. Native mods go in `horizon-native-mods/`, and the launcher builds them
+   game folder (the one holding `options.txt`): a content mod's `.vmod` (or a folder holding `volt-mod.toml`) in
+   `volt-mods/`. Native mods go in `volt-native-mods/`, and the launcher builds them
    ([native-mods.md](native-mods.md)).
 2. Options > **Mods** lists them with what each may do ("May add blocks, items and mob effects to your worlds") and a
-   switch. They start off. The choice is kept in `horizon-mods.txt` (`mod.<id>:true`).
+   switch. They start off. The choice is kept in `volt-mods.txt` (`mod.<id>:true`).
 3. A content mod's blocks, items and mob effects load once, when the game starts: restart the game after a switch.
 4. A mod that can't load shows why, in red, on its row.
 
@@ -31,24 +31,24 @@ Benchmarks (`--benchmark`) never load mods.
 ## Making a content mod
 
 ```sh
-cargo install --git https://github.com/horizon-rust/horizon cargo-horizon-mod
-cargo horizon-mod new my-mod        # a content mod: manifest, one block with its model, loot and recipe
+cargo install --git https://github.com/volt-rust/volt cargo-volt-mod
+cargo volt-mod new my-mod        # a content mod: manifest, one block with its model, loot and recipe
 cd my-mod
-cargo horizon-mod run               # build my-mod.hmod, then start the game with it turned on
-cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
-cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
+cargo volt-mod run               # build my-mod.vmod, then start the game with it turned on
+cargo volt-mod build             # only build: target/volt-mod/my_mod.vmod
+cargo volt-mod check target/volt-mod/my_mod.vmod   # the registry's checks; --json for JSON
 ```
 
 - `new <path> [--name "Name"]` writes the template. It makes content mods only: any other `--template` is refused.
-- `build` packs `horizon-mod.toml`, `assets/` and `data/` into `target/horizon-mod/<id>.hmod`, with the same checks
+- `build` packs `volt-mod.toml`, `assets/` and `data/` into `target/volt-mod/<id>.vmod`, with the same checks
   the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code is native now) and a
   manifest without capability `registries`.
-- `run` builds, then starts `horizon-client` (on `PATH`, or `--game PATH`, or `HORIZON_CLIENT`) with
-  `--dev-mod target/horizon-mod/<id>.hmod`, always on. Arguments after `--` go to the game. The game reads content once
+- `run` builds, then starts `volt-client` (on `PATH`, or `--game PATH`, or `VOLT_CLIENT`) with
+  `--dev-mod target/volt-mod/<id>.vmod`, always on. Arguments after `--` go to the game. The game reads content once
   at start, so rebuild and run again after an edit.
 - `check <file>` runs what the registry runs: the file's size and SHA-256, its manifest and content, and a signature
-  with `--key <public key> --signature <file>.minisig`. It reads `.hmod`, `.hnmod`, `.hpack`, resource pack `.zip`
-  and `.hshader` files.
+  with `--key <public key> --signature <file>.minisig`. It reads `.vmod`, `.hnmod`, `.vpack`, resource pack `.zip`
+  and `.vshader` files.
 - `registry build|review|check|list|release|page` is the registry repository's CI ([api/mod-index.md](api/mod-index.md)).
 
 ### The manifest
@@ -69,8 +69,8 @@ Unknown keys are refused, so a typo is an error, not a silently ignored permissi
 
 ### Content mods (API 0.2)
 
-A content mod has capability `registries` and carries `assets/` and `data/` in the `.hmod`. It adds blocks and items
-by declaring them in `data/<id>/horizon/block/*.json` and `data/<id>/horizon/item/*.json`, each copying a vanilla
+A content mod has capability `registries` and carries `assets/` and `data/` in the `.vmod`. It adds blocks and items
+by declaring them in `data/<id>/volt/block/*.json` and `data/<id>/volt/item/*.json`, each copying a vanilla
 template ([modpacks.md](modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and mob effects (below):
 
 ```json
@@ -110,9 +110,9 @@ have no `max_stack_size` or `rarity` keys, so those two go in `components` here
 A component type no vanilla item has is refused, so a misspelt one fails
 the load instead of doing nothing. Behaviour the game ties to a vanilla
 item's id doesn't come along yet: a copy of the trident doesn't throw
-([#3305](https://github.com/horizon-rust/horizon/issues/3305)).
+([#3305](https://github.com/volt-rust/volt/issues/3305)).
 
-A mod effect is declared in `data/<id>/horizon/mob_effect/<name>.json` with what vanilla's `MobEffect` takes: its
+A mod effect is declared in `data/<id>/volt/mob_effect/<name>.json` with what vanilla's `MobEffect` takes: its
 category (`beneficial`, `harmful` or `neutral`) and its RGB colour (0 to `0xFFFFFF`), which its particles take:
 
 ```json
@@ -155,12 +155,12 @@ namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
 A listed namespace is the mod's as its id is: its `assets/` and `data/` files load, and the game reads its tags,
-recipes, names and loot. Blocks, items and mob effects are declared in `data/<id>/horizon/` only. `minecraft`, `c` and
-`horizon` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
+recipes, names and loot. Blocks, items and mob effects are declared in `data/<id>/volt/` only. `minecraft`, `c` and
+`volt` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
 MiB each and 512 MiB in all. A mod whose content is refused is left out, with the reason in the log. The game reads
-this content into its block and item tables (`horizon_client::mod_content`, [modpacks.md](modpacks.md)). A tag entry
+this content into its block and item tables (`volt_client::mod_content`, [modpacks.md](modpacks.md)). A tag entry
 naming an id nobody registers (a block a port left out, another mod's item) is dropped, so the rest of the tag still
 loads; vanilla would drop the whole tag.
 
@@ -173,20 +173,20 @@ of adds are left out, ...". Tags are the only `minecraft` files a mod may hold: 
 namespaces.
 
 A mod adds to structure sets and template pools that are not its own (vanilla's villages, another mod's houses) with
-a set or pool file in its own namespace holding `horizon:add_to`, a key vanilla data never has. Its entries are
+a set or pool file in its own namespace holding `volt:add_to`, a key vanilla data never has. Its entries are
 appended to each set or pool named, after every mod's own files, in mod and file order; the file is no set or pool
 itself. A name nobody defines is skipped.
 
 ```json
-{ "horizon:add_to": "minecraft:villages",
+{ "volt:add_to": "minecraft:villages",
   "structures": [ { "structure": "mymod:village_beach", "weight": 10 } ] }
 ```
 
-A pool addition holds `"elements"` as a pool does. `horizon-port-pack carry` writes these from the Lithostitched
+A pool addition holds `"elements"` as a pool does. `volt-port-pack carry` writes these from the Lithostitched
 modifiers `add_structure_set_entries` and `add_template_pool_elements`.
 
 A structure (and any of its pool elements, in place of the structure's) may hold
-`horizon:enhanced_terrain_adaptation`: MoogsStructureLib's terrain kernel, which carves or buries terrain around the
+`volt:enhanced_terrain_adaptation`: MoogsStructureLib's terrain kernel, which carves or buries terrain around the
 pieces on top of vanilla's `terrain_adaptation`. `kernel_size` and `kernel_distance` shape the kernel; `top` and
 `bottom` (`carve`, `bury` or `none`) act above and below a piece's floor; `bottom_offset`, `padding` (`x`, `top`,
 `bottom`, `z`) and MoogsStructureLib's `band` (`bottom`, `top`, `piece_heights`) move the box it measures from. On a
@@ -194,37 +194,37 @@ structure, `rigid_junctions` adds rigid pieces' junctions as well and `inflate` 
 radius. `kernel_size` 0 is none.
 
 ```json
-{ "horizon:enhanced_terrain_adaptation": { "kernel_size": 24, "kernel_distance": 24,
+{ "volt:enhanced_terrain_adaptation": { "kernel_size": 24, "kernel_distance": 24,
     "top": "carve", "bottom": "none", "rigid_junctions": true, "inflate": true } }
 ```
 
 ## Native mods
 
 Behaviour that needs code (a new key, a HUD, a tool that changes how mining works) is a native mod. It is a bundle of
-a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game. Start from
-[horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template). How the launcher builds
+a `volt-mixin.toml` and a few `.rs` helpers that hook into named functions of the game. Start from
+[volt-native-mod-template](https://github.com/volt-rust/volt-native-mod-template). How the launcher builds
 one, what it pins and why it is not sandboxed: [native-mods.md](native-mods.md).
 
 A native mod's config files go in the game's shared `config/` folder, beside `options.txt` (on a dedicated server,
 beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its own file names, such as
 `config/<mod id>.json`. It asks for the folder with `Game::native_config_dir()` (hook points API 26), which needs no
-game, so it works from any hook, and makes the folder when missing. Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
+game, so it works from any hook, and makes the folder when missing. Settings kept with `native_set_setting` stay where they were, in `volt-mods/.volt-mod-data/<id>/`.
 
 ## Publish your mod
 
-Horizon's registry lists mods, modpacks (`.hpack`) and resource packs made for Horizon. **A project is reviewed
+Volt's registry lists mods, modpacks (`.vpack`) and resource packs made for Volt. **A project is reviewed
 once, when it is listed; its later releases are checked by machine, not read by a person.** Players find them at
-[playhorizon.dev/mods](https://playhorizon.dev/mods) and in the launcher (Mods, then **Horizon** beside Modrinth),
+[playvolt.dev/mods](https://playvolt.dev/mods) and in the launcher (Mods, then **Volt** beside Modrinth),
 which checks every file before it installs it.
 
-1. Run `cargo horizon-mod check` on the file (above): the registry runs the same checks.
+1. Run `cargo volt-mod check` on the file (above): the registry runs the same checks.
 2. Put the source in a public GitHub repository, under a licence that lets players run it. A native mod's `.hnmod` is
    its source.
-3. Publish a **GitHub release** in it with the file as an asset (`.hmod`, `.hnmod`, `.hpack`, `.hshader`, or a resource
+3. Publish a **GitHub release** in it with the file as an asset (`.vmod`, `.hnmod`, `.vpack`, `.vshader`, or a resource
    pack's `.zip`), and its `.minisig` beside it if you sign. The release notes are the changelog.
-4. List the project once: open [playhorizon.dev/mods/submit](https://playhorizon.dev/mods/submit), sign in with GitHub
+4. List the project once: open [playvolt.dev/mods/submit](https://playvolt.dev/mods/submit), sign in with GitHub
    and give the repository and the page (name, summary, licence, optionally a minisign public key). It opens a pull
-   request in [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) adding `mods/<id>.toml`, with
+   request in [volt-rust/volt-mods](https://github.com/volt-rust/volt-mods) adding `mods/<id>.toml`, with
    you as owner. A reviewer reads the repository and its source and merges it.
 
 **Releasing a version is only step 3.** Publish a GitHub release (not a draft or a pre-release); within the hour the
@@ -239,7 +239,7 @@ Once it is published, its page and its card in the launcher show its rating: pla
 page give it 1 to 5 stars, one rating per account, which they can change. Its owners can't rate it, and nobody sees
 who rated.
 
-Your page can live in your repository too: a `horizon-registry.toml` at its root (on the newest release's tag) with
+Your page can live in your repository too: a `volt-registry.toml` at its root (on the newest release's tag) with
 `name`, `summary`, `description`, `authors` and `license` fills what the registry's entry leaves out; the entry's own
 words win. Its owners, key, kind and icon are the registry's, changed by a pull request. Projects listed before this
 (`versions` in their entry) keep their hosted versions. The formats: [api/mod-index.md](api/mod-index.md).
@@ -254,10 +254,10 @@ words win. Its owners, key, kind and icon are the registry's, changed by a pull 
 - **Takedowns.** A file the registry takes down (`revoked.toml`) is refused by the launcher and turned off where
   installed.
 
-## Horizon's official mods
+## Volt's official mods
 
-Horizon's own mods are native. They live in
-[horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) under `native/<name>/`:
+Volt's own mods are native. They live in
+[volt-rust/volt-mods](https://github.com/volt-rust/volt-mods) under `native/<name>/`:
 
 | Mod | Folder | Replaces |
 |---|---|---|
@@ -278,16 +278,16 @@ A content mod may register its own biomes with `data/<ns>/worldgen/biome/<name>.
 codec shape: `temperature`, `downfall`, `has_precipitation`, `effects`, `features`, `spawners`), its own
 features with `data/<ns>/worldgen/feature/` (26.3 name; `configured_feature/` still works) and
 `data/<ns>/worldgen/placed_feature/`. A biome file may also carry two keys vanilla data never has:
-`horizon:climate` (each of temperature/humidity/continentalness/erosion/depth/weirdness a `[min, max]`
+`volt:climate` (each of temperature/humidity/continentalness/erosion/depth/weirdness a `[min, max]`
 range or one number in -2..=2, plus `offset`; a missing field spans the whole range) and
-`horizon:dimension` (`minecraft:overworld` by default, or `minecraft:the_nether`; any other dimension is
+`volt:dimension` (`minecraft:overworld` by default, or `minecraft:the_nether`; any other dimension is
 refused). Both keys are stripped before the biome joins the bundle, and the ranges are appended, quantized
 as vanilla's `quantizeCoord` quantizes its preset tables, to that dimension's multi-noise preset in
 `presets.json`. An added biome is placed only where its ranges are the closest match, as a datapack's
-appended entries are. A biome without `horizon:climate` registers but is placed by nothing. This is
+appended entries are. A biome without `volt:climate` registers but is placed by nothing. This is
 data-only, so it works on Android exactly as on PC, and API 0.2 mods without biome files are unchanged.
 Malformed climate data (out of range, `min > max`, unknown dimension) refuses the mod with the file named.
-Unit coverage: `climate_entry_strips_keys_and_quantizes` in `crates/horizon-client/src/mod_content_tests.rs`.
+Unit coverage: `climate_entry_strips_keys_and_quantizes` in `crates/volt-client/src/mod_content_tests.rs`.
 
 ### Mod items in the creative inventory
 
@@ -295,15 +295,15 @@ The content build also patches `creative-inventory.json`: every mod item (a decl
 item) joins each creative category tab that lists its vanilla template item, right after the template's
 first listing, and the search tab under its id-derived name — the search tab's aligned `lines`/`tags`
 arrays and each tab's `permissions_only` indices are kept consistent (`append_creative` in
-`crates/horizon-client/src/mod_content.rs`). Items also need an `assets/<ns>/items/<name>.json` client
+`crates/volt-client/src/mod_content.rs`). Items also need an `assets/<ns>/items/<name>.json` client
 item definition to render (`item_render.rs` loads definitions, not bare `models/item/` files).
 
-### Biomes Unseen (`biomes_unseen.hmod`)
+### Biomes Unseen (`biomes_unseen.vmod`)
 
 The showcase content mod for the worldgen API: 44 biomes (39 Overworld, 5 Nether), 176 blocks, 29 items,
-built reproducibly by `scripts/generate_biomes_unseen.py` (which also packages the `.hmod`). It ships as
+built reproducibly by `scripts/generate_biomes_unseen.py` (which also packages the `.vmod`). It ships as
 a release asset, not inside the APK. Android install: Volt Launcher > Mods > paste the release asset's
-HTTPS URL > Import .hmod (or drop the file into the launcher's "Mods" folder), enable it, start a new
+HTTPS URL > Import .vmod (or drop the file into the launcher's "Mods" folder), enable it, start a new
 world. Format decision and evidence: `docs/biomes_unseen/FORMAT-DECISION.md`. CI proof: the
 `Worldgen mod tests (host)` job (biome registration, asset completeness, creative placement) and the
 `Runtime proof (real root, live client)` job — the real `resource_root` over the real prepared root,
@@ -314,7 +314,7 @@ biomes_unseen:bayou` and `/give @s biomes_unseen:cherry_planks` must succeed in 
 
 At every start (and again when a world opens) the game writes a plain-text report beside
 `options.txt` — on Android that is the game home the Files app shows under "Volt Launcher":
-`volt-mods-report.txt`. For every installed `.hmod` it lists what actually happened: loaded (with
+`volt-mods-report.txt`. For every installed `.vmod` it lists what actually happened: loaded (with
 block/item/biome-definition counts, creative items added, and the biomes placed per dimension),
 not enabled, or refused with the exact reason. The launcher's Installed page shows the same line
 under each mod. Send this file when a mod looks wrong in game.

@@ -22,7 +22,7 @@ struct Scratch(PathBuf);
 impl Scratch {
     fn new(name: &str) -> Scratch {
         let dir =
-            std::env::temp_dir().join(format!("horizon-sources-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("volt-sources-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         Scratch(dir)
@@ -224,7 +224,7 @@ fn prism_native_jars_are_found_through_the_linked_folder() {
     );
     let official = Path::new("com/mojang/jtracy/1.14.38/jtracy-1.14.38-natives-windows.jar");
     assert!(!linked.join("libraries").join(official).exists());
-    let found = horizon_prepare::artifacts::launcher_library(
+    let found = volt_prepare::artifacts::launcher_library(
         &linked,
         "com.mojang:jtracy:1.14.38:natives-windows",
         official,
@@ -470,10 +470,10 @@ fn nothing_found_lists_every_folder_and_what_it_lacks() {
     let mojang = Mojang::new(MANIFEST);
     let error = resolve_with(&chosen, &known, &s.0.join("linked"), &mojang).unwrap_err();
     let expected = format!(
-        "Minecraft 26.3 was not found. Horizon looked in:\n  \
+        "Minecraft 26.3 was not found. Volt looked in:\n  \
          {} (the folder doesn't exist)\n  \
          {} (Prism Launcher: libraries/com/mojang/minecraft/26.3/minecraft-26.3-client.jar is \
-         not the 26.3 release Horizon was made for)\n  \
+         not the 26.3 release Volt was made for)\n  \
          {} (Modrinth App: no Minecraft 26.3 client jar)\nTo fix it:\n",
         chosen.display(),
         wrong.display(),
@@ -493,7 +493,7 @@ fn a_version_file_that_is_not_the_pinned_one_is_refused() {
     let dir = s.launcher("PrismLauncher", "", jar);
     let linked = s.0.join("linked");
     let error = resolve_with(&dir, &[], &linked, &Mojang::new(b"{}")).unwrap_err();
-    assert!(error.contains("not the one Horizon pins"), "{error}");
+    assert!(error.contains("not the one Volt pins"), "{error}");
     assert!(!linked.join("versions/26.3/26.3.json").exists());
 }
 

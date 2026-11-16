@@ -2700,23 +2700,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-bench"
+name = "volt-bench"
 version = "0.1.0"
 dependencies = [
- "horizon-telemetry",
+ "volt-telemetry",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "horizon-core"
+name = "volt-core"
 version = "0.1.0"
 dependencies = [
  "libm",
 ]
 
 [[package]]
-name = "horizon-friends"
+name = "volt-friends"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
@@ -2731,7 +2731,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-launcher"
+name = "volt-launcher"
 version = "0.2.0"
 dependencies = [
  "base64",
@@ -2742,16 +2742,16 @@ dependencies = [
  "futures-lite 2.6.1",
  "getrandom 0.3.4",
  "gpui",
- "horizon-bench",
- "horizon-core",
- "horizon-friends",
- "horizon-mods",
- "horizon-port-pack",
- "horizon-prepare",
- "horizon-release-sign",
- "horizon-telemetry",
- "horizon-theme",
- "horizon-world",
+ "volt-bench",
+ "volt-core",
+ "volt-friends",
+ "volt-mods",
+ "volt-port-pack",
+ "volt-prepare",
+ "volt-release-sign",
+ "volt-telemetry",
+ "volt-theme",
+ "volt-world",
  "image",
  "keyring",
  "objc2-app-kit",
@@ -2775,10 +2775,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mods"
+name = "volt-mods"
 version = "0.1.0"
 dependencies = [
- "horizon-shader-api",
+ "volt-shader-api",
  "log",
  "minisign-verify",
  "serde",
@@ -2790,10 +2790,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-port-pack"
+name = "volt-port-pack"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "volt-mods",
  "serde",
  "serde_json",
  "sha1",
@@ -2803,7 +2803,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-prepare"
+name = "volt-prepare"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
@@ -2815,7 +2815,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-release-sign"
+name = "volt-release-sign"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -2823,7 +2823,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-shader-api"
+name = "volt-shader-api"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
@@ -2836,7 +2836,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-telemetry"
+name = "volt-telemetry"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
@@ -2847,15 +2847,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-theme"
+name = "volt-theme"
 version = "0.1.0"
 
 [[package]]
-name = "horizon-world"
+name = "volt-world"
 version = "0.1.0"
 dependencies = [
  "flate2",
- "horizon-core",
+ "volt-core",
  "libm",
  "lz4_flex",
  "postcard",

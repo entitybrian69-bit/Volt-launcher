@@ -4,13 +4,13 @@ version = "1.0.0"
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Horizon's official far view: distant terrain past the render distance."
+description = "Volt's official far view: distant terrain past the render distance."
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-horizon-mod-sdk = { path = "../../../crates/horizon-mod-sdk" }
+volt-mod-sdk = { path = "../../../crates/volt-mod-sdk" }
 
 [lints]
 workspace = true

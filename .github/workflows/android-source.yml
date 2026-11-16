@@ -52,7 +52,7 @@ jobs:
           - abi: x86_64
             target: x86_64-linux-android
     env:
-      HORIZON_TELEMETRY_URL: "off"
+      VOLT_TELEMETRY_URL: "off"
       CARGO_TARGET_DIR: .local/ci-target
       CARGO_BUILD_JOBS: "2"
     steps:

@@ -10,14 +10,14 @@ Use an APK built from the current `android` branch. Record its source commit, AB
 6. **Sensitivity:** drag equal distances horizontally and vertically in landscape and portrait. Tune each axis independently and restart to verify persistence. Test gyro separately; these two sliders calibrate finger movement.
 7. **Tutorial:** in a disposable new profile, walk/jump and turn with touch (or a gamepad). Both first hints should complete. Leave/re-enter and create another world: a completed stage should not restart, but an unfinished stage can return.
 8. **D-pad:** immediately after Play, press Down without touching the display or waiting for full resource loading. Check highlight and Enter/center-button activation, then options, world and server lists. Text-field arrow editing must still work.
-9. **Diagnostics:** record once with Performance recording only, GPU profiling only, and both together. Return to the launcher and export through Files / Horizon Android / Reports. With both enabled, there must be one combined session containing CPU/frame context and supported GPU stage data. Check a second Play too. Empty GPU stage data must correspond to unsupported encoder timestamps or no completed samples, not a missing report.
+9. **Diagnostics:** record once with Performance recording only, GPU profiling only, and both together. Return to the launcher and export through Files / Volt Android / Reports. With both enabled, there must be one combined session containing CPU/frame context and supported GPU stage data. Check a second Play too. Empty GPU stage data must correspond to unsupported encoder timestamps or no completed samples, not a missing report.
 10. **Installation #30:** on a disposable installation, download and prepare resources without a PC. Restart/retry preparation and verify it finishes instead of returning to Download with a missing-file error. Preserve logs if the affected Samsung device still fails.
-11. **Upstream regression smoke test:** Compatibility and Batching, world loading, translucent water/glass, dawn/dusk, resource-pack reload, `.hmod` Zoom and minimap, keyboard input, multiplayer join and reconnect, pause/Home/lock recovery.
+11. **Upstream regression smoke test:** Compatibility and Batching, world loading, translucent water/glass, dawn/dusk, resource-pack reload, `.vmod` Zoom and minimap, keyboard input, multiplayer join and reconnect, pause/Home/lock recovery.
 
 These checks do not require deleting real worlds or resetting the primary app's storage.
 
 12. **Crash diagnostics:** performance recording can remain off. After a real failure,
-    reopen Horizon, wait a few seconds and use Settings > Diagnostic report > Export
+    reopen Volt, wait a few seconds and use Settings > Diagnostic report > Export
     ZIP. Check previous/current session phase, Android exit collection status and
     available panic/native summaries. A return to the launcher must preserve its
     handled error, including when a non-default profile is active. Do not force a

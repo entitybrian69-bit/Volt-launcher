@@ -10,15 +10,24 @@ PRIVATE_ROOTS = {".local", "decompiled", "minecraft", "assets", "run", "logs"}
 PRIVATE_EXTENSIONS = {".jar", ".class", ".jfr", ".hprof", ".java", ".apk", ".aab", ".keystore", ".jks"}
 ORIGINAL_JDK_TOOLS = {"tools/JfrSummary.java", "tests/java/JfrFixture.java"}
 # Owner-approved, original NativeActivity result callback; not recovered game code.
-ANDROID_RESULT_BRIDGE = "packaging/android/java/dev/horizon/android/HorizonActivity.java"
-ANDROID_DOCUMENTS_BRIDGE = "packaging/android/java/dev/horizon/android/HorizonDocumentsProvider.java"
+ANDROID_RESULT_BRIDGE = "packaging/android/java/dev/volt/launcher/VoltActivity.java"
+ANDROID_DOCUMENTS_BRIDGE = "packaging/android/java/dev/volt/launcher/VoltDocumentsProvider.java"
 # Original Discord Rich Presence bridge (THIRD_PARTY_NOTICES.md); not recovered game code.
-ANDROID_DISCORD_BRIDGE = "packaging/android/java/dev/horizon/android/VoltDiscordRpc.java"
+ANDROID_DISCORD_BRIDGE = "packaging/android/java/dev/volt/launcher/VoltDiscordRpc.java"
+# The same three bridges under their pre-rename Horizon paths, so history checks
+# (`--history` walks every revision) still allow them.
+ANDROID_BRIDGES_BEFORE_RENAME = {
+    "packaging/android/java/dev/horizon/android/HorizonActivity.java",
+    "packaging/android/java/dev/horizon/android/HorizonDocumentsProvider.java",
+    "packaging/android/java/dev/horizon/android/VoltDiscordRpc.java",
+}
 
 
 def prohibited(path):
     parsed = PurePosixPath(path)
-    if parsed.name.lower() in {"local.properties", "control.json", "android-launch.json", "horizon-touch.json", "engine-data.zip", "horizon-resources.json"}:
+    if parsed.name.lower() in {"local.properties", "control.json", "android-launch.json",
+                               "volt-touch.json", "horizon-touch.json", "engine-data.zip",
+                               "volt-resources.json", "horizon-resources.json"}:
         return True
     name = parsed.name.lower()
     if name == ".env" or (name.startswith(".env.") and name != ".env.example"):
@@ -26,11 +35,16 @@ def prohibited(path):
     if any(part in {".local", ".gradle", "node_modules", "__pycache__"} for part in parsed.parts):
         return True
     # Original JDK-only tools are an exact allowlist; recovered game Java stays private.
-    if path in ORIGINAL_JDK_TOOLS or path in {ANDROID_RESULT_BRIDGE, ANDROID_DOCUMENTS_BRIDGE, ANDROID_DISCORD_BRIDGE}:
+    if path in ORIGINAL_JDK_TOOLS or path in {
+        ANDROID_RESULT_BRIDGE, ANDROID_DOCUMENTS_BRIDGE, ANDROID_DISCORD_BRIDGE,
+    } or path in ANDROID_BRIDGES_BEFORE_RENAME:
         return False
-    # Original Horizon mod sources may also be tracked.
-    if parsed.suffix == ".java" and path.startswith(("mods/horizon/src/", "mods/horizon-lab/src/")):
-        return not ("/dev/horizonlab/" in path)
+    # Original Volt mod sources may also be tracked, under either name.
+    if parsed.suffix == ".java" and path.startswith(
+        ("mods/volt/src/", "mods/volt-lab/src/", "mods/horizon/src/", "mods/horizon-lab/src/")
+    ):
+        # Recovered game code lives under the ...labs parity packages and stays private.
+        return not ("/dev/voltlabs/" in path or "/dev/horizonlab/" in path)
     return bool(parsed.parts and parsed.parts[0] in PRIVATE_ROOTS) or parsed.suffix.lower() in PRIVATE_EXTENSIONS
 
 

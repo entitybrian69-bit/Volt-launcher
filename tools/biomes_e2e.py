@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Biomes Unseen, live: the REAL client (offscreen, software Vulkan) with the
-shipped biomes_unseen.hmod enabled, driven by horizon-ctl. Creates a creative
+shipped biomes_unseen.vmod enabled, driven by volt-ctl. Creates a creative
 world, then proves in the running game what the host tests can only prove on
 files:
 
@@ -12,7 +12,7 @@ can send) and checks its counts.
 
     python3 tools/biomes_e2e.py --bin-dir target/fast
 
-Needs the prepared resources in .local/horizon-client/<version> and, on a
+Needs the prepared resources in .local/volt-client/<version> and, on a
 headless Linux box, a DISPLAY (xvfb-run) and a Vulkan ICD (lavapipe).
 """
 import argparse
@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import lab  # noqa: E402
 
-HMOD = ROOT / "crates/horizon-client/testdata/biomes_unseen.hmod"
+HMOD = ROOT / "crates/volt-client/testdata/biomes_unseen.vmod"
 LAVAPIPE_ICDS = [
     Path("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"),
     Path("/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json"),
@@ -43,29 +43,29 @@ class CtlError(RuntimeError):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bin-dir", required=True,
-                        help="folder holding horizon-client and horizon-ctl")
+                        help="folder holding volt-client and volt-ctl")
     parser.add_argument("--hmod", default=str(HMOD))
     args = parser.parse_args()
     bins = Path(args.bin_dir).resolve()
-    ctl_bin = bins / "horizon-ctl"
-    client = bins / "horizon-client"
+    ctl_bin = bins / "volt-ctl"
+    client = bins / "volt-client"
     for b in (ctl_bin, client):
         if not b.is_file():
             sys.exit(f"missing binary: {b}")
     resources = lab.RESOURCES.resolve()
-    if not (resources / "horizon-resources.json").exists():
+    if not (resources / "volt-resources.json").exists():
         sys.exit(f"no prepared resources in {resources}")
 
     work = Path(tempfile.mkdtemp(prefix="volt-biomes-e2e-"))
-    (work / ".local/horizon-client").mkdir(parents=True)
-    os.symlink(resources, work / ".local/horizon-client" / lab.VERSION)
+    (work / ".local/volt-client").mkdir(parents=True)
+    os.symlink(resources, work / ".local/volt-client" / lab.VERSION)
     (work / "options.txt").write_text("onboardAccessibility:false\n")
     # The mod, installed and enabled exactly as the launcher does it.
-    (work / "horizon-mods").mkdir()
-    shutil.copyfile(args.hmod, work / "horizon-mods/biomes_unseen.hmod")
-    (work / "horizon-mods.txt").write_text("mod.biomes_unseen:true\n")
+    (work / "volt-mods").mkdir()
+    shutil.copyfile(args.vmod, work / "volt-mods/biomes_unseen.vmod")
+    (work / "volt-mods.txt").write_text("mod.biomes_unseen:true\n")
 
-    env = lab.game_env(HORIZON_HOME=work, HORIZON_TELEMETRY_URL="off")
+    env = lab.game_env(VOLT_HOME=work, VOLT_TELEMETRY_URL="off")
     for icd in LAVAPIPE_ICDS:
         if icd.exists():
             env.setdefault("VK_ICD_FILENAMES", str(icd))
@@ -79,7 +79,7 @@ def main():
         out = r.stdout.strip().splitlines()
         reply = json.loads(out[-1]) if out else {}
         if r.returncode != 0:
-            raise CtlError(f"horizon-ctl {words[0]}: exit {r.returncode}: "
+            raise CtlError(f"volt-ctl {words[0]}: exit {r.returncode}: "
                            f"{reply or r.stderr.strip()[-800:]}")
         return reply
 

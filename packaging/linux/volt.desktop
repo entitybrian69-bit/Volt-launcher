@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Volt
+Comment=Minecraft: Java Edition 26.3, rewritten in Rust
+Exec=volt-client
+Icon=volt
+Terminal=false
+Categories=Game;
+StartupWMClass=volt
+NoDisplay=true

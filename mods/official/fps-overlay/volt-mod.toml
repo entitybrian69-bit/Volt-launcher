@@ -1,0 +1,9 @@
+id = "fps_overlay"
+name = "FPS Counter"
+version = "1.0.0"
+description = "Frames per second in a corner of the screen, with the slowest frame and the 1% low if you like. Volt's own, formerly an extra."
+authors = ["Volt"]
+api = "0.1"
+side = "client"
+capabilities = ["render", "ui", "storage"]
+experimental = ["render", "ui"]

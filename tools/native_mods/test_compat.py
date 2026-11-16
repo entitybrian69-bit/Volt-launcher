@@ -16,15 +16,15 @@ class CompatibilityTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / 'revoked.toml').write_text('')
         self.meta = {'schema': 1, 'id': 'test_mod', 'version': '1.0', 'game': '26.3',
-                     'horizon': 'a' * 40, 'mixins': 'b' * 40, 'hooks': 1}
+                     'volt': 'a' * 40, 'mixins': 'b' * 40, 'hooks': 1}
         self.mixin = ('[mod]\nid = "test_mod"\nversion = "1.0"\n'
-                      '[compatibility]\nhorizon_revision = "' + 'a' * 40 + '"\n')
+                      '[compatibility]\nvolt_revision = "' + 'a' * 40 + '"\n')
 
     def bundle(self, extra=None):
         archive = self.root / 'test.hnmod'
         with zipfile.ZipFile(archive, 'w') as z:
-            z.writestr('horizon-native.json', json.dumps(self.meta))
-            z.writestr('mixins/test_mod/horizon-mixin.toml', self.mixin)
+            z.writestr('volt-native.json', json.dumps(self.meta))
+            z.writestr('mixins/test_mod/volt-mixin.toml', self.mixin)
             for name, contents in (extra or []):
                 z.writestr(name, contents)
         entry = {'id': 'test_mod', 'versions': [{'version': '1.0', 'game': '26.3',
@@ -54,14 +54,14 @@ class CompatibilityTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as td:
-            m = Path(td) / 'horizon-mixin.toml'
-            m.write_text('destination = "crates/horizon-client/src/chat.rs"\n'
-                         'target = "horizon_client::chat::ChatScreen::draw"\n',
+            m = Path(td) / 'volt-mixin.toml'
+            m.write_text('destination = "crates/volt-client/src/chat.rs"\n'
+                         'target = "volt_client::chat::ChatScreen::draw"\n',
                          encoding='utf-8')
             self.assertTrue(compat.apply_fork_remaps(m))
             text = m.read_text(encoding='utf-8')
-            self.assertIn('crates/horizon-client-render/src/chat.rs', text)
-            self.assertIn('horizon_client_render::chat::ChatScreen::draw', text)
+            self.assertIn('crates/volt-client-render/src/chat.rs', text)
+            self.assertIn('volt_client_render::chat::ChatScreen::draw', text)
             self.assertFalse(compat.apply_fork_remaps(m))
 
     def test_source_shims_edit_exactly_one_site(self):
@@ -81,23 +81,23 @@ class CompatibilityTests(unittest.TestCase):
                 compat.apply_fork_source_shims('worldedit', d)
             self.assertEqual(compat.apply_fork_source_shims('appleskin', d), 0)
 
-    def test_bundle_crates_propagate_to_horizon_android(self):
+    def test_bundle_crates_propagate_to_volt_launcher(self):
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as td:
             stage = Path(td)
-            client = stage / 'crates' / 'horizon-client'
-            android = stage / 'crates' / 'horizon-android'
+            client = stage / 'crates' / 'volt-client'
+            android = stage / 'crates' / 'volt-android'
             client.mkdir(parents=True)
             android.mkdir(parents=True)
             (client / 'Cargo.toml').write_text(
-                '[package]\nname = "horizon-client"\n\n[dependencies]\n'
+                '[package]\nname = "volt-client"\n\n[dependencies]\n'
                 'serde = "1"\n'
                 'voicechat_engine = { path = "../../native-crates/voicechat/engine" }\n',
                 encoding='utf-8')
             (android / 'Cargo.toml').write_text(
-                '[package]\nname = "horizon-android"\n\n[dependencies]\n'
-                'horizon-client = { path = "../horizon-client" }\n',
+                '[package]\nname = "volt-android"\n\n[dependencies]\n'
+                'volt-client = { path = "../volt-client" }\n',
                 encoding='utf-8')
             self.assertEqual(compat.propagate_bundle_crates(stage), ['voicechat_engine'])
             text = (android / 'Cargo.toml').read_text(encoding='utf-8')
@@ -124,7 +124,7 @@ class CompatibilityTests(unittest.TestCase):
         sig = secret.sign(digest)
         if tamper_sig:
             sig = bytes([sig[0] ^ 1]) + sig[1:]
-        trusted = 'test 1.0 for Horizon 26.3'
+        trusted = 'test 1.0 for Volt 26.3'
         global_sig = secret.sign(sig + trusted.encode())
         record_id = (b'\x08' * 8) if wrong_key_id else key_id
         entry['versions'][0]['signature'] = (
@@ -175,7 +175,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertFalse((self.root / 'escape').exists())
 
     def test_duplicate_rejected(self):
-        archive, entry = self.bundle([('horizon-native.json', '{}')])
+        archive, entry = self.bundle([('volt-native.json', '{}')])
         with self.assertRaisesRegex(compat.Rejected, 'duplicate'):
             self.extract(archive, entry)
 
@@ -191,7 +191,7 @@ class CompatibilityTests(unittest.TestCase):
         import json as _json
         hook = _json.loads((compat.ROOT / 'native-hooks.json').read_text())['hooks'][0]
         manifest = {'mod': {}, 'compatibility': {}, 'module': {},
-                    'injection': [{'target': 'horizon_client::game::Game::attack'},
+                    'injection': [{'target': 'volt_client::game::Game::attack'},
                                   {'hook': hook['name'], 'hook_version': hook['version']}]}
         data = {'meta': dict(self.meta, hooks=9999), 'manifest': manifest}
         with self.assertRaisesRegex(compat.Rejected, r'needs native hook API 9999'):
@@ -207,11 +207,11 @@ class CompatibilityTests(unittest.TestCase):
         import json as _json
         hook = _json.loads((compat.ROOT / 'native-hooks.json').read_text())['hooks'][0]
         manifest = {'mod': {}, 'compatibility': {}, 'module': {},
-                    'injection': [{'target': 'horizon_client::game::Game::attack'},
+                    'injection': [{'target': 'volt_client::game::Game::attack'},
                                   {'hook': hook['name'], 'hook_version': hook['version']}]}
         data = {'meta': dict(self.meta), 'manifest': manifest}
         data['meta'].pop('hooks', None)
-        with self.assertRaisesRegex(compat.Rejected, 'pins Horizon .* exactly without a hook-API'):
+        with self.assertRaisesRegex(compat.Rejected, 'pins Volt .* exactly without a hook-API'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40)
         # The probe-only flag lets the mixin compiler judge raw targets instead.
         self.assertTrue(compat.check_hooks(data, compat.ROOT, 'c' * 40, raw_targets=True))
@@ -234,8 +234,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertTrue(compat.check_hooks(data, compat.ROOT, 'c' * 40))
         # An engine-internal target outside the served hook points still
         # fails closed without the probe-only flag.
-        manifest['injection'][0] = {'target': 'horizon_client::game::Game::attack'}
-        with self.assertRaisesRegex(compat.Rejected, 'pins Horizon .* exactly without a hook-API'):
+        manifest['injection'][0] = {'target': 'volt_client::game::Game::attack'}
+        with self.assertRaisesRegex(compat.Rejected, 'pins Volt .* exactly without a hook-API'):
             compat.check_hooks(data, compat.ROOT, 'c' * 40)
         # So does a named hook Volt does not serve.
         manifest['injection'][0] = {'target': target['target']}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline Horizon native-mod inventory and isolated Volt Android compile probe.
+"""Offline Volt native-mod inventory and isolated Volt Android compile probe.
 
 This is a development/review tool, not an installer or a security sandbox.
 See docs/native-mods/compatibility.md before using --trust-native-code.
@@ -190,7 +190,7 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
                 raise Rejected("expanded bundle too large")
             if info.is_dir():
                 continue
-            if not (name == "horizon-native.json" or (len(p.parts) >= 3
+            if not (name == "volt-native.json" or (len(p.parts) >= 3
                     and p.parts[:2] == ("mixins", entry["id"]))):
                 raise Rejected("unexpected bundle path")
             out = dest.joinpath(*p.parts)
@@ -198,30 +198,30 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
             with z.open(info) as src, out.open("xb") as dst:
                 while chunk := src.read(64 * 1024):
                     dst.write(chunk)
-    meta_path = dest / "horizon-native.json"
-    manifest_path = dest / "mixins" / entry["id"] / "horizon-mixin.toml"
+    meta_path = dest / "volt-native.json"
+    manifest_path = dest / "mixins" / entry["id"] / "volt-mixin.toml"
     if not meta_path.is_file() or not manifest_path.is_file():
         raise Rejected("bundle is missing native or mixin manifest")
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     if (meta.get("schema") != 1 or meta.get("id") != entry["id"]
             or meta.get("version") != ver.get("version") or meta.get("game") != "26.3"
-            or not REV.fullmatch(str(meta.get("horizon", "")))
+            or not REV.fullmatch(str(meta.get("volt", "")))
             or not REV.fullmatch(str(meta.get("mixins", "")))):
         raise Rejected("native manifest does not match the registry")
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("mod", {}).get("id") != meta["id"] or manifest.get("mod", {}).get("version") != meta["version"]:
         raise Rejected("mixin identity differs from bundle")
-    if manifest.get("compatibility", {}).get("horizon_revision") != meta["horizon"]:
-        raise Rejected("mixin and bundle Horizon revisions differ")
+    if manifest.get("compatibility", {}).get("volt_revision") != meta["volt"]:
+        raise Rejected("mixin and bundle Volt revisions differ")
     return {"meta": meta, "manifest": manifest, "sha256": digest, "manifest_path": manifest_path}
 
 # This fork keeps the official chat screen in the render crate
-# (crates/horizon-client-render/src/chat.rs, re-exported as
-# horizon_client::chat): bundles built against the official layout are
+# (crates/volt-client-render/src/chat.rs, re-exported as
+# volt_client::chat): bundles built against the official layout are
 # remapped to it when their revision is rebound.
 FORK_REMAPS = (
-    ("crates/horizon-client/src/chat.rs", "crates/horizon-client-render/src/chat.rs"),
-    ("horizon_client::chat::", "horizon_client_render::chat::"),
+    ("crates/volt-client/src/chat.rs", "crates/volt-client-render/src/chat.rs"),
+    ("volt_client::chat::", "volt_client_render::chat::"),
 )
 
 
@@ -245,7 +245,7 @@ FORK_SOURCE_SHIMS = {
         ("runtime.rs",
          "stack.data_mut().custom_name = Some(WAND_NAME.to_owned());",
          "stack.data_mut().custom_name ="
-         " Some(horizon_world::nbt::Tag::String(WAND_NAME.into()));"),
+         " Some(volt_world::nbt::Tag::String(WAND_NAME.into()));"),
         ("runtime.rs",
          "stack.data().and_then(|data| data.custom_name.as_deref()) == Some(WAND_NAME)",
          "stack.data().and_then(|data| data.custom_name_plain()).as_deref() == Some(WAND_NAME)"),
@@ -254,7 +254,7 @@ FORK_SOURCE_SHIMS = {
         ("item.rs",
          "d.custom_name = Some(bc::ITEM_NAME.to_owned());",
          "d.custom_name ="
-         " Some(horizon_world::nbt::Tag::String(bc::ITEM_NAME.into()));"),
+         " Some(volt_world::nbt::Tag::String(bc::ITEM_NAME.into()));"),
     ),
     "carryblock": (
         # The fork's Slots (official parity) grew a Native-menu variant after
@@ -264,7 +264,7 @@ FORK_SOURCE_SHIMS = {
          "Slots::Ender | Slots::Native => Vec::new(),"),
     ),
     "chat_animation": (
-        # Same drift as horizonmatica below: the fork restored upstream's
+        # Same drift as voltmatica below: the fork restored upstream's
         # nine-argument ui::slider; the drag-aware form is ui::slider_dragging.
         ("anim.rs",
          "ui::slider(batch, atlas, vx, y, vw, &label, value, hover, true,"
@@ -272,7 +272,7 @@ FORK_SOURCE_SHIMS = {
          "ui::slider_dragging(batch, atlas, vx, y, vw, &label, value, hover, true,"
          " dragging == Some(i));"),
     ),
-    "horizonmatica": (
+    "voltmatica": (
         # ui::slider lost its tenth (dragging) argument when the fork
         # restored the upstream signature; the drag-aware track moved to
         # ui::slider_dragging.
@@ -285,16 +285,16 @@ FORK_SOURCE_SHIMS = {
     "skins_3d": (
         # Upstream moved NativeMod from game::native_hooks to a mod_api
         # module after this fork's era; the struct itself is identical.
-        ("horizon-mixin.toml",
+        ("volt-mixin.toml",
          'ty = "&mut Vec<crate::mod_api::NativeMod>"',
          'ty = "&mut Vec<crate::game::native_hooks::NativeMod>"'),
         ("hooks/list.rs",
          "fn skins3d_listed(mods: &mut Vec<crate::mod_api::NativeMod>) {",
          "fn skins3d_listed(mods: &mut Vec<crate::game::native_hooks::NativeMod>) {"),
         ("glue.rs",
-         "pub(super) fn listed(mods: &mut Vec<horizon_client::mod_api::NativeMod>) {\n"
-         "    mods.push(horizon_client::mod_api::NativeMod {",
-         # game.rs is compiled inside the horizon-android crate, so the
+         "pub(super) fn listed(mods: &mut Vec<volt_client::mod_api::NativeMod>) {\n"
+         "    mods.push(volt_client::mod_api::NativeMod {",
+         # game.rs is compiled inside the volt-android crate, so the
          # woven glue reaches NativeMod via crate::, not the client lib.
          "pub(super) fn listed(mods: &mut Vec<crate::game::native_hooks::NativeMod>) {\n"
          "    mods.push(crate::game::native_hooks::NativeMod {"),
@@ -328,15 +328,15 @@ def apply_fork_source_shims(mod_id: str, mixins_dir: Path) -> int:
 
 
 def propagate_bundle_crates(stage: Path) -> list[str]:
-    """List a bundle crate woven into horizon-client in horizon-android too.
+    """List a bundle crate woven into volt-client in volt-android too.
 
-    horizon-android compiles horizon-client's sources as its own lib (its
-    [lib] path points into ../horizon-client/src), so a [[crate]] dependency
-    the mixin compiler writes into horizon-client's [dependencies] must also
-    be one of horizon-android's. Returns the packages it propagated.
+    volt-android compiles volt-client's sources as its own lib (its
+    [lib] path points into ../volt-client/src), so a [[crate]] dependency
+    the mixin compiler writes into volt-client's [dependencies] must also
+    be one of volt-android's. Returns the packages it propagated.
     """
-    client = stage / "crates" / "horizon-client" / "Cargo.toml"
-    android = stage / "crates" / "horizon-android" / "Cargo.toml"
+    client = stage / "crates" / "volt-client" / "Cargo.toml"
+    android = stage / "crates" / "volt-android" / "Cargo.toml"
     if not client.is_file() or not android.is_file():
         return []
     android_text = android.read_text(encoding="utf-8")
@@ -351,7 +351,7 @@ def propagate_bundle_crates(stage: Path) -> list[str]:
         return []
     marker = "[dependencies]"
     if marker not in android_text:
-        raise Rejected("horizon-android has no [dependencies] table to extend")
+        raise Rejected("volt-android has no [dependencies] table to extend")
     android_text = android_text.replace(marker, marker + "\n" + "\n".join(added), 1)
     android.write_text(android_text, encoding="utf-8")
     return [entry.split("=", 1)[0].strip() for entry in added]
@@ -362,7 +362,7 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
     meta, manifest = data["meta"], data["manifest"]
     if manifest.get("post_build") or manifest.get("post-build"):
         raise Rejected("post-build commands are not supported")
-    if meta["horizon"] == volt_rev:
+    if meta["volt"] == volt_rev:
         return False
     allowed = {"mod", "compatibility", "injection", "module"}
     if raw_targets:
@@ -370,9 +370,9 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
         # compiler stages them and the compiler's checks decide the rest.
         allowed.add("crate")
     if set(manifest) - allowed:
-        raise Rejected("non-hook transformations need exact pinned Horizon source")
+        raise Rejected("non-hook transformations need exact pinned Volt source")
     hooks = meta.get("hooks")
-    source = (root / "crates/horizon-client/src/game/native_hooks.rs").read_text()
+    source = (root / "crates/volt-client/src/game/native_hooks.rs").read_text()
     found = re.search(r"const NATIVE_HOOKS_API: u32 = (\d+);", source)
     if not found:
         raise Rejected("Volt source does not state its native hook API version")
@@ -400,7 +400,7 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
             # still decides whether each application fits.
             return True
         raise Rejected(
-            f"bundle pins Horizon {meta.get('horizon', '')[:12]} exactly without a hook-API "
+            f"bundle pins Volt {meta.get('volt', '')[:12]} exactly without a hook-API "
             f"declaration; {len(raw)} raw target injections (first: {raw[:6]}), "
             f"{len(named)} named hook injections, missing from Volt: {missing[:25]}"
         )
@@ -408,7 +408,7 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
     if hooks > served and not raw_targets:
         raise Rejected(
             f"needs native hook API {hooks}; Volt serves {served} "
-            "(the mod targets a newer Horizon than this fork has ported)"
+            "(the mod targets a newer Volt than this fork has ported)"
         )
     # Experimental probe-only path (raw_targets): a declared level above
     # Volt's falls through to the per-injection checks below. Named hooks
@@ -423,7 +423,7 @@ def check_hooks(data: dict, root: Path, volt_rev: str, raw_targets: bool = False
     for inj in injections:
         if "target" in inj:
             if inj["target"] not in targets and not raw_targets:
-                raise Rejected("non-hook target needs its exact pinned Horizon source")
+                raise Rejected("non-hook target needs its exact pinned Volt source")
         elif (inj.get("hook"), inj.get("hook_version")) not in names:
             raise Rejected("named hook unavailable")
     return True
@@ -475,7 +475,7 @@ def run_probe(args) -> dict:
         data = verified_extract(args.bundle, entry, work / "extracted", args.registry)
         meta = data["meta"]
         report.update(bundle_sha256=data["sha256"], version=meta["version"],
-                      horizon_revision=meta["horizon"], mixins_revision=meta["mixins"])
+                      volt_revision=meta["volt"], mixins_revision=meta["mixins"])
         if args.mixins_revision != meta["mixins"]:
             raise Rejected("mixin tool revision must match the bundle")
         rebind = check_hooks(data, ROOT, rev, raw_targets=getattr(args, "experimental_raw_targets", False))
@@ -483,10 +483,10 @@ def run_probe(args) -> dict:
         if rebind:
             manifest_path = data["manifest_path"]
             text = manifest_path.read_text(encoding="utf-8")
-            original = f'horizon_revision = "{meta["horizon"]}"'
+            original = f'volt_revision = "{meta["volt"]}"'
             if text.count(original) != 1:
                 raise Rejected("cannot safely rebind revision in staged manifest")
-            manifest_path.write_text(text.replace(original, f'horizon_revision = "{rev}"'), encoding="utf-8")
+            manifest_path.write_text(text.replace(original, f'volt_revision = "{rev}"'), encoding="utf-8")
             apply_fork_remaps(manifest_path)
             apply_fork_source_shims(entry["id"], manifest_path.parent)
         report["hook_revision_rebound"] = rebind
@@ -498,7 +498,7 @@ def run_probe(args) -> dict:
         with archive.open("wb") as f:
             subprocess.run(["git", "archive", rev], cwd=ROOT, stdout=f, check=True)
         extract_source_archive(archive, source)
-        (source / ".horizon-revision").write_text(rev + "\n", encoding="utf-8")
+        (source / ".volt-revision").write_text(rev + "\n", encoding="utf-8")
         stage = work / "stage"
         env = sanitized_env()
         env["CARGO_TARGET_DIR"] = str(work / "target")

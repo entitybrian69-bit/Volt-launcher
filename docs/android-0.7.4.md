@@ -1,4 +1,4 @@
-# Horizon Android 0.7.4
+# Volt Android 0.7.4
 
 Changes in development after 0.7.3 (versionCode 25).
 
@@ -13,12 +13,12 @@ Changes in development after 0.7.3 (versionCode 25).
 - Android recognizes the application as a game for system game tools.
 - GPU occlusion tests use atomic visibility stamps to avoid concurrent fragment
   writes. Adreno 730 flicker reports still require confirmation on that GPU.
-- Shader search has separate **Horizon** and **Modrinth** sources. Native packs
-  keep the Horizon registry path; classic Modrinth ZIPs have experimental
+- Shader search has separate **Volt** and **Modrinth** sources. Native packs
+  keep the Volt registry path; classic Modrinth ZIPs have experimental
   compatibility, checksum/archive checks, install status and Installed management.
 - Recipe-book search registers its actual editor bounds with Android IME. Controller text entry uses the system keyboard; command-block, world-option and settings fields preserve existing text.
 - Classic shader ZIP downloads use exclusive file creation rather than hard links, which Android app-data policy rejects.
-- Mods has Horizon/Modrinth source tabs. Modrinth Java mods are browse-only: installing a Java loader is not supported by this Rust client. HTTPS .hmod imports remain available.
+- Mods has Volt/Modrinth source tabs. Modrinth Java mods are browse-only: installing a Java loader is not supported by this Rust client. HTTPS .vmod imports remain available.
 - Native Android input for standard USB and Bluetooth gamepads: positional
   buttons, sticks, D-pad hats and analog/digital triggers use Controller Settings
   bindings, deadzones and look sensitivity. Controller focus navigation also

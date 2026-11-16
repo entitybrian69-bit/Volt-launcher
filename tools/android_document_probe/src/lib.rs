@@ -1,11 +1,11 @@
 //! Isolated SAF regression probe; no game, accounts or user worlds.
 #![allow(dead_code)]
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-#[path = "../../../crates/horizon-client/src/content_files.rs"]
+#[path = "../../../crates/volt-client/src/content_files.rs"]
 mod content_files;
-#[path = "../../../crates/horizon-client/src/android/document_bridge.rs"]
+#[path = "../../../crates/volt-client/src/android/document_bridge.rs"]
 mod document_bridge;
-#[path = "../../../crates/horizon-client/src/android/native_ime.rs"]
+#[path = "../../../crates/volt-client/src/android/native_ime.rs"]
 mod ime;
 use android_activity::{AndroidApp, MainEvent, OnCreateState, PollEvent};
 use jni::{
@@ -56,9 +56,9 @@ mod documents {
                     let mut output = std::fs::File::create(&stage)?;
                     let copied = content_files::copy_bounded(&mut file, &mut output, |_| true)?;
                     drop(output);
-                    let kind = if name.ends_with(".hmod") {
+                    let kind = if name.ends_with(".vmod") {
                         content_files::Kind::Mods
-                    } else if name.ends_with(".hshader") {
+                    } else if name.ends_with(".vshader") {
                         content_files::Kind::Shaders
                     } else {
                         content_files::Kind::Packs
@@ -83,7 +83,7 @@ mod documents {
 fn android_on_create(s: &OnCreateState<'_>) {
     android_logger::init_once(
         android_logger::Config::default()
-            .with_tag("HorizonDocumentProbe")
+            .with_tag("VoltDocumentProbe")
             .with_max_level(log::LevelFilter::Info),
     );
     if let Err(e) = unsafe { ime::initialize(s.vm_as_ptr().cast(), s.activity_as_ptr().cast()) } {

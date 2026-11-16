@@ -1,14 +1,14 @@
-//! Opt-in data collection from the launcher (`horizon_telemetry`): the player's answer, what
+//! Opt-in data collection from the launcher (`volt_telemetry`): the player's answer, what
 //! would be sent, deleting it, bug reports and benchmark uploads, and sending the outbox when
 //! the launcher starts and closes. The window, the CLI and the MCP server all go through here.
 //! Also the live count's side here: what the "I'm playing" ping holds, in words, and reading
-//! how many play now (`horizon_telemetry::live`).
+//! how many play now (`volt_telemetry::live`).
 use std::path::{Path, PathBuf};
 
-use horizon_telemetry::payload::{Bug, Crash, Perf, System, Timings};
-use horizon_telemetry::scrub::Scrubber;
-use horizon_telemetry::upload::{self, Flush};
-use horizon_telemetry::{outbox, Choices, Consent, Item, Kind, Payload, Source};
+use volt_telemetry::payload::{Bug, Crash, Perf, System, Timings};
+use volt_telemetry::scrub::Scrubber;
+use volt_telemetry::upload::{self, Flush};
+use volt_telemetry::{outbox, Choices, Consent, Item, Kind, Payload, Source};
 
 use crate::{account::Accounts, backend};
 
@@ -22,7 +22,7 @@ pub const SWITCHES: [(Kind, &str, &str); 4] = [
     (
         Kind::Crash,
         "Crash reports",
-        "When the game crashes: the error, where in Horizon's code it happened, your graphics adapter and settings. No log, no world or server, no user name in paths.",
+        "When the game crashes: the error, where in Volt's code it happened, your graphics adapter and settings. No log, no world or server, no user name in paths.",
     ),
     (
         Kind::Bug,
@@ -32,7 +32,7 @@ pub const SWITCHES: [(Kind, &str, &str); 4] = [
     (
         Kind::Benchmark,
         "Benchmark uploads",
-        "The results of benchmarks you run, for the community results on playhorizon.dev.",
+        "The results of benchmarks you run, for the community results on playvolt.dev.",
     ),
 ];
 
@@ -43,12 +43,12 @@ pub const NEVER: &str = "Never sent: your account name or UUID, world names, ser
 /// decision, 2026-10-22: count everyone, and tell them). Shown on the first-run question, in
 /// Settings, and once on the Play page to players who answered before it existed.
 pub const PING_NAME: &str = "\"I'm playing\" ping";
-pub const PING: &str = "While you play, the game sends an anonymous \"I'm playing\" ping once a minute, so the launcher can show how many people play Horizon right now. It holds: a random number made when the game starts and forgotten when it closes, the Horizon version, your OS (Linux, macOS or Windows), and whether you have a world open to LAN or friends. It doesn't hold: your account, your install ID, world or server names, or anything you do in the game, and the server doesn't keep your IP address. It is sent whatever the switches say.";
+pub const PING: &str = "While you play, the game sends an anonymous \"I'm playing\" ping once a minute, so the launcher can show how many people play Volt right now. It holds: a random number made when the game starts and forgotten when it closes, the Volt version, your OS (Linux, macOS or Windows), and whether you have a world open to LAN or friends. It doesn't hold: your account, your install ID, world or server names, or anything you do in the game, and the server doesn't keep your IP address. It is sent whatever the switches say.";
 
-/// How many play Horizon now (rounded), if the server says.
+/// How many play Volt now (rounded), if the server says.
 pub fn playing_now() -> Option<u64> {
-    let endpoint = horizon_telemetry::endpoint()?;
-    horizon_telemetry::live::fetch(&endpoint)
+    let endpoint = volt_telemetry::endpoint()?;
+    volt_telemetry::live::fetch(&endpoint)
         .ok()
         .map(|count| count.playing)
 }
@@ -56,12 +56,12 @@ pub fn playing_now() -> Option<u64> {
 /// Sends [`playing_now`] to the window as `Msg::Playing` now and every minute, on its own
 /// thread. Nothing at all when sending is turned off.
 pub fn watch_playing(tx: std::sync::mpsc::Sender<backend::Msg>) {
-    if horizon_telemetry::endpoint().is_none() {
+    if volt_telemetry::endpoint().is_none() {
         return;
     }
     std::thread::spawn(move || {
         while tx.send(backend::Msg::Playing(playing_now())).is_ok() {
-            std::thread::sleep(horizon_telemetry::live::INTERVAL);
+            std::thread::sleep(volt_telemetry::live::INTERVAL);
         }
     });
 }
@@ -113,8 +113,8 @@ pub fn preview() -> (String, String) {
             "v2026.10.15",
             Payload::Crash(Crash {
                 system: system.clone(),
-                error: "panicked at crates/horizon-client/src/game.rs:120:9: …".into(),
-                stack: "horizon_client::game::Game::tick (crates/horizon-client/src/game.rs:120:9)"
+                error: "panicked at crates/volt-client/src/game.rs:120:9: …".into(),
+                stack: "volt_client::game::Game::tick (crates/volt-client/src/game.rs:120:9)"
                     .into(),
                 thread: "Render thread".into(),
                 details: vec![("Graphics".into(), "Apple M4 Pro (Metal)".into())],
@@ -131,7 +131,7 @@ pub fn preview() -> (String, String) {
         ),
     ];
     let json = serde_json::to_string_pretty(&serde_json::json!({
-        "schema": horizon_telemetry::SCHEMA,
+        "schema": volt_telemetry::SCHEMA,
         "install_id": consent().install_id,
         "items": examples,
     }))
@@ -151,7 +151,7 @@ pub fn with_example_gpu(mut system: System) -> System {
     system.vram_mb = 8192;
     system.driver = "example: 570.86".into();
     system.backend = "Vulkan".into();
-    system.display = Some(horizon_telemetry::payload::Display {
+    system.display = Some(volt_telemetry::payload::Display {
         width: 1920,
         height: 1080,
         refresh_hz: 60,
@@ -167,10 +167,10 @@ pub fn delete_my_data() -> Result<String, String> {
     let home = home();
     let mut consent = Consent::load(&home);
     outbox::clear(&home).map_err(|e| e.to_string())?;
-    let remote = match horizon_telemetry::endpoint() {
+    let remote = match volt_telemetry::endpoint() {
         _ if consent.install_id.is_empty() => "Nothing was ever sent from here.",
         None => {
-            "Sending is turned off here (HORIZON_TELEMETRY_URL=off), so the server was not asked."
+            "Sending is turned off here (VOLT_TELEMETRY_URL=off), so the server was not asked."
         }
         Some(url) => {
             upload::delete_remote(&url, &consent.install_id)
@@ -249,8 +249,8 @@ pub fn submit(item: &Item) -> Result<String, String> {
     }
     Ok(match send() {
         Flush::Sent { .. } => "Sent. Thank you.".into(),
-        Flush::Nothing if horizon_telemetry::endpoint().is_none() => {
-            "Kept; sending is turned off here (HORIZON_TELEMETRY_URL=off).".into()
+        Flush::Nothing if volt_telemetry::endpoint().is_none() => {
+            "Kept; sending is turned off here (VOLT_TELEMETRY_URL=off).".into()
         }
         _ => "Kept; it will be sent the next time the launcher starts.".into(),
     })
@@ -276,7 +276,7 @@ pub fn label(kind: Kind) -> &'static str {
 
 /// Sends what is waiting, if there is a server and the player allows it.
 pub fn send() -> Flush {
-    match horizon_telemetry::endpoint() {
+    match volt_telemetry::endpoint() {
         Some(url) => upload::flush(&home(), &url),
         None => Flush::Nothing,
     }
@@ -297,7 +297,7 @@ pub fn status_json() -> serde_json::Value {
         "choices": consent.choices,
         "install_id": consent.install_id,
         "waiting": outbox::pending(&home()).len(),
-        "server": horizon_telemetry::endpoint(),
+        "server": volt_telemetry::endpoint(),
         "ping": PING,
     })
 }

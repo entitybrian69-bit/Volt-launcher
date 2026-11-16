@@ -4,15 +4,15 @@
 //! GitHub's public API to an exact **release asset** (a `.hnmod`, kept by its SHA-256) or an exact
 //! **commit** (the archive of that commit, whose mod folder is packed into a `.hnmod`), never to a
 //! branch that moves. The result passes the checks the registry's `.hnmod`s pass
-//! (`horizon_mods::index::native::Bundle::read`) before anything is installed, and the origin is
-//! kept beside the file (`horizon-native-mods/<id>.origin.json`) for "check for updates".
+//! (`volt_mods::index::native::Bundle::read`) before anything is installed, and the origin is
+//! kept beside the file (`volt-native-mods/<id>.origin.json`) for "check for updates".
 //!
 //! Nothing here runs the mod's code, and nothing here trusts it: the registry has not reviewed it.
 //! Callers show [`WARNING`] and ask first (`--trust-native-code`).
 use crate::backend;
 use crate::browser::java;
 use crate::native_mods::{self, Bundle, INSTALLED};
-use horizon_mods::index::native as format;
+use volt_mods::index::native as format;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -20,7 +20,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// What a player is told before a mod from GitHub is installed.
-pub const WARNING: &str = "Not reviewed by the Horizon registry. Native mods run with full access to this computer. Read the source first.";
+pub const WARNING: &str = "Not reviewed by the Volt registry. Native mods run with full access to this computer. Read the source first.";
 
 /// The most a release asset or a mod's archive may be.
 const MAX_ASSET: u64 = 64 << 20;
@@ -146,7 +146,7 @@ pub struct Resolved {
     pub commit: String,
     /// The release's `.hnmod`, installed as it is when there is one.
     pub asset: Option<Asset>,
-    /// A release that ships only a content mod (`.hmod`): not supported here yet.
+    /// A release that ships only a content mod (`.vmod`): not supported here yet.
     pub content_only: Option<String>,
 }
 
@@ -180,7 +180,7 @@ pub fn source_url(owner: &str, repo: &str, commit: &str) -> String {
 /// GitHub's JSON for an API path (`repos/...`); `None` when it answers 404.
 pub type Api<'a> = &'a dyn Fn(&str) -> Result<Option<serde_json::Value>, String>;
 
-/// The real API, unauthenticated (`HORIZON_GITHUB_TOKEN` is used when set, for CI).
+/// The real API, unauthenticated (`VOLT_GITHUB_TOKEN` is used when set, for CI).
 pub fn api(path: &str) -> Result<Option<serde_json::Value>, String> {
     let url = format!("https://api.github.com/{path}");
     match backend::get(&url) {
@@ -236,7 +236,7 @@ fn default_head(api: Api, link: &Link) -> Result<String, String> {
     commit_of(api, link, branch)
 }
 
-/// The `.hnmod` of a release's JSON (and a lone `.hmod`, which is not installed here).
+/// The `.hnmod` of a release's JSON (and a lone `.vmod`, which is not installed here).
 fn assets(release: &serde_json::Value, link: &Link) -> (Option<Asset>, Option<String>) {
     let prefix = format!(
         "https://github.com/{}/{}/releases/download/",
@@ -264,7 +264,7 @@ fn assets(release: &serde_json::Value, link: &Link) -> (Option<Asset>, Option<St
                 .map(str::to_ascii_lowercase),
         })
     });
-    let hmod = named(".hmod")
+    let hmod = named(".vmod")
         .find_map(|a| a["name"].as_str().map(str::to_owned))
         .filter(|_| hnmod.is_none());
     (hnmod, hmod)
@@ -407,8 +407,8 @@ fn checked(bytes: &[u8], dir: &Path) -> Result<Packed, String> {
     })
 }
 
-/// Every mod folder under `root`: a `horizon-mixin.toml`, or an unpacked `.hnmod`
-/// (`horizon-native.json`), the rules of `native-build <folder>`. A mod's folder is not searched
+/// Every mod folder under `root`: a `volt-mixin.toml`, or an unpacked `.hnmod`
+/// (`volt-native.json`), the rules of `native-build <folder>`. A mod's folder is not searched
 /// further.
 pub fn find_mods(root: &Path) -> Result<Vec<Bundle>, String> {
     fn walk(dir: &Path, depth: usize, out: &mut Vec<Bundle>) -> Result<(), String> {
@@ -467,13 +467,13 @@ fn walk_files(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Resu
 }
 
 /// The `.hnmod` of a mod folder, as bytes: its source (Rust, TOML and `data/`) with a manifest made
-/// from its `horizon-mixin.toml`, which must pin the Horizon commit it was made for
-/// (`[compatibility] horizon_revision`). An unpacked `.hnmod` (`horizon-native.json`) keeps the
+/// from its `volt-mixin.toml`, which must pin the Volt commit it was made for
+/// (`[compatibility] volt_revision`). An unpacked `.hnmod` (`volt-native.json`) keeps the
 /// pins and hook points its manifest names. The zip is the same for the same files.
 pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
-    let horizon = bundle.horizon.clone().filter(|h| format::revision(h)).ok_or_else(|| {
+    let volt = bundle.volt.clone().filter(|h| format::revision(h)).ok_or_else(|| {
         format!(
-            "{} has no [compatibility] horizon_revision (40 hex digits): add the Horizon commit it was made for.",
+            "{} has no [compatibility] volt_revision (40 hex digits): add the Volt commit it was made for.",
             bundle.id
         )
     })?;
@@ -482,7 +482,7 @@ pub fn pack(bundle: &Bundle) -> Result<Vec<u8>, String> {
         id: bundle.id.clone(),
         version: bundle.version.clone(),
         game: crate::browser::GAME.into(),
-        horizon,
+        volt,
         mixins: bundle
             .mixins
             .clone()
@@ -553,11 +553,11 @@ pub fn fetch(found: &Resolved) -> Result<Vec<Packed>, String> {
     if mods.is_empty() {
         return Err(match &found.content_only {
             Some(file) => format!(
-                "{} ships {file}, a content mod: installing .hmod files from GitHub is not supported yet.",
+                "{} ships {file}, a content mod: installing .vmod files from GitHub is not supported yet.",
                 found.label()
             ),
             None => format!(
-                "{} holds no native mod (a folder with horizon-mixin.toml, or an unpacked .hnmod).",
+                "{} holds no native mod (a folder with volt-mixin.toml, or an unpacked .hnmod).",
                 found.label()
             ),
         });

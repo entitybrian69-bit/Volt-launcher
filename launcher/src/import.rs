@@ -8,7 +8,7 @@
 //! - A `.mrpack` for a mod loader, or a CurseForge modpack zip (`manifest.json`): a Java
 //!   modpack, for the Modpacks import (`modpacks::import`).
 //! - A zip with `pack.mcmeta`: a data pack (`data/`) or a resource pack; with `shaders/`, or a
-//!   `.hshader`: a shader pack.
+//!   `.vshader`: a shader pack.
 //!
 //! Only what an instance holds is taken from a shared zip ([`crate::export::FILES`],
 //! [`crate::export::FOLDERS`], `saves/`), and every path is checked to stay inside its folder.
@@ -81,7 +81,7 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
         Some("zip") => {}
         _ => {
             return Err(format!(
-                "{name} can't be imported: drop a .mrpack, a .zip or a .hshader."
+                "{name} can't be imported: drop a .mrpack, a .zip or a .vshader."
             ))
         }
     }
@@ -107,7 +107,7 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
         return Ok(Dropped::Instance);
     }
     Err(format!(
-        "{name} is neither a pack nor a shared instance: nothing in it that Horizon reads."
+        "{name} is neither a pack nor a shared instance: nothing in it that Volt reads."
     ))
 }
 

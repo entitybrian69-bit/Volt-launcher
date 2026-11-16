@@ -1,5 +1,5 @@
 [package]
-name = "horizon-android-input-probe"
+name = "volt-android-input-probe"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

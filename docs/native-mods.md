@@ -1,10 +1,10 @@
 # Native mods (experimental)
 
 Native mods are **mixin bundles** that change the game's own Rust source before it is compiled, with
-[horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon). A bundle
-is a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game (HEAD, BEFORE_CALL,
+[volt-mixins](https://github.com/volt-rust/volt-mixins) (MIT, by levzzz5154, made for Volt). A bundle
+is a `volt-mixin.toml` and a few `.rs` helpers that hook into named functions of the game (HEAD, BEFORE_CALL,
 RETURN, MODIFY_ARG, OVERWRITE...; the tool's README lists them). A port such as Veinminer is three HEAD hooks and
-one module. Start a mod from [horizon-native-mod-template](https://github.com/horizon-rust/horizon-native-mod-template).
+one module. Start a mod from [volt-native-mod-template](https://github.com/volt-rust/volt-native-mod-template).
 
 Native mods are native code with the player's rights, not sandboxed. The launcher turns them on only when the player
 installs one (after a notice) and builds them only behind a red warning; the registry lists one only after a review (its later releases are checked by machine); and
@@ -12,28 +12,28 @@ they play in a game of their own, built for the instance they are installed in.
 
 ## Pinned to a Nightly
 
-A native mod builds on one exact Horizon commit: `[compatibility] horizon_revision` in its `horizon-mixin.toml`,
-and `horizon` in the `horizon-native.json` of its registry file (`.hnmod`, `horizon_mods::index::native`). Mods
+A native mod builds on one exact Volt commit: `[compatibility] volt_revision` in its `volt-mixin.toml`,
+and `volt` in the `volt-native.json` of its registry file (`.hnmod`, `volt_mods::index::native`). Mods
 pin a **Nightly's commit** (or a release's). Every Nightly ships its source and keeps its commit for good as the
 tag `nightly-source/<date>-<short>` ([release-flow.md](release-flow.md#nightly-channel)), so a pinned mod still
 builds after its Nightly is replaced. When the mods of one build pin different commits, the launcher says which
 mod pins which and the commit the build would use, the newest of them, and builds only after the player chooses
 **Build anyway** (`native-build --allow-version-mismatch`): such mods often still apply and compile. A failed build
-then says the mods were made for other versions. Their horizon-mixins pins may differ too: the build uses the
+then says the mods were made for other versions. Their volt-mixins pins may differ too: the build uses the
 newest of them and the launcher's own, never one older than a mod was made with. A bundle with no pin builds on
 the commit of the installed version the build starts from.
 
 ### Mods on the hook points
 
-A mod that hooks only Horizon's native hook points (`crates/horizon-client/src/game/native_hooks.rs`: empty
+A mod that hooks only Volt's native hook points (`crates/volt-client/src/game/native_hooks.rs`: empty
 functions the game calls at fixed places, plus helpers, kept stable across releases) can name the version it
-needs instead of pinning: `"hooks": 1` in its `.hnmod`'s `horizon-native.json`, the `NATIVE_HOOKS_API` of that
+needs instead of pinning: `"hooks": 1` in its `.hnmod`'s `volt-native.json`, the `NATIVE_HOOKS_API` of that
 file when it was made. Hook points are only ever added: each addition raises `NATIVE_HOOKS_API`, and a mod builds
-on any Horizon whose version is the one it needs or a later one. Its `horizon` is then only the commit it was tested on. The launcher builds it on the commit the other mods
+on any Volt whose version is the one it needs or a later one. Its `volt` is then only the commit it was tested on. The launcher builds it on the commit the other mods
 pin, else on the installed version's commit (the game the player plays), after checking that commit's
 `NATIVE_HOOKS_API` (read from GitHub) is at least the mod's; when it isn't and nothing pins, it builds on the commit the
-mod was tested on. In its own copy of the mod it sets `horizon_revision` to the commit it builds on. Horizon's
-own native mods (Zoom, FPS counter, Keystrokes, Minimap; horizon-rust/horizon-mods, `native/<name>/`) are made this way, so any of them build together
+mod was tested on. In its own copy of the mod it sets `volt_revision` to the commit it builds on. Volt's
+own native mods (Zoom, FPS counter, Keystrokes, Minimap; volt-rust/volt-mods, `native/<name>/`) are made this way, so any of them build together
 with no re-release for each Nightly.
 
 API 2 adds the item panel beside container screens and its recipe pages (`native_panel_items`,
@@ -119,7 +119,7 @@ neither hook, and an error skips the post hook. Bundles that use them need `"hoo
 
 API 24 adds `native_set_block`, a server-side `Game` helper that replaces a state in the current dimension through
 `Level.setBlock`. It accepts vanilla's neighbour and shape flags and returns whether a block changed; a block with a
-block entity gets one. Horizon sends every write to players whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE`
+block entity gets one. Volt sends every write to players whatever the flags: `UPDATE_CLIENTS`, `UPDATE_INVISIBLE`
 and `UPDATE_IMMEDIATE` change nothing yet. Hooks holding only `GameLevel` cannot call it yet. Bundles that use it need
 `"hooks": 24`.
 
@@ -136,7 +136,7 @@ it works from any hook ([mods.md](mods.md#native-mods)). Bundles that use it nee
 API 27 adds the player-health HUD rows through `native_health_hud`: every frame the HUD draws them, the
 hook hears the layout's inputs (`HealthInputs`) and the screen's GUI size, and a mod that answers with
 draws replaces all the rows — armour, hearts, food, air and the heights above the hotbar — for that
-frame. Nothing answered draws Horizon's own. Bundles that use it need `"hooks": 27`.
+frame. Nothing answered draws Volt's own. Bundles that use it need `"hooks": 27`.
 
 API 28 adds `native_block_in_tag` and `native_item_in_tag` for server tick hooks. They read the world's merged block and item tags, including data packs and content mods. An unknown tag returns false. An empty item stack tests the `minecraft:air` item, as vanilla does. Calls with an inactive or stale tick context return an error. Bundles that use them need `"hooks": 28`.
 
@@ -179,7 +179,7 @@ draw that lands on one: it runs often, so keep it short. Bone meal's random tick
 mod crop grows its own way. Without `handled`, the block then takes its own random tick as it is now (if it still
 ticks randomly), and lava's fluid random tick runs either way. It needs the level mutably, which only `native_random_tick` and API 34's `native_tick_block` give. It is API 18's `Game::native_set_block_property` with `Level.setBlock`'s flags (`native_hooks::flags`): a
 vanilla crop grows with `flags::UPDATE_CLIENTS` (neighbours' shapes update, so an observer fires, but no neighbour
-gets `neighborChanged` and comparators aren't told), a furnace sets its `lit` with `flags::UPDATE_ALL` (both). Horizon
+gets `neighborChanged` and comparators aren't told), a furnace sets its `lit` with `flags::UPDATE_ALL` (both). Volt
 sends every write to players whatever the flags: `UPDATE_CLIENTS` (2), `UPDATE_INVISIBLE` (4) and `UPDATE_IMMEDIATE`
 (8) change nothing yet. It writes at any loaded position, returns false off an authoritative server (the `Game` one too: a window that isn't a server), for a property or
 value the block doesn't have or a position that isn't loaded, and true without writing when the property already has
@@ -200,7 +200,7 @@ colours, completes and lists them like the game's own, and `native_command` runs
 keeps that command. Bundles that use it need `"hooks": 35`.
 
 API 36 adds recipes of a mod's own types, for a machine's crusher or altar. A recipe file whose `type` is outside `minecraft`
-(`mymod:crusher`) in `data/<namespace>/recipe/`, in a content mod (`.hmod`) or a world's data pack (not in a native mod's own bundle), stays loaded as it is: `native_recipes_of_type`
+(`mymod:crusher`) in `data/<namespace>/recipe/`, in a content mod (`.vmod`) or a world's data pack (not in a native mod's own bundle), stays loaded as it is: `native_recipes_of_type`
 gives each one's id and JSON, for the mod to read as it likes, and `native_recipe_ingredient` and `native_recipe_result` read the
 usual fields, tags included (a bare id is read as `minecraft:`; items the game doesn't know are left out, and the helper gives nothing if none is left). The recipes are the server's table: on the server thread, a dedicated server or a LAN host; a client, the single-player window included, sees only the content mods' recipes, not the world's data packs'. All three give nothing outside a world. The game doesn't craft them or show them in the recipe book; `/reload` reads a data pack's again.
 Bundles that use them need `"hooks": 36`.
@@ -229,7 +229,7 @@ In the window: install a native mod from the Mods page. The first one shows a no
 Rust and can take 20 to 30 minutes; later builds are faster) and turns on Settings → Game → **Native mods
 (experimental)**, which stays off for players who never install one; `mods install` does the same. Then **Build**. The launcher names the mods, warns in red, and builds only from "I trust these mods: build"; the
 row shows each step, the error if one fails, and the build the instance plays. From the command line:
-`horizon-launcher native-build [FOLDER] [--instance NAME] --trust-native-code`. FOLDER is a bundle, an unpacked
+`volt-launcher native-build [FOLDER] [--instance NAME] --trust-native-code`. FOLDER is a bundle, an unpacked
 `.hnmod`, or a folder of them; without it, the native mods turned on in the instance. It is not an MCP tool:
 trusting native code is the player's decision, never an agent's.
 
@@ -249,54 +249,54 @@ trusting native code is the player's decision, never an agent's.
    `/etc/os-release` (Debian, Ubuntu and Mint:
    `sudo apt install build-essential pkg-config libasound2-dev libudev-dev`). SteamOS has GCC without the C
    library's headers, and a read-only system: native builds don't work there yet.
-   `horizon-launcher rust status|install|remove`.
-2. **horizon-mixins**, at the commit the mods name (their `.hnmod`'s `mixins`), else `native_mods::MIXINS_REV`,
+   `volt-launcher rust status|install|remove`.
+2. **volt-mixins**, at the commit the mods name (their `.hnmod`'s `mixins`), else `native_mods::MIXINS_REV`,
    built once with that cargo (`cargo install --locked --git … --rev …`) into `native/tools/<commit>/`.
 3. **The source** of the pinned commit: GitHub's archive of it, once per commit (`native/source/<commit>/`, about
-   63 MB unpacked), with the commit in `.horizon-revision`. Never the player's own checkout. Links in the
+   63 MB unpacked), with the commit in `.volt-revision`. Never the player's own checkout. Links in the
    archive are left out: the tool refuses them and nothing needs them to build.
 4. **Mixins.** The bundles are copied first, so the build and its key use that copy whatever happens to the
-   folder meanwhile. `horizon-mixins apply` stages the modded source; the launcher copies only the files that
+   folder meanwhile. `volt-mixins apply` stages the modded source; the launcher copies only the files that
    changed into `native/stage/`, so Cargo, which goes by file times, recompiles only the crates the mods touch.
-5. **Compile**: `cargo build --locked --profile release --features horizon-client/mods -p horizon-client`, the
+5. **Compile**: `cargo build --locked --profile release --features volt-client/mods -p volt-client`, the
    release's own command (game-build.yml), into `native/target/`. Cargo downloads the locked crates from
-   crates.io (Horizon has no git dependencies). The log is `native/build.log`; a failure shows its last lines (a
-   horizon-mixins diagnostic in one line).
+   crates.io (Volt has no git dependencies). The log is `native/build.log`; a failure shows its last lines (a
+   volt-mixins diagnostic in one line).
 6. **Install**: a new version, `native-<commit>-<key>`, a copy of the starting version's folder (resources
    included, cloned on APFS, Btrfs and ReFS) with the built game in place of its own, and a `native-mods.json`
-   saying which commit, mods, horizon-mixins and Rust made it. The instance the mods are installed in plays it (a
+   saying which commit, mods, volt-mixins and Rust made it. The instance the mods are installed in plays it (a
    folder built from the command line, or mods of the default home, go to the **Native mods** instance). That
    instance gets each mod's settings from the default home the first time it plays it (its
-   `horizon-mods/.horizon-mod-data/<id>/` folder and `key.<id>.` lines of `horizon-mods.txt`, where earlier versions of
+   `volt-mods/.volt-mod-data/<id>/` folder and `key.<id>.` lines of `volt-mods.txt`, where earlier versions of
    the mod kept them); nothing it already has is overwritten.
 
 ## Install from GitHub
 
 An author can ship a native mod without a registry pull request per version: the player installs it from a
-GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods add-github <url>
+GitHub link, on the Mods page ("Add from GitHub") or with `volt-launcher mods add-github <url>
 [--mod ID | --all] [--instance NAME] --trust-native-code`. The link is `https://github.com/<owner>/<repo>`
 (its latest release), `.../releases/tag/<tag>`, `.../tree/<ref>` or `.../commit/<sha>`.
 
 - **Resolved to something exact.** GitHub's public API (no sign-in; a rate limit is said plainly, and
-  `HORIZON_GITHUB_TOKEN` raises it) turns the link into a release's `.hnmod` file or a **commit SHA**, never a
+  `VOLT_GITHUB_TOKEN` raises it) turns the link into a release's `.hnmod` file or a **commit SHA**, never a
   branch that moves. A release with a `.hnmod` asset installs that file (its SHA-256 is compared with the one GitHub
   lists). With no release or no such asset, the launcher fetches
   `codeload.github.com/<owner>/<repo>/tar.gz/<sha>` and looks in it for mods by the rules of
-  `native-build <folder>`: a folder with `horizon-mixin.toml`, or an unpacked `.hnmod` (`horizon-native.json`).
-  Several mods: they are listed, and the player picks one or installs all. A source folder must pin the Horizon commit
-  (`[compatibility] horizon_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hnmod`.
-  A release that ships only a content mod (`.hmod`) says "not supported yet": installing `.hmod` files from a link
+  `native-build <folder>`: a folder with `volt-mixin.toml`, or an unpacked `.hnmod` (`volt-native.json`).
+  Several mods: they are listed, and the player picks one or installs all. A source folder must pin the Volt commit
+  (`[compatibility] volt_revision`); the launcher packs its Rust, TOML and `data/` files into a `.hnmod`.
+  A release that ships only a content mod (`.vmod`) says "not supported yet": installing `.vmod` files from a link
   is not built.
-- **Checked like the registry's files.** The `.hnmod` is read as `horizon_mods::index::native::Bundle::read` reads a
+- **Checked like the registry's files.** The `.hnmod` is read as `volt_mods::index::native::Bundle::read` reads a
   registry file (only Rust, TOML and data under `mixins/<id>/`, size limits, nothing run) before it is installed.
-- **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
+- **Said first.** Before anything is downloaded: "not reviewed by the Volt registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs
   `--trust-native-code`, as `native-build` does. It is not an MCP tool: trusting native code is the player's
   decision, never an agent's.
-- **Origin kept.** `horizon-native-mods/<id>.origin.json` beside the `.hnmod`: owner/repo, release tag (for a
+- **Origin kept.** `volt-native-mods/<id>.origin.json` beside the `.hnmod`: owner/repo, release tag (for a
   release), commit, asset name and the SHA-256 of the installed file. `mods list` shows "from GitHub: owner/repo @
   tag" (or the commit's first 7 digits).
-- **Updates.** `horizon-launcher mods update-github [ID] [--check]` compares a mod from a release with the
+- **Updates.** `volt-launcher mods update-github [ID] [--check]` compares a mod from a release with the
   repository's latest release, and a mod from a commit with the head of the default branch; a newer one is
   installed with the same warning and `--trust-native-code`. `mods remove <id>` removes it. A mod already
   installed from the registry (or by hand) is never replaced.
@@ -305,9 +305,9 @@ Installing turns Native mods on, as any native mod does; then build as usual.
 
 ## Cache and disk
 
-The key hashes the commit, the horizon-mixins commit, Rust's version, the profile and features, and every file of
+The key hashes the commit, the volt-mixins commit, Rust's version, the profile and features, and every file of
 every bundle. The same set on the same commit is never built twice. A change gives a new build, and
-`native/target/` stays, so a rebuild compiles only `horizon-client` and what the mods touched.
+`native/target/` stays, so a rebuild compiles only `volt-client` and what the mods touched.
 
 Measured 2026-10-28 on the Mac mini (M4 Pro, 14 cores) with Veinminer 0.3.0 on Nightly `83f15fa`,
 `CARGO_BUILD_JOBS=8` while other agents' builds ran (upper bounds):
@@ -315,15 +315,15 @@ Measured 2026-10-28 on the Mac mini (M4 Pro, 14 cores) with Veinminer 0.3.0 on N
 | What | Size, time |
 |---|---|
 | Rust 1.99.1 (`<launcher data>/rust/`) | 453 MB; 58 s to download and unpack |
-| horizon-mixins (`native/tools/`) | 7 MB; built once in 19 s |
+| volt-mixins (`native/tools/`) | 7 MB; built once in 19 s |
 | Crates in the launcher's Cargo home (`<launcher data>/cargo/`) | 289 MB |
 | Source of one commit, and the stage | 64 MB each |
 | First build: release profile, the whole game | 9 min 10 s of compiling, 9 min 41 s in all; `native/target/` 1.5 GB |
-| Rebuild after a helper's code changed | 2 min 46 s of compiling (only `horizon-client`), 2 min 53 s in all |
-| A change horizon-mixins ignores (a comment) | nothing compiled; 31 s, mostly the version folder's copy |
+| Rebuild after a helper's code changed | 2 min 46 s of compiling (only `volt-client`), 2 min 53 s in all |
+| A change volt-mixins ignores (a comment) | nothing compiled; 31 s, mostly the version folder's copy |
 
 Measured 2026-10-29 on Windows 11 (Ryzen 7 9800X3D, 16 threads), the same mod and Nightly, an empty `native/target/`
-(horizon-mixins, the source and the crates were already downloaded):
+(volt-mixins, the source and the crates were already downloaded):
 
 | What | Size, time |
 |---|---|
@@ -331,7 +331,7 @@ Measured 2026-10-29 on Windows 11 (Ryzen 7 9800X3D, 16 threads), the same mod an
 | Crates in the launcher's Cargo home | 657 MB |
 | First build: release profile, the whole game | 6 min 57 s of compiling, 8 min 3 s in all; `native/target/` 2.0 GB |
 
-Measured 2026-10-28 on Linux (an x86_64 server with no Rust of its own), Zoom on Horizon `1149c92`, 3 jobs while CI
+Measured 2026-10-28 on Linux (an x86_64 server with no Rust of its own), Zoom on Volt `1149c92`, 3 jobs while CI
 ran: `rust install` in 11 s (592 MB), the first build in 12 min 9 s. The built game ran Zoom's proof (under `xvfb-run`:
 the game needs a display even with `--offscreen`).
 
@@ -342,21 +342,21 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
 - **Off until the player installs one.** Settings → Game → Native mods stays off for a player who never installs a
   native mod; the first install shows the notice and turns it on. The command needs `--trust-native-code`; the window
   shows a warning in red before every build: the mods run with full access to the computer, and their ids and
-  versions. The Mods page says who made each one, and "Not made or endorsed by the Horizon project" for any mod not
-  Horizon's own.
-- **The registry** (horizon-rust/horizon-mods) lists them as their own kind, `native-mod`, only after a maintainer
+  versions. The Mods page says who made each one, and "Not made or endorsed by the Volt project" for any mod not
+  Volt's own.
+- **The registry** (volt-rust/volt-mods) lists them as their own kind, `native-mod`, only after a maintainer
   has read the source and the repository they come from. Its entry names the GitHub repository (`repo`); each
   release of it with a `.hnmod` asset is a version once the bundle passes the registry's checks, with no further
   review (nothing is built or run by the registry; the player's launcher builds it behind its warning). The `.hnmod` contains `.rs` and `.toml` files and may contain data files under
   `mixins/<id>/data/`. The launcher checks the bundle without running anything. Native code is trusted.
   The file is pinned by SHA-256 like every registry file, and the version, game and pins are the bundle's own
-  `horizon-native.json`. `revoked.toml` takes a bad release down.
-  A content mod's entry may turn `native-mod` once (never back): its `.hmod` versions stay published and
-  are checked as `.hmod`s, the index lists only its `.hnmod` versions, and the launcher's update keeps the
-  player's `.hmod`; removing the mod removes both.
+  `volt-native.json`. `revoked.toml` takes a bad release down.
+  A content mod's entry may turn `native-mod` once (never back): its `.vmod` versions stay published and
+  are checked as `.vmod`s, the index lists only its `.hnmod` versions, and the launcher's update keeps the
+  player's `.vmod`; removing the mod removes both.
 - **Isolation of data.** Native mods run only in the instance built for them, with its own worlds, options and logs.
-- What this does not do: sandbox the compiled game. horizon-mixins' checks stop mistakes, not a malicious helper
-  ([security notes](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/security.md)).
+- What this does not do: sandbox the compiled game. volt-mixins' checks stop mistakes, not a malicious helper
+  ([security notes](https://github.com/volt-rust/volt-mixins/blob/main/docs/security.md)).
 
 ## Multiplayer
 
@@ -368,7 +368,7 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
 ## Left to do
 
 - Rebuild after the mods or the Nightly change (asking first, as it compiles for minutes).
-- A prebuilt horizon-mixins from its CI instead of building it on the player's computer.
+- A prebuilt volt-mixins from its CI instead of building it on the player's computer.
 
 ## Named hook catalog (draft)
 
@@ -376,7 +376,7 @@ Only the native builds an instance plays are kept (`native_mods::prune`); `nativ
 source targets. A contract includes the signature, call timing and behavior.
 Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
-Named injection resolution needs a matching horizon-mixins change; existing raw
+Named injection resolution needs a matching volt-mixins change; existing raw
 targets and the `hooks` metadata continue to work as before.
 
 ### Reading server blocks (draft)
@@ -394,7 +394,7 @@ A native server tick hook can call `native_server_block` with its context, a dim
 ### Server commands and players
 
 For mods that run where the world is simulated: a dedicated server, a LAN host, single player's server thread
-(`crates/horizon-client/src/game/native_server.rs`). The SMP mod of the official server is built on them
+(`crates/volt-client/src/game/native_server.rs`). The SMP mod of the official server is built on them
 ([smp.md](smp.md)).
 
 - **`native_register_commands(commands)`**: push a `NativeCommand` per usage, asked once when a world opens to
@@ -448,7 +448,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 
 ### Mobs
 
-API 37, `crates/horizon-client/src/game/native_mobs.rs`: helpers for server mods, for the level in place, on a server only (on a
+API 37, `crates/volt-client/src/game/native_mobs.rs`: helpers for server mods, for the level in place, on a server only (on a
 client they do nothing, and the readers give nothing). Each takes the `dimension` (`minecraft:overworld`) of the level it means, as
 `native_set_block` does, and is refused when another level is in place. The per-level tick hooks (API 23) run with a defined level in
 place; `native_server_tick` does not define one, so name the dimension and expect a refusal there.
@@ -467,12 +467,12 @@ place; `native_server_tick` does not define one, so name the dimension and expec
 
 ### Mod messages
 
-API 40, `crates/horizon-client/src/game/native_net.rs`: bytes between a mod's server half and its client half, on the
-one custom payload channel `horizon:mod_net`. A vanilla client never gets them, and a vanilla server isn't sent any.
+API 40, `crates/volt-client/src/game/native_net.rs`: bytes between a mod's server half and its client half, on the
+one custom payload channel `volt:mod_net`. A vanilla client never gets them, and a vanilla server isn't sent any.
 
 - `native_net_send_to_player(player, channel, data)` on the server and `native_net_send_to_server(channel, data)` on the
   client send one. The channel is `mod_id:name`: the id `[a-z0-9_]`, the name `[a-z0-9_./-]`, each 1 to 64 characters;
-  `minecraft` and `horizon` are the game's. The data is at most 30 000 bytes, and 32 messages a tick go each way per
+  `minecraft` and `volt` are the game's. The data is at most 30 000 bytes, and 32 messages a tick go each way per
   player. Ok means accepted: a player who left doesn't get it. Sending to the server is an error until the player has
   joined.
 - `native_net_from_client(player, channel, data)` and `native_net_from_server(channel, data)` hear them, all mods on every
@@ -482,7 +482,7 @@ one custom payload channel `horizon:mod_net`. A vanilla client never gets them, 
 
 ### Server menus
 
-API 10, `crates/horizon-client/src/game/native_menus.rs`: menus a server mod builds from ordinary items, which a
+API 10, `crates/volt-client/src/game/native_menus.rs`: menus a server mod builds from ordinary items, which a
 stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is installed on the player's side.
 
 - `native_open_menu(uuid, rows, title, items)` opens one in place of the player's open menu (its window id);

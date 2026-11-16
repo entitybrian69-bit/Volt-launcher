@@ -1,8 +1,8 @@
 //! Isolated diagnostic recovery probe. No game, GPU, accounts or player data.
 #![allow(dead_code)]
-#[path = "../../../crates/horizon-client/src/android/diagnostics.rs"]
+#[path = "../../../crates/volt-client/src/android/diagnostics.rs"]
 mod diagnostics;
-#[path = "../../../crates/horizon-client/src/android/exit_reports.rs"]
+#[path = "../../../crates/volt-client/src/android/exit_reports.rs"]
 mod exit_reports;
 mod backend { pub const VERSION: &str = "diagnostics-probe"; }
 use android_activity::{AndroidApp, MainEvent, PollEvent};

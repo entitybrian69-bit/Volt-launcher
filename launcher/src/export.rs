@@ -1,4 +1,4 @@
-//! Sharing an instance (or a port): its settings, packs and Horizon mods, and the worlds the
+//! Sharing an instance (or a port): its settings, packs and Volt mods, and the worlds the
 //! player picks, as a `.mrpack` (Modrinth's modpack format, from its published spec) or a plain
 //! `.zip` of the game folder's layout.
 //!
@@ -12,7 +12,7 @@
 //! rest goes under `overrides/`, which a launcher copies into the game folder.
 use crate::browser::installed::{Entry, Installed};
 use crate::browser::{FileRef, Kind, SourceId, GAME};
-use horizon_world::nbt::{self, Limits, Tag};
+use volt_world::nbt::{self, Limits, Tag};
 use sha2::Digest;
 use std::fs;
 use std::io::{Read, Write};
@@ -21,14 +21,14 @@ use std::path::{Path, PathBuf};
 /// The game folder's own files that are the instance's settings.
 pub const FILES: [&str; 6] = [
     "options.txt",
-    "horizon-graphics.txt",
-    "horizon-extras.txt",
-    "horizon-controller.txt",
-    "horizon-mods.txt",
+    "volt-graphics.txt",
+    "volt-extras.txt",
+    "volt-controller.txt",
+    "volt-mods.txt",
     "servers.dat",
 ];
 /// Its folders of packs, mods and their settings.
-pub const FOLDERS: [&str; 4] = ["resourcepacks", "shaderpacks", "horizon-mods", "config"];
+pub const FOLDERS: [&str; 4] = ["resourcepacks", "shaderpacks", "volt-mods", "config"];
 /// What a world keeps per player: left out.
 const PER_PLAYER: [&str; 4] = ["playerdata", "stats", "advancements", "session.lock"];
 const INDEX: &str = "modrinth.index.json";
@@ -172,7 +172,7 @@ fn index(name: &str, linked: &[&Linked]) -> serde_json::Value {
         "game": "minecraft",
         "versionId": "1",
         "name": name,
-        "summary": format!("{name}, exported from Horizon."),
+        "summary": format!("{name}, exported from Volt."),
         "files": files,
         "dependencies": { "minecraft": GAME },
     })

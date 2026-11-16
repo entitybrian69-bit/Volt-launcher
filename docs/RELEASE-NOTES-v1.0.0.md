@@ -4,7 +4,7 @@ The first full release of Volt Launcher.
 
 ### Highlights
 - Brand-new Volt UI: lobby home screen, Mods, Shaders, Controls Studio, and the in-game V overlay
-- Dozens of built-in pure-Rust mods ported from the Horizon PC registry — no Java, no .jar files
+- Dozens of built-in pure-Rust mods ported from the Volt PC registry — no Java, no .jar files
 - Volt Shaders with performance tiers tuned for phone GPUs, off by default and free when off
 - Volt Replay: native recorder with 360p–1440p capture at 30–144 FPS, plus replay rendering
 - Touch controls: full per-button editor with layout import from Pojav-family launchers and Aerix

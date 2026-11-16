@@ -91,13 +91,13 @@ Both are in launcher Settings and default off.
 
 ## 7. Mods, packs and reports
 
-- On a compatible 64-bit build install and enable a known sandbox `.hmod`, then
+- On a compatible 64-bit build install and enable a known sandbox `.vmod`, then
   verify its behavior in-game, not just its Installed entry. Restart and repeat.
 - `.hnmod` catalog entries must show an unsupported status, not claim successful
   Android execution. Java Modrinth mods remain incompatible with this client.
 - Import a resource pack and shader pack, cancel a picker, and test replacement
   confirmation. Enable/disable the packs and check recovery after resource reload.
-- Open Android Files > Horizon Android > Reports. After a genuine failure,
+- Open Android Files > Volt Android > Reports. After a genuine failure,
   restart the client and inspect the exit reason and any available trace/log tail.
   Do not deliberately crash an important world. OS low-memory termination is not
   necessarily a software crash; some firmware supplies no detailed trace.

@@ -1,13 +1,13 @@
-# Contributing to Horizon
+# Contributing to Volt
 
-Thanks for helping. Horizon is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
+Thanks for helping. Volt is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
 everything is that **it plays exactly like vanilla**. This page is the short version of how we work; questions are
 welcome on [Discord](https://discord.gg/HcTeMZxe5E).
 
 This repository holds the game and the launcher, plus the tools, tests and docs that build, check and release them.
-The website (playhorizon.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives elsewhere.
+The website (playvolt.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives elsewhere.
 
-**Where to start: [playhorizon.dev/hub](https://playhorizon.dev/hub).** It shows what is being done now and next
+**Where to start: [playvolt.dev/hub](https://playvolt.dev/hub).** It shows what is being done now and next
 ([ROADMAP.md](ROADMAP.md) in the repository), the work board, good first tasks, and the forms to report a bug or
 suggest something. A pull request for a roadmap item carries its `roadmap:<id>` label; ideas go to the suggestion
 queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
@@ -15,12 +15,12 @@ queue (the hub, or `/suggest` on Discord) rather than to issues, which are for b
 ## Build it
 
 You need Rust (stable), Python 3.10+, JDK 25, and on Linux the ALSA and udev headers (`libasound2-dev libudev-dev`).
-Horizon never downloads the game: it prepares its resources from your own copy of Minecraft 26.3, as described in
+Volt never downloads the game: it prepares its resources from your own copy of Minecraft 26.3, as described in
 [Build from source](README.md#build-from-source).
 
 ```sh
-cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
-cargo run --release -p horizon-client
+cargo run --release -p volt-prepare -- --prepare --server-jar ~/Downloads/server.jar
+cargo run --release -p volt-client
 ```
 
 The launcher is its own Cargo workspace in `launcher/` (`cd launcher && cargo run`; on NixOS, `nix-shell` first).
@@ -28,16 +28,16 @@ The launcher is its own Cargo workspace in `launcher/` (`cd launcher && cargo ru
 ## Vanilla first
 
 Wherever vanilla has a feature, vanilla is the specification, down to the order of random calls. "Parity" here
-means Horizon gives the same results as the pinned 26.3 client and server for the same inputs, checked by a
+means Volt gives the same results as the pinned 26.3 client and server for the same inputs, checked by a
 **harness**: a `tools/test_*_parity.py` script that runs a small Java oracle against the real game and a Rust
-probe against Horizon, and compares their outputs. There are about 290 of them.
+probe against Volt, and compares their outputs. There are about 290 of them.
 
-- **Read the vanilla code before writing Horizon's.** `tools/rea_vanilla.py` queries the pinned game bytecode:
+- **Read the vanilla code before writing Volt's.** `tools/rea_vanilla.py` queries the pinned game bytecode:
   `python3 tools/rea_vanilla.py method net.minecraft.world.level.block.DispenserBlock dispenseFrom`.
   Say in your pull request which vanilla classes and methods you followed.
 - **Gameplay changes come with a harness**, new or extended, so the next change can't silently break them.
   [The parity workflow](docs/parity-workflow.md) shows how harnesses run; copy a nearby one.
-- **Horizon's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
+- **Volt's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
   off by default wherever they would change the vanilla look.
 - **Everything players run is Rust.** Python and Java are fine for dev tools and harness drivers in `tools/`, never
   for player-facing code.
@@ -49,7 +49,7 @@ The pre-push hook checks the full history reachable from the branches and tags b
 
 ## Only original code, or code whose license allows it
 
-Horizon is MIT. Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
+Volt is MIT. Its code is written from Minecraft 26.3 itself and from public documentation. Since 30 October 2026
 another project's source may also be read and used, **only when that project's license allows it**:
 
 - **Allowed:** MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, 0BSD, ISC, zlib, Apache-2.0, Unlicense, and the CC0-1.0
@@ -113,15 +113,15 @@ it (edited on every push, never repeated): talk to its author in the thread befo
   can see.
 - **Tick "Allow edits by maintainers".** When something small is left (a lint, a rebase, a nit) we push the fixup
   ourselves instead of sending it back to you; only design questions come back.
-- **Tick its kind** in the template: `parity` (Horizon now does what vanilla does), `bug` (a crash or breakage),
-  `perf`, `feature` (new for players), `extra` (Horizon-only, off by default), `tooling` or `docs`. A workflow sets
+- **Tick its kind** in the template: `parity` (Volt now does what vanilla does), `bug` (a crash or breakage),
+  `perf`, `feature` (new for players), `extra` (Volt-only, off by default), `tooling` or `docs`. A workflow sets
   that label, and area labels (`launcher`, `mobs`, `worldgen`, `rendering`...) from the paths you change.
   `label:parity` is the list of real progress toward vanilla.
 - **Release labels** (we set them if you can't): `feature` also puts it under "New" in the release notes,
   `skip-release` when players see no change (tooling, docs, tests), nothing for a fix.
   `release-now` is for crash fixes that shouldn't wait. pr_ready suggests one.
 
-Who reviews and merges: the Horizon Team, on CI for ordinary pull requests; risky ones (saves, network, world
+Who reviews and merges: the Volt Team, on CI for ordinary pull requests; risky ones (saves, network, world
 generation, the launcher's updates) wait for a local proof first ([merging](docs/release-flow.md#merging)).
 
 Every merge to main is released automatically ([release flow](docs/release-flow.md)), so main always stays playable.
@@ -136,5 +136,5 @@ new pushes, we add it again.
 
 ## Talk to us
 
-[Discord](https://discord.gg/HcTeMZxe5E) for questions and ideas, [issues](https://github.com/horizon-rust/horizon/issues)
+[Discord](https://discord.gg/HcTeMZxe5E) for questions and ideas, [issues](https://github.com/volt-rust/volt/issues)
 for bugs. To take something on, `/claim` its issue ([above](#claim-before-you-start)).

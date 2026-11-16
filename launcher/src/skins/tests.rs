@@ -85,7 +85,7 @@ fn oversized_imports_are_rejected_before_png_decoding() {
     assert!(read_skin(&boundary).is_ok());
 
     let file = std::env::temp_dir().join(format!(
-        "horizon-skins-import-limit-{}.png",
+        "volt-skins-import-limit-{}.png",
         std::process::id()
     ));
     std::fs::write(&file, &oversized).unwrap();
@@ -96,7 +96,7 @@ fn oversized_imports_are_rejected_before_png_decoding() {
 
 #[test]
 fn a_kept_look_reaches_the_game_only_with_its_files() {
-    let root = std::env::temp_dir().join(format!("horizon-skins-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("volt-skins-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let (good, bad) = (root.join("alex.png"), root.join("big.png"));
@@ -128,7 +128,7 @@ fn a_kept_look_reaches_the_game_only_with_its_files() {
 
 #[test]
 fn forgetting_a_name_drops_its_files() {
-    let root = std::env::temp_dir().join(format!("horizon-skins-forget-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("volt-skins-forget-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let (src, cape_src) = (root.join("alex.png"), root.join("cape.png"));

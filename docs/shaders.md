@@ -1,35 +1,35 @@
-# Horizon shader packs
+# Volt shader packs
 
-Horizon has its own shader packs: WGSL written against stages of Horizon's renderer, checked before they run. This page
+Volt has its own shader packs: WGSL written against stages of Volt's renderer, checked before they run. This page
 is the guide for pack authors. The design and the pack format are in [api/shaders.md](api/shaders.md); every stage's
 signature, input, resource and limit is in the generated [api/shaders-reference.md](api/shaders-reference.md).
 
 Shader packs in the Iris/OptiFine format are a separate feature with its own loader; this page is only about
-Horizon's own format.
+Volt's own format.
 
 | Part | Where | State |
 |---|---|---|
-| Format, stages, check | `crates/horizon-shader-api` | API 0.1, experimental |
-| Authoring tool | `horizon-shader` (same crate) | `new`, `check`, `pack` |
-| Templates | `crates/horizon-shader-api/templates/` | post, sky, material |
-| Example pack | `crates/horizon-shader-api/packs/golden_hour` | a warm sky and two post passes |
-| In the game: every stage | Options > Horizon Settings > Shader Packs | sky, material, post passes, hot reload |
+| Format, stages, check | `crates/volt-shader-api` | API 0.1, experimental |
+| Authoring tool | `volt-shader` (same crate) | `new`, `check`, `pack` |
+| Templates | `crates/volt-shader-api/templates/` | post, sky, material |
+| Example pack | `crates/volt-shader-api/packs/golden_hour` | a warm sky and two post passes |
+| In the game: every stage | Options > Volt Settings > Shader Packs | sky, material, post passes, hot reload |
 | The registry and the launcher | `shader` kind ([api/mod-index.md](api/mod-index.md)); the Mods page's Shader packs tab | checked, then installed into `shaderpacks/` |
 
 ## Quick start
 
 ```sh
-cargo install --path crates/horizon-shader-api      # or: cargo run -p horizon-shader-api --bin horizon-shader -- <command>
-horizon-shader new my_pack --template post          # also: --template sky, --template material; --name "My Pack"
-horizon-shader check my_pack                        # what the game, the launcher and the registry will check
-horizon-shader pack my_pack                         # check, then write my_pack-0.1.0.hshader beside the folder
+cargo install --path crates/volt-shader-api      # or: cargo run -p volt-shader-api --bin volt-shader -- <command>
+volt-shader new my_pack --template post          # also: --template sky, --template material; --name "My Pack"
+volt-shader check my_pack                        # what the game, the launcher and the registry will check
+volt-shader pack my_pack                         # check, then write my_pack-0.1.0.vshader beside the folder
 ```
 
 `check` prints each stage with its cost, and the pack's SHA-256:
 
 ```
 golden_hour 1.0.0 (shader API 0.1): ok
-  sky       Warm horizon                     99 expressions, 0 texture reads
+  sky       Warm volt                     99 expressions, 0 texture reads
   post      Glow                            192 expressions, 3 texture reads
   post      Colour grade                    201 expressions, 2 texture reads
   sha256 b5e0d98c...
@@ -46,9 +46,9 @@ my_pack 0.1.0 (shader API 0.1): FAILED
 
 ## Trying a pack in the game
 
-Put the pack folder (or its `.hshader`) in `shaderpacks/` beside `options.txt` (Open Pack Folder opens it) and pick
-it on Options > Horizon Settings > Shader Packs, which lists Horizon's packs, marked (Horizon), beside packs in the
-`shaders/` format; one runs at a time, and clicking it again turns it off. `HORIZON_SHADER_PACK=<its folder or file
+Put the pack folder (or its `.vshader`) in `shaderpacks/` beside `options.txt` (Open Pack Folder opens it) and pick
+it on Options > Volt Settings > Shader Packs, which lists Volt's packs, marked (Volt), beside packs in the
+`shaders/` format; one runs at a time, and clicking it again turns it off. `VOLT_SHADER_PACK=<its folder or file
 name>` runs a pack whatever the page says, for development. The game checks the pack first, and refuses one that
 fails, with its problems in the chat. While it runs, the game looks at the pack twice a second: save a file
 and the pack is checked and rebuilt in place ("Shader pack ... reloaded"); if the new version fails, the chat says
@@ -56,7 +56,7 @@ where and the last good version keeps drawing. All three stages run.
 
 ## A pack
 
-A folder (or the same files zipped as a `.hshader`) with `horizon-shaders.toml` and WGSL files:
+A folder (or the same files zipped as a `.vshader`) with `volt-shaders.toml` and WGSL files:
 
 ```toml
 schema = 1
@@ -81,9 +81,9 @@ Every key is in [api/shaders.md](api/shaders.md#the-pack-format-schema-1).
 
 ## Stages
 
-A stage is one function your file defines. Horizon puts its prelude (the structs, `frame`, the stage's resources and
+A stage is one function your file defines. Volt puts its prelude (the structs, `frame`, the stage's resources and
 helpers) before your file and calls the function from its own pass, so the world is still culled, batched and meshed
-by Horizon: a pack changes how things look, not how they are drawn.
+by Volt: a pack changes how things look, not how they are drawn.
 
 | Stage | Your function | What it does |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ Post passes also read `scene_color`, `scene_depth`, `previous` (the last pass's 
 `depth_at(uv)` and `view_position(uv, depth)`.
 
 Rules the check enforces: your files declare no bindings (`@group`/`@binding`), no entry points and no names starting
-with `horizon_`. Code shared by several stages goes in files listed in `shared`, put before every stage.
+with `volt_`. Code shared by several stages goes in files listed in `shared`, put before every stage.
 
 ## Options
 

@@ -1,6 +1,6 @@
-# Contributing to Horizon Android
+# Contributing to Volt Android
 
-This is an unofficial Android fork of Horizon. Start with small changes and keep
+This is an unofficial Android fork of Volt. Start with small changes and keep
 the upstream attribution and history intact. Read [CONTRIBUTING.md](CONTRIBUTING.md)
 and [AGENTS.md](AGENTS.md) for the engine's rules.
 
@@ -10,7 +10,7 @@ on real phones. For rendering or performance reports, include the phone, Android
 version, renderer, resolution scale, render distance and APK/source version.
 Emulator FPS does not establish phone performance.
 
-[Report an Android bug](https://github.com/Vasysik/horizon-android/issues/new?template=android-bug.yml)
+[Report an Android bug](https://github.com/Vasysik/volt-android/issues/new?template=android-bug.yml)
 or send a focused pull request against `android`. Reproduction steps and a short
 video often help more than a large log dump. Do not post account/session files,
 tokens, private server details, signing keys or complete app data.
@@ -26,7 +26,7 @@ python -m unittest discover -s tests -p test_android_release_audit.py
 python tools/check_public_tree.py
 ```
 
-Touch preferences and the HUD editor live in `crates/horizon-client/src/touch*`;
+Touch preferences and the HUD editor live in `crates/volt-client/src/touch*`;
 standard options widgets in `options_ui.rs`; the Android entry point and launcher
 in `android_main.rs` and `android/`; game bindings in `game/pad.rs` and
 `game/android_input.rs`. Add focused regression tests for input/state changes.

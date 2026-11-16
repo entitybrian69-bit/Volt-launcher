@@ -13,7 +13,7 @@ Reviewed 51 commits on stable `upstream/main` after `b6c936f8`, through
 - Build tooling: nightly source archives, scheduling and harness path fixes.
 
 Android's shared browser filters source-only native mods and rejects their
-installation. It retains `.hmod` support and does not build source mods on the
+installation. It retains `.vmod` support and does not build source mods on the
 phone. Shared account and skin changes are retained. The Android upload scheduler,
 SAF bridge, launcher and touch controls remain in place. Upstream deployment
 workflows remain under `.github/upstream-workflows/` with `.disabled` suffixes;
@@ -33,7 +33,7 @@ and is tied to its resource bundle. It does not reuse seed-dependent generation.
 The HTTP change affects the standalone supervisor, not the Android launcher.
 
 Follow-up validation: ARM64/ARMv7 release Clippy, Android source tests, and
-`horizon-world`'s `decoration_is_shared_by_biome_source` Rust test with prepared
+`volt-world`'s `decoration_is_shared_by_biome_source` Rust test with prepared
 worldgen resources. No complete game APK was rebuilt for this check.
 
 ## Follow-up through f66f66c3

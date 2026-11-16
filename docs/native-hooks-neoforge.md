@@ -3,7 +3,7 @@
 Status: proposal, for the authors of hook PRs to comment on. Nothing here is built yet. Checked against `native-hooks.json` on main
 (41 hooks, `NATIVE_HOOKS_API` 24) on 31 October 2026.
 
-Native mods hook empty functions in `crates/horizon-client/src/game/native_hooks.rs`, listed by name in
+Native mods hook empty functions in `crates/volt-client/src/game/native_hooks.rs`, listed by name in
 `native-hooks.json` ([native-mods.md](native-mods.md)). So far each hook was designed on its own, and open PRs
 number their API versions over each other. This proposes one
 reference for every new hook point: the NeoForge 26.3 event that does the same thing.
@@ -13,26 +13,26 @@ Why NeoForge:
 - Its events already answer the questions each of our hooks asks again: where exactly it fires, on which side,
   what it can cancel, what it is handed.
 - Mod authors know them. A Java mod's `@SubscribeEvent` methods map to hook names, which helps porting by
-  hand. [horizon-port-pack](modpacks.md) may suggest mappings for a human to review, not translate listeners
+  hand. [volt-port-pack](modpacks.md) may suggest mappings for a human to review, not translate listeners
   automatically.
 
 What we take is event names and their documented contracts, from NeoForge's public user documentation
 (<https://docs.neoforged.net/>) only, each claim below citing the page it comes from, as [CONTRIBUTING.md](../CONTRIBUTING.md#only-original-code) allows. Nobody
 reads, copies, translates or paraphrases NeoForge's source, its patches included: where a hook fires is decided
-from vanilla 26.3's own methods, and the hooks stay Horizon's own Rust.
+from vanilla 26.3's own methods, and the hooks stay Volt's own Rust.
 
 ## Rules
 
 1. **Name.** A hook with a NeoForge counterpart takes the event's name in snake case, its nested class
    included: `ServerTickEvent.Pre` → `server_tick_pre`, function `native_server_tick_pre`;
    `PlayerInteractEvent.RightClickBlock` → `right_click_block`. A hook with no counterpart (the minimap, the
-   mods list, the item panel) keeps a Horizon name.
-2. **Firing point.** It fires in Horizon's port of the vanilla method where the documented event happens
+   mods list, the item panel) keeps a Volt name.
+2. **Firing point.** It fires in Volt's port of the vanilla method where the documented event happens
    (the tick starts, a block is broken), at the point vanilla's own steps make that true. The catalog names the vanilla method, so a
    reviewer can check it with `tools/rea_vanilla.py`.
 3. **Side.** NeoForge documents that "some events are only fired on one side"
    ([Events](https://docs.neoforged.net/docs/concepts/events/), "Sided Events"); the rest fire on whichever
-   side runs the method. Horizon has one binary with several
+   side runs the method. Volt has one binary with several
    `Game`s (the window, the server thread, a dedicated server), so each hook says its side:
    - `server`: the server's `Game` (single player's server thread, LAN host, dedicated) and the in-frame path.
    - `client`: the window's `Game`.
@@ -60,14 +60,14 @@ Each `native-hooks.json` entry gains three optional fields:
 {
   "name": "server_tick_pre",
   "version": 1,
-  "target": "horizon_client::game::native_hooks::Game<'_>::native_server_tick_pre",
+  "target": "volt_client::game::native_hooks::Game<'_>::native_server_tick_pre",
   "neoforge": "ServerTickEvent.Pre",
   "side": "server",
   "cancellable": false
 }
 ```
 
-`neoforge` is absent for Horizon-only hooks. horizon-mixins ignores fields it doesn't know, so this needs no
+`neoforge` is absent for Volt-only hooks. volt-mixins ignores fields it doesn't know, so this needs no
 tool change; the launcher and the docs can list them.
 
 ## The hooks we have
@@ -101,7 +101,7 @@ proposals, to be confirmed against the Javadoc linked from the documentation whe
 Hoppers, comparators and other mods should not read a fixed `slots` field. NeoForge's documentation lists
 `Capabilities.Item.BLOCK` ("automation-accessible inventory of a block") with `ResourceHandler<ItemResource>`,
 and `Capabilities.Energy.BLOCK` with `EnergyHandler`
-([Capabilities](https://docs.neoforged.net/docs/inventories/capabilities/)). A Horizon
+([Capabilities](https://docs.neoforged.net/docs/inventories/capabilities/)). A Volt
 `block_capability(pos, kind, side, out)` hook could fill an out parameter with a handler object, so new kinds
 (fluids, energy) are new kinds, not new fields on a struct, and older mods keep compiling. Menus and screens
 are not modelled here: main already has `menu_clicked`, `menu_closed`, `screen*` and `block_entity_container`,

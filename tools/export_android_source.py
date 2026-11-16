@@ -20,7 +20,7 @@ FILES = {'.dockerignore', '.gitattributes', '.gitignore', 'AGENTS.md', 'CLAUDE.m
          'Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'CONTRIBUTING.md', 'CONTRIBUTING_ANDROID.md', 'LICENSE', 'README.md',
          'research-lock.json', 'THIRD_PARTY_NOTICES.md'}
 SKIP = {'.git', '.local', 'target', 'build', 'dist', 'logs', 'node_modules',
-        '__pycache__', '.gradle', '.venv', '.horizon-cache'}
+        '__pycache__', '.gradle', '.venv', '.volt-cache'}
 SECRET = re.compile(rb'(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}|'
                     rb'AKIA[A-Z0-9]{16}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)')
 BINARY = {'.png', '.webp', '.jpg', '.jpeg', '.gif', '.ttf', '.otf', '.woff', '.woff2', '.ico'}
@@ -79,7 +79,7 @@ def export(root, output):
     provenance = root / 'docs/android-upstream.json'
     revisions = json.loads(provenance.read_text(encoding='utf-8')) if provenance.is_file() else {}
     base = revisions.get('merged_upstream_commit') or revisions.get('base_commit')
-    manifest = {'format': 1, 'upstream': 'https://github.com/ludovic111/horizon',
+    manifest = {'format': 1, 'upstream': 'https://github.com/ludovic111/volt',
                 'upstream_revision': base, 'history': 'Preserved upstream history' if base else 'Source snapshot',
                 'inactive_upstream_workflows': inactive, 'files': entries}
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +104,7 @@ def export(root, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / '.local/android/public/horizon-android-source-0.5.0.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / '.local/android/public/volt-android-source-0.5.0.zip')
     args = parser.parse_args()
     print(json.dumps(export(ROOT, args.output.resolve()), indent=2))
 

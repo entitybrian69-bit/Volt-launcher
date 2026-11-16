@@ -18,17 +18,17 @@
         <package android:name="cocobo1.pupu.app" />
     </queries>
     <application android:label="${appLabel}" android:appCategory="game" android:icon="@drawable/launcher_icon" android:banner="@drawable/tv_banner" android:extractNativeLibs="false" android:hasFragileUserData="true" android:usesCleartextTraffic="false">
-        <provider android:name="dev.horizon.android.HorizonDocumentsProvider" android:authorities="${applicationId}.documents" android:exported="true" android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+        <provider android:name="dev.volt.launcher.VoltDocumentsProvider" android:authorities="${applicationId}.documents" android:exported="true" android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
             <intent-filter>
                 <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
             </intent-filter>
         </provider>
-        <activity android:name="dev.horizon.android.HorizonActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|touchscreen|uiMode|colorMode|density|fontScale|layoutDirection|locale|mcc|mnc" android:windowSoftInputMode="adjustResize" android:theme="@style/HorizonGameTheme">
-            <meta-data android:name="android.app.lib_name" android:value="horizon_android" />
+        <activity android:name="dev.volt.launcher.VoltActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|touchscreen|uiMode|colorMode|density|fontScale|layoutDirection|locale|mcc|mnc" android:windowSoftInputMode="adjustResize" android:theme="@style/VoltGameTheme">
+            <meta-data android:name="android.app.lib_name" android:value="volt_launcher" />
         </activity>
         <!-- Keep installed launcher shortcuts targeting the previous component. -->
-        <activity-alias android:name="com.google.androidgamesdk.GameActivity" android:targetActivity="dev.horizon.android.HorizonActivity" android:screenOrientation="sensorLandscape" android:exported="true">
-            <meta-data android:name="android.app.lib_name" android:value="horizon_android" />
+        <activity-alias android:name="com.google.androidgamesdk.GameActivity" android:targetActivity="dev.volt.launcher.VoltActivity" android:screenOrientation="sensorLandscape" android:exported="true">
+            <meta-data android:name="android.app.lib_name" android:value="volt_launcher" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

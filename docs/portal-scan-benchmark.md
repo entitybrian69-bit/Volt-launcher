@@ -3,8 +3,8 @@
 Run with the pinned prepared client resources:
 
 ```sh
-CARGO_BUILD_JOBS=6 cargo run --profile fast -p horizon-client --example portal_scan_bench -- \
-  .local/horizon-client/26.3
+CARGO_BUILD_JOBS=6 cargo run --profile fast -p volt-client --example portal_scan_bench -- \
+  .local/volt-client/26.3
 ```
 
 The example keeps the original `Game::may_hold_portal` alongside the resident

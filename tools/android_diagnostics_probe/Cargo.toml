@@ -1,9 +1,9 @@
 [package]
-name = "horizon-diagnostics-probe"
+name = "volt-diagnostics-probe"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-build = "../../crates/horizon-android/build.rs"
+build = "../../crates/volt-android/build.rs"
 [lib]
 crate-type = ["cdylib"]
 [workspace]

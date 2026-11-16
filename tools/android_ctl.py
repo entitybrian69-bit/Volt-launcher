@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a Horizon control command to the development Android app over ADB.
+"""Send a Volt control command to the development Android app over ADB.
 
 The control token is read from app data and sent only over the forwarded loopback
 socket. It is never printed. ADB forwards are removed when the command finishes.
@@ -12,7 +12,7 @@ import subprocess
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--package', default='dev.horizon.android.dev', help='Isolated development package')
+    parser.add_argument('--package', default='dev.volt.android.dev', help='Isolated development package')
     parser.add_argument('--adb', default='adb', help='ADB executable')
     parser.add_argument('--serial', required=True, help='Explicit test device serial')
     parser.add_argument('command', nargs=argparse.REMAINDER)

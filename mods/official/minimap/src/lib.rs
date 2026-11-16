@@ -1,10 +1,10 @@
-//! Horizon's official minimap, formerly the built-in extra: a map of the
+//! Volt's official minimap, formerly the built-in extra: a map of the
 //! terrain around the player in a corner (`render.set-minimap`; the game
 //! keeps its tiles). Its settings page has the extra's five options, kept in
 //! the mod's storage (`corner`, `size`, `shape`, `zoom`, `rotate`) with the
 //! extra's values, where the game writes a player's old extra settings when
 //! it installs the mod for them.
-use horizon_mod_sdk::{
+use volt_mod_sdk::{
     Mod, Registration,
     render::{self, Corner, Minimap as MapView},
     storage,
@@ -132,4 +132,4 @@ impl Mod for Minimap {
     }
 }
 
-horizon_mod_sdk::export_mod!(Minimap);
+volt_mod_sdk::export_mod!(Minimap);

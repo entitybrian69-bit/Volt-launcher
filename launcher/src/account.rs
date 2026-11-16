@@ -9,7 +9,7 @@
 //! Minecraft: Java Edition, as other launchers do. Offline names play behind such an account.
 //! The game binary itself, its harnesses and the servers don't go through the launcher's gate.
 //!
-//! The Azure app (client ID) is Horizon's own and is configuration: `HORIZON_MSA_CLIENT_ID` at
+//! The Azure app (client ID) is Volt's own and is configuration: `VOLT_MSA_CLIENT_ID` at
 //! build time, or at run time to override it. Without one, sign-in says it is not configured.
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -18,13 +18,13 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The keychain service name every secret is stored under.
-pub const SERVICE: &str = "dev.playhorizon.launcher";
+pub const SERVICE: &str = "dev.playvolt.launcher";
 const SCOPE: &str = "XboxLive.signin offline_access";
 #[cfg(target_os = "android")]
 pub const NOT_CONFIGURED: &str = "Microsoft sign-in is coming soon. Until then the game plays offline: single player, \
      LAN and servers in offline mode work.";
 #[cfg(not(target_os = "android"))]
-pub const NOT_CONFIGURED: &str = "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID), so it can't start the game.";
+pub const NOT_CONFIGURED: &str = "This build of the launcher has no Microsoft sign-in (VOLT_MSA_CLIENT_ID), so it can't start the game.";
 /// What every Play says while no account in the launcher owns the game.
 pub const NEEDS_OWNER: &str =
     "Sign in with a Microsoft account that owns Minecraft: Java Edition to play";
@@ -41,8 +41,8 @@ const RENEW_BEFORE: u64 = 3600;
 /// empty value means none.
 pub fn client_id() -> Option<String> {
     configured_client_id(
-        std::env::var("HORIZON_MSA_CLIENT_ID").ok(),
-        option_env!("HORIZON_MSA_CLIENT_ID"),
+        std::env::var("VOLT_MSA_CLIENT_ID").ok(),
+        option_env!("VOLT_MSA_CLIENT_ID"),
     )
 }
 fn configured_client_id(runtime: Option<String>, compiled: Option<&str>) -> Option<String> {
@@ -65,9 +65,9 @@ pub struct Endpoints {
 
 impl Endpoints {
     pub fn live() -> Self {
-        // Development builds only: `HORIZON_MSA_MICROSOFT_ENDPOINT` points the device-code and
+        // Development builds only: `VOLT_MSA_MICROSOFT_ENDPOINT` points the device-code and
         // token requests at a local mock, to see and screenshot the sign-in panel.
-        let microsoft = std::env::var("HORIZON_MSA_MICROSOFT_ENDPOINT")
+        let microsoft = std::env::var("VOLT_MSA_MICROSOFT_ENDPOINT")
             .ok()
             .filter(|_| cfg!(debug_assertions))
             .unwrap_or_else(|| "https://login.microsoftonline.com/consumers/oauth2/v2.0".into());
@@ -86,7 +86,7 @@ fn request_to(method: &str, url: &str) -> ureq::Request {
     crate::proxy::agent(
         ureq::AgentBuilder::new()
             .timeout(Duration::from_secs(20))
-            .user_agent(&format!("horizon-launcher/{}", crate::backend::VERSION)),
+            .user_agent(&format!("volt-launcher/{}", crate::backend::VERSION)),
         url,
     )
     .build()
@@ -807,7 +807,7 @@ impl SecretStore for SystemStore {
             let attributes = vec![("service", SERVICE), ("account", key)];
             keyring
                 .create_item(
-                    "Horizon launcher: Minecraft account",
+                    "Volt launcher: Minecraft account",
                     &attributes,
                     secret.as_bytes(),
                     true,
@@ -929,7 +929,7 @@ fn delete_pieces(items: &dyn Items, key: &str) -> Result<(), String> {
 /// the player's credential store is full (an undocumented limit of its total size). The Xbox app
 /// and the Minecraft Launcher are known to leave hundreds of items there (#4313, #4366).
 #[cfg(any(target_os = "windows", test))]
-pub const CREDENTIAL_MANAGER_FULL: &str = "Windows Credential Manager is full, so Horizon can't \
+pub const CREDENTIAL_MANAGER_FULL: &str = "Windows Credential Manager is full, so Volt can't \
      keep your sign-in (Windows error 8; it isn't your computer's memory). Open Credential Manager \
      from the Start menu, go to Windows Credentials and remove entries you no longer use, then sign \
      in again. The Xbox app and the Minecraft Launcher often leave many XblGrts and Xbl| entries \
@@ -1037,8 +1037,8 @@ pub fn store() -> &'static dyn SecretStore {
                 )
             ))]
             {
-                let why = match std::env::var_os("HORIZON_NO_KEYCHAIN") {
-                    Some(_) => "HORIZON_NO_KEYCHAIN is set.".to_string(),
+                let why = match std::env::var_os("VOLT_NO_KEYCHAIN") {
+                    Some(_) => "VOLT_NO_KEYCHAIN is set.".to_string(),
                     None => match SystemStore.get("probe") {
                         Ok(_) => return Box::new(SystemStore),
                         Err(e) => e,
@@ -1066,7 +1066,7 @@ pub struct Accounts {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub offline: Vec<String>,
     /// The offline name that plays when no account is selected; none: the name the game made up
-    /// (`horizon-player.txt`).
+    /// (`volt-player.txt`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offline_selected: Option<String>,
     /// Each offline name's skin and cape (`skins`), by the name in lowercase.

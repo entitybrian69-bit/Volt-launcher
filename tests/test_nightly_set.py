@@ -11,7 +11,7 @@ NOW = "2026-10-28T12:00:00+00:00"
 PATTERNS = ns.guarded_patterns((ROOT / ".github/CODEOWNERS").read_text())
 
 
-def pr(n, head="h", state="open", files=("crates/horizon-world/src/lib.rs",), base="main"):
+def pr(n, head="h", state="open", files=("crates/volt-world/src/lib.rs",), base="main"):
     return ns.PullRequest(n, state, f"{head}{n}", f"Fix {n}", f"dev{n}", base, list(files))
 
 
@@ -36,7 +36,7 @@ class NoReviewNeededTests(unittest.TestCase):
     def test_a_guarded_file_is_still_refused(self):
         for text in ("/nightly add 1", "/nightly dry-run 1"):
             with self.assertRaisesRegex(ns.Refused, "only Ludovic merges"):
-                run({}, text, "kacpherek", pr(1, files=["crates/horizon-world/src/lib.rs", ".github/CODEOWNERS"]))
+                run({}, text, "kacpherek", pr(1, files=["crates/volt-world/src/lib.rs", ".github/CODEOWNERS"]))
 
     def test_the_other_guards_stay(self):
         with self.assertRaisesRegex(ns.Refused, "not main"):
@@ -103,12 +103,12 @@ class AllowTests(unittest.TestCase):
 
 class RefusalTests(unittest.TestCase):
     def test_what_codeowners_guards_is_refused(self):
-        for path in (".github/workflows/x.yml", "tools/ci/nightly.py", "crates/horizon-release-sign/src/lib.rs",
-                     "crates/horizon-server/src/update.rs", "launcher/src/backend.rs", "launcher/links.json",
+        for path in (".github/workflows/x.yml", "tools/ci/nightly.py", "crates/volt-release-sign/src/lib.rs",
+                     "crates/volt-server/src/update.rs", "launcher/src/backend.rs", "launcher/links.json",
                      "launcher/src/signed.rs", "tools/release_train.py"):
             self.assertTrue(ns.guarded(path, PATTERNS), path)
-        for path in ("crates/horizon-client/src/game.rs", "launcher/src/main.rs", "tools/ci.py", "docs/x.md",
-                     "crates/horizon-server/src/main.rs"):
+        for path in ("crates/volt-client/src/game.rs", "launcher/src/main.rs", "tools/ci.py", "docs/x.md",
+                     "crates/volt-server/src/main.rs"):
             self.assertFalse(ns.guarded(path, PATTERNS), path)
         self.assertTrue(ns.guarded("tools/ci/x.py", ns.guarded_patterns("")))  # even without CODEOWNERS
 

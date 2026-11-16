@@ -1,4 +1,4 @@
-// Adapted from Horizon game.rs at 81ae4a7d8f27d38e5cabbdcda0a06b2c4b000045 (MIT).
+// Adapted from Volt game.rs at 81ae4a7d8f27d38e5cabbdcda0a06b2c4b000045 (MIT).
 use super::*;
 pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex> {
     let mut out = Vec::new();
@@ -53,10 +53,10 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
             game.pack
                 .item_renderer
                 .models
-                .swap_animation_scale(&horizon_client::item_render::stack_view(stack))
+                .swap_animation_scale(&volt_client::item_render::stack_view(stack))
         });
         let attack = attacks[i];
-        let inverse_height = horizon_client::first_person::equip_displacement(heights[i], scale);
+        let inverse_height = volt_client::first_person::equip_displacement(heights[i], scale);
         let mut canceled = false;
         game.native_render_hand(
             hand,
@@ -84,7 +84,7 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
             continue;
         };
         if let Some(id) = maps::map_id(&stack) {
-            use horizon_client::first_person::{MapHold, map_arm_poses, one_handed_map_pose};
+            use volt_client::first_person::{MapHold, map_arm_poses, one_handed_map_pose};
             let hold = MapHold::of(hand, off_hand_empty);
             // renderOneHandedMap and renderTwoHandedMap: the arms under
             // the map, unless the player is invisible.
@@ -124,10 +124,10 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
         let using = owner.using_this_item && owner.use_item_remaining_ticks > 0;
         let ticks_used =
             owner.use_duration as f32 - (owner.use_item_remaining_ticks as f32 - a + 1.0);
-        use horizon_client::first_person::ItemPose;
+        use volt_client::first_person::ItemPose;
         // ItemUseAnimation.SPEAR.
         let spear = using
-            .then(|| horizon_client::spear::Kinetic::of(&stack.item))
+            .then(|| volt_client::spear::Kinetic::of(&stack.item))
             .flatten()
             .map(|kinetic| ItemPose::Spear {
                 kinetic,
@@ -157,11 +157,11 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
                     .pack
                     .item_renderer
                     .models
-                    .components(&horizon_client::item_render::stack_view(&stack));
+                    .components(&volt_client::item_render::stack_view(&stack));
                 let mut animation = components
                     .get("minecraft:consumable")
-                    .map_or(horizon_world::consumable::UseAnimation::None, |c| {
-                        horizon_client::first_person::consumable_animation(c)
+                    .map_or(volt_world::consumable::UseAnimation::None, |c| {
+                        volt_client::first_person::consumable_animation(c)
                     });
                 game.native_use_animation(&stack, &mut animation);
                 item_use::use_pose(
@@ -187,18 +187,18 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
         let (context, seed) = if left {
             (
                 if crate::game::punchy::authored(left) {
-                    horizon_assets::item_model::DisplayContext::ThirdPersonLeftHand
+                    volt_assets::item_model::DisplayContext::ThirdPersonLeftHand
                 } else {
-                    horizon_assets::item_model::DisplayContext::FirstPersonLeftHand
+                    volt_assets::item_model::DisplayContext::FirstPersonLeftHand
                 },
                 3,
             )
         } else {
             (
                 if crate::game::punchy::authored(left) {
-                    horizon_assets::item_model::DisplayContext::ThirdPersonRightHand
+                    volt_assets::item_model::DisplayContext::ThirdPersonRightHand
                 } else {
-                    horizon_assets::item_model::DisplayContext::FirstPersonRightHand
+                    volt_assets::item_model::DisplayContext::FirstPersonRightHand
                 },
                 4,
             )
@@ -219,7 +219,7 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
         game.submit_item_world(
             &state,
             m,
-            horizon_client::block_entity_render::vertex_light(light),
+            volt_client::block_entity_render::vertex_light(light),
             &mut out,
         );
     }
@@ -227,7 +227,7 @@ pub(super) fn render(game: &mut crate::game::Game<'_>, alpha: f64) -> Vec<Vertex
     // transparency (`LevelRenderer` alone calls `setUseImprovedTransparency`):
     // a held player head stays classic.
     for vertex in &mut out {
-        vertex.layer &= !horizon_client::gfx::OIT_ENTITY;
+        vertex.layer &= !volt_client::gfx::OIT_ENTITY;
     }
     out
 }

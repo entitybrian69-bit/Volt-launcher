@@ -1,16 +1,16 @@
-# Horizon native mod compatibility work (experimental)
+# Volt native mod compatibility work (experimental)
 
-Horizon `.hnmod` files contain Rust source transformations; they are not
+Volt `.hnmod` files contain Rust source transformations; they are not
 Android-loadable plugins. This is an **offline inventory and experimental
 per-mod Android type-check probe**, not a general-purpose APK distribution service, security sandbox, or
 compatibility certification. A separate limited Android browser and bundled
-Zoom installer are described in `horizon-browser.md`; this probe does not
+Zoom installer are described in `volt-browser.md`; this probe does not
 implement dynamic loading or arbitrary mod combinations.
 
 ## Registry snapshot
 
-`horizon-registry-78853c19.json` lists the 72 native entries at the pinned
-[horizon-mods commit 78853c19a6d48640ef500f3c8ff8988923576f3f](https://github.com/horizon-rust/horizon-mods/tree/78853c19a6d48640ef500f3c8ff8988923576f3f).
+`volt-registry-78853c19.json` lists the 72 native entries at the pinned
+[volt-mods commit 78853c19a6d48640ef500f3c8ff8988923576f3f](https://github.com/volt-rust/volt-mods/tree/78853c19a6d48640ef500f3c8ff8988923576f3f).
 The inventory baseline labels all 144 ABI entries `not_checked`: inventory
 alone validates metadata only, not bundles, compilation, runtime, accessibility,
 safety or licenses. See the separately recorded probe result below. The
@@ -23,9 +23,9 @@ needed before any eventual distribution; this snapshot alone cannot provide it.
 To regenerate from a **separately verified checkout** of that registry commit:
 
 ```sh
-python3 tools/native_mods/compat.py inventory --registry /path/to/horizon-mods \
+python3 tools/native_mods/compat.py inventory --registry /path/to/volt-mods \
   --registry-revision 78853c19a6d48640ef500f3c8ff8988923576f3f \
-  --out docs/native-mods/horizon-registry-78853c19.json
+  --out docs/native-mods/volt-registry-78853c19.json
 python3 -m unittest discover -s tools/native_mods -v
 ```
 
@@ -65,7 +65,7 @@ Reports and logs are diagnostic artifacts only, not release inputs.
 To run a reviewed mod manually, use a **disposable, credential-free isolated
 VM**, a clean committed Volt checkout, Android SDK/NDK, Rust 1.95.0 and both
 Rust Android targets. Obtain and independently verify the registry snapshot,
-corresponding bundle, and the `horizon-mixins` executable built from the exact
+corresponding bundle, and the `volt-mixins` executable built from the exact
 revision declared in the bundle. Never point this tool at a signing machine,
 personal workstation with credentials, privileged runner, or shared build
 cache. Environment filtering is only defense in depth: compiling a native mod
@@ -74,7 +74,7 @@ or dependency runs arbitrary code with the runner's permissions and network.
 ```sh
 python3 tools/native_mods/compat.py probe --registry /path/to/registry \
   --id zoom --bundle /path/to/zoom-2.0.0.hnmod \
-  --mixins /path/to/horizon-mixins \
+  --mixins /path/to/volt-mixins \
   --mixins-revision 0d6b103c70633d8fd9443d8d0acd3aadaacedb06 \
   --abi arm64-v8a --output /tmp/zoom-probe --trust-native-code
 # Repeat with --abi armeabi-v7a and a different output directory.
@@ -119,7 +119,7 @@ code. A dirty tracked Volt checkout is refused. Temporary work is discarded.
 `tools/native_mods/build_set.py` is an experimental **offline worker**, not a
 hosted service or an installer. It accepts multiple `--mod ID=PATH` entries,
 checks the registry hash, revocation and manifests for each, applies the set
-with the pinned Horizon mixin compiler, and attempts to compile an Android
+with the pinned Volt mixin compiler, and attempts to compile an Android
 native library. It writes an unsigned `.so`, logs, and a JSON report. One
 mixin compiler revision must match every bundle; duplicate IDs, the excluded
 project, and the four already-integrated mods are rejected. Successful
@@ -141,11 +141,11 @@ and the minisign signature verifies over the exact archive bytes.
 Release APK builds run the worker in a dedicated `weave` job
 (`.github/workflows/android-apk.yml`) with read-only permissions and no
 signing keystore. It weaves the pinned registry bundles — JEI 0.1.0 and
-Horizon Physics 0.15.1, SHA-256-pinned against registry snapshot
+Volt Physics 0.15.1, SHA-256-pinned against registry snapshot
 `78853c19a6d4` — and uploads the engine library plus its build report. The
 signing job verifies the report (Volt commit, mod set, bundle and library
 hashes) and packages the attested library via `--prebuilt-library`; it never
-executes mod code or build scripts. Horizon Physics declares no portable
+executes mod code or build scripts. Volt Physics declares no portable
 hook-API level, so the worker rebinds it under `--experimental-raw-targets`:
 every raw target must match Volt's sources exactly for the strict AST weave
 to apply, and all four of its named hooks are already served by Volt.

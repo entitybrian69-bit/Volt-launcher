@@ -1,9 +1,9 @@
-//! Horizon's official keystrokes overlay, formerly the built-in extra:
+//! Volt's official keystrokes overlay, formerly the built-in extra:
 //! forward, left, back and right as the player bound them, the two mouse
 //! buttons (with clicks per second) and the space bar, lit while held,
 //! drawn as the extra drew them. It redraws in the frame hook only when
 //! something changed. Settings (`corner`, `cps`) live in the mod's storage.
-use horizon_mod_sdk::{
+use volt_mod_sdk::{
     Mod, Registration, input,
     render::{self, Corner, FillShape, Rect, Shape, TextShape},
     storage,
@@ -189,4 +189,4 @@ impl Mod for Keystrokes {
     }
 }
 
-horizon_mod_sdk::export_mod!(Keystrokes);
+volt_mod_sdk::export_mod!(Keystrokes);
