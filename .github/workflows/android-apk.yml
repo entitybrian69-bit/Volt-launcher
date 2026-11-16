@@ -1120,7 +1120,7 @@ jobs:
               # tools/native_mods/pack_vendored.py from the committed source
               # tree; the sha256 is also pinned in vendored/punchy.toml.
               ("punchy", "0.1.3",
-               "4c9c75be020e311acfbb5389dd538486f65981651660d15aebaa57cbc79b41e7"),
+               "84d2fca4c1ae46107b4df04ba881a17fdee7e6ee2d8020bdfdb903ac73671821"),
           }
           assert mods == expected, f"unexpected woven mod set: {sorted(mods)}"
           library = root / "libvolt_launcher.so"
