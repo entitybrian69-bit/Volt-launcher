@@ -54,9 +54,11 @@ class CompatibilityTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as td:
-            m = Path(td) / 'volt-mixin.toml'
-            m.write_text('destination = "crates/volt-client/src/chat.rs"\n'
-                         'target = "volt_client::chat::ChatScreen::draw"\n',
+            # A published bundle's manifest carries the registry's paths; the
+            # remap is what turns them into the ones this fork builds.
+            m = Path(td) / 'horizon-mixin.toml'
+            m.write_text('destination = "crates/horizon-client/src/chat.rs"\n'
+                         'target = "horizon_client::chat::ChatScreen::draw"\n',
                          encoding='utf-8')
             self.assertTrue(compat.apply_fork_remaps(m))
             text = m.read_text(encoding='utf-8')

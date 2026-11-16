@@ -25,6 +25,11 @@ ABIS = ("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 ID = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 REV = re.compile(r"[0-9a-f]{40}\Z")
+# A published native bundle names its two manifests the way the registry always
+# has; one rebuilt from this tree uses the Volt names. Both are the same pair,
+# so the reader accepts either instead of rejecting a bundle over its names.
+NATIVE_META_NAMES = ("horizon-native.json", "volt-native.json")
+MIXIN_MANIFEST_NAMES = ("horizon-mixin.toml", "volt-mixin.toml")
 MAX_ARCHIVE = 16 * 1024 * 1024
 MAX_EXPANDED = 64 * 1024 * 1024
 MAX_FILES = 2048
@@ -190,7 +195,7 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
                 raise Rejected("expanded bundle too large")
             if info.is_dir():
                 continue
-            if not (name == "volt-native.json" or (len(p.parts) >= 3
+            if not (name in NATIVE_META_NAMES or (len(p.parts) >= 3
                     and p.parts[:2] == ("mixins", entry["id"]))):
                 raise Rejected("unexpected bundle path")
             out = dest.joinpath(*p.parts)
@@ -198,30 +203,40 @@ def verified_extract(archive: Path, entry: dict, dest: Path, registry: Path) -> 
             with z.open(info) as src, out.open("xb") as dst:
                 while chunk := src.read(64 * 1024):
                     dst.write(chunk)
-    meta_path = dest / "volt-native.json"
-    manifest_path = dest / "mixins" / entry["id"] / "volt-mixin.toml"
-    if not meta_path.is_file() or not manifest_path.is_file():
+    mixin_dir = dest / "mixins" / entry["id"]
+    meta_path = next((dest / n for n in NATIVE_META_NAMES if (dest / n).is_file()), None)
+    manifest_path = next((mixin_dir / n for n in MIXIN_MANIFEST_NAMES
+                          if (mixin_dir / n).is_file()), None)
+    if meta_path is None or manifest_path is None:
         raise Rejected("bundle is missing native or mixin manifest")
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    # The field names the engine revision: `horizon` in a published bundle,
+    # `volt` in one this tree builds. Same value, same meaning.
+    revision = meta.get("volt") or meta.get("horizon")
     if (meta.get("schema") != 1 or meta.get("id") != entry["id"]
             or meta.get("version") != ver.get("version") or meta.get("game") != "26.3"
-            or not REV.fullmatch(str(meta.get("volt", "")))
+            or not REV.fullmatch(str(revision))
             or not REV.fullmatch(str(meta.get("mixins", "")))):
         raise Rejected("native manifest does not match the registry")
     manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("mod", {}).get("id") != meta["id"] or manifest.get("mod", {}).get("version") != meta["version"]:
         raise Rejected("mixin identity differs from bundle")
-    if manifest.get("compatibility", {}).get("volt_revision") != meta["volt"]:
+    compatibility = manifest.get("compatibility", {})
+    declared = compatibility.get("volt_revision", compatibility.get("horizon_revision"))
+    if declared != revision:
         raise Rejected("mixin and bundle Volt revisions differ")
+    # Callers read one field whatever the bundle called it.
+    meta.setdefault("volt", revision)
     return {"meta": meta, "manifest": manifest, "sha256": digest, "manifest_path": manifest_path}
 
 # This fork keeps the official chat screen in the render crate
 # (crates/volt-client-render/src/chat.rs, re-exported as
 # volt_client::chat): bundles built against the official layout are
-# remapped to it when their revision is rebound.
+# remapped to it when their revision is rebound. The left-hand side is what a
+# published manifest says, so it keeps the registry's names.
 FORK_REMAPS = (
-    ("crates/volt-client/src/chat.rs", "crates/volt-client-render/src/chat.rs"),
-    ("volt_client::chat::", "volt_client_render::chat::"),
+    ("crates/horizon-client/src/chat.rs", "crates/volt-client-render/src/chat.rs"),
+    ("horizon_client::chat::", "volt_client_render::chat::"),
 )
 
 
@@ -264,7 +279,7 @@ FORK_SOURCE_SHIMS = {
          "Slots::Ender | Slots::Native => Vec::new(),"),
     ),
     "chat_animation": (
-        # Same drift as voltmatica below: the fork restored upstream's
+        # Same drift as horizonmatica below: the fork restored upstream's
         # nine-argument ui::slider; the drag-aware form is ui::slider_dragging.
         ("anim.rs",
          "ui::slider(batch, atlas, vx, y, vw, &label, value, hover, true,"
@@ -272,7 +287,7 @@ FORK_SOURCE_SHIMS = {
          "ui::slider_dragging(batch, atlas, vx, y, vw, &label, value, hover, true,"
          " dragging == Some(i));"),
     ),
-    "voltmatica": (
+    "horizonmatica": (
         # ui::slider lost its tenth (dragging) argument when the fork
         # restored the upstream signature; the drag-aware track moved to
         # ui::slider_dragging.
@@ -318,7 +333,12 @@ def apply_fork_source_shims(mod_id: str, mixins_dir: Path) -> int:
     """Adapt a staged bundle's sources to this fork; the count of edits."""
     edited = 0
     for name, old, new in FORK_SOURCE_SHIMS.get(mod_id, ()):
-        path = mixins_dir / name
+        # A bundle carries one manifest name or the other, so a shim aimed at
+        # "the mixin manifest" takes whichever the bundle actually shipped.
+        candidates = MIXIN_MANIFEST_NAMES if name == "volt-mixin.toml" else (name,)
+        path = next((mixins_dir / c for c in candidates if (mixins_dir / c).is_file()), None)
+        if path is None:
+            raise Rejected(f"{mod_id}: no manifest for shim {name}")
         text = path.read_text(encoding="utf-8")
         if text.count(old) != 1:
             raise Rejected(f"{mod_id}: expected exactly one shim site in {name}")
@@ -483,10 +503,11 @@ def run_probe(args) -> dict:
         if rebind:
             manifest_path = data["manifest_path"]
             text = manifest_path.read_text(encoding="utf-8")
-            original = f'volt_revision = "{meta["volt"]}"'
+            key = "volt_revision" if "volt_revision" in text else "horizon_revision"
+            original = f'{key} = "{meta["volt"]}"'
             if text.count(original) != 1:
                 raise Rejected("cannot safely rebind revision in staged manifest")
-            manifest_path.write_text(text.replace(original, f'volt_revision = "{rev}"'), encoding="utf-8")
+            manifest_path.write_text(text.replace(original, f'{key} = "{rev}"'), encoding="utf-8")
             apply_fork_remaps(manifest_path)
             apply_fork_source_shims(entry["id"], manifest_path.parent)
         report["hook_revision_rebound"] = rebind
