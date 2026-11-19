@@ -130,3 +130,25 @@ complete the UI and licensed-game acceptance tests above **before** publishing. 
 `SHA256SUMS`, the commit, OS build and test evidence; verify re-downloaded release
 assets against those same hashes before sharing links. A `windows-latest` engine CI
 job is not this desktop acceptance test.
+
+### Native launcher integration milestone (not a release)
+
+`cargo build --profile fast --locked --target x86_64-pc-windows-msvc -p volt-launcher`
+creates **volt-launcher.exe**, distinct from the game. Its winit/wgpu host uses the
+same Liquid Glass home drawing, hit rectangles and device-code panel as Android.
+Set `HORIZON_MSA_CLIENT_ID` to your approved public Microsoft client ID; no
+credentials are bundled. PC account metadata lives under `%LOCALAPPDATA%\Volt Launcher`
+(or `HORIZON_LAUNCHER_HOME`); secrets use a separate Credential Manager service.
+Place the mods-enabled `horizon-client.exe` and allowlisted generated
+`engine-data.zip` from `tools/android_build.py:engine_data(public=True)` beside the
+GUI for installation. Never substitute a private developer resource bundle.
+
+Play checks ownership off the UI thread, installs official resources per player,
+and supplies a short-lived one-use session file to the engine. The Settings action
+persists the engine graphics API. Other catalog/profile/gallery/Controls Studio
+routes are **not yet ported**; a rendered frame is not proof of account, install,
+gameplay or full navigation parity. The Windows workflow attempts an actual presented
+home frame on its hosted Windows runner. For a Windows 11 x64 client result,
+dispatch with `windows11: true` on a fork-managed signed-in interactive runner
+labelled `volt-win11-x64-interactive`. The job checks OS edition/build/architecture;
+Windows Server evidence does not satisfy this gate. No verified player package yet.

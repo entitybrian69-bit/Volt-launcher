@@ -4,6 +4,11 @@ on:
     branches: ['arena/**', pc-windows]
   pull_request:
   workflow_dispatch:
+    inputs:
+      windows11:
+        description: Use a fork-managed interactive Windows 11 x64 runner
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -11,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   native:
-    runs-on: windows-latest
+    runs-on: ${{ inputs.windows11 && 'volt-win11-x64-interactive' || 'windows-latest' }}
     timeout-minutes: 120
     env:
       RUSTFLAGS: -C target-feature=+crt-static
@@ -20,6 +25,12 @@ jobs:
       HORIZON_TELEMETRY_URL: 'off'
       CARGO_PROFILE_FAST_INCREMENTAL: 'false'
     steps:
+      - name: Identify Windows edition and validate requested Windows 11 desktop
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host "$($os.Caption) $($os.BuildNumber) $($os.OSArchitecture)"
+          if ('${{ inputs.windows11 }}' -eq 'true' -and ($os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000 -or ![Environment]::UserInteractive -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64')) { throw 'Expected interactive Windows 11 x64 client' }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
@@ -42,6 +53,23 @@ jobs:
             if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
           }
           exit $LASTEXITCODE
+      - name: Build native Volt GUI and present a frame of the actual home screen
+        shell: pwsh
+        run: |
+          cargo build --locked --profile fast --target x86_64-pc-windows-msvc -p volt-launcher --message-format=short 2>&1 | ForEach-Object {
+            Write-Host $_
+            if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = 'target/x86_64-pc-windows-msvc/fast/volt-launcher.exe'
+          python tools/check_imports.py --windows-x64 $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $p = Start-Process $exe -ArgumentList '--smoke-frame' -PassThru
+          if (!$p.WaitForExit(120000)) { $p.Kill(); throw 'No rendered Volt home frame within two minutes' }
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:HORIZON_LAUNCHER_HOME/launcher-error.txt" -ErrorAction SilentlyContinue
+            throw "Volt GUI failed: $($p.ExitCode)"
+          }
       - name: Check DLL imports and start the real game CLI
         shell: pwsh
         run: |
