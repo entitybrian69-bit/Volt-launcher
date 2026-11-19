@@ -146,7 +146,7 @@ after preparing the pinned inputs. CI restores the fork's generated table cache 
 runs the pinned preparation, then checks the version, allowlist and ZIP integrity. Never substitute a private developer resource bundle.
 
 Play checks ownership off the UI thread, installs official resources per player,
-and supplies a short-lived one-use session file to the engine. The Settings action
+and pipes the selected session directly to the engine (no session file on Windows). The Settings action
 persists the engine graphics API. The original profile chooser selects or creates isolated game
 directories. Worlds and its picture viewer read the selected profile’s saves. Multiplayer
 reads and edits the same `servers.dat` as the game; selecting a server requests an
@@ -178,3 +178,8 @@ was dispatched for the same source; its native job was still awaiting the
 interactive x64 runner at the time of this entry. No installer, portable ZIP,
 release checksum or player download is certified by either the build or this
 hosted navigation test.
+
+**Attended acceptance:** [Runner setup and test procedure](windows-acceptance.md).
+The new acceptance path and packaged-frame probes are test tooling, not evidence
+of a successful licensed playthrough. Windows Logs now uses the same diagnostics
+panel as Android; Refresh checks local game and crash-log metadata.

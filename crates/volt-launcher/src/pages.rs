@@ -5,12 +5,14 @@ use horizon_client::{
 };
 include!("../../horizon-client/src/launcher_ui/page.rs");
 include!("../../horizon-client/src/launcher_ui/home.rs");
+include!("../../horizon-client/src/launcher_ui/console.rs");
 include!("../../horizon-client/src/launcher_ui/gallery.rs");
 include!("../../horizon-client/src/launcher_ui/servers.rs");
 include!("../../horizon-client/src/launcher_ui/media.rs");
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Action {
     Play,
+    Logs,
     Page(Page),
     Profile,
     ViewWorld(usize),
@@ -205,4 +207,21 @@ pub(super) fn media_page(
         targets.clear();
         draw_photo_viewer(ui, targets, photos, view, w, h);
     }
+}
+
+pub(super) fn logs_page(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    phase: f32,
+    summary: &str,
+) {
+    let (w, h) = (ui.w, ui.h);
+    draw_launcher_scene(ui, w, h, phase);
+    let (x, y) = tab_header(ui, targets, "Launcher log");
+    console_panel(
+        ui,
+        [x, y + 50., w - 2. * x, h - 2. * y - 50.],
+        targets,
+        summary,
+    );
 }

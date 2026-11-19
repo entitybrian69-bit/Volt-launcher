@@ -10,7 +10,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $payloadDir = (Get-Item -LiteralPath $Payload).FullName
-foreach ($file in 'Volt Launcher.exe','horizon-client.exe','engine-data.zip','LICENSE','THIRD_PARTY_NOTICES.md') {
+$publicFiles = @('Volt Launcher.exe','horizon-client.exe','engine-data.zip','LICENSE','THIRD_PARTY_NOTICES.md')
+foreach ($file in $publicFiles) {
     if (!(Test-Path -LiteralPath (Join-Path $payloadDir $file) -PathType Leaf)) { throw "Missing public payload file: $file" }
 }
 if ((Get-FileHash -LiteralPath "$payloadDir/Volt Launcher.exe").Hash -eq (Get-FileHash -LiteralPath "$payloadDir/horizon-client.exe").Hash) {
@@ -27,11 +28,12 @@ $out = [IO.Path]::GetFullPath($OutputDirectory)
 if ((Test-Path -LiteralPath $out) -or $out.StartsWith($payloadDir + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Choose a new output directory outside the payload'
 }
-# Reject links and known private artifacts. The maintainer still audits the *entire* payload.
-foreach ($entry in @(Get-Item -LiteralPath $payloadDir) + @(Get-ChildItem -LiteralPath $payloadDir -Force -Recurse)) {
-    if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Linked input: $entry" }
-    if ($entry.Name -match '^(\.git|\.local|\.env(\..*)?|saves|accounts(\.json)?|profiles|logs|crash-reports|horizon-resources\.json|session\.json)$|\.(jar|pfx|keystore|jks|apk)$') {
-        throw "Non-distributable input: $entry"
+# This statically linked payload has no redistributable DLL subdirectory. Do not
+# use a blacklist: no scratch accounts, arbitrary archives, reports or saves.
+if ((Get-Item -LiteralPath $payloadDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked staging directory' }
+foreach ($entry in Get-ChildItem -LiteralPath $payloadDir -Force) {
+    if ($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $entry.Name -notin $publicFiles) {
+        throw 'Unexpected or linked input in public staging directory'
     }
 }
 $null = New-Item -ItemType Directory -Path $out

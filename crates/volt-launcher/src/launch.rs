@@ -5,8 +5,9 @@ use horizon_client::{
     official_install::{self, InstallProgress},
 };
 use std::{
+    os::windows::process::CommandExt,
     path::PathBuf,
-    process::{Child, Command},
+    process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
 };
 pub(super) enum Destination {
@@ -30,6 +31,16 @@ pub(super) fn prepare_and_launch(
         &mut accounts,
     )
     .map_err(|e| e.to_string())?;
+    let licensed_test = std::env::var("VOLT_QA_LICENSED_PLAY").as_deref() == Ok("1");
+    if licensed_test
+        && (pass.owner.is_none()
+            || pass.session.is_none()
+            || !matches!(&destination, Destination::Home))
+    {
+        return Err(
+            "This acceptance run requires Play with a live, entitled Microsoft session.".into(),
+        );
+    }
     accounts.save()?;
     let engine = std::env::current_exe()?.with_file_name("horizon-client.exe");
     if !engine.is_file() {
@@ -49,7 +60,11 @@ pub(super) fn prepare_and_launch(
     }
     let game_dir = profile_dir(&home, profile);
     let mut cmd = Command::new(engine);
-    cmd.current_dir(&game_dir)
+    // The console-subsystem engine owns its own game window. Don't flash a second
+    // console window when Play starts it from Explorer/the GUI subsystem.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW)
+        .current_dir(&game_dir)
         .arg("--home")
         .arg(&home)
         .arg("--game-dir")
@@ -71,7 +86,14 @@ pub(super) fn prepare_and_launch(
             }
         }
     }
-    let mut session = None;
+    if licensed_test {
+        // Observe a normal interactive game (no autostart, synthetic terrain or frame limit).
+        cmd.stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .arg("--smoke-report")
+            .arg(home.join("licensed-world.json"));
+    }
+    cmd.env_remove("HORIZON_SESSION_FILE");
     if let Some((player, secrets)) = pass.session {
         let (player, secrets) = account::fresh(
             &account::Endpoints::live(),
@@ -81,9 +103,18 @@ pub(super) fn prepare_and_launch(
         )?;
         accounts.add(account::store(), player.clone(), &secrets)?;
         accounts.save()?;
-        let file = account::write_session_file(&home.join("sessions"), &player, &secrets)?;
-        cmd.arg("--session-file").arg(&file);
-        session = Some(file);
+        let mut child = cmd.arg("--session-stdin").stdin(Stdio::piped()).spawn()?;
+        let result = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Session pipe not available".to_owned())
+            .and_then(|pipe| account::write_game_session(pipe, &player, &secrets));
+        if let Err(error) = result {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error.into());
+        }
+        return Ok(child);
     } else if let Some(name) = accounts.name_arg() {
         // Only an explicitly selected offline name, after the same owner gate above.
         cmd.arg("--name").arg(name).envs(accounts.look_env());
@@ -93,11 +124,5 @@ pub(super) fn prepare_and_launch(
             .unwrap_or_else(|| "Sign in again to start this profile.".into())
             .into());
     }
-    let child = cmd.spawn();
-    if child.is_err()
-        && let Some(file) = session
-    {
-        let _ = std::fs::remove_file(file);
-    }
-    Ok(child?)
+    Ok(cmd.spawn()?)
 }

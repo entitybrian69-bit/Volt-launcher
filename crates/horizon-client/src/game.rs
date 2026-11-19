@@ -507,6 +507,10 @@ impl Options {
                 horizon_client::auth::set_current(session);
             }
             Ok(None) => {}
+            // A launcher explicitly piping a signed session must not silently start offline.
+            Err(_) if o.session_stdin => {
+                return Err("Invalid launcher session on standard input".into());
+            }
             Err(e) => eprintln!("Horizon: not signed in: {e}"),
         }
         if let Some(dir) = o.game_dir.take() {
@@ -19037,6 +19041,8 @@ fn write_report(game: &Game<'_>) -> Result<()> {
     if let Some(path) = &game.options.report {
         let report = serde_json::json!({
             "frames": game.frames,
+            "world_frames": game.world_frames,
+            "signed_in": horizon_client::auth::current().is_some(),
             "elapsed_seconds": game.started.elapsed().as_secs_f64(),
             "chunks": game.world.chunks.len(),
             "generated": game.streaming.generated_total,

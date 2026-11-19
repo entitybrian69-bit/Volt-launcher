@@ -1417,6 +1417,21 @@ pub fn write_session_file(
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let mut file = options.open(&path).map_err(|e| e.to_string())?;
+    if let Err(error) = write_game_session(&mut file, account, secrets) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(error);
+    }
+    Ok(path)
+}
+
+/// Only the fields the engine needs (never the Microsoft refresh token). The Windows
+/// launcher supplies a private pipe, avoiding user-readable session files on disk.
+pub fn write_game_session(
+    writer: impl std::io::Write,
+    account: &Account,
+    secrets: &Secrets,
+) -> Result<(), String> {
     let body = json!({
         "name": account.name,
         "uuid": account.uuid,
@@ -1424,8 +1439,7 @@ pub fn write_session_file(
         "user_type": "msa",
         "xuid": secrets.xuid,
     });
-    std::io::Write::write_all(&mut file, body.to_string().as_bytes()).map_err(|e| e.to_string())?;
-    Ok(path)
+    serde_json::to_writer(writer, &body).map_err(|_| "Could not deliver the game session".to_owned())
 }
 
 /// Where a background sign-in is (the window and the MCP server show it).

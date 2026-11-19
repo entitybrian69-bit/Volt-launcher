@@ -9,6 +9,10 @@ on:
         description: Use a fork-managed interactive Windows 11 x64 runner
         type: boolean
         default: false
+      licensed_play:
+        description: Require a tester at the Windows 11 desktop for real sign-in, installation and gameplay
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -60,8 +64,9 @@ jobs:
           retention-days: 1
           if-no-files-found: error
   native:
+    needs: tables
     runs-on: ${{ inputs.windows11 && 'volt-win11-x64-interactive' || 'windows-latest' }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       RUSTFLAGS: -C target-feature=+crt-static
       HORIZON_NO_AUDIO: '1'
@@ -74,10 +79,14 @@ jobs:
         run: |
           $os = Get-CimInstance Win32_OperatingSystem
           Write-Host "$($os.Caption) $($os.BuildNumber) $($os.OSArchitecture)"
-          if ('${{ inputs.windows11 }}' -eq 'true' -and ($os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000 -or ![Environment]::UserInteractive -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64')) { throw 'Expected interactive Windows 11 x64 client' }
+          if ('${{ inputs.licensed_play }}' -eq 'true' -and '${{ inputs.windows11 }}' -ne 'true') { throw 'Licensed acceptance requires the Windows 11 desktop input' }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Require a signed-in client desktop (not session zero)
+        if: inputs.windows11
+        shell: pwsh
+        run: ./packaging/windows/require-win11.ps1
       - uses: Swatinem/rust-cache@v2
       - name: Isolate player data
         shell: pwsh
@@ -120,6 +129,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $help = & $exe --help
           if ($LASTEXITCODE -ne 0 -or -not ($help -join "`n").Contains('--resources')) { throw 'Game CLI did not start' }
+      - name: Reject a broken signed-session pipe rather than silently playing offline
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/fast/horizon-client.exe'
+          $info = [Diagnostics.ProcessStartInfo]::new((Resolve-Path $exe).Path)
+          $info.UseShellExecute = $false
+          $info.RedirectStandardInput = $true
+          $info.ArgumentList.Add('--session-stdin')
+          $p = [Diagnostics.Process]::Start($info)
+          try {
+            $p.StandardInput.Write('{}')
+            $p.StandardInput.Close()
+            if (!$p.WaitForExit(30000) -or $p.ExitCode -eq 0) { throw 'Invalid explicit session was not rejected' }
+            if (!(Select-String -Quiet -SimpleMatch 'Invalid launcher session on standard input' -LiteralPath "$env:HORIZON_HOME/logs/latest.log")) { throw 'Engine failed for a different reason' }
+          } finally {
+            if (!$p.HasExited) { $p.Kill($true); $p.WaitForExit() }
+            $p.Dispose()
+          }
       - name: Release tooling rejects the engine-only build
         shell: pwsh
         run: |
@@ -137,6 +164,18 @@ jobs:
             if ($_.Exception.Message -ne 'Missing public payload file: Volt Launcher.exe') { throw }
           }
           if (Test-Path -LiteralPath $out) { throw 'Packaging wrote output before validation' }
+      - uses: actions/download-artifact@v4
+        if: inputs.windows11 && inputs.licensed_play
+        with:
+          name: _internal-volt-engine-tables
+          path: target/x86_64-pc-windows-msvc/fast
+      - name: Human-assisted fresh licensed Play acceptance (no uploads)
+        if: inputs.windows11 && inputs.licensed_play
+        timeout-minutes: 95
+        shell: pwsh
+        env:
+          HORIZON_MSA_CLIENT_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
+        run: ./packaging/windows/test-licensed-play.ps1 -Payload target/x86_64-pc-windows-msvc/fast
       - uses: actions/upload-artifact@v4
         with:
           name: volt-windows-engine-only

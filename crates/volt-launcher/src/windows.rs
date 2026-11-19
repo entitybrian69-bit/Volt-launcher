@@ -154,6 +154,7 @@ struct App {
     login: login::Login,
     settings: bool,
     worlds: Option<Worlds>,
+    console: Option<String>,
     media: Option<media::Media>,
     servers: Option<Servers>,
     editing_name: bool,
@@ -214,7 +215,30 @@ impl App {
                     view: None,
                 });
             }
+            HomeTab(pages::HomeTab::Console) => self.console = Some(String::new()),
+            Logs => {
+                use horizon_client::logging::{logs_dir, newest_crash_report};
+                let log = std::fs::metadata(logs_dir(&self.home).join("latest.log")).ok();
+                let state = if self.child.is_some() {
+                    "Game running"
+                } else if self.ready {
+                    "Game files ready"
+                } else {
+                    "Game not installed"
+                };
+                let latest = log.map_or_else(
+                    || "No game log yet".to_string(),
+                    |m| format!("Latest log: {} bytes", m.len()),
+                );
+                let crash = if newest_crash_report(&self.home).is_some() {
+                    "Crash report available"
+                } else {
+                    "No crash report"
+                };
+                self.console = Some(format!("{state} · {latest} · {crash}"));
+            }
             HomeTab(pages::HomeTab::Overview) => {
+                self.console = None;
                 self.worlds = None;
                 self.servers = None;
                 self.media = None;
@@ -412,6 +436,9 @@ impl App {
             Action::HomeTab(HomeTab::Overview),
             Action::HomeTab(HomeTab::Multiplayer),
             Action::HomeTab(HomeTab::Overview),
+            Action::HomeTab(HomeTab::Console),
+            Action::Logs,
+            Action::HomeTab(HomeTab::Overview),
             Action::HomeTab(HomeTab::Screenshots),
             Action::HomeTab(HomeTab::Overview),
             Action::HomeTab(HomeTab::Replays),
@@ -491,7 +518,14 @@ impl App {
         self.density = ui.density;
         self.targets.clear();
         self.photos.poll();
-        if let Some(media) = &mut self.media {
+        if let Some(summary) = &self.console {
+            pages::logs_page(
+                &mut ui,
+                &mut self.targets,
+                self.start.elapsed().as_secs_f32(),
+                summary,
+            );
+        } else if let Some(media) = &mut self.media {
             pages::media_page(
                 &mut ui,
                 &mut self.targets,
@@ -692,6 +726,8 @@ impl ApplicationHandler for App {
                     if m.view.take().is_none() {
                         self.media = None;
                     }
+                } else if self.console.is_some() {
+                    self.console = None;
                 } else if self.servers.is_some() {
                     self.servers = None;
                 } else if let Some(worlds) = &mut self.worlds {
@@ -757,6 +793,7 @@ fn run() -> Result<()> {
         settings: false,
         photos: photo_cache::PhotoCache::new(),
         worlds: None,
+        console: None,
         media: None,
         servers: None,
         editing_name: false,

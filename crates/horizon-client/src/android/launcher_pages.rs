@@ -6,6 +6,7 @@ use winit::{
 };
 
 include!("../launcher_ui/home.rs");
+include!("../launcher_ui/console.rs");
 
 include!("../launcher_ui/gallery.rs");
 include!("../launcher_ui/servers.rs");
@@ -1251,15 +1252,7 @@ impl DrawCtx<'_> {
             HomeTab::Replays => {
                 *self.list_view=Some(replay_rows(ui,area,&self.catalog.replays,&self.catalog.config.game_home(self.home).join("replays"),self.photos,self.targets,&mut self.catalog.scroll));
             }
-            HomeTab::Console => {
-                ui.text(Face::LauncherMedium, 15.0, x + 8.0, y + 8.0, theme::TEXT(), "Launcher diagnostics");
-                let status = if self.catalog.status.is_empty() { "Tap Refresh to read the latest local diagnostic summary." } else { &self.catalog.status };
-                let status = ui.fit_text(Face::LauncherRegular, 12.5, status, w - 16.0);
-                ui.text(Face::LauncherRegular, 12.5, x + 8.0, y + 38.0, theme::MUTED(), &status);
-                if h >= 100.0 {
-                    styled_button(ui, self.targets, [x + 8.0, y + 64.0, 100.0, 32.0], "Refresh", Action::Logs, BtnStyle::Secondary, true);
-                }
-            }
+            HomeTab::Console => console_panel(ui, area, self.targets, &self.catalog.status),
         }
     }
 

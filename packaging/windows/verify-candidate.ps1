@@ -55,6 +55,16 @@ function Test-Startup($directory) {
         if (!$app.HasExited) { $app.Kill($true); $app.WaitForExit() }
         $app.Dispose()
     }
+    # A responsive HWND is not a presented frame. Exercise the installed/extracted
+    # binary itself, not another copy from target/ or the staging directory.
+    $info.ArgumentList.Add('--smoke-frame')
+    $probe = [Diagnostics.Process]::Start($info)
+    try {
+        if (!$probe.WaitForExit(120000) -or $probe.ExitCode -ne 0) { throw 'Packaged launcher failed real frame/navigation probe' }
+    } finally {
+        if (!$probe.HasExited) { $probe.Kill($true); $probe.WaitForExit() }
+        $probe.Dispose()
+    }
 }
 # Keep the private VM and scratch folder for diagnosis on failure. Discard VM after test.
 [IO.Compression.ZipFile]::ExtractToDirectory($zip.FullName, $portable)
