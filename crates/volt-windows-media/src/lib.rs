@@ -66,9 +66,14 @@ fn sample(data: &[u8], time: i64) -> windows::core::Result<IMFSample> {
 /// writer selects an installed H.264 encoder. Never publish a partial MP4 or erase
 /// a previous successful export if the codec, filesystem or capture fails.
 pub fn write_mp4(
-    path: &Path, w: u32, h: u32, frames: impl Iterator<Item = (i64, Vec<u8>)>,
+    path: &Path,
+    w: u32,
+    h: u32,
+    frames: impl Iterator<Item = (i64, Vec<u8>)>,
 ) -> Result<u64> {
-    let bytes = w.checked_mul(h).and_then(|n| n.checked_add(n / 2))
+    let bytes = w
+        .checked_mul(h)
+        .and_then(|n| n.checked_add(n / 2))
         .filter(|_| w >= 64 && h >= 64 && w % 2 == 0 && h % 2 == 0)
         .ok_or("invalid NV12 dimensions")?;
     let path = std::path::absolute(path)?;
@@ -94,11 +99,17 @@ pub fn write_mp4(
             let mut count = 0;
             let mut duration = 10_000_000 / 30;
             for (pts, data) in frames {
-                if data.len() != bytes as usize { return Err("invalid NV12 frame length".into()); }
-                let time = pts.checked_sub(*origin.get_or_insert(pts)).and_then(|t| t.checked_mul(10))
+                if data.len() != bytes as usize {
+                    return Err("invalid NV12 frame length".into());
+                }
+                let time = pts
+                    .checked_sub(*origin.get_or_insert(pts))
+                    .and_then(|t| t.checked_mul(10))
                     .ok_or("replay timestamp out of range")?;
                 if let Some((last, frame)) = previous.take() {
-                    if time <= last { return Err("replay clock did not advance".into()); }
+                    if time <= last {
+                        return Err("replay clock did not advance".into());
+                    }
                     duration = time - last;
                     frame.SetSampleDuration(duration)?;
                     writer.WriteSample(stream, &frame)?;
@@ -156,7 +167,9 @@ mod tests {
                         assert!(frame.GetTotalLength()? >= size as u32);
                         times.push(frame.GetSampleTime()?);
                     }
-                    if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 { break; }
+                    if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                        break;
+                    }
                 }
                 assert_eq!(times, (0..8).map(|i| i * 400_000).collect::<Vec<_>>());
             }

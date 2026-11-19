@@ -153,11 +153,18 @@ fn encode(
 }
 
 #[cfg(windows)]
-fn encode(receiver: &Receiver<Frame>, stop: &AtomicBool, path: &std::path::Path) -> Result<String, String> {
+fn encode(
+    receiver: &Receiver<Frame>,
+    stop: &AtomicBool,
+    path: &std::path::Path,
+) -> Result<String, String> {
     let first = next_frame(receiver, stop).ok_or("no frames arrived")?;
     let size = first.size;
     let (w, h) = (size[0] & !1, size[1] & !1);
-    let bytes = w.checked_mul(h).and_then(|n| n.checked_add(n / 2)).ok_or("frame too large")?;
+    let bytes = w
+        .checked_mul(h)
+        .and_then(|n| n.checked_add(n / 2))
+        .ok_or("frame too large")?;
     if w < 64 || h < 64 {
         return Err("the frame is too small to encode".into());
     }
@@ -165,7 +172,9 @@ fn encode(receiver: &Receiver<Frame>, stop: &AtomicBool, path: &std::path::Path)
     let frames = std::iter::once(first)
         .chain(std::iter::from_fn(|| next_frame(receiver, stop)))
         .filter(|f| {
-            if f.size != size || last.is_some_and(|pts| f.pts_us <= pts) { return false; }
+            if f.size != size || last.is_some_and(|pts| f.pts_us <= pts) {
+                return false;
+            }
             last = Some(f.pts_us);
             true
         })
