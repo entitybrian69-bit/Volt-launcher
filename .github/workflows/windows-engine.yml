@@ -12,7 +12,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: volt-windows-${{ github.ref }}
+  group: volt-windows-${{ github.ref }}-${{ inputs.windows11 && 'win11' || 'hosted' }}
   cancel-in-progress: true
 jobs:
   native:
@@ -45,22 +45,17 @@ jobs:
         run: cargo test --locked -p volt-windows-media --target x86_64-pc-windows-msvc
       - name: Read live memory counters for Volt Boost and the HUD
         run: cargo test --locked -p horizon-threads --target x86_64-pc-windows-msvc --lib windows_memory_counters
-      - name: Build native game with audio, controllers and sandboxed mods
+      - name: Build Volt Launcher and native game with audio, controllers and sandboxed mods
         shell: pwsh
         run: |
-          cargo build --message-format=short --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client --features mods 2>&1 | ForEach-Object {
+          cargo build --message-format=short --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client -p volt-launcher --bin volt-launcher --features horizon-client/mods 2>&1 | ForEach-Object {
             Write-Host $_
             if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
           }
           exit $LASTEXITCODE
-      - name: Build native Volt GUI and present a frame of the actual home screen
+      - name: Present the real Volt home and navigate account, instances, worlds and renderer
         shell: pwsh
         run: |
-          cargo build --locked --profile fast --target x86_64-pc-windows-msvc -p volt-launcher --message-format=short 2>&1 | ForEach-Object {
-            Write-Host $_
-            if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
-          }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $exe = 'target/x86_64-pc-windows-msvc/fast/volt-launcher.exe'
           python tools/check_imports.py --windows-x64 $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

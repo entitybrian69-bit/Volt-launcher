@@ -145,10 +145,10 @@ GUI for installation. Never substitute a private developer resource bundle.
 
 Play checks ownership off the UI thread, installs official resources per player,
 and supplies a short-lived one-use session file to the engine. The Settings action
-persists the engine graphics API. Other catalog/profile/gallery/Controls Studio
+persists the engine graphics API. The original profile chooser selects or creates isolated game directories, and the Worlds grid and picture viewer read saves from that profile. Catalog, other galleries and Controls Studio
 routes are **not yet ported**; a rendered frame is not proof of account, install,
 gameplay or full navigation parity. The Windows workflow attempts an actual presented
-home frame on its hosted Windows runner. For a Windows 11 x64 client result,
+home frame and account/profile/Worlds/renderer navigation on its hosted Windows runner. For a Windows 11 x64 client result,
 dispatch with `windows11: true` on a fork-managed signed-in interactive runner
 labelled `volt-win11-x64-interactive`. The job checks OS edition/build/architecture;
 Windows Server evidence does not satisfy this gate. No verified player package yet.

@@ -1,6 +1,54 @@
 #[path = "../../horizon-client/src/android/login.rs"]
 mod login;
 mod pages;
+#[path = "../../horizon-client/src/android/photo_cache.rs"]
+mod photo_cache;
+mod skin_preview {
+    include!("../../horizon-client/src/launcher_ui/picture_hash.rs");
+}
+struct Worlds {
+    dir: PathBuf,
+    names: Vec<String>,
+    scroll: f32,
+    view: Option<pages::PhotoView>,
+}
+
+mod chooser {
+    use crate::pages::{Action, button};
+    use horizon_client::{
+        graphics::GraphicsApi,
+        ui_theme::{Face, Ui},
+    };
+    include!("../../horizon-client/src/launcher_ui/chooser.rs");
+    impl Chooser {
+        pub(super) fn renderers(active: GraphicsApi, device: Option<String>) -> Self {
+            Self {
+                title: "Rendering mode",
+                help: "Select the graphics API for the next start.",
+                device,
+                scroll: 0.0,
+                choices: GraphicsApi::choices()
+                    .iter()
+                    .map(|a| {
+                        (
+                            a.label().to_string(),
+                            String::new(),
+                            Action::ChooseRenderer(*a),
+                            active == *a,
+                        )
+                    })
+                    .collect(),
+            }
+        }
+    }
+}
+fn profile_dir(home: &std::path::Path, profile: u32) -> PathBuf {
+    if profile == 0 {
+        home.into()
+    } else {
+        home.join("profiles").join(format!("profile-{profile}"))
+    }
+}
 #[path = "../../../launcher/src/skins.rs"]
 mod skins;
 mod account {
@@ -74,7 +122,7 @@ use winit::{
 };
 
 type Progress = Arc<Mutex<Option<InstallProgress>>>;
-fn prepare_and_launch(home: PathBuf, progress: Progress) -> Result<Child> {
+fn prepare_and_launch(home: PathBuf, profile: u32, progress: Progress) -> Result<Child> {
     let id = account::client_id();
     let mut accounts = account::Accounts::load();
     let pass = account::launch(
@@ -114,12 +162,13 @@ fn prepare_and_launch(home: PathBuf, progress: Progress) -> Result<Child> {
     accounts.add(account::store(), player.clone(), &secrets)?;
     accounts.save()?;
     let file = account::write_session_file(&home.join("sessions"), &player, &secrets)?;
+    let game_dir = profile_dir(&home, profile);
     let child = Command::new(engine)
-        .current_dir(&home)
+        .current_dir(&game_dir)
         .arg("--home")
         .arg(&home)
         .arg("--game-dir")
-        .arg(&home)
+        .arg(&game_dir)
         .arg("--resources")
         .arg(
             home.join(".local/horizon-client")
@@ -141,6 +190,10 @@ struct App {
     window: Option<Arc<Window>>,
     login: login::Login,
     settings: bool,
+    worlds: Option<Worlds>,
+    photos: photo_cache::PhotoCache,
+    chooser: Option<chooser::Chooser>,
+    profile: u32,
     api: GraphicsApi,
     start: Instant,
     pointer: (f32, f32),
@@ -154,6 +207,7 @@ struct App {
     child: Option<(Child, Instant)>,
     seconds: u64,
     smoke: bool,
+    smoke_step: usize,
 }
 impl App {
     fn play(&mut self) {
@@ -169,8 +223,9 @@ impl App {
         self.worker = Some(rx);
         let home = self.home.clone();
         let progress = self.progress.clone();
+        let profile = self.profile;
         std::thread::spawn(move || {
-            let _ = tx.send(prepare_and_launch(home, progress).map_err(|e| e.to_string()));
+            let _ = tx.send(prepare_and_launch(home, profile, progress).map_err(|e| e.to_string()));
         });
     }
     fn action(&mut self, a: Action) {
@@ -181,21 +236,78 @@ impl App {
         pages::feedback(a);
         let id = account::client_id().unwrap_or_default();
         match a {
+            HomeTab(pages::HomeTab::Worlds) => {
+                let dir = profile_dir(&self.home, self.profile).join("saves");
+                self.worlds = Some(Worlds {
+                    names: pages::world_folders_in(&dir),
+                    dir,
+                    scroll: 0.,
+                    view: None,
+                });
+            }
+            HomeTab(pages::HomeTab::Overview) => self.worlds = None,
+            ViewWorld(i) => {
+                if let Some(worlds) = &mut self.worlds
+                    && let Some(name) = worlds.names.get(i)
+                {
+                    let path = worlds.dir.join(name).join("icon.png");
+                    worlds.view = Some(pages::PhotoView {
+                        title: name.clone(),
+                        key: photo_cache::file_key(&path),
+                        source: photo_cache::Source::File(path),
+                    });
+                }
+            }
+            ClosePhoto => {
+                if let Some(worlds) = &mut self.worlds {
+                    worlds.view = None;
+                }
+            }
             Play => self.play(),
             Page(pages::Page::Account) => self.login.visible = true,
             Page(pages::Page::Settings) => self.settings = true,
             Page(pages::Page::Play) => self.settings = false,
+            Discord => {
+                self.message =
+                    platform::open_login_url(horizon_client::discord_presence::DISCORD_INVITE)
+                        .err();
+            }
+            Profile => self.chooser = Some(chooser::Chooser::profiles(&self.home, self.profile)),
+            Dismiss => self.chooser = None,
+            ChooseProfile(profile) => {
+                let dir = profile_dir(&self.home, profile);
+                match std::fs::create_dir_all(&dir).and_then(|_| {
+                    std::fs::write(self.home.join("selected-profile"), profile.to_string())
+                }) {
+                    Ok(()) => {
+                        self.profile = profile;
+                        self.api = Graphics::load(&dir).api;
+                    }
+                    Err(e) => self.message = Some(e.to_string()),
+                }
+                self.chooser = None;
+            }
             Renderer => {
-                let choices = GraphicsApi::choices();
-                let at = choices.iter().position(|a| *a == self.api).unwrap_or(0);
-                let next = choices[(at + 1) % choices.len()];
-                let mut g = Graphics::load(&self.home);
+                self.chooser = Some(chooser::Chooser::renderers(
+                    self.api,
+                    self.renderer.as_ref().map(|r| {
+                        format!(
+                            "GPU: {} / {} {}",
+                            r.info.name, r.info.driver, r.info.driver_info
+                        )
+                    }),
+                ))
+            }
+            ChooseRenderer(next) => {
+                let dir = profile_dir(&self.home, self.profile);
+                let mut g = Graphics::load(&dir);
                 g.api = next;
-                g.save(&self.home);
-                self.api = Graphics::load(&self.home).api;
+                g.save(&dir);
+                self.api = Graphics::load(&dir).api;
                 if self.api != next {
                     self.message = Some("Could not save renderer setting".into());
                 }
+                self.chooser = None;
             }
             SignIn => self.login.start(&id),
             DeviceSignIn => self.login.start_device(&id),
@@ -206,6 +318,52 @@ impl App {
             ReviewApp => self.login.review_app(),
             _ => self.message = Some("This Volt screen has not been ported to Windows yet.".into()),
         }
+    }
+    /// Exercise navigation through the actual hit rectangles after each present. No credentials,
+    /// network, writes to settings or invocation of Play are needed for this startup check.
+    fn smoke_frame(&mut self) -> Result<bool> {
+        use pages::{HomeTab, Page};
+        let path = [
+            Action::Page(Page::Account),
+            Action::CloseLogin,
+            Action::Profile,
+            Action::Dismiss,
+            Action::HomeTab(HomeTab::Worlds),
+            Action::HomeTab(HomeTab::Overview),
+            Action::Page(Page::Settings),
+            Action::Renderer,
+            Action::Dismiss,
+            Action::Page(Page::Play),
+        ];
+        if let Some(&next) = path.get(self.smoke_step) {
+            let &(rect, _) = self
+                .targets
+                .iter()
+                .find(|(_, a)| *a == next)
+                .ok_or_else(|| format!("Missing Volt hit target at step {}", self.smoke_step))?;
+            let actual = self
+                .hit(rect[0] + rect[2] / 2., rect[1] + rect[3] / 2.)
+                .ok_or("Hit rectangle missing")?;
+            if actual != next {
+                return Err(
+                    format!("Obstructed Volt hit target at step {}", self.smoke_step).into(),
+                );
+            }
+            self.action(actual);
+            self.smoke_step += 1;
+            Ok(false)
+        } else if self.targets.iter().any(|(_, a)| *a == Action::Play) {
+            self.smoke = false;
+            Ok(true)
+        } else {
+            Err("Did not return to Volt home".into())
+        }
+    }
+    fn hit(&self, x: f32, y: f32) -> Option<Action> {
+        self.targets
+            .iter()
+            .find(|([l, t, w, h], _)| x >= *l && x < l + w && y >= *t && y < t + h)
+            .map(|(_, a)| *a)
     }
     fn draw(&mut self) -> Result<bool> {
         self.login.poll();
@@ -246,18 +404,32 @@ impl App {
         );
         self.density = ui.density;
         self.targets.clear();
-        pages::draw(
-            &mut ui,
-            &mut self.targets,
-            self.start.elapsed().as_secs_f32(),
-            self.settings,
-            self.api,
-            &self.login,
-            self.seconds,
-            self.ready,
-            *self.progress.lock().unwrap(),
-            self.message.as_deref(),
-        );
+        self.photos.poll();
+        if let Some(worlds) = &mut self.worlds {
+            pages::worlds_page(
+                &mut ui,
+                &mut self.targets,
+                self.start.elapsed().as_secs_f32(),
+                worlds,
+                &mut self.photos,
+            );
+        } else {
+            pages::draw(
+                &mut ui,
+                &mut self.targets,
+                self.start.elapsed().as_secs_f32(),
+                self.settings,
+                self.api,
+                &self.login,
+                self.seconds,
+                self.ready,
+                *self.progress.lock().unwrap(),
+                self.message.as_deref(),
+            );
+        }
+        if let Some(c) = &mut self.chooser {
+            c.draw(&mut ui, &mut self.targets);
+        }
         ui.finish();
         let shown = r.render(&loading_frame(&b))?;
         if !shown {
@@ -320,6 +492,19 @@ impl ApplicationHandler for App {
                     r.resize(s.width, s.height);
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let dy = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y * 38.0,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 / self.density,
+                };
+                if let Some(c) = &mut self.chooser {
+                    c.scroll -= dy;
+                } else if let Some(worlds) = &mut self.worlds
+                    && worlds.view.is_none()
+                {
+                    worlds.scroll -= dy;
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = (position.x as f32, position.y as f32)
             }
@@ -329,23 +514,32 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 let (x, y) = (self.pointer.0 / self.density, self.pointer.1 / self.density);
-                if let Some((_, a)) = self
-                    .targets
-                    .iter()
-                    .find(|([l, t, w, h], _)| x >= *l && x < l + w && y >= *t && y < t + h)
-                {
-                    self.action(*a);
+                if let Some(a) = self.hit(x, y) {
+                    self.action(a);
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed
                     && event.logical_key == Key::Named(NamedKey::Escape) =>
             {
-                self.login.close();
-                self.settings = false;
+                if let Some(worlds) = &mut self.worlds {
+                    if worlds.view.take().is_none() {
+                        self.worlds = None;
+                    }
+                } else if self.chooser.take().is_none() {
+                    self.login.close();
+                    self.settings = false;
+                }
             }
             WindowEvent::RedrawRequested => match self.draw() {
-                Ok(true) if self.smoke => el.exit(),
+                Ok(true) if self.smoke => match self.smoke_frame() {
+                    Ok(true) => el.exit(),
+                    Ok(false) => {}
+                    Err(e) => {
+                        self.fatal = Some(e.to_string());
+                        el.exit();
+                    }
+                },
                 Ok(_) => {}
                 Err(e) => {
                     self.fatal = Some(e.to_string());
@@ -359,10 +553,25 @@ impl ApplicationHandler for App {
 fn run() -> Result<()> {
     let home = backend::data_dir();
     std::fs::create_dir_all(&home)?;
+    let _lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(home.join("volt-launcher.lock"))?;
+    _lock
+        .try_lock()
+        .map_err(|e| format!("Cannot lock Volt home (another launcher may be running): {e}"))?;
+    let profile = std::fs::read_to_string(home.join("selected-profile"))
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     let gui = UiResources::load(&home.join("installer"), &home.join("installer"))?;
     let mut app = App {
         ready: official_install::ready(&home),
-        api: Graphics::load(&home).api,
+        api: Graphics::load(&profile_dir(&home, profile)).api,
+        profile,
+        chooser: None,
         seconds: std::fs::read_to_string(home.join("play-seconds"))
             .ok()
             .and_then(|s| s.parse().ok())
@@ -373,6 +582,8 @@ fn run() -> Result<()> {
         window: None,
         login: login::Login::new(),
         settings: false,
+        photos: photo_cache::PhotoCache::new(),
+        worlds: None,
         start: Instant::now(),
         pointer: (0., 0.),
         density: 1.,
@@ -382,11 +593,15 @@ fn run() -> Result<()> {
         worker: None,
         progress: Default::default(),
         child: None,
+        smoke_step: 0,
         smoke: std::env::args().any(|a| a == "--smoke-frame"),
     };
     EventLoop::new()?.run_app(&mut app)?;
     if let Some(e) = app.fatal {
         return Err(e.into());
+    }
+    if app.smoke {
+        return Err("Volt frame test closed before completing".into());
     }
     Ok(())
 }
