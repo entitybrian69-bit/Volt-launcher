@@ -1,0 +1,51 @@
+name: Volt Windows engine
+on:
+  push:
+    branches: ['arena/**', pc-windows]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: volt-windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+      HORIZON_NO_AUDIO: '1'
+      HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
+      HORIZON_TELEMETRY_URL: 'off'
+      CARGO_PROFILE_FAST_INCREMENTAL: 'false'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Isolate player data
+        shell: pwsh
+        run: |
+          foreach ($key in 'HORIZON_HOME','HORIZON_LAUNCHER_HOME','XDG_DATA_HOME','XDG_CONFIG_HOME','HORIZON_LAUNCHER_TRASH','HORIZON_LAUNCHER_CLIPBOARD','HORIZON_LAUNCHER_DESKTOP') {
+            "$key=$env:RUNNER_TEMP\volt test\$key" >> $env:GITHUB_ENV
+          }
+      - name: Encode and decode a replay with Windows Media Foundation
+        run: cargo test --locked -p volt-windows-media --target x86_64-pc-windows-msvc
+      - name: Build native game with audio, controllers and sandboxed mods
+        run: cargo build --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client --features mods
+      - name: Check DLL imports and start the real game CLI
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/fast/horizon-client.exe'
+          python tools/check_imports.py $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $help = & $exe --help
+          if ($LASTEXITCODE -ne 0 -or -not ($help -join "`n").Contains('--resources')) { throw 'Game CLI did not start' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: volt-windows-engine-only
+          path: |
+            target/x86_64-pc-windows-msvc/fast/horizon-client.exe
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+          if-no-files-found: error

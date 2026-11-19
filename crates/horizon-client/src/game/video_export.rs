@@ -1,8 +1,8 @@
 //! Volt Replay's MP4 export: frames the renderer reads back are converted
 //! to YUV, pushed through the device's hardware H.264 encoder and muxed
 //! into an `.mp4`, entirely on-device (`libmediandk`, resolved at runtime
-//! like the Android DNS bindings). Desktop builds drain the frames and
-//! report that export is Android-only.
+//! like the Android DNS bindings). Windows uses the Media Foundation H.264
+//! sink writer with the same YUV conversion and replay clock.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -120,6 +120,7 @@ fn encode_worker(receiver: Receiver<Frame>, stop: &AtomicBool, path: PathBuf) ->
     match encode(&receiver, stop, &path) {
         Ok(note) => note,
         Err(e) => {
+            #[cfg(not(windows))] // The Windows writer commits only finalized output.
             let _ = std::fs::remove_file(&path);
             format!("Export failed: {e}")
         }
@@ -140,7 +141,7 @@ fn next_frame(receiver: &Receiver<Frame>, stop: &AtomicBool) -> Option<Frame> {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", windows)))]
 fn encode(
     receiver: &Receiver<Frame>,
     stop: &AtomicBool,
@@ -149,6 +150,140 @@ fn encode(
     // Drain so the renderer never blocks; MediaCodec is Android's.
     while next_frame(receiver, stop).is_some() {}
     Err("MP4 export needs Android's hardware encoder.".to_string())
+}
+
+#[cfg(windows)]
+fn encode(receiver: &Receiver<Frame>, stop: &AtomicBool, path: &std::path::Path) -> Result<String, String> {
+    let first = next_frame(receiver, stop).ok_or("no frames arrived")?;
+    let size = first.size;
+    let (w, h) = (size[0] & !1, size[1] & !1);
+    let bytes = w.checked_mul(h).and_then(|n| n.checked_add(n / 2)).ok_or("frame too large")?;
+    if w < 64 || h < 64 {
+        return Err("the frame is too small to encode".into());
+    }
+    let mut last = None;
+    let frames = std::iter::once(first)
+        .chain(std::iter::from_fn(|| next_frame(receiver, stop)))
+        .filter(|f| {
+            if f.size != size || last.is_some_and(|pts| f.pts_us <= pts) { return false; }
+            last = Some(f.pts_us);
+            true
+        })
+        .map(|f| {
+            let mut data = vec![0; bytes as usize];
+            fill_yuv(&mut data, &f, w as usize, h as usize, w as usize, h as usize, true);
+            (f.pts_us, data)
+        });
+    let count = volt_windows_media::write_mp4(path, w, h, frames).map_err(|e| e.to_string())?;
+    Ok(format!("Saved {} ({count} frames).", path.display()))
+}
+
+#[cfg(any(windows, target_os = "android"))]
+/// Converts `frame`'s packed pixels (cropped to `w`×`h`) into the
+/// encoder's YUV 4:2:0 layout inside `out` (BT.601 limited range).
+pub(in crate::game) fn fill_yuv(
+    out: &mut [u8],
+    frame: &Frame,
+    w: usize,
+    h: usize,
+    stride: usize,
+    slice: usize,
+    semi_planar: bool,
+) {
+    let src_w = frame.size[0] as usize;
+    let (ri, bi) = if frame.bgra { (2usize, 0usize) } else { (0usize, 2usize) };
+    let pixels = &frame.pixels;
+    // One luma row from the packed source into `dst` (stride-wide).
+    let luma_row = |row: usize, dst: &mut [u8]| {
+        let src = &pixels[row * src_w..row * src_w + w];
+        for (d, px) in dst[..w].iter_mut().zip(src) {
+            let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
+            *d = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
+        }
+    };
+    // One chroma value pair for the subsampled pixel at (`row`, `col`).
+    let uv_at = |row: usize, col: usize| {
+        let px = pixels[row * 2 * src_w + col * 2];
+        let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
+        let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+        let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+        (u, v)
+    };
+    // The convert was the recorder thread's bottleneck above 720p (one
+    // scalar pass per pixel): band the disjoint luma and chroma rows
+    // across a few cores. Small frames stay single-threaded.
+    let bands = if h >= 540 {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .clamp(1, 4)
+    } else {
+        1
+    };
+    let (y_plane, chroma) = out.split_at_mut(stride * slice);
+    let c_h = h / 2;
+    let cs = stride / 2;
+    let plane = cs * slice.div_ceil(2);
+    std::thread::scope(|scope| {
+        let y_rows = h.div_ceil(bands);
+        for (band, chunk) in y_plane[..stride * h].chunks_mut(stride * y_rows).enumerate() {
+            let mut work = move || {
+                for (r, dst) in chunk.chunks_mut(stride).enumerate() {
+                    luma_row(band * y_rows + r, dst);
+                }
+            };
+            if bands > 1 {
+                scope.spawn(work);
+            } else {
+                work();
+            }
+        }
+        if c_h == 0 {
+            return;
+        }
+        let c_rows = c_h.div_ceil(bands);
+        if semi_planar {
+            for (band, chunk) in chroma[..stride * c_h].chunks_mut(stride * c_rows).enumerate()
+            {
+                let mut work = move || {
+                    for (r, dst) in chunk.chunks_mut(stride).enumerate() {
+                        let row = band * c_rows + r;
+                        for col in 0..w / 2 {
+                            let (u, v) = uv_at(row, col);
+                            dst[col * 2] = u;
+                            dst[col * 2 + 1] = v;
+                        }
+                    }
+                };
+                if bands > 1 {
+                    scope.spawn(work);
+                } else {
+                    work();
+                }
+            }
+        } else {
+            let (u_plane, v_plane) = chroma.split_at_mut(plane);
+            let u_chunks = u_plane[..cs * c_h].chunks_mut(cs * c_rows);
+            let v_chunks = v_plane[..cs * c_h].chunks_mut(cs * c_rows);
+            for (band, (uc, vc)) in u_chunks.zip(v_chunks).enumerate() {
+                let mut work = move || {
+                    for (r, (ud, vd)) in uc.chunks_mut(cs).zip(vc.chunks_mut(cs)).enumerate() {
+                        let row = band * c_rows + r;
+                        for col in 0..w / 2 {
+                            let (u, v) = uv_at(row, col);
+                            ud[col] = u;
+                            vd[col] = v;
+                        }
+                    }
+                };
+                if bands > 1 {
+                    scope.spawn(work);
+                } else {
+                    work();
+                }
+            }
+        }
+    });
 }
 
 #[cfg(target_os = "android")]
@@ -461,112 +596,7 @@ pub(super) mod media {
         }
     }
 
-    /// Converts `frame`'s packed pixels (cropped to `w`×`h`) into the
-    /// encoder's YUV 4:2:0 layout inside `out` (BT.601 limited range).
-    pub(in crate::game) fn fill_yuv(
-        out: &mut [u8],
-        frame: &Frame,
-        w: usize,
-        h: usize,
-        stride: usize,
-        slice: usize,
-        semi_planar: bool,
-    ) {
-        let src_w = frame.size[0] as usize;
-        let (ri, bi) = if frame.bgra { (2usize, 0usize) } else { (0usize, 2usize) };
-        let pixels = &frame.pixels;
-        // One luma row from the packed source into `dst` (stride-wide).
-        let luma_row = |row: usize, dst: &mut [u8]| {
-            let src = &pixels[row * src_w..row * src_w + w];
-            for (d, px) in dst[..w].iter_mut().zip(src) {
-                let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
-                *d = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16).clamp(0, 255) as u8;
-            }
-        };
-        // One chroma value pair for the subsampled pixel at (`row`, `col`).
-        let uv_at = |row: usize, col: usize| {
-            let px = pixels[row * 2 * src_w + col * 2];
-            let (r, g, b) = (px[ri] as i32, px[1] as i32, px[bi] as i32);
-            let u = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-            let v = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-            (u, v)
-        };
-        // The convert was the recorder thread's bottleneck above 720p (one
-        // scalar pass per pixel): band the disjoint luma and chroma rows
-        // across a few cores. Small frames stay single-threaded.
-        let bands = if h >= 540 {
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(1)
-                .clamp(1, 4)
-        } else {
-            1
-        };
-        let (y_plane, chroma) = out.split_at_mut(stride * slice);
-        let c_h = h / 2;
-        let cs = stride / 2;
-        let plane = cs * slice.div_ceil(2);
-        std::thread::scope(|scope| {
-            let y_rows = h.div_ceil(bands);
-            for (band, chunk) in y_plane[..stride * h].chunks_mut(stride * y_rows).enumerate() {
-                let mut work = move || {
-                    for (r, dst) in chunk.chunks_mut(stride).enumerate() {
-                        luma_row(band * y_rows + r, dst);
-                    }
-                };
-                if bands > 1 {
-                    scope.spawn(work);
-                } else {
-                    work();
-                }
-            }
-            if c_h == 0 {
-                return;
-            }
-            let c_rows = c_h.div_ceil(bands);
-            if semi_planar {
-                for (band, chunk) in chroma[..stride * c_h].chunks_mut(stride * c_rows).enumerate()
-                {
-                    let mut work = move || {
-                        for (r, dst) in chunk.chunks_mut(stride).enumerate() {
-                            let row = band * c_rows + r;
-                            for col in 0..w / 2 {
-                                let (u, v) = uv_at(row, col);
-                                dst[col * 2] = u;
-                                dst[col * 2 + 1] = v;
-                            }
-                        }
-                    };
-                    if bands > 1 {
-                        scope.spawn(work);
-                    } else {
-                        work();
-                    }
-                }
-            } else {
-                let (u_plane, v_plane) = chroma.split_at_mut(plane);
-                let u_chunks = u_plane[..cs * c_h].chunks_mut(cs * c_rows);
-                let v_chunks = v_plane[..cs * c_h].chunks_mut(cs * c_rows);
-                for (band, (uc, vc)) in u_chunks.zip(v_chunks).enumerate() {
-                    let mut work = move || {
-                        for (r, (ud, vd)) in uc.chunks_mut(cs).zip(vc.chunks_mut(cs)).enumerate() {
-                            let row = band * c_rows + r;
-                            for col in 0..w / 2 {
-                                let (u, v) = uv_at(row, col);
-                                ud[col] = u;
-                                vd[col] = v;
-                            }
-                        }
-                    };
-                    if bands > 1 {
-                        scope.spawn(work);
-                    } else {
-                        work();
-                    }
-                }
-            }
-        });
-    }
+    pub(in crate::game) use super::fill_yuv;
 
     pub(super) fn encode(
         receiver: &Receiver<Frame>,

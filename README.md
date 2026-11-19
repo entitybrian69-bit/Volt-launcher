@@ -19,6 +19,8 @@
 
 <div align="center">
 
+**Windows PC port:** [Migration status, feature inventory and developer build](docs/windows-port.md). No Windows installer is available yet.
+
 ## ⚡ Download
 
 | Android device | Download |
