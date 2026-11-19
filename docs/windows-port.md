@@ -140,12 +140,19 @@ Set `HORIZON_MSA_CLIENT_ID` to your approved public Microsoft client ID; no
 credentials are bundled. PC account metadata lives under `%LOCALAPPDATA%\Volt Launcher`
 (or `HORIZON_LAUNCHER_HOME`); secrets use a separate Credential Manager service.
 Place the mods-enabled `horizon-client.exe` and allowlisted generated
-`engine-data.zip` from `tools/android_build.py:engine_data(public=True)` beside the
-GUI for installation. Never substitute a private developer resource bundle.
+`engine-data.zip` beside the GUI for installation. Build that archive with
+`python tools/windows_engine_tables.py engine-data.zip --from-directory .local/horizon-client/26.3`
+after preparing the pinned inputs. CI restores the fork's generated table cache or
+runs the pinned preparation, then checks the version, allowlist and ZIP integrity. Never substitute a private developer resource bundle.
 
 Play checks ownership off the UI thread, installs official resources per player,
 and supplies a short-lived one-use session file to the engine. The Settings action
-persists the engine graphics API. The original profile chooser selects or creates isolated game directories, and the Worlds grid and picture viewer read saves from that profile. Catalog, other galleries and Controls Studio
+persists the engine graphics API. The original profile chooser selects or creates isolated game
+directories. Worlds and its picture viewer read the selected profile’s saves. Multiplayer
+reads and edits the same `servers.dat` as the game; selecting a server requests an
+ownership-gated engine launch. Named offline play is only selectable alongside a
+verified owner and does not authorize a download without a live entitlement check.
+Catalog, other galleries and Controls Studio
 routes are **not yet ported**; a rendered frame is not proof of account, install,
 gameplay or full navigation parity. The Windows workflow attempts an actual presented
 home frame and account/profile/Worlds/renderer navigation on its hosted Windows runner. For a Windows 11 x64 client result,

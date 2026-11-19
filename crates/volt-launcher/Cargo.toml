@@ -11,6 +11,8 @@ test = false
 
 [target.'cfg(windows)'.dependencies]
 horizon-client = { path = "../horizon-client" }
+base64 = "0.22"
+horizon-world = { path = "../horizon-world" }
 horizon-core = { path = "../horizon-core" }
 horizon-theme = { path = "../horizon-theme" }
 horizon-port-pack = { path = "../horizon-port-pack" }

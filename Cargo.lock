@@ -4212,11 +4212,13 @@ name = "volt-launcher"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "base64",
  "getrandom 0.3.4",
  "horizon-client",
  "horizon-core",
  "horizon-port-pack",
  "horizon-theme",
+ "horizon-world",
  "image",
  "keyring",
  "open",

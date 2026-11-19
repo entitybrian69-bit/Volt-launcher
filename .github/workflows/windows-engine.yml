@@ -1,4 +1,4 @@
-name: Volt Windows engine
+name: Volt Windows launcher and engine
 on:
   push:
     branches: ['arena/**', pc-windows]
@@ -15,6 +15,48 @@ concurrency:
   group: volt-windows-${{ github.ref }}-${{ inputs.windows11 && 'win11' || 'hosted' }}
   cancel-in-progress: true
 jobs:
+  tables:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Restore allowlisted generated tables from this fork's preparation cache
+        id: tables-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .local/horizon-client-tables
+          key: engine-tables-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_build.py', 'tools/android_prepare.py') }}
+      - uses: actions/setup-java@v5
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Prepare missing tables from pinned upstream inputs
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        run: |
+          PYTHONPATH=tools python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import lab
+          pin = json.loads(Path('research-lock.json').read_text())['minecraft']
+          sha, version = pin['manifest_sha1'], pin['version']
+          lab.download(f'https://piston-meta.mojang.com/v1/packages/{sha}/{version}.json', Path(f'.local/minecraft/{version}/manifest.json'), sha)
+          PY
+          python3 tools/android_prepare.py --java-home "$JAVA_HOME"
+      - name: Produce only the real installer's allowlisted generated input
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('research-lock.json'))['minecraft']['version'])")
+          root=.local/horizon-client
+          if [[ "${{ steps.tables-cache.outputs.cache-hit }}" = true ]]; then root=.local/horizon-client-tables; fi
+          python3 tools/windows_engine_tables.py .local/volt/engine-data.zip --from-directory "$root/$version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: _internal-volt-engine-tables
+          path: .local/volt/engine-data.zip
+          retention-days: 1
+          if-no-files-found: error
   native:
     runs-on: ${{ inputs.windows11 && 'volt-win11-x64-interactive' || 'windows-latest' }}
     timeout-minutes: 120
@@ -39,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           foreach ($key in 'HORIZON_HOME','HORIZON_LAUNCHER_HOME','XDG_DATA_HOME','XDG_CONFIG_HOME','HORIZON_LAUNCHER_TRASH','HORIZON_LAUNCHER_CLIPBOARD','HORIZON_LAUNCHER_DESKTOP') {
-            "$key=$env:RUNNER_TEMP\volt test\$key" >> $env:GITHUB_ENV
+            "$key=$env:RUNNER_TEMP\volt test $env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT\$key" >> $env:GITHUB_ENV
           }
       - name: Encode and decode a replay with Windows Media Foundation
         run: cargo test --locked -p volt-windows-media --target x86_64-pc-windows-msvc

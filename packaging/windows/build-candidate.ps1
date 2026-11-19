@@ -10,7 +10,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $payloadDir = (Get-Item -LiteralPath $Payload).FullName
-foreach ($file in 'Volt Launcher.exe','horizon-client.exe','LICENSE','THIRD_PARTY_NOTICES.md') {
+foreach ($file in 'Volt Launcher.exe','horizon-client.exe','engine-data.zip','LICENSE','THIRD_PARTY_NOTICES.md') {
     if (!(Test-Path -LiteralPath (Join-Path $payloadDir $file) -PathType Leaf)) { throw "Missing public payload file: $file" }
 }
 if ((Get-FileHash -LiteralPath "$payloadDir/Volt Launcher.exe").Hash -eq (Get-FileHash -LiteralPath "$payloadDir/horizon-client.exe").Hash) {
@@ -21,6 +21,8 @@ foreach ($file in 'Volt Launcher.exe','horizon-client.exe') {
     python "$repo/tools/check_imports.py" --windows-x64 "$payloadDir/$file"
     if ($LASTEXITCODE -ne 0) { throw "Failed DLL import audit: $file" }
 }
+python "$repo/tools/windows_engine_tables.py" "$payloadDir/engine-data.zip"
+if ($LASTEXITCODE -ne 0) { throw 'Missing, private or invalid generated engine tables' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
 if ((Test-Path -LiteralPath $out) -or $out.StartsWith($payloadDir + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Choose a new output directory outside the payload'

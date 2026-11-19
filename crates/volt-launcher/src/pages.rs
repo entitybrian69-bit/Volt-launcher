@@ -6,12 +6,15 @@ use horizon_client::{
 include!("../../horizon-client/src/launcher_ui/page.rs");
 include!("../../horizon-client/src/launcher_ui/home.rs");
 include!("../../horizon-client/src/launcher_ui/gallery.rs");
+include!("../../horizon-client/src/launcher_ui/servers.rs");
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Action {
     Play,
     Page(Page),
     Profile,
     ViewWorld(usize),
+    SaveServer,
+    ConnectServer(usize),
     ClosePhoto,
     HomeTab(HomeTab),
     Discord,
@@ -41,6 +44,7 @@ pub fn draw(
     settings: bool,
     api: GraphicsApi,
     login: &crate::login::Login,
+    offline_name: &str,
     seconds: u64,
     ready: bool,
     progress: Option<InstallProgress>,
@@ -70,16 +74,13 @@ pub fn draw(
         liquid_home(
             ui,
             [0., 0., w, h],
-            &login.status(""),
+            &login.status(offline_name),
             seconds,
             ready,
             progress,
             message,
             targets,
         );
-    }
-    if login.visible {
-        login.draw(ui, targets, "", false);
     }
 }
 
@@ -92,20 +93,7 @@ pub(super) fn worlds_page(
 ) {
     let (w, h) = (ui.w, ui.h);
     draw_launcher_scene(ui, w, h, phase);
-    let (x, y) = (16., 14.);
-    let back = [x, y, 92., 38.];
-    ui.rounded(x, y, 92., 38., 19., theme::GLASS());
-    ui.border(x, y, 92., 38., 19., theme::GLASS_BORDER());
-    draw_centered_text(ui, Face::LauncherMedium, 13., back, theme::TEXT(), "< Home");
-    targets.push((back, Action::HomeTab(HomeTab::Overview)));
-    ui.text(
-        Face::Display,
-        21.,
-        x + 106.,
-        y + 5.,
-        theme::TEXT(),
-        "Worlds",
-    );
+    let (x, y) = tab_header(ui, targets, "Worlds");
     world_grid(
         ui,
         [x, y + 50., w - 2. * x, h - 2. * y - 50.],
@@ -118,5 +106,47 @@ pub(super) fn worlds_page(
     if let Some(view) = &worlds.view {
         targets.clear();
         draw_photo_viewer(ui, targets, photos, view, w, h);
+    }
+}
+
+fn tab_header(ui: &mut Ui, targets: &mut Vec<([f32; 4], Action)>, title: &str) -> (f32, f32) {
+    let (x, y) = (16., 14.);
+    let back = [x, y, 92., 38.];
+    ui.rounded(x, y, 92., 38., 19., theme::GLASS());
+    ui.border(x, y, 92., 38., 19., theme::GLASS_BORDER());
+    draw_centered_text(ui, Face::LauncherMedium, 13., back, theme::TEXT(), "< Home");
+    targets.push((back, Action::HomeTab(HomeTab::Overview)));
+    ui.text(Face::Display, 21., x + 106., y + 5., theme::TEXT(), title);
+    (x, y)
+}
+pub(super) fn servers_page(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    phase: f32,
+    servers: &mut crate::Servers,
+    photos: &mut crate::photo_cache::PhotoCache,
+) {
+    let (w, h) = (ui.w, ui.h);
+    draw_launcher_scene(ui, w, h, phase);
+    let (x, y) = tab_header(ui, targets, "Multiplayer");
+    server_rows(
+        ui,
+        [x, y + 50., w - 2. * x, h - 2. * y - 50.],
+        &servers.address,
+        &servers.rows,
+        photos,
+        &mut servers.scroll,
+        targets,
+        None,
+    );
+    if let Some(note) = &servers.note {
+        ui.text(
+            Face::LauncherRegular,
+            12.,
+            x + 230.,
+            y + 12.,
+            theme::MUTED(),
+            note,
+        );
     }
 }

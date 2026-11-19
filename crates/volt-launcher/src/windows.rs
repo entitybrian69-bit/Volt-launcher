@@ -6,6 +6,15 @@ mod photo_cache;
 mod skin_preview {
     include!("../../horizon-client/src/launcher_ui/picture_hash.rs");
 }
+#[path = "../../../launcher/src/server_list.rs"]
+mod server_list;
+struct Servers {
+    rows: Vec<server_list::Server>,
+    address: String,
+    editing: bool,
+    scroll: f32,
+    note: Option<String>,
+}
 struct Worlds {
     dir: PathBuf,
     names: Vec<String>,
@@ -122,7 +131,12 @@ use winit::{
 };
 
 type Progress = Arc<Mutex<Option<InstallProgress>>>;
-fn prepare_and_launch(home: PathBuf, profile: u32, progress: Progress) -> Result<Child> {
+fn prepare_and_launch(
+    home: PathBuf,
+    profile: u32,
+    server: Option<String>,
+    progress: Progress,
+) -> Result<Child> {
     let id = account::client_id();
     let mut accounts = account::Accounts::load();
     let pass = account::launch(
@@ -149,22 +163,9 @@ fn prepare_and_launch(home: PathBuf, profile: u32, progress: Progress) -> Result
         std::fs::copy(tables, home.join("engine-data.zip"))?;
         official_install::install_with_progress(&home, |p| *progress.lock().unwrap() = Some(p))?;
     }
-    let (player, secrets) = pass
-        .session
-        .ok_or("A signed-in Minecraft profile is required.")?;
-    // Renew once more after a potentially long install; session files have a short lifetime.
-    let (player, secrets) = account::fresh(
-        &account::Endpoints::live(),
-        id.as_deref().unwrap_or(""),
-        &player,
-        secrets,
-    )?;
-    accounts.add(account::store(), player.clone(), &secrets)?;
-    accounts.save()?;
-    let file = account::write_session_file(&home.join("sessions"), &player, &secrets)?;
     let game_dir = profile_dir(&home, profile);
-    let child = Command::new(engine)
-        .current_dir(&game_dir)
+    let mut cmd = Command::new(engine);
+    cmd.current_dir(&game_dir)
         .arg("--home")
         .arg(&home)
         .arg("--game-dir")
@@ -173,11 +174,36 @@ fn prepare_and_launch(home: PathBuf, profile: u32, progress: Progress) -> Result
         .arg(
             home.join(".local/horizon-client")
                 .join(horizon_core::VANILLA_VERSION),
-        )
-        .arg("--session-file")
-        .arg(&file)
-        .spawn();
-    if child.is_err() {
+        );
+    if let Some(server) = server {
+        cmd.arg("--server").arg(server);
+    }
+    let mut session = None;
+    if let Some((player, secrets)) = pass.session {
+        let (player, secrets) = account::fresh(
+            &account::Endpoints::live(),
+            id.as_deref().unwrap_or(""),
+            &player,
+            secrets,
+        )?;
+        accounts.add(account::store(), player.clone(), &secrets)?;
+        accounts.save()?;
+        let file = account::write_session_file(&home.join("sessions"), &player, &secrets)?;
+        cmd.arg("--session-file").arg(&file);
+        session = Some(file);
+    } else if let Some(name) = accounts.name_arg() {
+        // Only an explicitly selected offline name, after the same owner gate above.
+        cmd.arg("--name").arg(name).envs(accounts.look_env());
+    } else {
+        return Err(pass
+            .offline
+            .unwrap_or_else(|| "Sign in again to start this profile.".into())
+            .into());
+    }
+    let child = cmd.spawn();
+    if child.is_err()
+        && let Some(file) = session
+    {
         let _ = std::fs::remove_file(file);
     }
     Ok(child?)
@@ -191,6 +217,9 @@ struct App {
     login: login::Login,
     settings: bool,
     worlds: Option<Worlds>,
+    servers: Option<Servers>,
+    editing_name: bool,
+    offline_name: String,
     photos: photo_cache::PhotoCache,
     chooser: Option<chooser::Chooser>,
     profile: u32,
@@ -210,11 +239,11 @@ struct App {
     smoke_step: usize,
 }
 impl App {
-    fn play(&mut self) {
+    fn play(&mut self, server: Option<String>) {
         if self.worker.is_some() || self.child.is_some() {
             return;
         }
-        if !self.login.signed_in {
+        if !self.login.signed_in && !account::Accounts::load().has_owner(account::store()) {
             self.login.visible = true;
             return;
         }
@@ -225,7 +254,9 @@ impl App {
         let progress = self.progress.clone();
         let profile = self.profile;
         std::thread::spawn(move || {
-            let _ = tx.send(prepare_and_launch(home, profile, progress).map_err(|e| e.to_string()));
+            let _ = tx.send(
+                prepare_and_launch(home, profile, server, progress).map_err(|e| e.to_string()),
+            );
         });
     }
     fn action(&mut self, a: Action) {
@@ -245,7 +276,76 @@ impl App {
                     view: None,
                 });
             }
-            HomeTab(pages::HomeTab::Overview) => self.worlds = None,
+            HomeTab(pages::HomeTab::Overview) => {
+                self.worlds = None;
+                self.servers = None;
+            }
+            HomeTab(pages::HomeTab::Multiplayer) => {
+                self.servers = Some(Servers {
+                    rows: server_list::List::load(&profile_dir(&self.home, self.profile)).servers(),
+                    address: String::new(),
+                    scroll: 0.,
+                    editing: false,
+                    note: None,
+                });
+            }
+            Field("server") => {
+                if let Some(s) = &mut self.servers {
+                    s.editing = true;
+                    s.note = Some("Type a server address, then press Enter to save.".into());
+                }
+            }
+            SaveServer => {
+                if let Some(s) = &mut self.servers {
+                    let dir = profile_dir(&self.home, self.profile);
+                    let address = s.address.trim();
+                    let result = server_list::List::try_load(&dir).and_then(|mut l| {
+                        if l.servers()
+                            .iter()
+                            .any(|srv| srv.ip.eq_ignore_ascii_case(address))
+                        {
+                            return Err("Server already saved.".into());
+                        }
+                        l.add(address, address)?;
+                        l.save(&dir)?;
+                        s.rows = l.servers();
+                        Ok(())
+                    });
+                    s.editing = false;
+                    s.note = Some(
+                        result
+                            .err()
+                            .unwrap_or_else(|| "Saved to this instance.".into()),
+                    );
+                }
+            }
+            ConnectServer(i) => {
+                if let Some(ip) = self
+                    .servers
+                    .as_ref()
+                    .and_then(|s| s.rows.get(i))
+                    .map(|s| s.ip.clone())
+                {
+                    self.play(Some(ip));
+                }
+            }
+            Field("name") => self.editing_name = true,
+            FinishNameEdit => {
+                let mut ac = account::Accounts::load();
+                let result = ac
+                    .play_as(
+                        account::store(),
+                        account::Player::Offline(self.offline_name.clone()),
+                    )
+                    .and_then(|_| ac.save());
+                self.editing_name = false;
+                self.login.refresh_status();
+                if let Err(e) = result {
+                    self.login.hide();
+                    self.message = Some(e);
+                    self.offline_name = account::Accounts::load().name_arg().unwrap_or("").into();
+                }
+            }
             ViewWorld(i) => {
                 if let Some(worlds) = &mut self.worlds
                     && let Some(name) = worlds.names.get(i)
@@ -263,7 +363,7 @@ impl App {
                     worlds.view = None;
                 }
             }
-            Play => self.play(),
+            Play => self.play(None),
             Page(pages::Page::Account) => self.login.visible = true,
             Page(pages::Page::Settings) => self.settings = true,
             Page(pages::Page::Play) => self.settings = false,
@@ -312,7 +412,10 @@ impl App {
             SignIn => self.login.start(&id),
             DeviceSignIn => self.login.start_device(&id),
             SignOut => self.login.sign_out(),
-            CloseLogin | CancelLogin => self.login.close(),
+            CloseLogin | CancelLogin => {
+                self.editing_name = false;
+                self.login.close();
+            }
             LoginLink => self.login.open_link(),
             CopyLoginCode => self.login.copy_code(),
             ReviewApp => self.login.review_app(),
@@ -329,6 +432,8 @@ impl App {
             Action::Profile,
             Action::Dismiss,
             Action::HomeTab(HomeTab::Worlds),
+            Action::HomeTab(HomeTab::Overview),
+            Action::HomeTab(HomeTab::Multiplayer),
             Action::HomeTab(HomeTab::Overview),
             Action::Page(Page::Settings),
             Action::Renderer,
@@ -405,7 +510,15 @@ impl App {
         self.density = ui.density;
         self.targets.clear();
         self.photos.poll();
-        if let Some(worlds) = &mut self.worlds {
+        if let Some(servers) = &mut self.servers {
+            pages::servers_page(
+                &mut ui,
+                &mut self.targets,
+                self.start.elapsed().as_secs_f32(),
+                servers,
+                &mut self.photos,
+            );
+        } else if let Some(worlds) = &mut self.worlds {
             pages::worlds_page(
                 &mut ui,
                 &mut self.targets,
@@ -421,6 +534,7 @@ impl App {
                 self.settings,
                 self.api,
                 &self.login,
+                &self.offline_name,
                 self.seconds,
                 self.ready,
                 *self.progress.lock().unwrap(),
@@ -429,6 +543,14 @@ impl App {
         }
         if let Some(c) = &mut self.chooser {
             c.draw(&mut ui, &mut self.targets);
+        }
+        if self.login.visible {
+            self.login.draw(
+                &mut ui,
+                &mut self.targets,
+                &self.offline_name,
+                self.editing_name,
+            );
         }
         ui.finish();
         let shown = r.render(&loading_frame(&b))?;
@@ -499,6 +621,8 @@ impl ApplicationHandler for App {
                 };
                 if let Some(c) = &mut self.chooser {
                     c.scroll -= dy;
+                } else if let Some(servers) = &mut self.servers {
+                    servers.scroll -= dy;
                 } else if let Some(worlds) = &mut self.worlds
                     && worlds.view.is_none()
                 {
@@ -520,9 +644,44 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed
+                    && event.logical_key != Key::Named(NamedKey::Escape)
+                    && (self.login.visible && self.editing_name
+                        || !self.login.visible
+                            && self.servers.as_ref().is_some_and(|s| s.editing)) =>
+            {
+                if event.logical_key == Key::Named(NamedKey::Enter) {
+                    self.action(if self.editing_name {
+                        Action::FinishNameEdit
+                    } else {
+                        Action::SaveServer
+                    });
+                } else {
+                    let (field, max) = if self.editing_name {
+                        (&mut self.offline_name, 16)
+                    } else {
+                        (&mut self.servers.as_mut().unwrap().address, 255)
+                    };
+                    if event.logical_key == Key::Named(NamedKey::Backspace) {
+                        field.pop();
+                    } else if let Some(text) = event.text {
+                        for c in text.chars().filter(|c| !c.is_control()) {
+                            if field.len() + c.len_utf8() <= max {
+                                field.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed
                     && event.logical_key == Key::Named(NamedKey::Escape) =>
             {
-                if let Some(worlds) = &mut self.worlds {
+                if self.login.visible {
+                    self.login.close();
+                    self.editing_name = false;
+                } else if self.servers.is_some() {
+                    self.servers = None;
+                } else if let Some(worlds) = &mut self.worlds {
                     if worlds.view.take().is_none() {
                         self.worlds = None;
                     }
@@ -584,6 +743,9 @@ fn run() -> Result<()> {
         settings: false,
         photos: photo_cache::PhotoCache::new(),
         worlds: None,
+        servers: None,
+        editing_name: false,
+        offline_name: account::Accounts::load().name_arg().unwrap_or("").into(),
         start: Instant::now(),
         pointer: (0., 0.),
         density: 1.,
