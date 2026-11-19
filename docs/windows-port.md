@@ -161,3 +161,20 @@ home frame and account/profile/Worlds/renderer navigation on its hosted Windows 
 dispatch with `windows11: true` on a fork-managed signed-in interactive runner
 labelled `volt-win11-x64-interactive`. The job checks OS edition/build/architecture;
 Windows Server evidence does not satisfy this gate. No verified player package yet.
+
+**Verified native GUI milestone (2026-11-19):** [hosted Windows job
+135631501582](https://github.com/luciferstudios/Volt-launcherPc/actions/runs/44544533197/job/135631501582),
+commit `428b8e6`. The locked MSVC x64 GUI and mods-enabled engine build passed.
+The GUI import audit and 19-second startup/navigation step passed: the app
+presented its home, activated 16 targets on rendered frames (including Account,
+Instances, Worlds, Multiplayer, Captures, Replays, Settings and the renderer
+chooser), returned to Home and exited successfully. The separate engine CLI
+startup/import audit and engine-only packaging rejection also passed. The
+allowlist/version/CRC check produced a generated-table input, not a release.
+This test did not sign in, download Minecraft, exercise a populated profile or
+start a licensed world. [Windows 11 desktop run
+44544532879](https://github.com/luciferstudios/Volt-launcherPc/actions/runs/44544532879)
+was dispatched for the same source; its native job was still awaiting the
+interactive x64 runner at the time of this entry. No installer, portable ZIP,
+release checksum or player download is certified by either the build or this
+hosted navigation test.
