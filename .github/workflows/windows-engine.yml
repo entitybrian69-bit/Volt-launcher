@@ -25,6 +25,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - name: Check licensed test configuration before reserving a desktop
+        if: inputs.licensed_play
+        env:
+          APP_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
+          WINDOWS11: ${{ inputs.windows11 }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, uuid
+          if os.environ['WINDOWS11'].lower() != 'true':
+              raise SystemExit('Licensed test requires windows11=true')
+          try:
+              if not uuid.UUID(os.environ['APP_ID']).int:
+                  raise ValueError('empty app id')
+          except ValueError:
+              raise SystemExit('Set Actions variable VOLT_MSA_CLIENT_ID to the approved public application ID and re-dispatch')
+          PYTHON
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
@@ -69,6 +85,7 @@ jobs:
     timeout-minutes: 180
     env:
       RUSTFLAGS: -C target-feature=+crt-static
+      HORIZON_NO_KEYCHAIN: '1'
       HORIZON_NO_AUDIO: '1'
       HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
       HORIZON_TELEMETRY_URL: 'off'
@@ -99,6 +116,8 @@ jobs:
       - name: Read live memory counters for Volt Boost and the HUD
         run: cargo test --locked -p horizon-threads --target x86_64-pc-windows-msvc --lib windows_memory_counters
       - name: Build Volt Launcher and native game with audio, controllers and sandboxed mods
+        env:
+          HORIZON_MSA_CLIENT_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
         shell: pwsh
         run: |
           cargo build --message-format=short --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client -p volt-launcher --bin volt-launcher --features horizon-client/mods 2>&1 | ForEach-Object {
@@ -113,6 +132,7 @@ jobs:
           python tools/check_imports.py --windows-x64 $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $stderr = "$env:RUNNER_TEMP/volt-frame-stderr.txt"
+          $env:HORIZON_LAUNCHER_HOME = Join-Path $env:RUNNER_TEMP ('Volt GUI ' + [guid]::NewGuid())
           $p = Start-Process $exe -ArgumentList '--smoke-frame' -RedirectStandardError $stderr -PassThru
           if (!$p.WaitForExit(120000)) { $p.Kill(); throw 'No rendered Volt home frame within two minutes' }
           if ($p.ExitCode -ne 0) {
@@ -121,6 +141,9 @@ jobs:
             }
             throw "Volt GUI failed: $($p.ExitCode)"
           }
+          $layout = Get-Content -LiteralPath "$env:HORIZON_LAUNCHER_HOME/horizon-touch.json" -Raw | ConvertFrom-Json
+          if (@($layout.custom_buttons).Count -lt 1 -or !$layout.custom_buttons) { throw 'Studio did not persist the edited layout' }
+          if ((Get-Content -LiteralPath "$env:HORIZON_LAUNCHER_HOME/home-style" -Raw) -ne 'liquid') { throw 'Home style was not restored' }
       - name: Check DLL imports and start the real game CLI
         shell: pwsh
         run: |

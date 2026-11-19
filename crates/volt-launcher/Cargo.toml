@@ -11,6 +11,7 @@ test = false
 
 [target.'cfg(windows)'.dependencies]
 horizon-client = { path = "../horizon-client" }
+glam = "0.30"
 base64 = "0.22"
 horizon-world = { path = "../horizon-world" }
 horizon-core = { path = "../horizon-core" }

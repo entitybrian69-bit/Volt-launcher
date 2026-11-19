@@ -154,8 +154,7 @@ ownership-gated engine launch. Named offline play is only selectable alongside a
 verified owner and does not authorize a download without a live entitlement check.
 Captures and Replays reuse the Android grid/rows, thumbnail decoder and full-screen
 picture viewer. Watch and MP4 pass the selected replay to the gated game process;
-this is not proof that an entire replay exports in game. Catalog, Classic Home,
-live recorder and Controls Studio are **not yet ported**; a rendered frame is not proof of account, install,
+this is not proof that an entire replay exports in game. Remote Catalog, recorder audio/clip mode, and complete Controls Studio device testing are **still outstanding**; a rendered frame is not proof of account, install,
 gameplay or full navigation parity. The Windows workflow attempts an actual presented
 home frame and account/profile/Worlds/renderer navigation on its hosted Windows runner. For a Windows 11 x64 client result,
 dispatch with `windows11: true` on a fork-managed signed-in interactive runner
@@ -183,3 +182,13 @@ hosted navigation test.
 The new acceptance path and packaged-frame probes are test tooling, not evidence
 of a successful licensed playthrough. Windows Logs now uses the same diagnostics
 panel as Android; Refresh checks local game and crash-log metadata.
+
+**Desktop feature work (awaiting verification):** Settings switches between the shared
+Liquid and Classic home layouts. The Controls button opens the original visual editor
+on the selected profile; mouse drag, physical-keyboard text, preset save/load/export
+and PNG import are wired to Windows. This is not proof of in-game touchscreen parity.
+F10 → Recorder uses the renderer’s GPU capture and native H.264 writer, with the
+chosen rate/resolution and HUD layers; Windows capture is explicitly video-only,
+not Android AAC or the 30-second clip ring. Test it by starting and stopping in a
+real world, opening the resulting profile MP4 from Captures, checking playback,
+resolution and duration and confirming no recording continues after Stop.

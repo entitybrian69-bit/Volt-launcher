@@ -1,4 +1,8 @@
+#[path = "../../horizon-client/src/android/controls_studio.rs"]
+mod controls_studio;
+mod documents;
 mod launch;
+use controls_studio::{ControlsStudio, StudioAction};
 #[path = "../../horizon-client/src/android/login.rs"]
 mod login;
 mod media;
@@ -6,8 +10,15 @@ mod pages;
 use launch::{Destination, Progress, prepare_and_launch};
 #[path = "../../horizon-client/src/android/photo_cache.rs"]
 mod photo_cache;
-mod skin_preview {
-    include!("../../horizon-client/src/launcher_ui/picture_hash.rs");
+#[path = "../../horizon-client/src/android/skin_preview.rs"]
+mod skin_preview;
+#[derive(Default)]
+struct Avatar {
+    rect: Option<[f32; 4]>,
+    dragging: bool,
+    yaw: f32,
+    pitch: f32,
+    uuid: u128,
 }
 #[path = "../../../launcher/src/server_list.rs"]
 mod server_list;
@@ -108,6 +119,9 @@ mod backend {
     }
 }
 mod platform {
+    // Text input comes from the active desktop keyboard, not an Android IME.
+    pub fn show(_: &str) {}
+    pub fn hide() {}
     pub fn copy_login_code(text: &str) -> bool {
         arboard::Clipboard::new()
             .and_then(|mut c| c.set_text(text))
@@ -147,6 +161,8 @@ use winit::{
 };
 
 struct App {
+    studio: ControlsStudio,
+    avatar: Avatar,
     home: PathBuf,
     gui: UiResources,
     renderer: Option<Renderer>,
@@ -360,7 +376,32 @@ impl App {
                 }
             }
             Play => self.play(Destination::Home),
-            Page(pages::Page::Account) => self.login.visible = true,
+            Page(pages::Page::Controls) => self
+                .studio
+                .open_for_profile(&profile_dir(&self.home, self.profile)),
+            Studio(action) => {
+                if let Some(note) = self.studio.handle_action(
+                    action,
+                    &self.home,
+                    &profile_dir(&self.home, self.profile),
+                ) {
+                    self.message = Some(note);
+                }
+            }
+            ToggleHomeStyle => {
+                let liquid = !pages::theme::liquid();
+                if let Err(e) = std::fs::write(
+                    self.home.join("home-style"),
+                    if liquid { "liquid" } else { "classic" },
+                ) {
+                    self.message = Some(e.to_string());
+                } else {
+                    pages::theme::set(true, liquid, 0x79e59c);
+                }
+            }
+            Page(pages::Page::Installed) => self.action(Action::Profile),
+            Page(pages::Page::VoltSettings) => self.settings = true,
+            Account | Page(pages::Page::Account) => self.login.visible = true,
             Page(pages::Page::Settings) => self.settings = true,
             Page(pages::Page::Play) => self.settings = false,
             Discord => {
@@ -424,7 +465,7 @@ impl App {
         }
     }
     /// Exercise navigation through the actual hit rectangles after each present. No credentials,
-    /// network, writes to settings or invocation of Play are needed for this startup check.
+    /// network or invocation of Play; the layout and style edits use a new test profile.
     fn smoke_frame(&mut self) -> Result<bool> {
         use pages::{HomeTab, Page};
         let path = [
@@ -443,7 +484,17 @@ impl App {
             Action::HomeTab(HomeTab::Overview),
             Action::HomeTab(HomeTab::Replays),
             Action::HomeTab(HomeTab::Overview),
+            Action::Page(Page::Controls),
+            Action::Studio(StudioAction::ToggleContextMenu),
+            Action::Studio(StudioAction::AddButton),
+            Action::Studio(StudioAction::ApplyAndClose),
             Action::Page(Page::Settings),
+            Action::ToggleHomeStyle,
+            Action::Page(Page::Play),
+            Action::Account,
+            Action::CloseLogin,
+            Action::Page(Page::Settings),
+            Action::ToggleHomeStyle,
             Action::Renderer,
             Action::Dismiss,
             Action::Page(Page::Play),
@@ -518,7 +569,9 @@ impl App {
         self.density = ui.density;
         self.targets.clear();
         self.photos.poll();
-        if let Some(summary) = &self.console {
+        if self.studio.open {
+            self.studio.draw(&mut ui, &mut self.targets);
+        } else if let Some(summary) = &self.console {
             pages::logs_page(
                 &mut ui,
                 &mut self.targets,
@@ -562,6 +615,7 @@ impl App {
                 self.ready,
                 *self.progress.lock().unwrap(),
                 self.message.as_deref(),
+                &mut self.avatar,
             );
         }
         if (self.media.is_some() || self.servers.is_some() || self.settings)
@@ -671,7 +725,53 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.pointer = (position.x as f32, position.y as f32)
+                if self.avatar.dragging {
+                    self.avatar.yaw = (self.avatar.yaw
+                        + (position.x as f32 - self.pointer.0) * 0.6 / self.density)
+                        % 360.;
+                    self.avatar.pitch = (self.avatar.pitch
+                        + (position.y as f32 - self.pointer.1) * 0.4 / self.density)
+                        .clamp(-55., 55.);
+                }
+                self.pointer = (position.x as f32, position.y as f32);
+                if self.studio.open {
+                    self.studio
+                        .pointer_move(self.pointer.0 / self.density, self.pointer.1 / self.density);
+                }
+            }
+            WindowEvent::Focused(false) if self.avatar.dragging => {
+                self.avatar.dragging = false;
+            }
+            WindowEvent::MouseInput {
+                button: MouseButton::Left,
+                state: ElementState::Pressed,
+                ..
+            } if !self.login.visible
+                && self.chooser.is_none()
+                && !self.settings
+                && !self.studio.open
+                && self.media.is_none()
+                && self.worlds.is_none()
+                && self.servers.is_none()
+                && self.console.is_none() =>
+            {
+                let (x, y) = (self.pointer.0 / self.density, self.pointer.1 / self.density);
+                self.avatar.dragging = self
+                    .avatar
+                    .rect
+                    .is_some_and(|[l, t, w, h]| x >= l && x < l + w && y >= t && y < t + h)
+                    && self.hit(x, y).is_none();
+            }
+            WindowEvent::Focused(false) if self.studio.open => {
+                self.studio.pointer_up();
+            }
+            WindowEvent::MouseInput {
+                button: MouseButton::Left,
+                state: ElementState::Pressed,
+                ..
+            } if self.studio.open => {
+                self.studio
+                    .pointer_down(self.pointer.0 / self.density, self.pointer.1 / self.density);
             }
             WindowEvent::MouseInput {
                 button: MouseButton::Left,
@@ -679,8 +779,28 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 let (x, y) = (self.pointer.0 / self.density, self.pointer.1 / self.density);
+                if std::mem::take(&mut self.avatar.dragging) {
+                    return;
+                }
+                if self.studio.open && self.studio.pointer_up() {
+                    return;
+                }
                 if let Some(a) = self.hit(x, y) {
                     self.action(a);
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && self.studio.open =>
+            {
+                use horizon_client::osk::Output;
+                if event.logical_key == Key::Named(NamedKey::Escape) {
+                    self.studio.back();
+                } else if event.logical_key == Key::Named(NamedKey::Enter) {
+                    self.studio.handle_osk(&Output::Enter);
+                } else if event.logical_key == Key::Named(NamedKey::Backspace) {
+                    self.studio.handle_osk(&Output::Backspace);
+                } else if let Some(text) = event.text {
+                    self.studio.handle_osk(&Output::Text(text.to_string()));
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -775,8 +895,24 @@ fn run() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let gui = UiResources::load(&home.join("installer"), &home.join("installer"))?;
+    let liquid = !std::fs::read_to_string(home.join("home-style")).is_ok_and(|s| s == "classic");
+    pages::theme::set(true, liquid, 0x79e59c);
+    let resources = if official_install::ready(&home) {
+        home.join(".local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION)
+    } else {
+        home.join("installer")
+    };
+    let gui = UiResources::load(&resources, &resources)?;
     let mut app = App {
+        avatar: Avatar {
+            uuid: account::Accounts::load()
+                .selected()
+                .and_then(|a| u128::from_str_radix(&a.uuid.replace("-", ""), 16).ok())
+                .unwrap_or(0),
+            ..Default::default()
+        },
+        studio: ControlsStudio::default(),
         ready: official_install::ready(&home),
         api: Graphics::load(&profile_dir(&home, profile)).api,
         profile,
@@ -820,6 +956,22 @@ fn run() -> Result<()> {
     Ok(())
 }
 fn main() {
+    // Navigation QA edits a control layout and the home style. Never run it in a
+    // real profile (including one specified explicitly). Reserve a new home.
+    if std::env::args().any(|a| a == "--smoke-frame") {
+        let Some(home) = std::env::var_os("HORIZON_LAUNCHER_HOME").map(PathBuf::from) else {
+            std::process::exit(2);
+        };
+        if !home.is_absolute()
+            || home
+                .parent()
+                .is_none_or(|p| std::fs::create_dir_all(p).is_err())
+            || std::fs::create_dir(&home).is_err()
+        {
+            eprintln!("--smoke-frame requires a new isolated HORIZON_LAUNCHER_HOME");
+            std::process::exit(2);
+        }
+    }
     if let Err(e) = run() {
         let _ = std::fs::write(
             backend::data_dir().join("launcher-error.txt"),

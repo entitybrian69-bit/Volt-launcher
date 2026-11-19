@@ -6,6 +6,7 @@ use horizon_client::{
 include!("../../horizon-client/src/launcher_ui/page.rs");
 include!("../../horizon-client/src/launcher_ui/home.rs");
 include!("../../horizon-client/src/launcher_ui/console.rs");
+include!("../../horizon-client/src/launcher_ui/classic.rs");
 include!("../../horizon-client/src/launcher_ui/gallery.rs");
 include!("../../horizon-client/src/launcher_ui/servers.rs");
 include!("../../horizon-client/src/launcher_ui/media.rs");
@@ -13,6 +14,10 @@ include!("../../horizon-client/src/launcher_ui/media.rs");
 pub(crate) enum Action {
     Play,
     Logs,
+    Account,
+    OpenVoltBoost,
+    ToggleHomeStyle,
+    Studio(crate::controls_studio::StudioAction),
     Page(Page),
     Profile,
     ViewWorld(usize),
@@ -60,11 +65,25 @@ pub fn draw(
     ready: bool,
     progress: Option<InstallProgress>,
     message: Option<&str>,
+    avatar: &mut crate::Avatar,
 ) {
+    avatar.rect = None;
     let (w, h) = (ui.w, ui.h);
     draw_launcher_scene(ui, w, h, phase);
     if settings {
         ui.text(Face::Display, 24., 24., 24., theme::TEXT(), "Settings");
+        button(
+            ui,
+            targets,
+            [24., 154., 360., 52.],
+            if theme::liquid() {
+                "Home style: Liquid Glass"
+            } else {
+                "Home style: Classic"
+            },
+            Action::ToggleHomeStyle,
+            false,
+        );
         button(
             ui,
             targets,
@@ -81,6 +100,33 @@ pub fn draw(
             Action::Page(Page::Play),
             true,
         );
+    } else if !theme::liquid() {
+        avatar.rect = Some(classic_home(
+            ui,
+            [0., 0., w, h],
+            &login.status(offline_name),
+            login.profile.as_deref().unwrap_or(offline_name).to_owned(),
+            seconds,
+            ready,
+            progress,
+            message,
+            targets,
+            |ui, rect| {
+                crate::skin_preview::draw_player_3d(
+                    ui,
+                    rect,
+                    avatar.yaw,
+                    avatar.pitch,
+                    phase,
+                    0.,
+                    2,
+                    3,
+                    None,
+                    None,
+                    avatar.uuid,
+                )
+            },
+        ));
     } else {
         liquid_home(
             ui,

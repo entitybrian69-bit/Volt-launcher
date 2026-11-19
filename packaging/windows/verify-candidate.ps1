@@ -57,6 +57,8 @@ function Test-Startup($directory) {
     }
     # A responsive HWND is not a presented frame. Exercise the installed/extracted
     # binary itself, not another copy from target/ or the staging directory.
+    $info.Environment['HORIZON_LAUNCHER_HOME'] = Join-Path $root ((Split-Path -Leaf $directory) + ' frame probe')
+    $info.Environment['HORIZON_NO_KEYCHAIN'] = '1'
     $info.ArgumentList.Add('--smoke-frame')
     $probe = [Diagnostics.Process]::Start($info)
     try {

@@ -158,7 +158,14 @@ fn encode(
     stop: &AtomicBool,
     path: &std::path::Path,
 ) -> Result<String, String> {
+    encode_windows(receiver,stop,path,30,|_|12_000_000, |_|{})
+}
+
+#[cfg(windows)]
+pub(super) fn encode_windows(receiver:&Receiver<Frame>,stop:&AtomicBool,path:&std::path::Path,
+    fps:u32, bitrate:impl FnOnce(u32)->u32, mut elapsed:impl FnMut(u64)) -> Result<String,String>{
     let first = next_frame(receiver, stop).ok_or("no frames arrived")?;
+    let origin=first.pts_us;
     let size = first.size;
     let (w, h) = (size[0] & !1, size[1] & !1);
     let bytes = w
@@ -181,9 +188,10 @@ fn encode(
         .map(|f| {
             let mut data = vec![0; bytes as usize];
             fill_yuv(&mut data, &f, w as usize, h as usize, w as usize, h as usize, true);
+            elapsed(f.pts_us.saturating_sub(origin) as u64);
             (f.pts_us, data)
         });
-    let count = volt_windows_media::write_mp4(path, w, h, frames).map_err(|e| e.to_string())?;
+    let count = volt_windows_media::write_mp4_at_rate(path, w, h, fps, bitrate(w),frames).map_err(|e| e.to_string())?;
     Ok(format!("Saved {} ({count} frames).", path.display()))
 }
 

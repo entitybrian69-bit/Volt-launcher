@@ -32,13 +32,13 @@ impl Drop for Runtime {
     }
 }
 
-fn video_type(w: u32, h: u32, subtype: &GUID) -> windows::core::Result<IMFMediaType> {
+fn video_type(w: u32, h: u32, fps: u32, subtype: &GUID) -> windows::core::Result<IMFMediaType> {
     unsafe {
         let ty = MFCreateMediaType()?;
         ty.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
         ty.SetGUID(&MF_MT_SUBTYPE, subtype)?;
         ty.SetUINT64(&MF_MT_FRAME_SIZE, (u64::from(w) << 32) | u64::from(h))?;
-        ty.SetUINT64(&MF_MT_FRAME_RATE, (30 << 32) | 1)?;
+        ty.SetUINT64(&MF_MT_FRAME_RATE, (u64::from(fps) << 32) | 1)?;
         ty.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, (1 << 32) | 1)?;
         ty.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
         Ok(ty)
@@ -71,6 +71,21 @@ pub fn write_mp4(
     h: u32,
     frames: impl Iterator<Item = (i64, Vec<u8>)>,
 ) -> Result<u64> {
+    write_mp4_at_rate(path, w, h, 30, 12_000_000, frames)
+}
+
+/// Live recording uses the GPU capture rate and the profile's resolution-dependent bitrate.
+pub fn write_mp4_at_rate(
+    path: &Path,
+    w: u32,
+    h: u32,
+    fps: u32,
+    bitrate: u32,
+    frames: impl Iterator<Item = (i64, Vec<u8>)>,
+) -> Result<u64> {
+    if !(1..=240).contains(&fps) || bitrate == 0 {
+        return Err("invalid H.264 encoding rate".into());
+    }
     let bytes = w
         .checked_mul(h)
         .and_then(|n| n.checked_add(n / 2))
@@ -87,17 +102,17 @@ pub fn write_mp4(
         let _runtime = Runtime::start()?;
         let count = unsafe {
             let writer = MFCreateSinkWriterFromURL(&HSTRING::from(tmp.as_os_str()), None, None)?;
-            let output = video_type(w, h, &MFVideoFormat_H264)?;
-            output.SetUINT32(&MF_MT_AVG_BITRATE, 12_000_000)?;
+            let output = video_type(w, h, fps, &MFVideoFormat_H264)?;
+            output.SetUINT32(&MF_MT_AVG_BITRATE, bitrate)?;
             let stream = writer.AddStream(&output)?;
-            let input = video_type(w, h, &MFVideoFormat_NV12)?;
+            let input = video_type(w, h, fps, &MFVideoFormat_NV12)?;
             input.SetUINT32(&MF_MT_DEFAULT_STRIDE, w)?;
             writer.SetInputMediaType(stream, &input, None)?;
             writer.BeginWriting()?;
             let mut previous: Option<(i64, IMFSample)> = None;
             let mut origin = None;
             let mut count = 0;
-            let mut duration = 10_000_000 / 30;
+            let mut duration = 10_000_000 / i64::from(fps);
             for (pts, data) in frames {
                 if data.len() != bytes as usize {
                     return Err("invalid NV12 frame length".into());
@@ -142,7 +157,10 @@ mod tests {
         let path = root.join("replay.mp4");
         let size = 160 * 120 * 3 / 2;
         let frames = (0..8).map(|i| (i * 40_000, vec![80 + i as u8; size]));
-        assert_eq!(write_mp4(&path, 160, 120, frames)?, 8);
+        assert_eq!(
+            write_mp4_at_rate(&path, 160, 120, 25, 1_200_000, frames)?,
+            8
+        );
         let original = fs::read(&path)?;
         assert!(write_mp4(&path, 160, 120, [(0, vec![0; 8])].into_iter()).is_err());
         assert_eq!(fs::read(&path)?, original);

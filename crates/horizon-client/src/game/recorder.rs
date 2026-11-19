@@ -76,7 +76,7 @@ impl Settings {
                 }
                 "controls" => s.controls = value == "true",
                 "hud" => s.hud = value == "true",
-                "clip" => s.clip = value == "true",
+                "clip" => s.clip = !cfg!(windows) && value == "true",
                 _ => {}
             }
         }
@@ -147,7 +147,10 @@ impl Recording {
         // at the renderer (pooled buffers keep the memory bounded).
         let (sender, frames) = std::sync::mpsc::sync_channel::<Frame>(8);
         let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel(64);
+        #[cfg(not(windows))]
         horizon_client::audio::tap::install(audio_tx);
+        #[cfg(windows)]
+        drop(audio_tx); // No mixer tap until the Windows writer supports an audio track.
         let stop = Arc::new(AtomicBool::new(false));
         let clip_now = Arc::new(AtomicBool::new(false));
         let recorded_us = Arc::new(AtomicU64::new(0));
@@ -184,6 +187,9 @@ impl Recording {
         self.clip_now.store(true, Ordering::Relaxed);
     }
     /// Seconds captured so far (clip mode: seconds currently in the ring).
+    pub fn worker_finished(&self) -> bool {
+        self.worker.as_ref().is_some_and(|w|w.is_finished())
+    }
     pub fn recorded_seconds(&self) -> f64 {
         self.recorded_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
     }
@@ -235,7 +241,16 @@ fn file_name(prefix: &str) -> String {
     )
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(windows)]
+fn work(frames:&Receiver<Frame>, _audio:&Receiver<horizon_client::audio::tap::Chunk>, stop:&AtomicBool,
+    _clip_now:&AtomicBool, recorded_us:&AtomicU64, dir:&Path, settings:Settings) -> String {
+    let path=dir.join(file_name("volt"));
+    if path.exists(){return "A recording with this timestamp already exists; retry in a second.".into();}
+    super::video_export::encode_windows(frames,stop,&path,settings.fps,|w|settings.bitrate(w),
+        |us|recorded_us.store(us, Ordering::Relaxed)).unwrap_or_else(|e|format!("Recording failed: {e}"))
+}
+
+#[cfg(not(any(target_os = "android",windows)))]
 fn work(
     frames: &Receiver<Frame>,
     audio: &Receiver<horizon_client::audio::tap::Chunk>,
