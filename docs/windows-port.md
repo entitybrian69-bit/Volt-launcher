@@ -192,3 +192,10 @@ chosen rate/resolution and HUD layers; Windows capture is explicitly video-only,
 not Android AAC or the 30-second clip ring. Test it by starting and stopping in a
 real world, opening the resulting profile MP4 from Captures, checking playback,
 resolution and duration and confirming no recording continues after Stop.
+
+**Catalog:** Browse, Packs and Shaders can fetch the Horizon registry on Refresh.
+Install checks the current compatible version, revocations, size, archive contents,
+manifest, SHA-256 and signature if the project has a signing key. It never
+compiles downloaded source or replaces an existing player file. The profile’s
+`.hmod`, resource packs and native shader packs still need to be enabled in-game.
+Modrinth, CurseForge, pack updates/removal and full Android catalog parity remain open.

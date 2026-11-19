@@ -1,7 +1,9 @@
+mod catalog;
 #[path = "../../horizon-client/src/android/controls_studio.rs"]
 mod controls_studio;
 mod documents;
 mod launch;
+mod registry;
 use controls_studio::{ControlsStudio, StudioAction};
 #[path = "../../horizon-client/src/android/login.rs"]
 mod login;
@@ -162,6 +164,7 @@ use winit::{
 
 struct App {
     studio: ControlsStudio,
+    catalog: Option<catalog::Catalog>,
     avatar: Avatar,
     home: PathBuf,
     gui: UiResources,
@@ -255,6 +258,7 @@ impl App {
             }
             HomeTab(pages::HomeTab::Overview) => {
                 self.console = None;
+                self.catalog = None;
                 self.worlds = None;
                 self.servers = None;
                 self.media = None;
@@ -399,6 +403,22 @@ impl App {
                     pages::theme::set(true, liquid, 0x79e59c);
                 }
             }
+            Page(p @ (pages::Page::Mods | pages::Page::Packs | pages::Page::Shaders)) => {
+                self.catalog = Some(catalog::Catalog::new(
+                    profile_dir(&self.home, self.profile),
+                    p,
+                ))
+            }
+            RefreshCatalog => {
+                if let Some(c) = self.catalog.as_mut() {
+                    c.request(None);
+                }
+            }
+            InstallProject(i) => {
+                if let Some(c) = self.catalog.as_mut() {
+                    c.request(Some(i));
+                }
+            }
             Page(pages::Page::Installed) => self.action(Action::Profile),
             Page(pages::Page::VoltSettings) => self.settings = true,
             Account | Page(pages::Page::Account) => self.login.visible = true,
@@ -483,6 +503,12 @@ impl App {
             Action::HomeTab(HomeTab::Screenshots),
             Action::HomeTab(HomeTab::Overview),
             Action::HomeTab(HomeTab::Replays),
+            Action::HomeTab(HomeTab::Overview),
+            Action::Page(Page::Mods),
+            Action::HomeTab(HomeTab::Overview),
+            Action::Page(Page::Packs),
+            Action::HomeTab(HomeTab::Overview),
+            Action::Page(Page::Shaders),
             Action::HomeTab(HomeTab::Overview),
             Action::Page(Page::Controls),
             Action::Studio(StudioAction::ToggleContextMenu),
@@ -571,6 +597,14 @@ impl App {
         self.photos.poll();
         if self.studio.open {
             self.studio.draw(&mut ui, &mut self.targets);
+        } else if let Some(c) = &mut self.catalog {
+            c.poll();
+            pages::catalog_page(
+                &mut ui,
+                &mut self.targets,
+                self.start.elapsed().as_secs_f32(),
+                c,
+            );
         } else if let Some(summary) = &self.console {
             pages::logs_page(
                 &mut ui,
@@ -712,6 +746,8 @@ impl ApplicationHandler for App {
                 };
                 if let Some(c) = &mut self.chooser {
                     c.scroll -= dy;
+                } else if let Some(c) = &mut self.catalog {
+                    c.scroll -= dy;
                 } else if let Some(media) = &mut self.media
                     && media.view.is_none()
                 {
@@ -751,6 +787,7 @@ impl ApplicationHandler for App {
                 && !self.settings
                 && !self.studio.open
                 && self.media.is_none()
+                && self.catalog.is_none()
                 && self.worlds.is_none()
                 && self.servers.is_none()
                 && self.console.is_none() =>
@@ -846,6 +883,10 @@ impl ApplicationHandler for App {
                     if m.view.take().is_none() {
                         self.media = None;
                     }
+                } else if self.catalog.is_some() {
+                    if !self.catalog.as_ref().unwrap().busy() {
+                        self.catalog = None;
+                    }
                 } else if self.console.is_some() {
                     self.console = None;
                 } else if self.servers.is_some() {
@@ -913,6 +954,7 @@ fn run() -> Result<()> {
             ..Default::default()
         },
         studio: ControlsStudio::default(),
+        catalog: None,
         ready: official_install::ready(&home),
         api: Graphics::load(&profile_dir(&home, profile)).api,
         profile,

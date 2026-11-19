@@ -4217,6 +4217,7 @@ dependencies = [
  "glam",
  "horizon-client",
  "horizon-core",
+ "horizon-mods",
  "horizon-port-pack",
  "horizon-theme",
  "horizon-world",
@@ -4229,6 +4230,7 @@ dependencies = [
  "url",
  "winit",
  "winresource",
+ "zip",
 ]
 
 [[package]]

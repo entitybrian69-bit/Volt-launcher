@@ -125,7 +125,9 @@ jobs:
             if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
           }
           exit $LASTEXITCODE
-      - name: Present the real Volt home and navigate account, instances, worlds and renderer
+      - name: Verify profile-scoped catalog install, revocation and no overwrite
+        run: cargo test --locked --profile fast --target x86_64-pc-windows-msvc -p volt-launcher --features horizon-client/mods --test registry
+      - name: Present the real Volt home and navigate account, catalog, Studio and both home styles
         shell: pwsh
         run: |
           $exe = 'target/x86_64-pc-windows-msvc/fast/volt-launcher.exe'

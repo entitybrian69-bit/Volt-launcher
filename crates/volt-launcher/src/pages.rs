@@ -17,6 +17,8 @@ pub(crate) enum Action {
     Account,
     OpenVoltBoost,
     ToggleHomeStyle,
+    RefreshCatalog,
+    InstallProject(usize),
     Studio(crate::controls_studio::StudioAction),
     Page(Page),
     Profile,
@@ -270,4 +272,93 @@ pub(super) fn logs_page(
         targets,
         summary,
     );
+}
+
+pub(super) fn catalog_page(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    phase: f32,
+    catalog: &mut crate::catalog::Catalog,
+) {
+    let (w, h) = (ui.w, ui.h);
+    draw_launcher_scene(ui, w, h, phase);
+    let (x, y) = tab_header(ui, targets, catalog.label);
+    let busy = catalog.busy();
+    if busy {
+        targets.clear();
+    } else {
+        styled_button(
+            ui,
+            targets,
+            [w - x - 114., y, 114., 38.],
+            "Refresh",
+            Action::RefreshCatalog,
+            BtnStyle::Secondary,
+            true,
+        );
+    }
+    let status = ui.fit_text(Face::LauncherRegular, 13., &catalog.status, w - x * 2.);
+    ui.text(
+        Face::LauncherRegular,
+        13.,
+        x,
+        y + 50.,
+        theme::MUTED(),
+        &status,
+    );
+    let top = y + 80.;
+    let bottom = h - y;
+    let step = 72.;
+    catalog.scroll = catalog.scroll.clamp(
+        0.,
+        (catalog.rows.len() as f32 * step - (bottom - top).max(0.)).max(0.),
+    );
+    for (i, entry) in catalog.rows.iter().enumerate() {
+        let ry = top + i as f32 * step - catalog.scroll;
+        if ry + step <= top || ry >= bottom {
+            continue;
+        }
+        let start = ui.batch_mut().vertices.len();
+        ui.rounded(x, ry, w - x * 2., 64., 10., theme::CARD());
+        ui.border(x, ry, w - x * 2., 64., 10., theme::BORDER());
+        let avail = (w - x * 2. - 144.).max(1.);
+        let title = ui.fit_text(Face::LauncherMedium, 15., &entry.title, avail);
+        let summary = ui.fit_text(Face::LauncherRegular, 12., &entry.summary, avail);
+        ui.text(
+            Face::LauncherMedium,
+            15.,
+            x + 12.,
+            ry + 9.,
+            theme::TEXT(),
+            &title,
+        );
+        ui.text(
+            Face::LauncherRegular,
+            12.,
+            x + 12.,
+            ry + 35.,
+            theme::MUTED(),
+            &summary,
+        );
+        let by = ry + 14.;
+        if !busy && by >= top && by + 36. <= bottom {
+            styled_button(
+                ui,
+                targets,
+                [w - x - 110., by, 98., 36.],
+                "Install",
+                Action::InstallProject(i),
+                BtnStyle::Primary,
+                true,
+            );
+        }
+        let bounds = [
+            ui.to_batch(x),
+            ui.to_batch(top),
+            ui.to_batch(w - x),
+            ui.to_batch(bottom),
+        ];
+        ui.batch_mut()
+            .clip_since(start, bounds[0], bounds[1], bounds[2], bounds[3]);
+    }
 }
