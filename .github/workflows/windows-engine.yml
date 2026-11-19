@@ -1,0 +1,211 @@
+name: Volt Windows launcher and engine
+on:
+  push:
+    branches: ['arena/**', pc-windows]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      windows11:
+        description: Use a fork-managed interactive Windows 11 x64 runner
+        type: boolean
+        default: false
+      licensed_play:
+        description: Require a tester at the Windows 11 desktop for real sign-in, installation and gameplay
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: volt-windows-${{ github.ref }}-${{ inputs.windows11 && 'win11' || 'hosted' }}
+  # Keep the running hosted compiler long enough to collect diagnostics. Supersede
+  # unassigned Win11 requests rather than queue stale builds for that desktop.
+  cancel-in-progress: ${{ inputs.windows11 == true }}
+jobs:
+  tables:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check licensed test configuration before reserving a desktop
+        if: inputs.licensed_play
+        env:
+          APP_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
+          WINDOWS11: ${{ inputs.windows11 }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, uuid
+          if os.environ['WINDOWS11'].lower() != 'true':
+              raise SystemExit('Licensed test requires windows11=true')
+          try:
+              if not uuid.UUID(os.environ['APP_ID']).int:
+                  raise ValueError('empty app id')
+          except ValueError:
+              raise SystemExit('Set Actions variable VOLT_MSA_CLIENT_ID to the approved public application ID and re-dispatch')
+          PYTHON
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Restore allowlisted generated tables from this fork's preparation cache
+        id: tables-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .local/horizon-client-tables
+          key: engine-tables-v1-${{ runner.os }}-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'mods/horizon/src/test/java/dev/horizonlab/parity/**', 'tools/android_build.py', 'tools/android_prepare.py') }}
+      - uses: actions/setup-java@v5
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Prepare missing tables from pinned upstream inputs
+        if: steps.tables-cache.outputs.cache-hit != 'true'
+        run: |
+          PYTHONPATH=tools python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import lab
+          pin = json.loads(Path('research-lock.json').read_text())['minecraft']
+          sha, version = pin['manifest_sha1'], pin['version']
+          lab.download(f'https://piston-meta.mojang.com/v1/packages/{sha}/{version}.json', Path(f'.local/minecraft/{version}/manifest.json'), sha)
+          PY
+          python3 tools/android_prepare.py --java-home "$JAVA_HOME"
+      - name: Produce only the real installer's allowlisted generated input
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('research-lock.json'))['minecraft']['version'])")
+          root=.local/horizon-client
+          if [[ "${{ steps.tables-cache.outputs.cache-hit }}" = true ]]; then root=.local/horizon-client-tables; fi
+          python3 tools/windows_engine_tables.py .local/volt/engine-data.zip --from-directory "$root/$version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: _internal-volt-engine-tables
+          path: .local/volt/engine-data.zip
+          retention-days: 1
+          if-no-files-found: error
+  native:
+    needs: tables
+    runs-on: ${{ inputs.windows11 && 'volt-win11-x64-interactive' || 'windows-latest' }}
+    timeout-minutes: 180
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+      HORIZON_NO_KEYCHAIN: '1'
+      HORIZON_NO_AUDIO: '1'
+      HORIZON_LAUNCHER_NO_SELF_UPDATE: '1'
+      HORIZON_TELEMETRY_URL: 'off'
+      CARGO_PROFILE_FAST_INCREMENTAL: 'false'
+    steps:
+      - name: Identify Windows edition and validate requested Windows 11 desktop
+        shell: pwsh
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host "$($os.Caption) $($os.BuildNumber) $($os.OSArchitecture)"
+          if ('${{ inputs.licensed_play }}' -eq 'true' -and '${{ inputs.windows11 }}' -ne 'true') { throw 'Licensed acceptance requires the Windows 11 desktop input' }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Require a signed-in client desktop (not session zero)
+        if: inputs.windows11
+        shell: pwsh
+        run: ./packaging/windows/require-win11.ps1
+      - uses: Swatinem/rust-cache@v2
+      - name: Isolate player data
+        shell: pwsh
+        run: |
+          foreach ($key in 'HORIZON_HOME','HORIZON_LAUNCHER_HOME','XDG_DATA_HOME','XDG_CONFIG_HOME','HORIZON_LAUNCHER_TRASH','HORIZON_LAUNCHER_CLIPBOARD','HORIZON_LAUNCHER_DESKTOP') {
+            "$key=$env:RUNNER_TEMP\volt test $env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT\$key" >> $env:GITHUB_ENV
+          }
+      - name: Encode and decode a replay with Windows Media Foundation
+        run: cargo test --locked -p volt-windows-media --target x86_64-pc-windows-msvc
+      - name: Read live memory counters for Volt Boost and the HUD
+        run: cargo test --locked -p horizon-threads --target x86_64-pc-windows-msvc --lib windows_memory_counters
+      - name: Build Volt Launcher and native game with audio, controllers and sandboxed mods
+        env:
+          HORIZON_MSA_CLIENT_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
+        shell: pwsh
+        run: |
+          cargo build --message-format=short --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client -p volt-launcher --bin volt-launcher --features horizon-client/mods 2>&1 | ForEach-Object {
+            Write-Host $_
+            if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
+          }
+          exit $LASTEXITCODE
+      - name: Verify profile-scoped catalog install, revocation and no overwrite
+        run: cargo test --locked --profile fast --target x86_64-pc-windows-msvc -p volt-launcher --features horizon-client/mods --test registry
+      - name: Present the real Volt home and navigate account, catalog, Studio and both home styles
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/fast/volt-launcher.exe'
+          python tools/check_imports.py --windows-x64 $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $stderr = "$env:RUNNER_TEMP/volt-frame-stderr.txt"
+          $env:HORIZON_LAUNCHER_HOME = Join-Path $env:RUNNER_TEMP ('Volt GUI ' + [guid]::NewGuid())
+          $p = Start-Process $exe -ArgumentList '--smoke-frame' -RedirectStandardError $stderr -PassThru
+          if (!$p.WaitForExit(120000)) { $p.Kill(); throw 'No rendered Volt home frame within two minutes' }
+          if ($p.ExitCode -ne 0) {
+            foreach ($file in "$env:HORIZON_LAUNCHER_HOME/launcher-error.txt",$stderr) {
+              Get-Content -LiteralPath $file -Tail 12 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "::error::$_" }
+            }
+            throw "Volt GUI failed: $($p.ExitCode)"
+          }
+          $layout = Get-Content -LiteralPath "$env:HORIZON_LAUNCHER_HOME/horizon-touch.json" -Raw | ConvertFrom-Json
+          if (@($layout.custom_buttons).Count -lt 1 -or !$layout.custom_buttons) { throw 'Studio did not persist the edited layout' }
+          if ((Get-Content -LiteralPath "$env:HORIZON_LAUNCHER_HOME/home-style" -Raw) -ne 'liquid') { throw 'Home style was not restored' }
+      - name: Check DLL imports and start the real game CLI
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/fast/horizon-client.exe'
+          python tools/check_imports.py --windows-x64 $exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $help = & $exe --help
+          if ($LASTEXITCODE -ne 0 -or -not ($help -join "`n").Contains('--resources')) { throw 'Game CLI did not start' }
+      - name: Reject a broken signed-session pipe rather than silently playing offline
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/fast/horizon-client.exe'
+          $info = [Diagnostics.ProcessStartInfo]::new((Resolve-Path $exe).Path)
+          $info.UseShellExecute = $false
+          $info.RedirectStandardInput = $true
+          $info.ArgumentList.Add('--session-stdin')
+          $p = [Diagnostics.Process]::Start($info)
+          try {
+            $p.StandardInput.Write('{}')
+            $p.StandardInput.Close()
+            if (!$p.WaitForExit(30000) -or $p.ExitCode -eq 0) { throw 'Invalid explicit session was not rejected' }
+            if (!(Select-String -Quiet -SimpleMatch 'Invalid launcher session on standard input' -LiteralPath "$env:HORIZON_HOME/logs/latest.log")) { throw 'Engine failed for a different reason' }
+          } finally {
+            if (!$p.HasExited) { $p.Kill($true); $p.WaitForExit() }
+            $p.Dispose()
+          }
+      - name: Release tooling rejects the engine-only build
+        shell: pwsh
+        run: |
+          foreach ($script in Get-ChildItem packaging/windows/*.ps1) {
+            $parseErrors = $null
+            $tokens = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count) { throw ($parseErrors -join "`n") }
+          }
+          $out = Join-Path $env:RUNNER_TEMP 'must-not-be-created'
+          try {
+            ./packaging/windows/build-candidate.ps1 -Payload target/x86_64-pc-windows-msvc/fast -OutputDirectory $out -Version 0.0.1
+            throw 'Engine was accepted as the Volt Launcher'
+          } catch {
+            if ($_.Exception.Message -ne 'Missing public payload file: Volt Launcher.exe') { throw }
+          }
+          if (Test-Path -LiteralPath $out) { throw 'Packaging wrote output before validation' }
+      - uses: actions/download-artifact@v4
+        if: inputs.windows11 && inputs.licensed_play
+        with:
+          name: _internal-volt-engine-tables
+          path: target/x86_64-pc-windows-msvc/fast
+      - name: Human-assisted fresh licensed Play acceptance (no uploads)
+        if: inputs.windows11 && inputs.licensed_play
+        timeout-minutes: 95
+        shell: pwsh
+        env:
+          HORIZON_MSA_CLIENT_ID: ${{ vars.VOLT_MSA_CLIENT_ID }}
+        run: ./packaging/windows/test-licensed-play.ps1 -Payload target/x86_64-pc-windows-msvc/fast
+      - uses: actions/upload-artifact@v4
+        with:
+          name: volt-windows-engine-only
+          path: |
+            target/x86_64-pc-windows-msvc/fast/horizon-client.exe
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+          if-no-files-found: error

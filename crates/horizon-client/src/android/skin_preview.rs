@@ -14,14 +14,7 @@ pub struct CapePreviewTexture {
     pub rgba: Vec<u8>,
 }
 
-pub fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut h = 0xcbf2_9ce4_8422_2325u64;
-    for &b in bytes {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    h
-}
+include!("../launcher_ui/picture_hash.rs");
 
 /// Renders an interactive, depth-tested 3D Minecraft player model (with Classic 4px
 /// or Slim 3px arms, outer 2nd skin layer, directional lighting, and 3D cape)

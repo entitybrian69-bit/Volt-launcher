@@ -1783,7 +1783,7 @@ impl Extras {
         }
     }
 
-    /// Inspects hardware cores, pointer width, and `/proc/meminfo` total RAM to apply the best
+    /// Inspects hardware cores, pointer width, and total physical RAM to apply the best
     /// automatic Volt Boost profile for this device.
     pub fn auto_optimize_device(&mut self) -> VoltBoostPreset {
         let total_ram_mib = detect_total_ram_mib();
@@ -1825,6 +1825,10 @@ impl Extras {
     }
 }
 
+#[cfg(windows)]
+pub use horizon_threads::total_ram_mib as detect_total_ram_mib;
+
+#[cfg(not(windows))]
 pub fn detect_total_ram_mib() -> Option<u64> {
     let text = fs::read_to_string("/proc/meminfo").ok()?;
     for line in text.lines() {

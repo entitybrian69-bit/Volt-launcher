@@ -243,47 +243,8 @@ impl Config {
         self.profile_home(home)
     }
 }
-#[derive(Clone, Copy, PartialEq)]
-pub enum Page {
-    Play,
-    Account,
-    Mods,
-    Packs,
-    Shaders,
-    Controls,
-    Installed,
-    VoltSettings,
-    Settings,
-}
-impl Page {
-    pub const ALL: [Self; 9] = [
-        Self::Play,
-        Self::Account,
-        Self::Mods,
-        Self::Packs,
-        Self::Shaders,
-        Self::Controls,
-        Self::Installed,
-        Self::VoltSettings,
-        Self::Settings,
-    ];
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Play => "Play",
-            Self::Account => "Account",
-            Self::Mods => "Mods",
-            Self::Packs => "Packs",
-            Self::Shaders => "Shaders",
-            Self::Controls => "Controls",
-            Self::Installed => "Installed",
-            Self::VoltSettings => "Volt Settings",
-            Self::Settings => "Settings",
-        }
-    }
-    pub fn is_catalog(self) -> bool {
-        matches!(self, Self::Packs | Self::Shaders)
-    }
-}
+include!("../launcher_ui/page.rs");
+include!("../launcher_ui/captures.rs");
 #[derive(Clone)]
 pub struct ProjectIcon {
     pub hash: u64,
@@ -456,22 +417,7 @@ impl Catalog {
             horizon_client::replay::list(&self.config.game_home(home).join("replays"));
     }
     pub fn refresh_screenshots(&mut self, home: &Path) {
-        self.screenshots = std::fs::read_dir(self.config.game_home(home).join("screenshots"))
-            .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
-            .filter_map(|entry| entry.file_name().to_str()
-                .filter(|s| s.to_ascii_lowercase().ends_with(".png")).map(str::to_owned))
-            .collect();
-        self.screenshots.sort_unstable_by(|a, b| b.cmp(a));
-        self.recordings = std::fs::read_dir(self.config.game_home(home).join("recordings"))
-            .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
-            .filter_map(|entry| {
-                let name = entry.file_name().to_str()
-                    .filter(|s| s.to_ascii_lowercase().ends_with(".mp4")).map(str::to_owned)?;
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                Some((name, size))
-            })
-            .collect();
-        self.recordings.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        (self.screenshots,self.recordings)=capture_files(&self.config.game_home(home));
     }
     pub fn show_installed(&mut self, kind: Option<horizon_client::content_files::Kind>) {
         self.searches.cancel_interest();

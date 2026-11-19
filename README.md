@@ -19,6 +19,8 @@
 
 <div align="center">
 
+**Windows PC port:** [Migration status, feature inventory and developer build](docs/windows-port.md). [Windows 11 administrator setup and private sign-in test](docs/windows-acceptance.md). No Windows installer is available yet.
+
 ## ⚡ Download
 
 | Android device | Download |

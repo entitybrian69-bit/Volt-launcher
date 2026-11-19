@@ -63,7 +63,20 @@ pub fn thread_boost_enabled() -> bool {
     THREAD_BOOST.load(Ordering::Relaxed)
 }
 
-/// Current process resident memory (RSS) in MiB on Linux and Android (`/proc/self/statm`).
+/// Total physical memory available to Windows, in MiB (not the commit limit).
+#[cfg(windows)]
+pub fn total_ram_mib() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: MEMORYSTATUSEX is plain integer storage. Windows requires its size
+    // in dwLength and fills the remaining fields on success.
+    unsafe {
+        let mut status: MEMORYSTATUSEX = std::mem::zeroed();
+        status.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+        (GlobalMemoryStatusEx(&mut status) != 0).then_some(status.ullTotalPhys >> 20)
+    }
+}
+
+/// Current process resident memory (RSS on Linux/Android, working set on Windows), in MiB.
 pub fn resident_ram_mib() -> Option<u64> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
@@ -78,7 +91,23 @@ pub fn resident_ram_mib() -> Option<u64> {
         };
         Some(rss_pages.saturating_mul(page_bytes) / (1024 * 1024))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::{
+            ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+            Threading::GetCurrentProcess,
+        };
+        // SAFETY: the current-process pseudo handle needs no closing. The buffer
+        // has exactly the size passed to the OS and contains only integer fields.
+        unsafe {
+            let mut memory: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+            let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            memory.cb = size;
+            (K32GetProcessMemoryInfo(GetCurrentProcess(), &mut memory, size) != 0)
+                .then_some((memory.WorkingSetSize as u64) >> 20)
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
     {
         None
     }
@@ -405,6 +434,14 @@ pub fn junction(target: &std::path::Path, at: &std::path::Path) -> std::io::Resu
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn windows_memory_counters_are_available_to_an_ordinary_process() {
+        let working_set = super::resident_ram_mib().unwrap();
+        let physical = super::total_ram_mib().unwrap();
+        assert!(working_set > 0 && working_set <= physical);
+    }
+
     /// The hint holds on the platforms that take it.
     #[test]
     fn favouring_a_thread_takes_where_the_os_allows_it() {

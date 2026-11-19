@@ -84,6 +84,7 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 [target.'cfg(windows)'.dependencies]
+volt-windows-media = { path = "../volt-windows-media" }
 # Use the registered URI handler without routing links through Explorer/cmd.
 open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
 # DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).

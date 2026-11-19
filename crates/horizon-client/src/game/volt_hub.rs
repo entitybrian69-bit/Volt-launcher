@@ -174,7 +174,7 @@ impl Game<'_> {
         // takes the capture over or the renderer dropped the sink (the
         // file is finalized and saved either way).
         if self.recorder.is_some()
-            && (self.replay_control().is_some()
+            && (self.recorder.as_ref().is_some_and(|r|r.worker_finished()) || self.replay_control().is_some()
                 || self
                     .renderer
                     .as_ref()
@@ -967,6 +967,7 @@ impl Game<'_> {
                         if s.hud { "ON" } else { "OFF" },
                         Some(Act::RecHud),
                     );
+                    #[cfg(not(windows))]
                     row(
                         &mut ui,
                         &mut targets,
@@ -975,6 +976,9 @@ impl Game<'_> {
                         if s.clip { "ON" } else { "OFF" },
                         Some(Act::RecClipMode),
                     );
+                    #[cfg(windows)]
+                    note(&mut ui,&mut y,"Windows capture: H.264 video only; audio and clip ring unavailable.");
+                    #[cfg(not(windows))]
                     note(
                         &mut ui,
                         &mut y,
