@@ -689,9 +689,9 @@ fn check(ep: &Endpoints, client_id: Option<&str>, account: &Account, secrets: Se
     }
 }
 
-/// Android's session adapter preserves a still-valid token without a network request.
+/// Volt's native session adapters preserve a still-valid token without a network request.
 /// Renewal uses the same ownership/profile checks as the desktop launcher.
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", windows, test))]
 pub fn fresh(
     ep: &Endpoints,
     client_id: &str,

@@ -103,10 +103,13 @@ jobs:
           $exe = 'target/x86_64-pc-windows-msvc/fast/volt-launcher.exe'
           python tools/check_imports.py --windows-x64 $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $p = Start-Process $exe -ArgumentList '--smoke-frame' -PassThru
+          $stderr = "$env:RUNNER_TEMP/volt-frame-stderr.txt"
+          $p = Start-Process $exe -ArgumentList '--smoke-frame' -RedirectStandardError $stderr -PassThru
           if (!$p.WaitForExit(120000)) { $p.Kill(); throw 'No rendered Volt home frame within two minutes' }
           if ($p.ExitCode -ne 0) {
-            Get-Content "$env:HORIZON_LAUNCHER_HOME/launcher-error.txt" -ErrorAction SilentlyContinue
+            foreach ($file in "$env:HORIZON_LAUNCHER_HOME/launcher-error.txt",$stderr) {
+              Get-Content -LiteralPath $file -Tail 12 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "::error::$_" }
+            }
             throw "Volt GUI failed: $($p.ExitCode)"
           }
       - name: Check DLL imports and start the real game CLI

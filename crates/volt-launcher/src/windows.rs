@@ -384,9 +384,14 @@ impl App {
             SignIn => self.login.start(&id),
             DeviceSignIn => self.login.start_device(&id),
             SignOut => self.login.sign_out(),
-            CloseLogin | CancelLogin => {
+            CloseLogin => {
+                self.editing_name = false;
+                self.login.hide();
+            }
+            CancelLogin => {
                 self.editing_name = false;
                 self.login.close();
+                self.login.visible = true;
             }
             LoginLink => self.login.open_link(),
             CopyLoginCode => self.login.copy_code(),
@@ -720,6 +725,7 @@ impl ApplicationHandler for App {
 fn run() -> Result<()> {
     let home = backend::data_dir();
     std::fs::create_dir_all(&home)?;
+    horizon_client::crash::install(home.clone(), "launcher");
     let _lock = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
