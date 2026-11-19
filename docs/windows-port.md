@@ -41,7 +41,7 @@ Rows describe source capabilities, **not** claims of Windows verification.
 | Controls Studio, preset import, custom keys/drawers/images, four touch schemes, keypads, keyboard/IME, mouse capture, controller and feedback | `controls_studio`, `horizon-client-input`, touch/OSK, gilrs and DualSense | Bridge winit IME, raw mouse, touchscreen and focus cancellation; test edits, presets, gamepad navigation and sleep/resume. Phone vibration/gyro require applicable hardware, not simulated callbacks. |
 | Renderer selection, scale, aspect, refresh, orientation, immersive, cutout, custom phone Vulkan drivers | `display`, `gfx`, `graphics`; patched wgpu-hal and winit | Existing desktop Vulkan/DX12/WGL backends; test adapter fallback, DPI, resize, fullscreen, minimize/restore. Android driver packages are not Windows drivers. |
 | Sound, volumes, subtitles, accessibility | `audio`, `sound_engine`, desktop CPAL | WASAPI playback, device switch and mixer tap against prepared sound assets. |
-| Volt Settings / Boost, waypoints, minimap, mods, quick toggles, performance HUD | `volt_features`, `volt_settings_ui`, `volt_mods`, in-game `volt_hub` | Preserve real settings and presets, inspect output on GPU; OS performance hints/thermal data must be explicitly capability-dependent. |
+| Volt Settings / Boost, waypoints, minimap, mods, quick toggles, performance HUD | `volt_features`, `volt_settings_ui`, `volt_mods`, in-game `volt_hub` | Windows memory adapter supplies physical RAM for auto-optimize and current working set for the HUD. Verify presets and output on GPU; OS performance hints/thermal data must be explicitly capability-dependent. |
 | Replay record/watch/seek/camera, MP4 export, recorder, HUD/control layers, clip ring, captures | `game/{volt_gameplay,video_export,recorder}`, replay and renderer readback | **First implementation:** Windows Media Foundation sink for replay export. Real Windows test below. Live H.264 + AAC recording and 30 s clip saving are separate Android MediaCodec paths, **not ported by this change**. |
 | Files/gallery, screenshots, reports, console and crash recovery | `gallery`, `documents`, `diagnostics`, `exit_reports`, `performance`, engine logging | Native open/save dialogs, per-profile directories, log rotation/redaction and local report export. Test locked files, failed writes and forced termination. SAF/MediaStore/tombstones are not Windows APIs. |
 | Discord presence, links, update check/install | `discord_rpc`, `volt_updater`, `launcher/src/signed.rs` | Desktop IPC and safe OS links; fork-specific signed update channel. Never install APK updates. No automatic publishing during bring-up. |
@@ -65,10 +65,18 @@ cargo build --locked --target x86_64-pc-windows-msvc --profile fast -p horizon-c
 ```
 
 `windows-engine.yml` runs the native encode/decode + failed-reexport test,
-then builds the game, checks PE imports and starts its CLI with scratch homes.
+checks Volt Boost's memory counters, then builds the game, checks PE imports and starts its CLI with scratch homes.
 Its artifact is **engine only**. `--help` does not create a window or prove
 that gameplay works. No prepared resources or accounts are provided. Windows
 Explorer icon is derived from `packaging/android/res/drawable-nodpi/launcher_icon.png`.
+
+### Verification evidence
+
+[Native x64 run, 637d899](https://github.com/luciferstudios/Volt-launcherPc/actions/runs/44535445487):
+Media Foundation encoded eight frames, read the H.264 track back as NV12, preserved
+presentation timestamps and kept the previous file after an invalid re-export.
+This is evidence for the codec and filesystem adapter, **not** in-game capture,
+launcher UI, authentication or gameplay proof.
 
 ## Next milestones / release gates
 

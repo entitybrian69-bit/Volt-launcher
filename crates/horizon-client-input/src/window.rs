@@ -525,6 +525,14 @@ pub fn fullscreen_request(
 /// Horizon's icon for the window's title bar and the task bar (X11 and Windows; Wayland takes
 /// it from the `horizon.desktop` entry, macOS from the app bundle). `None` if it can't be read.
 pub fn icon() -> Option<winit::window::Icon> {
+    // Match Explorer and the window switcher to the icon embedded by build.rs.
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::IconExtWindows;
+        if let Ok(icon) = winit::window::Icon::from_resource(1, None) {
+            return Some(icon);
+        }
+    }
     let mut decoder = png::Decoder::new(std::io::Cursor::new(horizon_theme::ICON_PNG));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;

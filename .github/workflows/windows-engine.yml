@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
       - name: Isolate player data
         shell: pwsh
         run: |
@@ -31,8 +32,16 @@ jobs:
           }
       - name: Encode and decode a replay with Windows Media Foundation
         run: cargo test --locked -p volt-windows-media --target x86_64-pc-windows-msvc
+      - name: Read live memory counters for Volt Boost and the HUD
+        run: cargo test --locked -p horizon-threads --target x86_64-pc-windows-msvc --lib windows_memory_counters
       - name: Build native game with audio, controllers and sandboxed mods
-        run: cargo build --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client --features mods
+        shell: pwsh
+        run: |
+          cargo build --message-format=short --profile fast --locked --target x86_64-pc-windows-msvc -p horizon-client --bin horizon-client --features mods 2>&1 | ForEach-Object {
+            Write-Host $_
+            if ("$_" -match '\berror(\[E\d+\])?:') { Write-Host "::error::$_" }
+          }
+          exit $LASTEXITCODE
       - name: Check DLL imports and start the real game CLI
         shell: pwsh
         run: |
