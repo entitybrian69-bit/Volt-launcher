@@ -1,6 +1,9 @@
+mod launch;
 #[path = "../../horizon-client/src/android/login.rs"]
 mod login;
+mod media;
 mod pages;
+use launch::{Destination, Progress, prepare_and_launch};
 #[path = "../../horizon-client/src/android/photo_cache.rs"]
 mod photo_cache;
 mod skin_preview {
@@ -30,6 +33,19 @@ mod chooser {
     };
     include!("../../horizon-client/src/launcher_ui/chooser.rs");
     impl Chooser {
+        pub(super) fn remove(name: String) -> Self {
+            Self {
+                title: "Remove recording?",
+                help: "Deletes only this file from the current profile. This cannot be undone.",
+                device: Some(name),
+                scroll: 0.,
+                choices: vec![
+                    ("Remove".into(), String::new(), Action::ConfirmRemove, false),
+                    ("Cancel".into(), String::new(), Action::Dismiss, true),
+                ],
+            }
+        }
+
         pub(super) fn renderers(active: GraphicsApi, device: Option<String>) -> Self {
             Self {
                 title: "Rendering mode",
@@ -111,14 +127,14 @@ use horizon_client::{
     graphics::{Graphics, GraphicsApi},
     hud::HudBatch,
     launcher_render::{UiResources, loading_frame, loading_renderer},
-    official_install::{self, InstallProgress},
+    official_install,
     ui_theme::Ui,
 };
 use pages::Action;
 use std::{
     path::PathBuf,
-    process::{Child, Command},
-    sync::{Arc, Mutex, mpsc},
+    process::Child,
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 use winit::{
@@ -130,85 +146,6 @@ use winit::{
     window::{Window, WindowId},
 };
 
-type Progress = Arc<Mutex<Option<InstallProgress>>>;
-fn prepare_and_launch(
-    home: PathBuf,
-    profile: u32,
-    server: Option<String>,
-    progress: Progress,
-) -> Result<Child> {
-    let id = account::client_id();
-    let mut accounts = account::Accounts::load();
-    let pass = account::launch(
-        &account::Endpoints::live(),
-        id.as_deref(),
-        account::store(),
-        &mut accounts,
-    )
-    .map_err(|e| e.to_string())?;
-    accounts.save()?;
-    let engine = std::env::current_exe()?.with_file_name("horizon-client.exe");
-    if !engine.is_file() {
-        return Err("The sibling horizon-client.exe is missing.".into());
-    }
-    if !official_install::ready(&home) {
-        if pass.owner.is_none() {
-            return Err("Verify ownership online before downloading Minecraft.".into());
-        }
-        // Only allowlisted generated tables ship with the app. Mojang assets are installed per player.
-        let tables = engine.with_file_name("engine-data.zip");
-        if !tables.is_file() {
-            return Err("Missing engine-data.zip beside Volt Launcher.".into());
-        }
-        std::fs::copy(tables, home.join("engine-data.zip"))?;
-        official_install::install_with_progress(&home, |p| *progress.lock().unwrap() = Some(p))?;
-    }
-    let game_dir = profile_dir(&home, profile);
-    let mut cmd = Command::new(engine);
-    cmd.current_dir(&game_dir)
-        .arg("--home")
-        .arg(&home)
-        .arg("--game-dir")
-        .arg(&game_dir)
-        .arg("--resources")
-        .arg(
-            home.join(".local/horizon-client")
-                .join(horizon_core::VANILLA_VERSION),
-        );
-    if let Some(server) = server {
-        cmd.arg("--server").arg(server);
-    }
-    let mut session = None;
-    if let Some((player, secrets)) = pass.session {
-        let (player, secrets) = account::fresh(
-            &account::Endpoints::live(),
-            id.as_deref().unwrap_or(""),
-            &player,
-            secrets,
-        )?;
-        accounts.add(account::store(), player.clone(), &secrets)?;
-        accounts.save()?;
-        let file = account::write_session_file(&home.join("sessions"), &player, &secrets)?;
-        cmd.arg("--session-file").arg(&file);
-        session = Some(file);
-    } else if let Some(name) = accounts.name_arg() {
-        // Only an explicitly selected offline name, after the same owner gate above.
-        cmd.arg("--name").arg(name).envs(accounts.look_env());
-    } else {
-        return Err(pass
-            .offline
-            .unwrap_or_else(|| "Sign in again to start this profile.".into())
-            .into());
-    }
-    let child = cmd.spawn();
-    if child.is_err()
-        && let Some(file) = session
-    {
-        let _ = std::fs::remove_file(file);
-    }
-    Ok(child?)
-}
-
 struct App {
     home: PathBuf,
     gui: UiResources,
@@ -217,6 +154,7 @@ struct App {
     login: login::Login,
     settings: bool,
     worlds: Option<Worlds>,
+    media: Option<media::Media>,
     servers: Option<Servers>,
     editing_name: bool,
     offline_name: String,
@@ -239,7 +177,7 @@ struct App {
     smoke_step: usize,
 }
 impl App {
-    fn play(&mut self, server: Option<String>) {
+    fn play(&mut self, destination: Destination) {
         if self.worker.is_some() || self.child.is_some() {
             return;
         }
@@ -255,7 +193,7 @@ impl App {
         let profile = self.profile;
         std::thread::spawn(move || {
             let _ = tx.send(
-                prepare_and_launch(home, profile, server, progress).map_err(|e| e.to_string()),
+                prepare_and_launch(home, profile, destination, progress).map_err(|e| e.to_string()),
             );
         });
     }
@@ -279,6 +217,7 @@ impl App {
             HomeTab(pages::HomeTab::Overview) => {
                 self.worlds = None;
                 self.servers = None;
+                self.media = None;
             }
             HomeTab(pages::HomeTab::Multiplayer) => {
                 self.servers = Some(Servers {
@@ -326,7 +265,7 @@ impl App {
                     .and_then(|s| s.rows.get(i))
                     .map(|s| s.ip.clone())
                 {
-                    self.play(Some(ip));
+                    self.play(Destination::Server(ip));
                 }
             }
             Field("name") => self.editing_name = true,
@@ -358,12 +297,45 @@ impl App {
                     });
                 }
             }
+            HomeTab(pages::HomeTab::Screenshots) | HomeTab(pages::HomeTab::Replays) => {
+                self.media = Some(media::Media::new(
+                    profile_dir(&self.home, self.profile),
+                    a == HomeTab(pages::HomeTab::Replays),
+                ))
+            }
+            WatchReplay(i) | ExportReplay(i) => {
+                if let Some(path) = self
+                    .media
+                    .as_ref()
+                    .and_then(|m| m.replays.get(i))
+                    .map(|r| r.path.clone())
+                {
+                    self.play(Destination::Replay(path, a == ExportReplay(i)));
+                }
+            }
+            OpenCaptures | ViewScreenshot(_) | ViewReplayCover(_) | DeleteRecording(_)
+            | DeleteReplay(_) | ConfirmRemove => {
+                if let Some(m) = &mut self.media {
+                    match m.action(a) {
+                        Ok(Some(name)) => self.chooser = Some(chooser::Chooser::remove(name)),
+                        Ok(None) => {}
+                        Err(e) => self.message = Some(e.to_string()),
+                    }
+                }
+                if a == ConfirmRemove {
+                    self.chooser = None;
+                }
+            }
             ClosePhoto => {
+                if let Some(m) = &mut self.media {
+                    m.view = None;
+                }
+
                 if let Some(worlds) = &mut self.worlds {
                     worlds.view = None;
                 }
             }
-            Play => self.play(None),
+            Play => self.play(Destination::Home),
             Page(pages::Page::Account) => self.login.visible = true,
             Page(pages::Page::Settings) => self.settings = true,
             Page(pages::Page::Play) => self.settings = false,
@@ -434,6 +406,10 @@ impl App {
             Action::HomeTab(HomeTab::Worlds),
             Action::HomeTab(HomeTab::Overview),
             Action::HomeTab(HomeTab::Multiplayer),
+            Action::HomeTab(HomeTab::Overview),
+            Action::HomeTab(HomeTab::Screenshots),
+            Action::HomeTab(HomeTab::Overview),
+            Action::HomeTab(HomeTab::Replays),
             Action::HomeTab(HomeTab::Overview),
             Action::Page(Page::Settings),
             Action::Renderer,
@@ -510,7 +486,15 @@ impl App {
         self.density = ui.density;
         self.targets.clear();
         self.photos.poll();
-        if let Some(servers) = &mut self.servers {
+        if let Some(media) = &mut self.media {
+            pages::media_page(
+                &mut ui,
+                &mut self.targets,
+                self.start.elapsed().as_secs_f32(),
+                media,
+                &mut self.photos,
+            );
+        } else if let Some(servers) = &mut self.servers {
             pages::servers_page(
                 &mut ui,
                 &mut self.targets,
@@ -539,6 +523,20 @@ impl App {
                 self.ready,
                 *self.progress.lock().unwrap(),
                 self.message.as_deref(),
+            );
+        }
+        if (self.media.is_some() || self.servers.is_some() || self.settings)
+            && let Some(note) = &self.message
+        {
+            use horizon_client::ui_theme::Face;
+            let text = ui.fit_text(Face::LauncherRegular, 12., note, (ui.w - 400.).max(100.));
+            ui.text(
+                Face::LauncherRegular,
+                12.,
+                350.,
+                24.,
+                pages::theme::MUTED(),
+                &text,
             );
         }
         if let Some(c) = &mut self.chooser {
@@ -621,6 +619,10 @@ impl ApplicationHandler for App {
                 };
                 if let Some(c) = &mut self.chooser {
                     c.scroll -= dy;
+                } else if let Some(media) = &mut self.media
+                    && media.view.is_none()
+                {
+                    media.scroll -= dy;
                 } else if let Some(servers) = &mut self.servers {
                     servers.scroll -= dy;
                 } else if let Some(worlds) = &mut self.worlds
@@ -679,6 +681,12 @@ impl ApplicationHandler for App {
                 if self.login.visible {
                     self.login.close();
                     self.editing_name = false;
+                } else if self.chooser.is_some() {
+                    self.chooser = None;
+                } else if let Some(m) = &mut self.media {
+                    if m.view.take().is_none() {
+                        self.media = None;
+                    }
                 } else if self.servers.is_some() {
                     self.servers = None;
                 } else if let Some(worlds) = &mut self.worlds {
@@ -743,6 +751,7 @@ fn run() -> Result<()> {
         settings: false,
         photos: photo_cache::PhotoCache::new(),
         worlds: None,
+        media: None,
         servers: None,
         editing_name: false,
         offline_name: account::Accounts::load().name_arg().unwrap_or("").into(),

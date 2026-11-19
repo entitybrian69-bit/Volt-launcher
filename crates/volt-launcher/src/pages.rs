@@ -7,12 +7,21 @@ include!("../../horizon-client/src/launcher_ui/page.rs");
 include!("../../horizon-client/src/launcher_ui/home.rs");
 include!("../../horizon-client/src/launcher_ui/gallery.rs");
 include!("../../horizon-client/src/launcher_ui/servers.rs");
+include!("../../horizon-client/src/launcher_ui/media.rs");
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Action {
     Play,
     Page(Page),
     Profile,
     ViewWorld(usize),
+    OpenCaptures,
+    ViewScreenshot(usize),
+    DeleteRecording(usize),
+    WatchReplay(usize),
+    ExportReplay(usize),
+    ViewReplayCover(usize),
+    DeleteReplay(usize),
+    ConfirmRemove,
     SaveServer,
     ConnectServer(usize),
     ClosePhoto,
@@ -148,5 +157,52 @@ pub(super) fn servers_page(
             theme::MUTED(),
             note,
         );
+    }
+}
+
+pub(super) fn media_page(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    phase: f32,
+    media: &mut crate::media::Media,
+    photos: &mut crate::photo_cache::PhotoCache,
+) {
+    let (w, h) = (ui.w, ui.h);
+    draw_launcher_scene(ui, w, h, phase);
+    let (x, y) = tab_header(
+        ui,
+        targets,
+        if media.replay_tab {
+            "Replays"
+        } else {
+            "Captures"
+        },
+    );
+    let area = [x, y + 50., w - 2. * x, h - 2. * y - 50.];
+    if media.replay_tab {
+        replay_rows(
+            ui,
+            area,
+            &media.replays,
+            &media.home.join("replays"),
+            photos,
+            targets,
+            &mut media.scroll,
+        );
+    } else {
+        captures_grid(
+            ui,
+            area,
+            &media.shots,
+            &media.clips,
+            &media.home.join("screenshots"),
+            photos,
+            targets,
+            &mut media.scroll,
+        );
+    }
+    if let Some(view) = &media.view {
+        targets.clear();
+        draw_photo_viewer(ui, targets, photos, view, w, h);
     }
 }

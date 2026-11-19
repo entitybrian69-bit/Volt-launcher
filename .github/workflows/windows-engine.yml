@@ -13,7 +13,9 @@ permissions:
   contents: read
 concurrency:
   group: volt-windows-${{ github.ref }}-${{ inputs.windows11 && 'win11' || 'hosted' }}
-  cancel-in-progress: true
+  # Keep the running hosted compiler long enough to collect diagnostics. Supersede
+  # unassigned Win11 requests rather than queue stale builds for that desktop.
+  cancel-in-progress: ${{ inputs.windows11 == true }}
 jobs:
   tables:
     runs-on: ubuntu-latest

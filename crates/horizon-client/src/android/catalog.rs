@@ -244,6 +244,7 @@ impl Config {
     }
 }
 include!("../launcher_ui/page.rs");
+include!("../launcher_ui/captures.rs");
 #[derive(Clone)]
 pub struct ProjectIcon {
     pub hash: u64,
@@ -416,22 +417,7 @@ impl Catalog {
             horizon_client::replay::list(&self.config.game_home(home).join("replays"));
     }
     pub fn refresh_screenshots(&mut self, home: &Path) {
-        self.screenshots = std::fs::read_dir(self.config.game_home(home).join("screenshots"))
-            .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
-            .filter_map(|entry| entry.file_name().to_str()
-                .filter(|s| s.to_ascii_lowercase().ends_with(".png")).map(str::to_owned))
-            .collect();
-        self.screenshots.sort_unstable_by(|a, b| b.cmp(a));
-        self.recordings = std::fs::read_dir(self.config.game_home(home).join("recordings"))
-            .into_iter().flatten().flatten().filter(|entry| entry.path().is_file())
-            .filter_map(|entry| {
-                let name = entry.file_name().to_str()
-                    .filter(|s| s.to_ascii_lowercase().ends_with(".mp4")).map(str::to_owned)?;
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                Some((name, size))
-            })
-            .collect();
-        self.recordings.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        (self.screenshots,self.recordings)=capture_files(&self.config.game_home(home));
     }
     pub fn show_installed(&mut self, kind: Option<horizon_client::content_files::Kind>) {
         self.searches.cancel_interest();

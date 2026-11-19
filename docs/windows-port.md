@@ -152,8 +152,10 @@ directories. Worlds and its picture viewer read the selected profile’s saves. 
 reads and edits the same `servers.dat` as the game; selecting a server requests an
 ownership-gated engine launch. Named offline play is only selectable alongside a
 verified owner and does not authorize a download without a live entitlement check.
-Catalog, other galleries and Controls Studio
-routes are **not yet ported**; a rendered frame is not proof of account, install,
+Captures and Replays reuse the Android grid/rows, thumbnail decoder and full-screen
+picture viewer. Watch and MP4 pass the selected replay to the gated game process;
+this is not proof that an entire replay exports in game. Catalog, Classic Home,
+live recorder and Controls Studio are **not yet ported**; a rendered frame is not proof of account, install,
 gameplay or full navigation parity. The Windows workflow attempts an actual presented
 home frame and account/profile/Worlds/renderer navigation on its hosted Windows runner. For a Windows 11 x64 client result,
 dispatch with `windows11: true` on a fork-managed signed-in interactive runner
