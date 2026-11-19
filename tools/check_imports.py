@@ -114,9 +114,16 @@ def elf_needs(data):
     return interpreter, needed, runpath
 
 
-def check(path, server=False):
+def check(path, server=False, windows_x64=False):
     data = Path(path).read_bytes()
     problems = []
+    if windows_x64:
+        pe = int.from_bytes(data[0x3c:0x40], "little")
+        # AMD64 Machine and PE32+ optional header; ARM64 is PE32+ too.
+        if (data[:2] != b"MZ" or data[pe:pe+4] != b"PE\0\0" or
+                data[pe+4:pe+6] != b"\x64\x86" or data[pe+24:pe+26] != b"\x0b\x02"):
+            print(f"{path}: not a Windows x64 PE32+ executable", file=sys.stderr)
+            return False
     if data[:2] == b"MZ":
         names = pe_imports(data)
         problems += [f"imports {n}, which Windows does not ship" for n in names if not windows_allowed(n)]
@@ -141,8 +148,9 @@ def main():
     parser.add_argument("binaries", nargs="+")
     parser.add_argument("--server", action="store_true",
                         help="a server build: not even ALSA or udev (the game's sound and controllers)")
+    parser.add_argument("--windows-x64", action="store_true", help="require an AMD64 PE32+ image")
     args = parser.parse_args()
-    ok = all([check(path, args.server) for path in args.binaries])
+    ok = all([check(path, args.server, args.windows_x64) for path in args.binaries])
     sys.exit(0 if ok else 1)
 
 

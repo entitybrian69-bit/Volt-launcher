@@ -78,10 +78,14 @@ presentation timestamps and kept the previous file after an invalid re-export.
 This is evidence for the codec and filesystem adapter, **not** in-game capture,
 launcher UI, authentication or gameplay proof.
 
+Run `44536044523` on commit `fff1c74`: the x64 engine build, system-DLL check,
+`horizon-client.exe --help`, native media and memory-counter tests passed. The CI
+artifact is explicitly engine-only. There is no Windows 11 launcher startup result.
+
 ## Next milestones / release gates
 
-1. Get native runner proof for the locked engine, replay export and a rendered
-   offscreen frame using a tester's private prepared resources. Reconcile any
+1. Exercise the built engine beyond CLI startup: capture a rendered offscreen frame
+   using a tester's private prepared resources. Reconcile any
    fork-specific desktop build regressions without disabling renderer/mods.
 2. Factor launcher host seams (data paths, window/event loop, async workers,
    file picker, account vault, lifecycle) away from JNI. Mount the **same**
@@ -93,3 +97,36 @@ launcher UI, authentication or gameplay proof.
 5. Only after these gates package `Volt Launcher.exe`, dependencies, license,
    notices and icon into a per-user installer and portable archive. Verify clean
    install, offline relaunch, uninstall without save loss, signed update and rollback.
+
+### Candidate packaging and Windows 11 verification
+
+`packaging/windows/build-candidate.ps1` and `verify-candidate.ps1` are release-engineering
+scripts, **not a published build**. They have no publish step. They require the actual
+Windows Volt launcher; an engine-only build or the separate Horizon launcher is not a
+candidate. Do not use `tools/package_native_client.py`: its archives include private game files.
+
+Once the port is ready, assemble a **fresh, audited distribution folder** from the exact
+release commit: `Volt Launcher.exe`, `horizon-client.exe`, license, notices, and all approved
+public runtime files. Inspect nested archives for private data and restricted game resources.
+Run the following with PowerShell 7.2+, Python 3 and Inno Setup 6.3+ (`ISCC.exe` on PATH):
+
+```powershell
+./packaging/windows/build-candidate.ps1 -Version $version -Payload $stage -OutputDirectory $newOut
+```
+
+Copy the pristine staged files and both candidates to a clean, disposable **Windows 11
+x64 desktop** VM, logged in with no existing Volt install. Use a normal user and no
+development dependencies on PATH. Run:
+
+```powershell
+./packaging/windows/verify-candidate.ps1 -Payload $stage -CandidateDirectory $newOut
+```
+
+This checks extracted bytes and installed payload files against staging, starts each
+launcher with no CLI shortcut, requires a responsive `Volt Launcher` window, checks
+clean shutdown and uninstall, and hashes the exact installer and ZIP. A window title
+is not evidence of a correctly rendered home page, account ownership or game launch:
+complete the UI and licensed-game acceptance tests above **before** publishing. Retain
+`SHA256SUMS`, the commit, OS build and test evidence; verify re-downloaded release
+assets against those same hashes before sharing links. A `windows-latest` engine CI
+job is not this desktop acceptance test.

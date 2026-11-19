@@ -46,10 +46,27 @@ jobs:
         shell: pwsh
         run: |
           $exe = 'target/x86_64-pc-windows-msvc/fast/horizon-client.exe'
-          python tools/check_imports.py $exe
+          python tools/check_imports.py --windows-x64 $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $help = & $exe --help
           if ($LASTEXITCODE -ne 0 -or -not ($help -join "`n").Contains('--resources')) { throw 'Game CLI did not start' }
+      - name: Release tooling rejects the engine-only build
+        shell: pwsh
+        run: |
+          foreach ($script in Get-ChildItem packaging/windows/*.ps1) {
+            $parseErrors = $null
+            $tokens = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count) { throw ($parseErrors -join "`n") }
+          }
+          $out = Join-Path $env:RUNNER_TEMP 'must-not-be-created'
+          try {
+            ./packaging/windows/build-candidate.ps1 -Payload target/x86_64-pc-windows-msvc/fast -OutputDirectory $out -Version 0.0.1
+            throw 'Engine was accepted as the Volt Launcher'
+          } catch {
+            if ($_.Exception.Message -ne 'Missing public payload file: Volt Launcher.exe') { throw }
+          }
+          if (Test-Path -LiteralPath $out) { throw 'Packaging wrote output before validation' }
       - uses: actions/upload-artifact@v4
         with:
           name: volt-windows-engine-only
