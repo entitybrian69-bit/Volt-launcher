@@ -17,7 +17,7 @@ fn version<'a>(idx: &Index, p: &'a index::Project) -> Option<&'a index::Version>
     )
     .filter(|v| v.requires.is_empty())
 }
-pub(super) fn rows(idx: Index, kind: &Kind) -> Vec<Entry> {
+pub(super) fn rows(idx: &Index, kind: &Kind) -> Vec<Entry> {
     idx.projects
         .iter()
         .filter(|p| p.kind == *kind)

@@ -88,7 +88,7 @@ impl Catalog {
         .into();
         thread::spawn(move || {
             let _ = tx.send(match entry {
-                None => fetch().map(|idx| Reply::List(rows(idx, &kind))),
+                None => fetch().map(|idx| Reply::List(rows(&idx, &kind))),
                 Some(e) => fetch()
                     .and_then(|idx| install_from(&idx, &home, &kind, e, get))
                     .map(Reply::Installed),

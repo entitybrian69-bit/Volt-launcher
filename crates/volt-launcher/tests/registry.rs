@@ -17,7 +17,7 @@ fn fresh_verified_install_is_profile_scoped_and_fails_closed() {
     let sha = index::sha256(&bytes);
     let json = serde_json::json!({"schema":1,"projects":[{"id":"example","kind":"resourcepack","name":"Test","summary":"Fixture","license":"MIT","source":"https://github.com/example/fixture","versions":[{"version":"1","game":horizon_core::VANILLA_VERSION,"api":"1","file":{"name":"fixture.zip","url":"https://github.com/example/fixture/releases/download/1/pack.zip","size":bytes.len(),"sha256":sha}}]}]});
     let idx = Index::parse(&json.to_string()).unwrap();
-    let e = registry::rows(idx.clone(), &Kind::ResourcePack)
+    let e = registry::rows(&idx, &Kind::ResourcePack)
         .pop()
         .unwrap();
     let mut nonce = [0; 16];
